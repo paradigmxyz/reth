@@ -228,7 +228,7 @@ impl BitfinityEvmClient {
 
     /// Validates the block with the given hash and update the latest safe block number if
     /// successful.
-    pub async fn validate_block(&mut self, block_hash: B256) -> Result<(), RemoteClientError> {
+    pub async fn validate_block(&self, block_hash: B256) -> Result<(), RemoteClientError> {
         let validation_hash: B256 = todo!();
         match self.send_validation_request(block_hash, validation_hash).await {
             Ok(_) => {

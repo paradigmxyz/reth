@@ -147,7 +147,7 @@ impl BitfinityImportCommand {
             max_block_age_secs: Duration::from_secs(self.bitfinity.max_block_age_secs),
         };
 
-        let mut remote_client =
+        let remote_client = Arc::new(
             BitfinityEvmClient::from_rpc_url(
                 rpc_config,
                 start_block,
@@ -160,17 +160,8 @@ impl BitfinityImportCommand {
                 }),
                 self.bitfinity.check_evm_state_before_importing,
             )
-            .await?;
-
-        if self.bitfinity.validate_unsafe_blocks {
-            while let Some(unsafe_block) = remote_client.unsafe_block() {
-                if let Err(err) = remote_client.validate_block(unsafe_block).await {
-                    error!(target: "reth::cli - BitfinityImportCommand", "Block validation failed: {}", err);
-                }
-
-                info!(target: "reth::cli - BitfinityImportCommand", "Block validated: {}", unsafe_block);
-            }
-        }
+            .await?,
+        );
 
         // override the tip
         let safe_block = if let Some(safe_block) = remote_client.safe_block() {
@@ -180,7 +171,36 @@ impl BitfinityImportCommand {
             return Ok(());
         };
 
-        self.import_to_block(safe_block, remote_client, provider_factory.clone(), consensus.clone()).await?;
+        self.import_to_block(
+            safe_block,
+            remote_client.clone(),
+            provider_factory.clone(),
+            consensus.clone(),
+        )
+        .await?;
+
+        if self.bitfinity.validate_unsafe_blocks {
+            while let Some(unsafe_block) = remote_client.unsafe_block() {
+                if let Err(err) = remote_client.validate_block(unsafe_block).await {
+                    error!(target: "reth::cli - BitfinityImportCommand", "Block validation failed: {}", err);
+                    break;
+                }
+
+                info!(target: "reth::cli - BitfinityImportCommand", "Block validated: {}", unsafe_block);
+            }
+        }
+
+        if let Some(new_safe_block) = remote_client.safe_block() {
+            if new_safe_block != safe_block {
+                self.import_to_block(
+                    new_safe_block,
+                    remote_client.clone(),
+                    provider_factory.clone(),
+                    consensus.clone(),
+                )
+                .await?;
+            }
+        }
 
         info!(target: "reth::cli - BitfinityImportCommand", "Finishing up");
         Ok(())
@@ -190,7 +210,7 @@ impl BitfinityImportCommand {
     async fn import_to_block(
         &self,
         new_tip: B256,
-        remote_client: BitfinityEvmClient,
+        remote_client: Arc<BitfinityEvmClient>,
         provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
         consensus: Arc<EthBeaconConsensus<ChainSpec>>,
     ) -> eyre::Result<()> {
@@ -200,7 +220,7 @@ impl BitfinityImportCommand {
             &self.config,
             provider_factory.clone(),
             &consensus,
-            Arc::new(remote_client),
+            remote_client,
             StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
         )?;
 
