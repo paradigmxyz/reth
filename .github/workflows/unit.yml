@@ -23,7 +23,6 @@ jobs:
       group: Reth
     env:
       RUST_BACKTRACE: 1
-      RUST_LOG: debug,engine::root=trace
     strategy:
       matrix:
         include:
