@@ -11,7 +11,7 @@
 #![cfg(feature = "optimism")]
 
 mod validator;
-pub use validator::OpTransactionValidator;
+pub use validator::{OpL1BlockInfo, OpTransactionValidator};
 
 mod transaction;
 pub use transaction::OpPooledTransaction;
