@@ -228,6 +228,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
         // select of account reloads and new canonical state updates which should arrive at the rate
         // of the block time (12s)
+
+        let mut interval_duration = time::interval(config.max_tx_lifetime);
         tokio::select! {
             res = &mut reload_accounts_fut =>  {
                 reloaded = Some(res);
@@ -239,10 +241,6 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 }
                 event = ev;
             }
-        }
-
-        let mut interval_duration = time::interval(config.max_tx_lifetime);
-        tokio::select! {
             _ = interval_duration.tick() => {
                 let old_tx_hashes: Vec<_> = pool
                     .queued_transactions()
