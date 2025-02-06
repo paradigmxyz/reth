@@ -3,8 +3,9 @@ use crate::{
     prefix_set::TriePrefixSetsMut,
     proof::{Proof, ProofBlindedProviderFactory},
     trie_cursor::TrieCursorFactory,
-    HashedPostState,
 };
+use reth_trie_common::HashedPostState;
+
 use alloy_primitives::{
     keccak256,
     map::{B256HashMap, B256HashSet, Entry, HashMap},

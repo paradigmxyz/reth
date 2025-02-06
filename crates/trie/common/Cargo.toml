@@ -28,6 +28,9 @@ derive_more.workspace = true
 itertools = { workspace = true, features = ["use_alloc"] }
 nybbles = { workspace = true, features = ["rlp"] }
 
+# reth
+revm.workspace = true
+
 # `serde` feature
 serde = { workspace = true, optional = true }
 
@@ -37,6 +40,9 @@ serde_with = { workspace = true, optional = true }
 hash-db = { version = "=0.15.2", optional = true }
 plain_hasher = { version = "0.2", optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
+
+# misc
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["serde"] }
@@ -74,6 +80,7 @@ std = [
     "serde?/std",
     "serde_with?/std",
     "serde_json/std",
+    "revm/std",
 ]
 eip1186 = [
     "alloy-rpc-types-eth/serde",
@@ -89,6 +96,7 @@ serde = [
     "alloy-rpc-types-eth?/serde",
     "reth-primitives-traits/serde",
     "reth-codecs?/serde",
+    "revm/serde",
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -106,6 +114,7 @@ test-utils = [
     "arbitrary",
     "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
+    "revm/test-utils",
 ]
 arbitrary = [
     "std",
@@ -119,7 +128,9 @@ arbitrary = [
     "nybbles/arbitrary",
     "reth-codecs/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
+    "revm/arbitrary",
 ]
+rayon = ["dep:rayon"]
 
 [[bench]]
 name = "prefix_set"

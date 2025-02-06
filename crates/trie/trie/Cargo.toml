@@ -18,7 +18,7 @@ reth-primitives-traits.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-sparse.workspace = true
-reth-trie-common.workspace = true
+reth-trie-common = { workspace = true, features = ["rayon"] }
 
 revm.workspace = true
 
@@ -33,7 +33,6 @@ alloy-trie.workspace = true
 tracing.workspace = true
 
 # misc
-rayon.workspace = true
 auto_impl.workspace = true
 itertools.workspace = true
 

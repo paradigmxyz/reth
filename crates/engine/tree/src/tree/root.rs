@@ -676,7 +676,8 @@ where
                         prefetch_proofs_received += 1;
                         debug!(
                             target: "engine::root",
-                            len = targets.len(),
+                            targets = targets.len(),
+                            storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>(),
                             total_prefetches = prefetch_proofs_received,
                             "Prefetching proofs"
                         );

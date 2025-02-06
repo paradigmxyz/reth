@@ -30,7 +30,10 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::oneshot;
+use tokio::{
+    sync::oneshot,
+    time::{self, Duration},
+};
 use tracing::{debug, error, info, trace, warn};
 
 /// Additional settings for maintaining the transaction pool
@@ -45,11 +48,19 @@ pub struct MaintainPoolConfig {
     ///
     /// Default: 100
     pub max_reload_accounts: usize,
+
+    /// Maximum amount of time non-executable, non local transactions are queued.
+    /// Default: 3 hours
+    pub max_tx_lifetime: Duration,
 }
 
 impl Default for MaintainPoolConfig {
     fn default() -> Self {
-        Self { max_update_depth: 64, max_reload_accounts: 100 }
+        Self {
+            max_update_depth: 64,
+            max_reload_accounts: 100,
+            max_tx_lifetime: Duration::from_secs(3 * 60 * 60),
+        }
     }
 }
 
@@ -139,6 +150,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     // the future that reloads accounts from state
     let mut reload_accounts_fut = Fuse::terminated();
 
+    // eviction interval for stale non local txs
+    let mut stale_eviction_interval = time::interval(config.max_tx_lifetime);
+
     // The update loop that waits for new blocks and reorgs and performs pool updated
     // Listen for new chain events and derive the update action for the pool
     loop {
@@ -213,7 +227,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
         let mut reloaded = None;
 
         // select of account reloads and new canonical state updates which should arrive at the rate
-        // of the block time (12s)
+        // of the block time
         tokio::select! {
             res = &mut reload_accounts_fut =>  {
                 reloaded = Some(res);
@@ -225,8 +239,20 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 }
                 event = ev;
             }
+            _ = stale_eviction_interval.tick() => {
+                let stale_txs: Vec<_> = pool
+                    .queued_transactions()
+                    .into_iter()
+                    .filter(|tx| {
+                        // filter stale external txs
+                        tx.origin.is_external() && tx.timestamp.elapsed() > config.max_tx_lifetime
+                    })
+                    .map(|tx| *tx.hash())
+                    .collect();
+                debug!(target: "txpool", count=%stale_txs.len(), "removing stale transactions");
+                pool.remove_transactions(stale_txs);
+            }
         }
-
         // handle the result of the account reload
         match reloaded {
             Some(Ok(Ok(LoadedAccounts { accounts, failed_to_load }))) => {
@@ -694,7 +720,7 @@ mod tests {
         let tx_bytes = hex!("02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507");
         let tx = PooledTransaction::decode_2718(&mut &tx_bytes[..]).unwrap();
         let provider = MockEthProvider::default();
-        let transaction: EthPooledTransaction = tx.try_into_recovered().unwrap().into();
+        let transaction = EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap());
         let tx_to_cmp = transaction.clone();
         let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
