@@ -4,6 +4,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip2718::Encodable2718, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use parking_lot::RwLock;
 use reth_node_api::{Block, BlockBody};
 use reth_optimism_evm::RethL1BlockInfo;
@@ -50,6 +51,9 @@ pub struct OpPooledTransaction<
     estimated_tx_compressed_size: OnceLock<u64>,
     /// The pooled transaction type.
     _pd: core::marker::PhantomData<Pooled>,
+
+    /// Optional conditional attached to this transaction.
+    conditional: Option<Box<TransactionConditional>>,
 }
 
 impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
@@ -58,6 +62,7 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
         Self {
             inner: EthPooledTransaction::new(transaction, encoded_length),
             estimated_tx_compressed_size: Default::default(),
+            conditional: None,
             _pd: core::marker::PhantomData,
         }
     }
@@ -69,6 +74,17 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
         *self.estimated_tx_compressed_size.get_or_init(|| {
             op_alloy_flz::tx_estimated_size_fjord(&self.inner.transaction().encoded_2718())
         })
+    }
+
+    /// Conditional setter.
+    pub fn with_conditional(mut self, conditional: TransactionConditional) -> Self {
+        self.conditional = Some(Box::new(conditional));
+        self
+    }
+
+    /// Conditional getter.
+    pub fn conditional(&self) -> Option<&TransactionConditional> {
+        self.conditional.as_deref()
     }
 }
 
