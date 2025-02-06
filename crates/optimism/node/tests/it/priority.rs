@@ -22,12 +22,12 @@ use reth_optimism_node::{
         OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder,
         OpPoolBuilder,
     },
-    txpool::OpPooledTransaction,
     utils::optimism_payload_attributes,
     OpEngineTypes, OpNode,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_transaction_pool::OpPooledTransaction;
 use reth_payload_util::{
     BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
     PayloadTransactionsFixed,

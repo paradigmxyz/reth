@@ -3,14 +3,12 @@
 use alloy_primitives::B256;
 use alloy_rpc_types_debug::ExecutionWitness;
 use jsonrpsee_core::{async_trait, RpcResult};
-//use op_alloy_consensus::OpPooledTransaction;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::ConfigureEvmFor;
-use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_payload_builder::{OpPayloadBuilder, OpPayloadPrimitives};
-use reth_optimism_primitives::{transaction::signed::OpTransactionSigned, OpPrimitives};
+use reth_optimism_payload_builder::OpPayloadBuilder;
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_transaction_pool::OpPooledTransaction;
 use reth_primitives::SealedHeader;
 use reth_provider::{
@@ -19,7 +17,7 @@ use reth_provider::{
 pub use reth_rpc_api::DebugExecutionWitnessApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::TaskSpawner;
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_transaction_pool::TransactionPool;
 use std::{fmt::Debug, sync::Arc};
 use tokio::sync::{oneshot, Semaphore};
 
