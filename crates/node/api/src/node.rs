@@ -1,6 +1,8 @@
 //! Traits for configuring a node.
 
+use crate::PayloadTypes;
 use alloy_rpc_types_engine::JwtSecret;
+use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::BeaconConsensusEngineHandle;
@@ -8,7 +10,7 @@ use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
-use reth_payload_builder_primitives::PayloadBuilder;
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -42,6 +44,23 @@ where
     type Provider = Provider;
 }
 
+/// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
+pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
+    PayloadBuilder<
+    Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+    BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+>
+{
+}
+
+impl<T, N: NodeTypesWithEngine> PayloadBuilderFor<N> for T where
+    T: PayloadBuilder<
+        Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+    >
+{
+}
+
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The transaction pool of the node.
@@ -63,8 +82,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Network: FullNetwork;
 
     /// Builds new blocks.
-    type PayloadBuilder: PayloadBuilder<PayloadType = <Self::Types as NodeTypesWithEngine>::Engine>
-        + Clone;
+    type PayloadBuilder: PayloadBuilderFor<Self::Types>;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
@@ -81,8 +99,14 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns the handle to the network
     fn network(&self) -> &Self::Network;
 
-    /// Returns the handle to the payload builder service.
+    /// Returns the configured payload builder.
     fn payload_builder(&self) -> &Self::PayloadBuilder;
+
+    /// Returns the handle to the payload builder service handling payload building requests from
+    /// the engine.
+    fn payload_builder_handle(
+        &self,
+    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
