@@ -162,7 +162,7 @@ where
                 while let Some(tx) = transactions.next() {
                     let signer = tx.signer();
                     let tx = {
-                        let mut tx: <Eth::Pool as TransactionPool>::Transaction = tx.into();
+                        let mut tx = <Eth::Pool as TransactionPool>::Transaction::from_pooled(tx);
 
                         if let EthBlobTransactionSidecar::Present(sidecar) = tx.take_blob() {
                             tx.validate_blob(&sidecar, EnvKzgSettings::Default.get()).map_err(
