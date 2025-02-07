@@ -1,6 +1,5 @@
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    PayloadError,
+    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
 };
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
@@ -12,8 +11,8 @@ use reth_node_api::{
         EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
         VersionSpecificValidationError,
     },
-    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
-    PayloadValidator,
+    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, ExecutionData,
+    NodePrimitives, PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
@@ -48,13 +47,16 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
+    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block())
+    ) -> ExecutionData {
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        ExecutionData { payload, sidecar }
     }
 }
 
@@ -90,19 +92,19 @@ impl OpEngineValidator {
 
 impl PayloadValidator for OpEngineValidator {
     type Block = OpBlock;
+    type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
+        payload: ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload, sidecar)
+        self.inner.ensure_well_formed_payload(payload)
     }
 }
 
 impl<Types> EngineValidator<Types> for OpEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
+    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_execution_requests(
         &self,

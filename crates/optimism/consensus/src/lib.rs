@@ -12,6 +12,8 @@
 
 extern crate alloc;
 
+use core::fmt::Debug;
+
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
@@ -25,45 +27,50 @@ use reth_consensus_common::validation::{
     validate_body_against_header, validate_cancun_gas, validate_header_base_fee,
     validate_header_extra_data, validate_header_gas, validate_shanghai_withdrawals,
 };
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
-use reth_primitives::{GotExpected, RecoveredBlock, SealedHeader};
+use reth_optimism_primitives::DepositReceipt;
+use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
 use reth_primitives_traits::{Block, BlockBody, BlockHeader, SealedBlock};
 
 mod validation;
-pub use validation::validate_block_post_execution;
+pub use validation::{
+    decode_holocene_base_fee, next_block_base_fee, validate_block_post_execution,
+};
 
 /// Optimism consensus implementation.
 ///
 /// Provides basic checks as outlined in the execution specs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpBeaconConsensus {
+pub struct OpBeaconConsensus<ChainSpec> {
     /// Configuration
-    chain_spec: Arc<OpChainSpec>,
+    chain_spec: Arc<ChainSpec>,
 }
 
-impl OpBeaconConsensus {
+impl<ChainSpec> OpBeaconConsensus<ChainSpec> {
     /// Create a new instance of [`OpBeaconConsensus`]
-    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
 
-impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
+impl<ChainSpec: EthChainSpec + OpHardforks, N: NodePrimitives<Receipt: DepositReceipt>>
+    FullConsensus<N> for OpBeaconConsensus<ChainSpec>
+{
     fn validate_block_post_execution(
         &self,
-        block: &RecoveredBlock<OpBlock>,
-        input: PostExecutionInput<'_, OpReceipt>,
+        block: &RecoveredBlock<N::Block>,
+        input: PostExecutionInput<'_, N::Receipt>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block.header(), &self.chain_spec, input.receipts)
     }
 }
 
-impl<B: Block> Consensus<B> for OpBeaconConsensus {
+impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
+    for OpBeaconConsensus<ChainSpec>
+{
     type Error = ConsensusError;
 
     fn validate_body_against_header(
@@ -105,7 +112,9 @@ impl<B: Block> Consensus<B> for OpBeaconConsensus {
     }
 }
 
-impl<H: BlockHeader> HeaderValidator<H> for OpBeaconConsensus {
+impl<ChainSpec: EthChainSpec + OpHardforks, H: BlockHeader> HeaderValidator<H>
+    for OpBeaconConsensus<ChainSpec>
+{
     fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError> {
         validate_header_gas(header.header())?;
         validate_header_base_fee(header.header(), &self.chain_spec)
@@ -129,10 +138,9 @@ impl<H: BlockHeader> HeaderValidator<H> for OpBeaconConsensus {
         if self.chain_spec.is_holocene_active_at_timestamp(parent.timestamp()) {
             let header_base_fee =
                 header.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
-            let expected_base_fee = self
-                .chain_spec
-                .decode_holocene_base_fee(parent.header(), header.timestamp())
-                .map_err(|_| ConsensusError::BaseFeeMissing)?;
+            let expected_base_fee =
+                decode_holocene_base_fee(&self.chain_spec, parent.header(), header.timestamp())
+                    .map_err(|_| ConsensusError::BaseFeeMissing)?;
             if expected_base_fee != header_base_fee {
                 return Err(ConsensusError::BaseFeeDiff(GotExpected {
                     expected: expected_base_fee,

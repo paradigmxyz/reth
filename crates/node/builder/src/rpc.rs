@@ -10,8 +10,8 @@ use std::{
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineValidator, FullNodeComponents, NodeAddOns, NodeTypes,
-    NodeTypesWithEngine,
+    AddOnsContext, BlockTy, EngineTypes, EngineValidator, ExecutionData, FullNodeComponents,
+    NodeAddOns, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -401,7 +401,9 @@ where
 
 impl<N, EthApi, EV> RpcAddOns<N, EthApi, EV>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<Engine: EngineTypes<ExecutionData = ExecutionData>>,
+    >,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
         + AddDevSigners
@@ -435,7 +437,7 @@ where
             node.provider().clone(),
             config.chain.clone(),
             beacon_engine_handle,
-            PayloadStore::new(node.payload_builder().clone()),
+            PayloadStore::new(node.payload_builder_handle().clone()),
             node.pool().clone(),
             Box::new(node.task_executor().clone()),
             client,
@@ -528,7 +530,9 @@ where
 
 impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<Engine: EngineTypes<ExecutionData = ExecutionData>>,
+    >,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
         + AddDevSigners

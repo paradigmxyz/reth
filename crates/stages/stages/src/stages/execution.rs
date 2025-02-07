@@ -651,7 +651,6 @@ mod tests {
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm::execute::BasicBlockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
-    use reth_execution_errors::BlockValidationError;
     use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
@@ -714,14 +713,7 @@ mod tests {
         let genesis = SealedBlock::<reth_primitives::Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<reth_primitives::Block>::decode(&mut block_rlp).unwrap();
-        provider
-            .insert_historical_block(
-                genesis
-                    .try_recover()
-                    .map_err(|_| BlockValidationError::SenderRecoveryError)
-                    .unwrap(),
-            )
-            .unwrap();
+        provider.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
         provider.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
         provider
             .static_file_provider()

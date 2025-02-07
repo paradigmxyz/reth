@@ -19,8 +19,7 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
-    eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK},
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
@@ -190,7 +189,7 @@ where
         maybe_state: &mut Option<Box<dyn StateProvider>>,
     ) -> TransactionValidationOutcome<Tx> {
         // Checks for tx_type
-        match transaction.tx_type() {
+        match transaction.ty() {
             LEGACY_TX_TYPE_ID => {
                 // Accept legacy transactions
             }
@@ -307,7 +306,7 @@ where
                 )
             }
 
-            if transaction.authorization_count() == 0 {
+            if transaction.authorization_list().is_none_or(|l| l.is_empty()) {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
@@ -329,7 +328,8 @@ where
                 )
             }
 
-            let blob_count = transaction.blob_count();
+            let blob_count =
+                transaction.blob_versioned_hashes().map(|b| b.len() as u64).unwrap_or(0);
             if blob_count == 0 {
                 // no blobs
                 return TransactionValidationOutcome::Invalid(
@@ -340,14 +340,14 @@ where
                 )
             }
 
-            if blob_count > MAX_BLOBS_PER_BLOCK {
-                // too many blobs
+            let max_blob_count = self.fork_tracker.max_blob_count();
+            if blob_count > max_blob_count {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::TooManyEip4844Blobs {
                             have: blob_count,
-                            permitted: MAX_BLOBS_PER_BLOCK,
+                            permitted: max_blob_count,
                         },
                     ),
                 )
@@ -527,6 +527,14 @@ where
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
+        if let Some(blob_params) =
+            self.chain_spec().blob_params_at_timestamp(new_tip_block.timestamp())
+        {
+            self.fork_tracker
+                .max_blob_count
+                .store(blob_params.max_blob_count, std::sync::atomic::Ordering::Relaxed);
+        }
+
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -545,6 +553,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     cancun: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
     prague: bool,
+    /// Max blob count at the block's timestamp.
+    max_blob_count: u64,
     /// Whether using EIP-2718 type transactions is allowed
     eip2718: bool,
     /// Whether using EIP-1559 type transactions is allowed
@@ -603,6 +613,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // prague not yet activated
             prague: false,
+
+            // max blob count is cancun by default
+            max_blob_count: BlobParams::cancun().max_blob_count,
         }
     }
 
@@ -709,6 +722,12 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
         self.shanghai = self.client.chain_spec().is_shanghai_active_at_timestamp(timestamp);
         self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
+        self.max_blob_count = self
+            .client
+            .chain_spec()
+            .blob_params_at_timestamp(timestamp)
+            .unwrap_or_else(BlobParams::cancun)
+            .max_blob_count;
         self
     }
 
@@ -748,10 +767,17 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             ..
         } = self;
 
+        let max_blob_count = if prague {
+            BlobParams::prague().max_blob_count
+        } else {
+            BlobParams::cancun().max_blob_count
+        };
+
         let fork_tracker = ForkTracker {
             shanghai: AtomicBool::new(shanghai),
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
+            max_blob_count: AtomicU64::new(max_blob_count),
         };
 
         let inner = EthTransactionValidatorInner {
@@ -825,6 +851,8 @@ pub struct ForkTracker {
     pub cancun: AtomicBool,
     /// Tracks if prague is activated at the block's timestamp.
     pub prague: AtomicBool,
+    /// Tracks max blob count at the block's timestamp.
+    pub max_blob_count: AtomicU64,
 }
 
 impl ForkTracker {
@@ -841,6 +869,11 @@ impl ForkTracker {
     /// Returns `true` if Prague fork is activated.
     pub fn is_prague_activated(&self) -> bool {
         self.prague.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns the max blob count.
+    pub fn max_blob_count(&self) -> u64 {
+        self.max_blob_count.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -865,7 +898,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         transaction.input(),
         transaction.is_create(),
         transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
-        transaction.authorization_count() as u64,
+        transaction.authorization_list().map(|l| l.len()).unwrap_or(0) as u64,
     );
 
     let gas_limit = transaction.gas_limit();
@@ -883,6 +916,7 @@ mod tests {
         blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
+    use alloy_consensus::Transaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, PooledTransaction};
@@ -894,15 +928,19 @@ mod tests {
         let data = hex::decode(raw).unwrap();
         let tx = PooledTransaction::decode_2718(&mut data.as_ref()).unwrap();
 
-        tx.try_into_recovered().unwrap().into()
+        EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap())
     }
 
     // <https://github.com/paradigmxyz/reth/issues/5178>
     #[tokio::test]
     async fn validate_transaction() {
         let transaction = get_transaction();
-        let mut fork_tracker =
-            ForkTracker { shanghai: false.into(), cancun: false.into(), prague: false.into() };
+        let mut fork_tracker = ForkTracker {
+            shanghai: false.into(),
+            cancun: false.into(),
+            prague: false.into(),
+            max_blob_count: 0.into(),
+        };
 
         let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
