@@ -440,6 +440,39 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 }
 
+/// A builder for creating state providers that can be used across threads.
+#[derive(Clone, Debug)]
+pub struct StateProviderBuilder<N: NodePrimitives, P> {
+    /// The provider factory used to create providers.
+    provider_factory: P,
+    /// The historical block hash to fetch state from.
+    historical: B256,
+    /// The blocks that form the chain from historical to target.
+    blocks: Vec<ExecutedBlockWithTrieUpdates<N>>,
+}
+
+impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
+    /// Creates a new state provider from the provider factory, historical block hash and blocks.
+    fn new(
+        provider_factory: P,
+        historical: B256,
+        blocks: Vec<ExecutedBlockWithTrieUpdates<N>>,
+    ) -> Self {
+        Self { provider_factory, historical, blocks }
+    }
+}
+
+impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
+where
+    P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone,
+{
+    /// Creates a new state provider from this builder.
+    pub fn build(&self) -> ProviderResult<StateProviderBox> {
+        let historical = self.provider_factory.state_by_block_hash(self.historical)?;
+        Ok(Box::new(MemoryOverlayStateProvider::new(historical, self.blocks.clone())))
+    }
+}
+
 /// Tracks the state of the engine api internals.
 ///
 /// This type is not shareable.
@@ -2676,14 +2709,11 @@ where
         cancel_execution: ManualCancel,
         task_finished: Arc<RwLock<()>>,
     ) -> Result<(), InsertBlockErrorKind> {
-        let Some(state_provider) = self.state_provider(block.parent_hash())? else {
-            trace!(target: "engine::tree", parent=%block.parent_hash(), "Could not get state provider for prewarm");
+        // Get the builder once, outside the thread
+        let Some(state_provider_builder) = self.state_provider_builder(block.parent_hash())? else {
+            trace!(target: "engine::tree", parent=%block.parent_hash(), "Could not get state provider builder for prewarm");
             return Ok(())
         };
-
-        // Use the caches to create a new executor
-        let state_provider =
-            CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
         // clone and copy info required for execution
         let evm_config = self.evm_config.clone();
@@ -2691,6 +2721,23 @@ where
         // spawn task executing the individual tx
         self.thread_pool.spawn(move || {
             let in_progress = task_finished.read().unwrap();
+
+            // Create the state provider inside the thread
+            let state_provider = match state_provider_builder.build() {
+                Ok(provider) => provider,
+                Err(err) => {
+                    trace!(target: "engine::tree", %err, "Failed to build state provider in prewarm thread");
+                    return
+                }
+            };
+
+            // Use the caches to create a new provider with caching
+            let state_provider = CachedStateProvider::new_with_caches(
+                state_provider,
+                caches,
+                cache_metrics,
+            );
+
             let state_provider = StateProviderDatabase::new(&state_provider);
 
             // create a new executor and disable nonce checks in the env
@@ -3060,6 +3107,35 @@ where
             num,
         );
         Ok(())
+    }
+
+    /// Returns a builder for creating state providers for the given hash.
+    ///
+    /// This is an optimization for parallel execution contexts where we want to avoid
+    /// creating state providers in the critical path.
+    pub fn state_provider_builder(
+        &self,
+        hash: B256,
+    ) -> ProviderResult<Option<StateProviderBuilder<N, P>>>
+    where
+        P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone,
+    {
+        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
+            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
+            // the block leads back to the canonical chain
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), historical, blocks)))
+        }
+
+        // Check if the block is persisted
+        if let Some(header) = self.provider.header(&hash)? {
+            debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
+            // For persisted blocks, we create a builder that will fetch state directly from the
+            // database
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, vec![])))
+        }
+
+        debug!(target: "engine::tree", %hash, "no canonical state found for block");
+        Ok(None)
     }
 }
 

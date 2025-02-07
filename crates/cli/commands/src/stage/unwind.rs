@@ -12,7 +12,6 @@ use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_core::args::NetworkArgs;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainStateBlockReader,
     ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory, StorageLocation,
@@ -32,9 +31,6 @@ use tracing::info;
 pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
-
-    #[command(flatten)]
-    network: NetworkArgs,
 
     #[command(subcommand)]
     command: Subcommands,
