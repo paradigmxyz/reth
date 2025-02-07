@@ -957,7 +957,9 @@ fn check_end_condition(
 }
 
 /// Listen to incoming sparse trie updates and update the sparse trie.
-/// Returns final state root, trie updates and the number of update iterations.
+///
+/// Once the updates receiver channel is dropped, returns final state root, trie updates and the
+/// number of update iterations.
 fn run_sparse_trie<Factory>(
     config: StateRootConfig<Factory>,
     metrics: StateRootTaskMetrics,
