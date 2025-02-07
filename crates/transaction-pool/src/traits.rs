@@ -15,13 +15,13 @@ use alloy_eips::{
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_execution_types::ChangedAccount;
-use reth_primitives::{
-    kzg::KzgSettings,
-    transaction::{SignedTransactionIntoRecoveredExt, TransactionConversionError},
-    PooledTransaction, Recovered, SealedBlock, TransactionSigned,
+use reth_primitives_traits::{
+    transaction::{error::TransactionConversionError, signed::SignedTransactionIntoRecoveredExt},
+    Block, InMemorySize, PooledTransaction, Recovered, SealedBlock, SignedTransaction,
 };
-use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
+use revm_primitives::KzgSettings;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1338,7 +1338,7 @@ impl EthPoolTransaction for EthPooledTransaction {
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         match self.transaction.transaction() {
-            reth_primitives::Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
+            Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.ty())),
         }
     }

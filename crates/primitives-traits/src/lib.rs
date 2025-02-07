@@ -86,6 +86,10 @@ pub mod receipt;
 pub use receipt::{FullReceipt, Receipt};
 
 pub mod transaction;
+pub use alloy_consensus::{
+    transaction::{PooledTransaction, Recovered, TransactionMeta},
+    ReceiptWithBloom, TxType,
+};
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},

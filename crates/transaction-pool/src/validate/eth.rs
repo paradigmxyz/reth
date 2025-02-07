@@ -22,8 +22,9 @@ use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_primitives::{InvalidTransactionError, SealedBlock};
-use reth_primitives_traits::{Block, GotExpected};
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
+};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{

@@ -28,14 +28,14 @@ use rand::{
     distributions::{Uniform, WeightedIndex},
     prelude::Distribution,
 };
-use reth_primitives::{
+use reth_ethereum_primitives::{Transaction, TransactionSigned};
+use reth_primitives_traits::{
     transaction::{
-        SignedTransactionIntoRecoveredExt, TransactionConversionError,
-        TryFromRecoveredTransactionError,
+        error::{TransactionConversionError, TryFromRecoveredTransactionError},
+        signed::SignedTransactionIntoRecoveredExt,
     },
-    PooledTransaction, Recovered, Transaction, TransactionSigned, TxType,
+    InMemorySize, PooledTransaction, Recovered, SignedTransaction, TxType,
 };
-use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
@@ -903,7 +903,7 @@ impl EthPoolTransaction for MockTransaction {
     fn validate_blob(
         &self,
         _blob: &BlobTransactionSidecar,
-        _settings: &reth_primitives::kzg::KzgSettings,
+        _settings: &revm_primitives::kzg::KzgSettings,
     ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         match &self {
             Self::Eip4844 { .. } => Ok(()),
