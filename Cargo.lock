@@ -8589,6 +8589,7 @@ dependencies = [
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
+ "async-trait",
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
