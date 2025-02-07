@@ -763,4 +763,24 @@ impl NetworkEventStream {
             _ => None,
         }
     }
+
+    /// Awaits the next event for a peer added.
+    pub async fn peer_added(&mut self) -> Option<PeerId> {
+        let peer_id = match self.inner.next().await {
+            Some(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id))) => peer_id,
+            _ => return None,
+        };
+
+        Some(peer_id)
+    }
+
+    /// Awaits the next event for a peer remvoed.
+    pub async fn peer_removed(&mut self) -> Option<PeerId> {
+        let peer_id = match self.inner.next().await {
+            Some(NetworkEvent::Peer(PeerEvent::PeerRemoved(peer_id))) => peer_id,
+            _ => return None,
+        };
+
+        Some(peer_id)
+    }
 }

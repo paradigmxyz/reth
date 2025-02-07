@@ -91,7 +91,7 @@ impl BlockValidationMetrics {
 /// Metrics for the blockchain tree block buffer
 #[derive(Metrics)]
 #[metrics(scope = "blockchain_tree.block_buffer")]
-pub(super) struct BlockBufferMetrics {
+pub(crate) struct BlockBufferMetrics {
     /// Total blocks in the block buffer
     pub blocks: Gauge,
 }

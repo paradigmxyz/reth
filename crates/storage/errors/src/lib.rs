@@ -22,3 +22,6 @@ pub mod provider;
 
 /// Writer error
 pub mod writer;
+
+/// Any error
+pub mod any;

@@ -408,7 +408,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "auto_impl",
- "dashmap",
+ "dashmap 6.1.0",
  "futures",
  "futures-utils-wasm",
  "lru 0.13.0",
@@ -1462,7 +1462,7 @@ dependencies = [
  "boa_string",
  "bytemuck",
  "cfg-if",
- "dashmap",
+ "dashmap 6.1.0",
  "fast-float2",
  "hashbrown 0.15.2",
  "icu_normalizer",
@@ -1633,6 +1633,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3ac9f8b63eca6fd385229b3675f6cc0dc5c8a5c8a54a59d4f52ffd670d87b0c"
 
 [[package]]
+name = "bytecount"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ce89b21cab1437276d2650d57e971f9d548a2d9037cc231abdc0562b97498ce"
+
+[[package]]
 name = "bytemuck"
 version = "1.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1698,6 +1704,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e35af189006b9c0f00a064685c727031e3ed2d8020f7ba284d78cc2671bd36ea"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "cargo_metadata"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4acbb09d9ee8e23699b9634375c72795d095bf268439da88562cf9b501f181fa"
+dependencies = [
+ "camino",
+ "cargo-platform",
+ "semver 1.0.25",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2389,6 +2408,19 @@ dependencies = [
 
 [[package]]
 name = "dashmap"
+version = "5.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
+dependencies = [
+ "cfg-if",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
+name = "dashmap"
 version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
@@ -2825,6 +2857,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "error-chain"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d2f06b9cac1506ece98fe3231e3cc9c4410ec3d5b1f24ae1c8946f0742cdefc"
+dependencies = [
+ "version_check",
+]
+
+[[package]]
 name = "ethereum_serde_utils"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2988,6 +3029,7 @@ dependencies = [
  "eyre",
  "reth",
  "reth-chainspec",
+ "reth-ethereum-payload-builder",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-node-api",
@@ -5051,6 +5093,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mini-moka"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c325dfab65f261f386debee8b0969da215b3fa0037e74c8a1234db7ba986d803"
+dependencies = [
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "dashmap 5.5.3",
+ "skeptic",
+ "smallvec",
+ "tagptr",
+ "triomphe",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6028,6 +6085,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.98",
+]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.9.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57206b407293d2bcd3af849ce869d52068623f19e1b5ff8e8778e3309439682b"
+dependencies = [
+ "bitflags 2.8.0",
+ "memchr",
+ "unicase",
 ]
 
 [[package]]
@@ -7138,7 +7206,6 @@ dependencies = [
  "reth-node-types",
  "reth-optimism-chainspec",
  "reth-payload-builder",
- "reth-payload-builder-primitives",
  "reth-payload-primitives",
  "reth-provider",
  "reth-prune",
@@ -7214,7 +7281,7 @@ dependencies = [
  "derive_more",
  "futures",
  "metrics",
- "moka",
+ "mini-moka",
  "proptest",
  "rand 0.8.5",
  "rayon",
@@ -7233,7 +7300,6 @@ dependencies = [
  "reth-metrics",
  "reth-network-p2p",
  "reth-payload-builder",
- "reth-payload-builder-primitives",
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
@@ -7629,6 +7695,7 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-db-common",
+ "reth-ethereum-payload-builder",
  "reth-evm",
  "reth-execution-types",
  "reth-exex",
@@ -7730,7 +7797,7 @@ dependencies = [
  "bitflags 2.8.0",
  "byteorder",
  "codspeed-criterion-compat",
- "dashmap",
+ "dashmap 6.1.0",
  "derive_more",
  "indexmap 2.7.1",
  "parking_lot",
@@ -7944,6 +8011,7 @@ version = "1.1.5"
 dependencies = [
  "alloy-rpc-types-engine",
  "eyre",
+ "reth-basic-payload-builder",
  "reth-consensus",
  "reth-db-api",
  "reth-engine-primitives",
@@ -7951,6 +8019,7 @@ dependencies = [
  "reth-network-api",
  "reth-node-core",
  "reth-node-types",
+ "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
  "reth-provider",
@@ -7972,6 +8041,7 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "rayon",
+ "reth-basic-payload-builder",
  "reth-chain-state",
  "reth-chainspec",
  "reth-cli-util",
@@ -8088,7 +8158,6 @@ dependencies = [
  "eyre",
  "futures",
  "rand 0.8.5",
- "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
@@ -8104,7 +8173,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
- "reth-payload-builder",
  "reth-payload-primitives",
  "reth-provider",
  "reth-revm",
@@ -8348,6 +8416,7 @@ dependencies = [
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-rpc",
+ "reth-optimism-txpool",
  "reth-payload-builder",
  "reth-payload-util",
  "reth-payload-validator",
@@ -8489,13 +8558,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-txpool"
+version = "1.1.5"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "c-kzg",
+ "derive_more",
+ "op-alloy-consensus",
+ "op-alloy-flz",
+ "parking_lot",
+ "reth-chainspec",
+ "reth-optimism-chainspec",
+ "reth-optimism-evm",
+ "reth-optimism-forks",
+ "reth-optimism-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-storage-api",
+ "reth-transaction-pool",
+ "revm",
+]
+
+[[package]]
 name = "reth-payload-builder"
 version = "1.1.5"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types",
- "async-trait",
  "futures-util",
  "metrics",
  "reth-chain-state",
@@ -8515,8 +8608,6 @@ dependencies = [
 name = "reth-payload-builder-primitives"
 version = "1.1.5"
 dependencies = [
- "alloy-rpc-types-engine",
- "async-trait",
  "pin-project",
  "reth-payload-primitives",
  "tokio",
@@ -8632,7 +8723,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "assert_matches",
  "auto_impl",
- "dashmap",
+ "dashmap 6.1.0",
  "eyre",
  "itertools 0.13.0",
  "metrics",
@@ -9243,7 +9334,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "derive_more",
- "reth-fs-util",
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
@@ -10400,6 +10490,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
 
 [[package]]
+name = "skeptic"
+version = "0.13.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16d23b015676c90a0f01c197bfdc786c20342c73a0afdda9025adb0bc42940a8"
+dependencies = [
+ "bytecount",
+ "cargo_metadata 0.14.2",
+ "error-chain",
+ "glob",
+ "pulldown-cmark",
+ "tempfile",
+ "walkdir",
+]
+
+[[package]]
 name = "sketches-ddsketch"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10697,7 +10802,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0bef5dd380747bd7b6e636a8032a24aa34fcecaf843e59fc97d299681922e86"
 dependencies = [
  "bincode",
- "cargo_metadata",
+ "cargo_metadata 0.18.1",
  "serde",
 ]
 
@@ -11252,6 +11357,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "triomphe"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef8f7726da4807b58ea5c96fdc122f80702030edc33b35aff9190a51148ccc85"
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11446,7 +11557,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2990d9ea5967266ea0ccf413a4aa5c42a93dbcfda9cb49a97de6931726b12566"
 dependencies = [
  "anyhow",
- "cargo_metadata",
+ "cargo_metadata 0.18.1",
  "cfg-if",
  "regex",
  "rustversion",
