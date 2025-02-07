@@ -11,6 +11,8 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+extern crate alloc;
+
 pub mod builder;
 pub use builder::OpPayloadBuilder;
 pub mod error;
@@ -18,5 +20,7 @@ pub mod payload;
 pub use payload::{OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes};
 mod traits;
 pub use traits::*;
+pub mod validator;
+pub use validator::OpExecutionPayloadValidator;
 
 pub mod config;

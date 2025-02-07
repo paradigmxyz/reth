@@ -1,6 +1,7 @@
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
 };
+use core::fmt;
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
 };
@@ -16,10 +17,14 @@ use reth_node_api::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::{OpBlock, OpPrimitives};
+use reth_optimism_payload_builder::{
+    OpBuiltPayload, OpExecutionPayloadValidator, OpPayloadBuilderAttributes,
+};
+use reth_optimism_primitives::OpBlock;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::SealedBlock;
+use reth_primitives::SealedBlockFor;
+use reth_provider::StateProviderFactory;
+use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::sync::Arc;
 
 /// The types used in the optimism beacon consensus engine.
@@ -74,13 +79,13 @@ impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N> {
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
 pub struct OpEngineValidator {
-    inner: ExecutionPayloadValidator<OpChainSpec>,
+    inner: OpExecutionPayloadValidator<OpChainSpec>,
 }
 
-impl OpEngineValidator {
+impl<P> OpEngineValidator<P> {
     /// Instantiates a new validator.
-    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self { inner: ExecutionPayloadValidator::new(chain_spec) }
+    pub const fn new(chain_spec: Arc<OpChainSpec>, state_provider: P) -> Self {
+        Self { inner: OpExecutionPayloadValidator::new(chain_spec, state_provider) }
     }
 
     /// Returns the chain spec used by the validator.
@@ -225,6 +230,7 @@ mod test {
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_node_builder::EngineValidator;
     use reth_optimism_chainspec::BASE_SEPOLIA;
+    use reth_provider::noop::NoopProvider;
 
     fn get_chainspec() -> Arc<OpChainSpec> {
         let hardforks = OpHardfork::base_sepolia();
@@ -262,10 +268,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_pre_holocene() {
-        let validator = OpEngineValidator::new(get_chainspec());
+        let chain_spec = get_chainspec();
+        let validator = OpEngineValidator::new(chain_spec.clone(), NoopProvider::new(chain_spec));
         let attributes = get_attributes(None, 1732633199);
 
-        let result = <engine::OpEngineValidator as EngineValidator<
+        let result = <engine::OpEngineValidator<NoopProvider<OpChainSpec>> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -275,10 +282,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_no_eip1559_params() {
-        let validator = OpEngineValidator::new(get_chainspec());
+        let chain_spec = get_chainspec();
+        let validator = OpEngineValidator::new(chain_spec.clone(), NoopProvider::new(chain_spec));
         let attributes = get_attributes(None, 1732633200);
 
-        let result = <engine::OpEngineValidator as EngineValidator<
+        let result = <engine::OpEngineValidator<NoopProvider<OpChainSpec>> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -288,10 +296,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_eip1559_params_zero_denominator() {
-        let validator = OpEngineValidator::new(get_chainspec());
+        let chain_spec = get_chainspec();
+        let validator = OpEngineValidator::new(chain_spec.clone(), NoopProvider::new(chain_spec));
         let attributes = get_attributes(Some(b64!("0000000000000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator as EngineValidator<
+        let result = <engine::OpEngineValidator<NoopProvider<OpChainSpec>> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -301,10 +310,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_valid() {
-        let validator = OpEngineValidator::new(get_chainspec());
+        let chain_spec = get_chainspec();
+        let validator = OpEngineValidator::new(chain_spec.clone(), NoopProvider::new(chain_spec));
         let attributes = get_attributes(Some(b64!("0000000800000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator as EngineValidator<
+        let result = <engine::OpEngineValidator<NoopProvider<OpChainSpec>> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -314,10 +324,11 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_valid_all_zero() {
-        let validator = OpEngineValidator::new(get_chainspec());
+        let chain_spec = get_chainspec();
+        let validator = OpEngineValidator::new(chain_spec.clone(), NoopProvider::new(chain_spec));
         let attributes = get_attributes(Some(b64!("0000000000000000")), 1732633200);
 
-        let result = <engine::OpEngineValidator as EngineValidator<
+        let result = <engine::OpEngineValidator<NoopProvider<OpChainSpec>> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
