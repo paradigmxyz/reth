@@ -1,4 +1,6 @@
-use crate::{db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError};
+use crate::{
+    any::AnyError, db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError,
+};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
@@ -143,6 +145,9 @@ pub enum ProviderError {
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,
+    /// A wrapper for arbitrary errors requiring thread-safety and cloneability.
+    #[error(transparent)]
+    Any(#[from] AnyError),
 }
 
 impl From<alloy_rlp::Error> for ProviderError {
