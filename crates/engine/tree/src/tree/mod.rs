@@ -20,6 +20,7 @@ use alloy_rpc_types_engine::{
 };
 use cached_state::{ProviderCaches, SavedCache};
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
+use metrics::PrewarmThreadMetrics;
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
@@ -2485,6 +2486,7 @@ where
         if self.config.use_caching_and_prewarming() {
             debug!(target: "engine::tree", "Spawning prewarm threads");
             let prewarm_start = Instant::now();
+            let prewarm_metrics = self.metrics.prewarm.clone();
 
             // Prewarm transactions
             for (tx_idx, tx) in block.transactions_recovered().enumerate() {
@@ -2499,16 +2501,21 @@ where
                     state_root_sender,
                     cancel_execution.clone(),
                     prewarm_task_lock.clone(),
+                    prewarm_metrics.clone(),
                 )?;
                 let elapsed = start.elapsed();
                 debug!(target: "engine::tree", ?tx_idx, elapsed = ?elapsed, "Spawned transaction prewarm");
             }
 
+            prewarm_metrics.transactions.set(block.transaction_count() as f64);
+            prewarm_metrics.transactions_histogram.record(block.transaction_count() as f64);
+
             drop(state_root_sender);
             let elapsed = prewarm_start.elapsed();
             debug!(target: "engine::tree", ?elapsed, "Done spawning prewarm threads");
 
-            self.metrics.block_validation.prewarm_spawn_duration.set(elapsed.as_secs_f64());
+            self.metrics.prewarm.spawn_duration.set(elapsed);
+            self.metrics.prewarm.spawn_duration_histogram.record(elapsed);
         }
         trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
@@ -2711,6 +2718,7 @@ where
         state_root_sender: Option<Sender<StateRootMessage>>,
         cancel_execution: ManualCancel,
         task_finished: Arc<RwLock<()>>,
+        metrics: PrewarmThreadMetrics,
     ) -> Result<(), InsertBlockErrorKind> {
         // Get the builder once, outside the thread
         let Some(state_provider_builder) = self.state_provider_builder(block.parent_hash())? else {
@@ -2723,6 +2731,7 @@ where
 
         // spawn task executing the individual tx
         self.thread_pool.spawn(move || {
+            let thread_start = Instant::now();
             let in_progress = task_finished.read().unwrap();
 
             // Create the state provider inside the thread
@@ -2755,6 +2764,7 @@ where
                 return
             }
 
+            let execution_start = Instant::now();
             let ResultAndState { state, .. } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
@@ -2762,6 +2772,7 @@ where
                     return
                 }
             };
+            metrics.execution_duration.record(execution_start.elapsed());
 
             // execution no longer in progress, so we can drop the lock
             drop(in_progress);
@@ -2795,15 +2806,20 @@ where
                 targets.insert(keccak256(addr), storage_set);
             }
 
+            let storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>();
             debug!(
                 target: "engine::tree",
                 tx_hash = ?tx.tx_hash(),
                 targets = targets.len(),
-                storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>(),
+                storage_targets,
                 "Prefetching proofs for a transaction"
             );
+            metrics.prefetch_storage_targets.record(storage_targets as f64);
 
             let _ = state_root_sender.send(StateRootMessage::PrefetchProofs(targets));
+
+            // record final metrics
+            metrics.total_runtime.record(thread_start.elapsed());
         });
 
         Ok(())
