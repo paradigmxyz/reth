@@ -466,29 +466,25 @@ where
             }
 
             let mut conn_ready = true;
-            loop {
-                match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(Ok(())) => {
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
-                            }
-                        } else {
-                            break
+
+            match this.inner.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    if let Some(msg) = this.inner.out_buffer.pop_front() {
+                        if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                            return Poll::Ready(Some(Err(err.into())))
                         }
                     }
-                    Poll::Ready(Err(err)) => {
-                        if let Err(disconnect_err) =
-                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
-                        {
-                            return Poll::Ready(Some(Err(disconnect_err.into())))
-                        }
-                        return Poll::Ready(Some(Err(err.into())))
+                }
+                Poll::Ready(Err(err)) => {
+                    if let Err(disconnect_err) =
+                        this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
+                    {
+                        return Poll::Ready(Some(Err(disconnect_err.into())))
                     }
-                    Poll::Pending => {
-                        conn_ready = false;
-                        break
-                    }
+                    return Poll::Ready(Some(Err(err.into())))
+                }
+                Poll::Pending => {
+                    conn_ready = false;
                 }
             }
 
@@ -581,18 +577,27 @@ where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     Primary: Sink<T> + Unpin,
     P2PStreamError: Into<<Primary as Sink<T>>::Error>,
+    io::Error: Into<<Primary as Sink<T>>::Error>,
 {
     type Error = <Primary as Sink<T>>::Error;
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
-        if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
+
+        // First try to drain any buffered satellite messages
+        loop {
+            ready!(this.inner.conn.poll_ready_unpin(cx)).map_err(Into::into)?;
+            if let Some(msg) = this.inner.out_buffer.pop_front() {
+                if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                    return Poll::Ready(Err(err.into()))
+                }
+                continue;
+            }
+            break;
         }
-        if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err))
-        }
-        Poll::Ready(Ok(()))
+
+        // Only check primary sink readiness after buffer is drained
+        this.primary.st.poll_ready_unpin(cx)
     }
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
@@ -600,7 +605,23 @@ where
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.get_mut().inner.conn.poll_flush_unpin(cx).map_err(Into::into)
+        let this = self.get_mut();
+
+        // First try to send all buffered satellite messages
+        loop {
+            ready!(this.inner.conn.poll_ready_unpin(cx)).map_err(Into::into)?;
+            if let Some(msg) = this.inner.out_buffer.pop_front() {
+                if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                    return Poll::Ready(Err(err.into()))
+                }
+                continue;
+            }
+            break;
+        }
+
+        // Then flush both the connection and primary stream
+        ready!(this.inner.conn.poll_flush_unpin(cx)).map_err(Into::into)?;
+        this.primary.st.poll_flush_unpin(cx)
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
