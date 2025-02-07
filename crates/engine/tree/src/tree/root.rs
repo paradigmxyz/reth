@@ -703,12 +703,12 @@ where
     ///    * Sparse trie task reveals the multiproof, updates the sparse trie, computes storage trie
     ///      roots, and calculates RLP nodes of the state trie below
     ///      [`SPARSE_TRIE_INCREMENTAL_LEVEL`].
-    /// 5. Steps above are repeated until the engine receives a
+    /// 5. Steps above are repeated until this task receives a
     ///    [`StateRootMessage::FinishedStateUpdates`].
     ///    * Once this message is received, on every [`StateRootMessage::EmptyProof`] and
     ///      [`StateRootMessage::ProofCalculated`] message, we check if there are any proofs are
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
-    ///      left to be revealed.
+    ///      left to be revealed using [`check_end_condition`].
     ///    * If there are none left, we drop the sparse trie task sender channel, and it signals
     ///      [`run_sparse_trie`] to calculate the state root of the full state trie, and send it
     ///      back to this task via [`StateRootMessage::RootCalculated`] message.
