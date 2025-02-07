@@ -18,7 +18,6 @@ use alloy_primitives::{
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use block_buffer::BlockBuffer;
 use cached_state::{ProviderCaches, SavedCache};
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use persistence_state::CurrentPersistenceAction;
@@ -91,6 +90,7 @@ pub mod root;
 mod trie_updates;
 
 use crate::tree::{config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError};
+pub use block_buffer::BlockBuffer;
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
