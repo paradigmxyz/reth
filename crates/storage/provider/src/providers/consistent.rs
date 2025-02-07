@@ -801,7 +801,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
                 hash.into(),
                 |db_provider| db_provider.find_block_by_hash(hash, BlockSource::Canonical),
                 |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
-            ) {
+            )? {
                 return Ok(Some(block))
             }
         }
