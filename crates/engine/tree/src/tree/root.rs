@@ -673,6 +673,47 @@ where
         }
     }
 
+    /// Starts the main loop that handles all incoming messages, fetches proofs, applies them to the
+    /// sparse trie, updates the sparse trie, and eventually returns the state root.
+    ///
+    /// The lifecycle is the following:
+    /// 1. Either [`StateRootMessage::PrefetchProofs`] or [`StateRootMessage::StateUpdate`] is
+    ///    received from the engine.
+    ///    * For [`StateRootMessage::StateUpdate`], the state update is hashed with
+    ///      [`evm_state_to_hashed_post_state`], and then (proof targets)[`MultiProofTargets`] are
+    ///      extracted with [`get_proof_targets`].
+    ///    * For both messages, proof targets are deduplicated according to `fetched_proof_targets`,
+    ///      so that the proofs for accounts and storage slots that were already fetched are not
+    ///      requested again.
+    /// 2. Using the proof targets, a new multiproof is calculated using
+    ///    [`MultiproofManager::spawn_or_queue`].
+    ///    * If the list of proof targets is empty, the [`StateRootMessage::EmptyProof`] message is
+    ///      sent back to this task along with the original state update.
+    ///    * Otherwise, the multiproof is calculated and the [`StateRootMessage::ProofCalculated`]
+    ///      message is sent back to this task along with the resulting multiproof, proof targets
+    ///      and original state update.
+    /// 3. Either [`StateRootMessage::EmptyProof`] or [`StateRootMessage::ProofCalculated`] is
+    ///    received.
+    ///    * The multiproof is added to the (proof sequencer)[`ProofSequencer`].
+    ///    * If the proof sequencer has a contiguous sequence of multiproofs in the same order as
+    ///      state updates arrived (i.e. transaction order), such sequence is returned.
+    /// 4. Once there's a sequence of contiguous multiproofs along with the proof targets and state
+    ///    updates associated with them, a [`SparseTrieUpdate`] is generated and sent to the sparse
+    ///    trie task that's running in [`run_sparse_trie`].
+    ///    * Sparse trie task reveals the multiproof, updates the sparse trie, computes storage trie
+    ///      roots, and calculates RLP nodes of the state trie below
+    ///      [`SPARSE_TRIE_INCREMENTAL_LEVEL`].
+    /// 5. Steps above are repeated until this task receives a
+    ///    [`StateRootMessage::FinishedStateUpdates`].
+    ///    * Once this message is received, on every [`StateRootMessage::EmptyProof`] and
+    ///      [`StateRootMessage::ProofCalculated`] message, we check if there are any proofs are
+    ///      currently being calculated, or if there are any pending proofs in the proof sequencer
+    ///      left to be revealed using [`check_end_condition`].
+    ///    * If there are none left, we drop the sparse trie task sender channel, and it signals
+    ///      [`run_sparse_trie`] to calculate the state root of the full state trie, and send it
+    ///      back to this task via [`StateRootMessage::RootCalculated`] message.
+    /// 6. On [`StateRootMessage::RootCalculated`] message, the loop exits and the the state root is
+    ///    returned.
     fn run(mut self, sparse_trie_tx: Sender<SparseTrieUpdate>) -> StateRootResult {
         let mut sparse_trie_tx = Some(sparse_trie_tx);
 
@@ -916,7 +957,9 @@ fn check_end_condition(
 }
 
 /// Listen to incoming sparse trie updates and update the sparse trie.
-/// Returns final state root, trie updates and the number of update iterations.
+///
+/// Once the updates receiver channel is dropped, returns final state root, trie updates and the
+/// number of update iterations.
 fn run_sparse_trie<Factory>(
     config: StateRootConfig<Factory>,
     metrics: StateRootTaskMetrics,
