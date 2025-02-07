@@ -389,7 +389,8 @@ pub(crate) struct ProviderCacheBuilder {
 
 impl ProviderCacheBuilder {
     /// Build a [`ProviderCaches`] struct, so that provider caches can be easily cloned.
-    pub(crate) fn build_caches(self, total_cache_size: u64) -> ProviderCaches {
+    pub(crate) fn build_caches(self, total_cache_size_mb: u64) -> ProviderCaches {
+        let total_cache_size = total_cache_size_mb * 1024 * 1024;
         let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
