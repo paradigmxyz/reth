@@ -2797,8 +2797,6 @@ mod tests {
         let mut peers = PeersManager::default();
         peers.add_and_connect(peer, PeerAddr::from_tcp(socket_addr), None);
         assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::PendingOut);
-        assert_eq!(
-            peers.connection_info.num_pending_out, 1
-        );
+        assert_eq!(peers.connection_info.num_pending_out, 1);
     }
 }
