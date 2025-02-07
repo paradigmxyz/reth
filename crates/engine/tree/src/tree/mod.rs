@@ -90,12 +90,10 @@ mod persistence_state;
 pub mod root;
 mod trie_updates;
 
-use crate::tree::{
-    config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError,
-    invalid_headers::InvalidHeaderCache,
-};
+use crate::tree::{config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError};
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
+pub use invalid_headers::InvalidHeaderCache;
 pub use persistence_state::PersistenceState;
 use trie_updates::compare_trie_updates;
 
