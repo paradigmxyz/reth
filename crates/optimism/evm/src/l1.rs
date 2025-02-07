@@ -14,6 +14,8 @@ use revm::{
 };
 use tracing::trace;
 
+use thiserror::Error;
+
 /// The address of the create2 deployer
 const CREATE_2_DEPLOYER_ADDR: Address = address!("13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
 
@@ -29,6 +31,39 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 
 /// The function selector of the "setL1BlockValuesIsthmus" function in the `L1Block` contract.
 const L1_BLOCK_ISTHMUS_SELECTOR: [u8; 4] = hex!("098999be");
+
+#[derive(Debug, Error)]
+pub enum L1BlockInfoError {
+    #[error("could not find l1 block info tx in the L2 block")]
+    MissingInfoTransaction,
+    #[error("invalid l1 block info transaction calldata in the L2 block")]
+    InvalidCalldata,
+    #[error("unexpected l1 block info tx calldata length found: expected {expected}, actual {actual}")]
+    UnexpectedCalldataLength {
+        expected: usize,
+        actual: usize,
+    },
+    #[error("could not convert {0}")]
+    ConversionFailed(&'static str),
+    #[error("Optimism hardforks are not active")]
+    HardforksNotActive,
+}
+
+#[derive(Debug, Error)]
+pub enum OpBlockExecutionError {
+    #[error("L1 block info error: {0}")]
+    L1BlockInfoError(#[from] L1BlockInfoError),
+
+    // Add other variants here if needed
+    #[error("Block execution error: {0}")]
+    BlockExecutionError(String),
+
+    #[error("Database error: {0}")]
+    DatabaseError(#[from] reth_db::Error),
+
+    #[error("Other error: {0}")]
+    Other(String),
+}
 
 /// Extracts the [`L1BlockInfo`] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
@@ -94,25 +129,22 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     // + 32 bytes for the fee overhead
     // + 32 bytes for the fee scalar
     if data.len() != 256 {
-        return Err(OpBlockExecutionError::L1BlockInfoError {
-            message: "unexpected l1 block info tx calldata length found".to_string(),
-        })
-    }
+        return Err(OpBlockExecutionError::L1BlockInfoError(
+            L1BlockInfoError::UnexpectedCalldataLength {
+                expected: 256,
+                actual: data.len(),
+            },
+        ));
 
     let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 base fee".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 base fee"))
     })?;
+
     let l1_fee_overhead = U256::try_from_be_slice(&data[192..224]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 fee overhead".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 fee overhead"))
     })?;
     let l1_fee_scalar = U256::try_from_be_slice(&data[224..256]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 fee scalar".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 fee scalar"))
     })?;
 
     let mut l1block = L1BlockInfo::default();
@@ -139,9 +171,12 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 /// <https://github.com/ethereum-optimism/optimism/blob/957e13dd504fb336a4be40fb5dd0d8ba0276be34/packages/contracts-bedrock/src/L2/L1Block.sol#L136>
 pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError> {
     if data.len() != 160 {
-        return Err(OpBlockExecutionError::L1BlockInfoError {
-            message: "unexpected l1 block info tx calldata length found".to_string(),
-        })
+        return Err(OpBlockExecutionError::L1BlockInfoError(
+            L1BlockInfoError::UnexpectedCalldataLength {
+                expected: 160,
+                actual: data.len(),
+            },
+        ));
     }
 
     // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
@@ -160,25 +195,18 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     // 132   bytes32 _batcherHash,
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 base fee scalar".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 base fee scalar"))
     })?;
     let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 blob base fee scalar".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 blob base fee scalar"))
     })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 blob base fee".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 base fee"))
     })?;
     let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 blob base fee".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 blob base fee"))
     })?;
+
 
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
@@ -204,10 +232,12 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 ///  10. _operatorFeeScalar   Operator fee scalar
 ///  11. _operatorFeeConstant Operator fee constant
 pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError> {
-    if data.len() != 172 {
-        return Err(OpBlockExecutionError::L1BlockInfoError {
-            message: "unexpected l1 block info tx calldata length found".to_string(),
-        })
+    return Err(OpBlockExecutionError::L1BlockInfoError(
+        L1BlockInfoError::UnexpectedCalldataLength {
+            expected: 172,
+            actual: data.len(),
+        },
+    ));
     }
 
     // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
@@ -227,36 +257,26 @@ pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     // 164   uint32 _operatorFeeScalar
     // 168   uint64 _operatorFeeConstant
 
+   
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 base fee scalar".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 base fee scalar"))
     })?;
     let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 blob base fee scalar".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 blob base fee scalar"))
     })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 blob base fee".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 base fee"))
     })?;
     let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert l1 blob base fee".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("l1 blob base fee"))
     })?;
     let operator_fee_scalar = U256::try_from_be_slice(&data[160..164]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert operator fee scalar".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("operator fee scalar"))
     })?;
     let operator_fee_constant = U256::try_from_be_slice(&data[164..172]).ok_or_else(|| {
-        OpBlockExecutionError::L1BlockInfoError {
-            message: "could not convert operator fee constant".to_string(),
-        }
+        OpBlockExecutionError::L1BlockInfoError(L1BlockInfoError::ConversionFailed("operator fee constant"))
     })?;
+
 
     let mut l1block = L1BlockInfo::default();
     l1block.l1_base_fee = l1_base_fee;
@@ -325,10 +345,10 @@ impl RethL1BlockInfo for L1BlockInfo {
         } else if chain_spec.is_bedrock_active_at_block(block_number) {
             SpecId::BEDROCK
         } else {
-            return Err(OpBlockExecutionError::L1BlockInfoError {
-                message: "Optimism hardforks are not active".to_string(),
-            }
-            .into())
+            return Err(OpBlockExecutionError::L1BlockInfoError(
+                L1BlockInfoError::HardforksNotActive,
+            )
+            .into());
         };
         Ok(self.calculate_tx_l1_cost(input, spec_id))
     }
@@ -347,10 +367,10 @@ impl RethL1BlockInfo for L1BlockInfo {
         } else if chain_spec.is_bedrock_active_at_block(block_number) {
             SpecId::BEDROCK
         } else {
-            return Err(OpBlockExecutionError::L1BlockInfoError {
-                message: "Optimism hardforks are not active".to_string(),
-            }
-            .into())
+            return Err(OpBlockExecutionError::L1BlockInfoError(
+                L1BlockInfoError::HardforksNotActive,
+            )
+            .into());
         };
         Ok(self.data_gas(input, spec_id))
     }
