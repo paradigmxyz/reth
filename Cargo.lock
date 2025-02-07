@@ -9334,7 +9334,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "derive_more",
- "reth-fs-util",
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
