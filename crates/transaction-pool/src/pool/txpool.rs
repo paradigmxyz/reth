@@ -4,7 +4,7 @@ use crate::{
     config::{LocalTransactionConfig, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER},
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind},
     identifier::{SenderId, TransactionId},
-    metrics::{AllTransactionsMetrics, TxPoolMetrics},
+    metrics::{AllTransactionsMetrics, TxEvictionMetrics, TxPoolMetrics},
     pool::{
         best::BestTransactions,
         blob::BlobTransactions,
@@ -115,6 +115,8 @@ pub struct TxPool<T: TransactionOrdering> {
     metrics: TxPoolMetrics,
     /// The last update kind that was applied to the pool.
     latest_update_kind: Option<PoolUpdateKind>,
+    /// Metrics for evictions
+    eviction_metrics: TxEvictionMetrics,
 }
 
 // === impl TxPool ===
@@ -132,6 +134,7 @@ impl<T: TransactionOrdering> TxPool<T> {
             config,
             metrics: Default::default(),
             latest_update_kind: None,
+            eviction_metrics: Default::default(),
         }
     }
 
@@ -957,6 +960,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     ///
     /// This returns all transactions that were removed from the entire pool.
     pub(crate) fn discard_worst(&mut self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let start = std::time::Instant::now();
         let mut removed = Vec::new();
 
         // Helper macro that discards the worst transactions for the pools
@@ -1013,6 +1017,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                 queued_limit  => queued_pool,
             ]
         );
+
+        self.eviction_metrics.tx_eviction_duration_seconds.record(start.elapsed());
+        self.eviction_metrics.tx_transactions_evicted.increment(removed.len() as u64);
 
         removed
     }

@@ -1,7 +1,7 @@
 //! Transaction pool metrics.
 
 use reth_metrics::{
-    metrics::{Counter, Gauge},
+    metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
 
@@ -122,4 +122,44 @@ pub struct AllTransactionsMetrics {
     pub(crate) blob_base_fee: Gauge,
     /// The current base fee
     pub(crate) base_fee: Gauge,
+}
+
+/// Blob pool eviction metrics
+#[derive(Metrics, Clone)]
+#[metrics(scope = "transaction_pool")]
+pub struct BlobEvictionMetrics {
+    /// Counter for the number of blob transactions evicted
+    pub(crate) blob_transactions_evicted: Counter,
+    /// Blob eviction routine time
+    pub(crate) blob_eviction_duration_seconds: Histogram,
+}
+
+/// Pending pool eviction metrics
+#[derive(Metrics, Clone)]
+#[metrics(scope = "transaction_pool")]
+pub struct PendingEvictionMetrics {
+    /// Counter for the number of pending transactions evicted
+    pub(crate) pending_transactions_evicted: Counter,
+    /// Pending eviction routine time
+    pub(crate) pending_eviction_duration_seconds: Histogram,
+}
+
+/// Parked pool eviction metrics
+#[derive(Metrics, Clone)]
+#[metrics(scope = "transaction_pool")]
+pub struct ParkedEvictionMetrics {
+    /// Counter for the number of parked transactions evicted
+    pub(crate) parked_transactions_evicted: Counter,
+    /// Parked eviction routine time
+    pub(crate) parked_eviction_duration_seconds: Histogram,
+}
+
+/// Tx pool eviction metrics
+#[derive(Metrics, Clone)]
+#[metrics(scope = "transaction_pool")]
+pub struct TxEvictionMetrics {
+    /// Counter for the number of transactions evicted
+    pub(crate) tx_transactions_evicted: Counter,
+    /// Transaction eviction routine time
+    pub(crate) tx_eviction_duration_seconds: Histogram,
 }
