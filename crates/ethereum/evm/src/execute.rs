@@ -122,8 +122,7 @@ where
         block: &RecoveredBlock<reth_primitives::Block>,
     ) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
-        let state_clear_flag =
-            (*self.chain_spec).is_spurious_dragon_active_at_block(block.number());
+        let state_clear_flag = self.chain_spec.is_spurious_dragon_active_at_block(block.number());
         self.state.set_state_clear_flag(state_clear_flag);
 
         let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
@@ -142,8 +141,8 @@ where
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body().transaction_count());
         for (sender, transaction) in block.transactions_with_sender() {
-            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
-            // must be no greater than the block’s gasLimit.
+            // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
+            // must be no greater than the block's gasLimit.
             let block_available_gas = block.gas_limit() - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
@@ -171,19 +170,14 @@ where
             cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(
-                #[allow(clippy::needless_update)] // side-effect of optimism fields
-                Receipt {
-                    tx_type: transaction.tx_type(),
-                    // Success flag was added in `EIP-658: Embedding transaction status code in
-                    // receipts`.
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    // convert to reth log
-                    logs: result.into_logs(),
-                    ..Default::default()
-                },
-            );
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                logs: result.into_logs(),
+            });
         }
         Ok(ExecuteOutput { receipts, gas_used: cumulative_gas_used })
     }
