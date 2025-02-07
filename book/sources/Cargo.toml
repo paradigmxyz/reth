@@ -13,5 +13,5 @@ reth-tracing = { path = "../../crates/tracing" }
 reth-node-api = { path = "../../crates/node/api" }
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "4b8c055" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "4b8c055" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "4f5049a" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "4f5049a" }
