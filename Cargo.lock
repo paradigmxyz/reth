@@ -261,7 +261,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=4b8c055#4b8c05570b14a35fe4976b17c19eb249557f22ca"
+source = "git+https://github.com/alloy-rs/evm?rev=4f5049a#4f5049abee4c595d68f3fd3bf03ddaa1d9d679e7"
 dependencies = [
  "alloy-primitives",
  "derive_more",
@@ -368,7 +368,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=4b8c055#4b8c05570b14a35fe4976b17c19eb249557f22ca"
+source = "git+https://github.com/alloy-rs/evm?rev=4f5049a#4f5049abee4c595d68f3fd3bf03ddaa1d9d679e7"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
