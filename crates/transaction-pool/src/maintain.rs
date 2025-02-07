@@ -115,6 +115,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
+    let mut first_run = true;
     let metrics = MaintainPoolMetrics::default();
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
     // ensure the pool points to latest state
@@ -238,6 +239,13 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     break;
                 }
                 event = ev;
+                // on receiving the first event on start up, mark the pool as drifted to explicitly
+                // trigger revalidation and clear out outdated txs.
+                if first_run {
+                    maintained_state = MaintainedPoolState::Drifted;
+                    metrics.inc_drift();
+                    first_run = false
+                }
             }
             _ = stale_eviction_interval.tick() => {
                 let stale_txs: Vec<_> = pool
