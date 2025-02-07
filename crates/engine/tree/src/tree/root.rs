@@ -146,6 +146,13 @@ pub enum StateRootMessage {
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution
     StateUpdate(EvmState),
+    /// Empty proof for a specific state update
+    EmptyProof {
+        /// The index of this proof in the sequence of state updates
+        sequence_number: u64,
+        /// The state update that was used to calculate the proof
+        state: HashedPostState,
+    },
     /// Proof calculation completed for a specific state update
     ProofCalculated(Box<ProofCalculated>),
     /// Error during proof calculation
@@ -347,6 +354,19 @@ where
     /// Spawns a new multiproof calculation or enqueues it for later if
     /// `max_concurrent` are already inflight.
     fn spawn_or_queue(&mut self, input: MultiproofInput<Factory>) {
+        // If there are no proof targets, we can just send an empty multiproof back immediately
+        if input.proof_targets.is_empty() {
+            debug!(
+                sequence_number = input.proof_sequence_number,
+                "No proof targets, sending empty multiproof back immediately"
+            );
+            let _ = input.state_root_message_sender.send(StateRootMessage::EmptyProof {
+                sequence_number: input.proof_sequence_number,
+                state: input.hashed_state_update,
+            });
+            return
+        }
+
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
             return;
@@ -705,19 +725,52 @@ where
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
 
-                        let all_proofs_received =
-                            proofs_processed >= updates_received + prefetch_proofs_received;
-                        let no_pending = !self.proof_sequencer.has_pending();
-                        if all_proofs_received && no_pending {
-                            // drop the sender
+                        if check_end_condition(CheckEndConditionParams {
+                            proofs_processed,
+                            updates_received,
+                            prefetch_proofs_received,
+                            updates_finished,
+                            proof_sequencer: &self.proof_sequencer,
+                        }) {
                             sparse_trie_tx.take();
                             debug!(
                                 target: "engine::root",
-                                total_updates = updates_received,
-                                total_proofs = proofs_processed,
                                 "State updates finished and all proofs processed, ending calculation"
                             );
+                        };
+                    }
+                    StateRootMessage::EmptyProof { sequence_number, state } => {
+                        trace!(target: "engine::root", "processing StateRootMessage::EmptyProof");
+
+                        proofs_processed += 1;
+
+                        if let Some(combined_update) = self.on_proof(
+                            sequence_number,
+                            SparseTrieUpdate {
+                                state,
+                                targets: MultiProofTargets::default(),
+                                multiproof: MultiProof::default(),
+                            },
+                        ) {
+                            let _ = sparse_trie_tx
+                                .as_ref()
+                                .expect("tx not dropped")
+                                .send(combined_update);
                         }
+
+                        if check_end_condition(CheckEndConditionParams {
+                            proofs_processed,
+                            updates_received,
+                            prefetch_proofs_received,
+                            updates_finished,
+                            proof_sequencer: &self.proof_sequencer,
+                        }) {
+                            sparse_trie_tx.take();
+                            debug!(
+                                target: "engine::root",
+                                "State updates finished and all proofs processed, ending calculation"
+                            );
+                        };
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
@@ -759,19 +812,19 @@ where
                                 .send(combined_update);
                         }
 
-                        let all_proofs_received =
-                            proofs_processed >= updates_received + prefetch_proofs_received;
-                        let no_pending = !self.proof_sequencer.has_pending();
-                        if all_proofs_received && no_pending && updates_finished {
-                            // drop the sender
+                        if check_end_condition(CheckEndConditionParams {
+                            proofs_processed,
+                            updates_received,
+                            prefetch_proofs_received,
+                            updates_finished,
+                            proof_sequencer: &self.proof_sequencer,
+                        }) {
                             sparse_trie_tx.take();
                             debug!(
                                 target: "engine::root",
-                                total_updates = updates_received,
-                                total_proofs = proofs_processed,
-                                "All proofs processed, ending calculation"
+                                "State updates finished and all proofs processed, ending calculation"
                             );
-                        }
+                        };
                     }
                     StateRootMessage::RootCalculated { state_root, trie_updates, iterations } => {
                         trace!(target: "engine::root", "processing StateRootMessage::RootCalculated");
@@ -789,8 +842,10 @@ where
                             "All proofs processed, ending calculation"
                         );
 
-                        self.metrics.state_updates_received_histogram.record(updates_received);
-                        self.metrics.proofs_processed_histogram.record(proofs_processed);
+                        self.metrics
+                            .state_updates_received_histogram
+                            .record(updates_received as f64);
+                        self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
                         self.metrics.state_root_iterations_histogram.record(iterations as f64);
 
                         return Ok(StateRootComputeOutcome {
@@ -825,6 +880,39 @@ where
             }
         }
     }
+}
+
+/// Convenience params struct to pass to [`check_end_condition`].
+struct CheckEndConditionParams<'a> {
+    proofs_processed: u64,
+    updates_received: u64,
+    prefetch_proofs_received: u64,
+    updates_finished: bool,
+    proof_sequencer: &'a ProofSequencer,
+}
+
+// Returns true if all state updates finished and all profs processed.
+fn check_end_condition(
+    CheckEndConditionParams {
+        proofs_processed,
+        updates_received,
+        prefetch_proofs_received,
+        updates_finished,
+        proof_sequencer,
+    }: CheckEndConditionParams<'_>,
+) -> bool {
+    let all_proofs_received = proofs_processed >= updates_received + prefetch_proofs_received;
+    let no_pending = !proof_sequencer.has_pending();
+    debug!(
+        target: "engine::root",
+        proofs_processed,
+        updates_received,
+        prefetch_proofs_received,
+        no_pending,
+        updates_finished,
+        "Checking end condition"
+    );
+    all_proofs_received && no_pending && updates_finished
 }
 
 /// Listen to incoming sparse trie updates and update the sparse trie.
