@@ -67,7 +67,7 @@ Logging:
       --log.file.filter <FILTER>
           The filter to use for logs written to the log file
 
-          [default: debug]
+          [default: error]
 
       --log.file.directory <PATH>
           The path to put log files in
