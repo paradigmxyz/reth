@@ -4,7 +4,7 @@ use alloy_node_bindings::Geth;
 use alloy_primitives::map::HashSet;
 use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
-use reth_chainspec::MAINNET;
+use reth_chainspec::{MAINNET, SEPOLIA};
 use reth_discv4::Discv4Config;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, HeadersDirection};
 use reth_net_banlist::BanList;
@@ -855,4 +855,42 @@ async fn test_disconnect_then_connect() {
     handle0.connect_peer(*handle1.peer_id(), handle1.local_addr());
     let peer = listener0.next_session_established().await.unwrap();
     assert_eq!(peer, *handle1.peer_id());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connect_peer_in_different_network_should_fail() {
+    reth_tracing::init_test_tracing();
+
+    // peer in mainnet.
+    let peer = new_random_peer(10, vec![]).await;
+    let peer_handle = peer.handle().clone();
+    tokio::task::spawn(peer);
+
+    // peer in sepolia.
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    // If the remote disconnect first, then we would not get a fatal protocol error. So set
+    // max_backoff_count to 0 to speed up the removal of the peer.
+    let peers_config = PeersConfig::default().with_max_backoff_count(0);
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .peer_config(peers_config)
+        .build_with_noop_provider(SEPOLIA.clone());
+
+    let network = NetworkManager::new(config).await.unwrap();
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    // create networkeventstream to get the next session event easily.
+    let events = handle.event_listener();
+
+    let mut event_stream = NetworkEventStream::new(events);
+
+    handle.add_peer(*peer_handle.peer_id(), peer_handle.local_addr());
+
+    let added_peer_id = event_stream.peer_added().await.unwrap();
+    assert_eq!(added_peer_id, *peer_handle.peer_id());
+
+    let removed_peer_id = event_stream.peer_removed().await.unwrap();
+    assert_eq!(removed_peer_id, *peer_handle.peer_id());
 }
