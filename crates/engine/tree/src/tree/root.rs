@@ -712,8 +712,8 @@ where
     ///    * If there are none left, we drop the sparse trie task sender channel, and it signals
     ///      [`run_sparse_trie`] to calculate the state root of the full state trie, and send it
     ///      back to this task via [`StateRootMessage::RootCalculated`] message.
-    /// 6. On [`StateRootMessage::RootCalculated`] message, the state root is returned and this task
-    ///    exits.
+    /// 6. On [`StateRootMessage::RootCalculated`] message, the loop exits and the the state root is
+    ///    returned.
     fn run(mut self, sparse_trie_tx: Sender<SparseTrieUpdate>) -> StateRootResult {
         let mut sparse_trie_tx = Some(sparse_trie_tx);
 
