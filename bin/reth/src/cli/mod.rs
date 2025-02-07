@@ -130,7 +130,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     {
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.command.chain_spec() {
-            self.logs.log_file_directory = self.logs.log_file_directory.join(chain_spec.chain.to_string());
+            self.logs.log_file_directory =
+                self.logs.log_file_directory.join(chain_spec.chain.to_string());
         }
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
@@ -292,7 +293,8 @@ mod tests {
     fn parse_logs_path_node() {
         let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
         if let Some(chain_spec) = reth.command.chain_spec() {
-            reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+            reth.logs.log_file_directory =
+                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
         }
         let log_dir = reth.logs.log_file_directory;
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
@@ -317,7 +319,8 @@ mod tests {
     fn parse_logs_path_init() {
         let mut reth = Cli::try_parse_args_from(["reth", "init"]).unwrap();
         if let Some(chain_spec) = reth.command.chain_spec() {
-            reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+            reth.logs.log_file_directory =
+                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
         }
         let log_dir = reth.logs.log_file_directory;
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
@@ -330,7 +333,8 @@ mod tests {
     fn parse_empty_logs_path() {
         let mut reth = Cli::try_parse_args_from(["reth", "config"]).unwrap();
         if let Some(chain_spec) = reth.command.chain_spec() {
-            reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+            reth.logs.log_file_directory =
+                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
         }
         let log_dir = reth.logs.log_file_directory;
         let end = "reth/logs".to_string();

@@ -4,7 +4,10 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
-use std::{sync::Arc, io::{self, Write}};
+use std::{
+    io::{self, Write},
+    sync::Arc,
+};
 
 mod checksum;
 mod clear;
