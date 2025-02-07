@@ -62,6 +62,12 @@ pub enum OpInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
+    /// Transaction conditional cost exceeded maximum allowed
+    #[error("conditional cost exceeded maximum allowed")]
+    ConditionalCostExceeded,
+    /// Invalid conditional parameters
+    #[error("invalid conditional parameters")]
+    InvalidCondition,
 }
 
 impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
