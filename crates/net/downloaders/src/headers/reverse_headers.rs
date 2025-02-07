@@ -674,6 +674,11 @@ where
             // headers are sorted high to low
             self.queued_validated_headers.pop();
         }
+        trace!(
+            target: "downloaders::headers",
+            head=?head.num_hash(),
+            "Updating local head"
+        );
         // update the local head
         self.local_head = Some(head);
     }
@@ -681,61 +686,60 @@ where
     /// If the given target is different from the current target, we need to update the sync target
     fn update_sync_target(&mut self, target: SyncTarget) {
         let current_tip = self.sync_target.as_ref().and_then(|t| t.hash());
+        trace!(
+            target: "downloaders::headers",
+            sync_target=?target,
+            current_tip=?current_tip,
+            "Updating sync target"
+        );
         match target {
             SyncTarget::Tip(tip) => {
-                if Some(tip) != current_tip {
-                    trace!(target: "downloaders::headers", current=?current_tip, new=?tip, "Update sync target");
-                    let new_sync_target = SyncTargetBlock::from_hash(tip);
+                trace!(target: "downloaders::headers", current=?current_tip, new=?tip, "Update sync target");
+                let new_sync_target = SyncTargetBlock::from_hash(tip);
 
-                    // if the new sync target is the next queued request we don't need to re-start
-                    // the target update
-                    if let Some(target_number) = self
-                        .queued_validated_headers
-                        .first()
-                        .filter(|h| h.hash() == tip)
-                        .map(|h| h.number())
-                    {
-                        self.sync_target = Some(new_sync_target.with_number(target_number));
-                        return
-                    }
-
-                    trace!(target: "downloaders::headers", new=?target, "Request new sync target");
-                    self.metrics.out_of_order_requests.increment(1);
-                    self.sync_target = Some(new_sync_target);
-                    self.sync_target_request = Some(
-                        self.request_fut(self.get_sync_target_request(tip.into()), Priority::High),
-                    );
+                // if the new sync target is the next queued request we don't need to re-start
+                // the target update
+                if let Some(target_number) = self
+                    .queued_validated_headers
+                    .first()
+                    .filter(|h| h.hash() == tip)
+                    .map(|h| h.number())
+                {
+                    self.sync_target = Some(new_sync_target.with_number(target_number));
+                    return
                 }
+
+                trace!(target: "downloaders::headers", new=?target, "Request new sync target");
+                self.metrics.out_of_order_requests.increment(1);
+                self.sync_target = Some(new_sync_target);
+                self.sync_target_request = Some(
+                    self.request_fut(self.get_sync_target_request(tip.into()), Priority::High),
+                );
             }
             SyncTarget::Gap(existing) => {
                 let target = existing.parent;
-                if Some(target) != current_tip {
-                    // there could be a sync target request in progress
-                    self.sync_target_request.take();
-                    // If the target has changed, update the request pointers based on the new
-                    // targeted block number
-                    let parent_block_number = existing.block.number.saturating_sub(1);
+                // there could be a sync target request in progress
+                self.sync_target_request.take();
+                // If the target has changed, update the request pointers based on the new
+                // targeted block number
+                let parent_block_number = existing.block.number.saturating_sub(1);
 
-                    trace!(target: "downloaders::headers", current=?current_tip, new=?target, %parent_block_number, "Updated sync target");
+                trace!(target: "downloaders::headers", current=?current_tip, new=?target, %parent_block_number, "Updated sync target");
 
-                    // Update the sync target hash
-                    self.sync_target = match self.sync_target.take() {
-                        Some(sync_target) => Some(sync_target.with_hash(target)),
-                        None => Some(SyncTargetBlock::from_hash(target)),
-                    };
-                    self.on_block_number_update(parent_block_number, parent_block_number);
-                }
+                // Update the sync target hash
+                self.sync_target = match self.sync_target.take() {
+                    Some(sync_target) => Some(sync_target.with_hash(target)),
+                    None => Some(SyncTargetBlock::from_hash(target)),
+                };
+                self.on_block_number_update(parent_block_number, parent_block_number);
             }
             SyncTarget::TipNum(num) => {
-                let current_tip_num = self.sync_target.as_ref().and_then(|t| t.number());
-                if Some(num) != current_tip_num {
-                    trace!(target: "downloaders::headers", %num, "Updating sync target based on num");
-                    // just update the sync target
-                    self.sync_target = Some(SyncTargetBlock::from_number(num));
-                    self.sync_target_request = Some(
-                        self.request_fut(self.get_sync_target_request(num.into()), Priority::High),
-                    );
-                }
+                trace!(target: "downloaders::headers", %num, "Updating sync target based on num");
+                // just update the sync target
+                self.sync_target = Some(SyncTargetBlock::from_number(num));
+                self.sync_target_request = Some(
+                    self.request_fut(self.get_sync_target_request(num.into()), Priority::High),
+                );
             }
         }
     }
@@ -1058,14 +1062,6 @@ impl SyncTargetBlock {
         match self {
             Self::Hash(hash) | Self::HashAndNumber { hash, .. } => Some(*hash),
             Self::Number(_) => None,
-        }
-    }
-
-    /// Return the block number of the sync target, if it is set.
-    const fn number(&self) -> Option<u64> {
-        match self {
-            Self::Hash(_) => None,
-            Self::Number(number) | Self::HashAndNumber { number, .. } => Some(*number),
         }
     }
 }
