@@ -128,10 +128,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
-        // Add network name to logs dir (only set when using `Node` command)
-        let chain = self.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or_default();
-        self.logs.log_file_directory = self.logs.log_file_directory.join(chain);
-
+        // Add network name if available to the logs dir
+        if let Some(chain_spec) = self.command.chain_spec() {
+            self.logs.log_file_directory = self.logs.log_file_directory.join(chain_spec.chain.to_string());
+        }
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
