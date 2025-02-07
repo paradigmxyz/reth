@@ -14,11 +14,11 @@ extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::eip7840::BlobParams;
 use alloy_op_evm::OpEvmFactory;
 use alloy_primitives::{Address, U256};
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
+use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::next_block_base_fee;
@@ -133,7 +133,7 @@ pub struct OpEvmConfig<ChainSpec = OpChainSpec> {
 
 impl<ChainSpec> Clone for OpEvmConfig<ChainSpec> {
     fn clone(&self) -> Self {
-        Self { chain_spec: self.chain_spec.clone() }
+        Self { chain_spec: self.chain_spec.clone(), evm_factory: OpEvmFactory::default() }
     }
 }
 
