@@ -259,6 +259,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-evm"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm?rev=316250b#316250bdbeeb30139ad9ff8b29383668eedd18cb"
+dependencies = [
+ "alloy-primitives",
+ "derive_more",
+ "revm",
+]
+
+[[package]]
 name = "alloy-genesis"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -353,6 +363,17 @@ dependencies = [
  "thiserror 2.0.11",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "alloy-op-evm"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm?rev=316250b#316250bdbeeb30139ad9ff8b29383668eedd18cb"
+dependencies = [
+ "alloy-evm",
+ "alloy-primitives",
+ "derive_more",
+ "revm",
 ]
 
 [[package]]
@@ -2303,9 +2324,9 @@ dependencies = [
 
 [[package]]
 name = "crunchy"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
+checksum = "43da5946c66ffcc7745f48db692ffbb10a83bfe0afd96235c5c2a4fb23994929"
 
 [[package]]
 name = "crypto-bigint"
@@ -3063,6 +3084,7 @@ name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -3261,6 +3283,7 @@ name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -7677,6 +7700,7 @@ version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-primitives",
  "auto_impl",
  "futures-util",
@@ -7704,10 +7728,10 @@ version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-sol-types",
- "derive_more",
  "reth-chainspec",
  "reth-consensus",
  "reth-ethereum-consensus",
@@ -8516,7 +8540,9 @@ version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-genesis",
+ "alloy-op-evm",
  "alloy-primitives",
  "derive_more",
  "op-alloy-consensus",
