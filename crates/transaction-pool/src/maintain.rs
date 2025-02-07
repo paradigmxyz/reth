@@ -153,6 +153,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     // eviction interval for stale non local txs
     let mut stale_eviction_interval = time::interval(config.max_tx_lifetime);
 
+    // toggle for the first notification
+    let mut first_event = true;
+
     // The update loop that waits for new blocks and reorgs and performs pool updated
     // Listen for new chain events and derive the update action for the pool
     loop {
@@ -238,6 +241,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     break;
                 }
                 event = ev;
+                // on receiving the first event on start up, mark the pool as drifted to explicitly
+                // trigger revalidation and clear out outdated txs.
+                if first_event {
+                    maintained_state = MaintainedPoolState::Drifted;
+                    first_event = false
+                }
             }
             _ = stale_eviction_interval.tick() => {
                 let stale_txs: Vec<_> = pool

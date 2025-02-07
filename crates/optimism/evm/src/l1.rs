@@ -1,12 +1,11 @@
 //! Optimism-specific implementation and utilities for the executor
 
 use crate::OpBlockExecutionError;
-use alloc::{string::ToString, sync::Arc};
+use alloc::string::ToString;
 use alloy_consensus::Transaction;
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
 use reth_execution_errors::BlockExecutionError;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::{OpHardfork, OpHardforks};
+use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::BlockBody;
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
@@ -360,7 +359,7 @@ impl RethL1BlockInfo for L1BlockInfo {
 /// deployer contract. This is done by directly setting the code of the create2 deployer account
 /// prior to executing any transactions on the timestamp activation of the fork.
 pub fn ensure_create2_deployer<DB>(
-    chain_spec: Arc<OpChainSpec>,
+    chain_spec: impl OpHardforks,
     timestamp: u64,
     db: &mut revm::State<DB>,
 ) -> Result<(), DB::Error>
@@ -370,8 +369,8 @@ where
     // If the canyon hardfork is active at the current timestamp, and it was not active at the
     // previous block timestamp (heuristically, block time is not perfectly constant at 2s), and the
     // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
-    if chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, timestamp.saturating_sub(2))
+    if chain_spec.is_canyon_active_at_timestamp(timestamp) &&
+        !chain_spec.is_canyon_active_at_timestamp(timestamp.saturating_sub(2))
     {
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 

@@ -11,8 +11,4 @@
 mod events;
 pub use crate::events::{Events, PayloadEvents};
 
-/// Contains the payload builder trait to abstract over payload attributes.
-mod traits;
-pub use traits::{PayloadBuilder, PayloadStoreExt};
-
 pub use reth_payload_primitives::PayloadBuilderError;
