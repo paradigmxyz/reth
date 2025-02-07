@@ -1,6 +1,6 @@
 //! Merkle trie proofs.
 
-use crate::{Nibbles, TrieAccount};
+use crate::{decoded_proof_nodes::DecodedProofNodes, Nibbles, TrieAccount};
 use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
@@ -136,7 +136,21 @@ impl MultiProof {
     }
 }
 
-/// The merkle multiproof of storage trie.
+
+/// The decoded merkle multiproof for a storage trie.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DecodedStorageMultiProof {
+    /// Storage trie root.
+    pub root: B256,
+    /// Decoded storage multiproof for the requested slots.
+    pub subtree: DecodedProofNodes,
+    /// The hash masks of the branch nodes in the storage proof.
+    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+    /// The tree masks of the branch nodes in the storage proof.
+    pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+}
+
+/// The merkle multiproof for a storage trie.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StorageMultiProof {
     /// Storage trie root.
@@ -189,6 +203,16 @@ impl StorageMultiProof {
         };
 
         Ok(StorageProof { key: slot, nibbles, value, proof })
+    }
+
+    /// Creates a new [`DecodedStorageMultiProof`] from this storage multiproof.
+    pub fn decode(self) -> DecodedStorageMultiProof {
+        DecodedStorageMultiProof {
+            root: self.root,
+            subtree: DecodedProofNodes::from_nodes(self.subtree),
+            branch_node_hash_masks: self.branch_node_hash_masks,
+            branch_node_tree_masks: self.branch_node_tree_masks,
+        }
     }
 }
 

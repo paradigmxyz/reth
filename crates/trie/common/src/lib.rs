@@ -41,6 +41,9 @@ pub use subnode::StoredSubNode;
 /// The container indicates when the trie has been modified.
 pub mod prefix_set;
 
+/// A version of `ProofNodes`s that are decoded.
+pub mod decoded_proof_nodes;
+
 mod proofs;
 #[cfg(any(test, feature = "test-utils"))]
 pub use proofs::triehash;
