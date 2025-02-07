@@ -2601,6 +2601,7 @@ where
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
         if self.config.use_caching_and_prewarming() {
+            let save_cache_start = Instant::now();
             // this is the only place / thread a writer is acquired, so we would have already
             // crashed if we had a poisoned rwlock
             //
@@ -2611,6 +2612,10 @@ where
             // apply state updates to cache and save it (if saving was successful)
             self.most_recent_cache =
                 state_provider.save_cache(sealed_block.hash(), &output.state).ok();
+            let elapsed = save_cache_start.elapsed();
+
+            // record how long it took to save caches
+            self.metrics.block_validation.cache_saving_duration.set(elapsed.as_secs_f64());
         }
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
