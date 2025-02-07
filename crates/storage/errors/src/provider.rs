@@ -1,4 +1,6 @@
-use crate::{any::AnyError, db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError};
+use crate::{
+    any::AnyError, db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError,
+};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};

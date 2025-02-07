@@ -1,19 +1,19 @@
 use alloc::sync::Arc;
-use core::error::Error;
-use core::fmt;
+use core::{error::Error, fmt};
 
 /// A thread-safe cloneable wrapper for any error type.
 #[derive(Clone)]
 pub struct AnyError {
-    inner: Arc<dyn Error + Send + Sync + 'static>
+    inner: Arc<dyn Error + Send + Sync + 'static>,
 }
 
 impl AnyError {
-     /// Creates a new `AnyError` wrapping the given error value.
-    pub fn new<E>(error: E) -> Self where E: Error + Send + Sync + 'static, {
-        Self {
-            inner: Arc::new(error)
-        }
+    /// Creates a new `AnyError` wrapping the given error value.
+    pub fn new<E>(error: E) -> Self
+    where
+        E: Error + Send + Sync + 'static,
+    {
+        Self { inner: Arc::new(error) }
     }
 
     /// Returns a reference to the underlying error value.
