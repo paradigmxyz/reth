@@ -7,7 +7,6 @@ use crate::{
     OpEngineTypes,
 };
 use op_alloy_consensus::OpPooledTransaction;
-use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
@@ -23,7 +22,7 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
-    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
@@ -39,7 +38,6 @@ use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
 };
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
@@ -485,13 +483,23 @@ impl<Txs> OpPayloadBuilder<Txs> {
         OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
     }
 
-    /// A helper method to initialize [`PayloadBuilderService`] with the given EVM config.
-    pub fn spawn<Node, Evm, Pool>(
-        self,
+    /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
+    /// given EVM config.
+    #[expect(clippy::type_complexity)]
+    pub fn build<Node, Evm, Pool>(
+        &self,
         evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>>
+    ) -> eyre::Result<
+        reth_optimism_payload_builder::OpPayloadBuilder<
+            Pool,
+            Node::Provider,
+            Evm,
+            PrimitivesTy<Node::Types>,
+            Txs,
+        >,
+    >
     where
         Node: FullNodeTypes<
             Types: NodeTypesWithEngine<
@@ -511,28 +519,10 @@ impl<Txs> OpPayloadBuilder<Txs> {
             ctx.provider().clone(),
             evm_config,
             BasicOpReceiptBuilder::default(),
-            OpBuilderConfig { da_config: self.da_config },
+            OpBuilderConfig { da_config: self.da_config.clone() },
         )
-        .with_transactions(self.best_transactions)
+        .with_transactions(self.best_transactions.clone())
         .set_compute_pending_block(self.compute_pending_block);
-        let conf = ctx.payload_builder_config();
-
-        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-            .interval(conf.interval())
-            .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks());
-
-        let payload_generator = BasicPayloadJobGenerator::with_builder(
-            ctx.provider().clone(),
-            ctx.task_executor().clone(),
-            payload_job_config,
-            payload_builder,
-        );
-        let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-
-        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
-
         Ok(payload_builder)
     }
 }
@@ -551,12 +541,20 @@ where
         + 'static,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
-    async fn spawn_payload_service(
-        self,
+    type PayloadBuilder = reth_optimism_payload_builder::OpPayloadBuilder<
+        Pool,
+        Node::Provider,
+        OpEvmConfig,
+        PrimitivesTy<Node::Types>,
+        Txs,
+    >;
+
+    async fn build_payload_builder(
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>> {
-        self.spawn(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
+    ) -> eyre::Result<Self::PayloadBuilder> {
+        self.build(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
 

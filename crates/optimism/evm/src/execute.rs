@@ -8,7 +8,6 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Eip658Value, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
 use op_alloy_consensus::OpDepositReceipt;
-use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
     execute::{
@@ -21,10 +20,8 @@ use reth_evm::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
-use reth_optimism_forks::OpHardfork;
-use reth_optimism_primitives::{
-    transaction::signed::OpTransaction, DepositReceipt, OpPrimitives, OpReceipt,
-};
+use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt, OpPrimitives};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_revm::State;
@@ -33,9 +30,13 @@ use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
 #[derive(Debug, Clone)]
-pub struct OpExecutionStrategyFactory<N: NodePrimitives = OpPrimitives, EvmConfig = OpEvmConfig> {
+pub struct OpExecutionStrategyFactory<
+    N: NodePrimitives = OpPrimitives,
+    ChainSpec = OpChainSpec,
+    EvmConfig = OpEvmConfig<ChainSpec>,
+> {
     /// The chainspec
-    chain_spec: Arc<OpChainSpec>,
+    chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
     /// Receipt builder.
@@ -53,10 +54,10 @@ impl OpExecutionStrategyFactory<OpPrimitives> {
     }
 }
 
-impl<N: NodePrimitives, EvmConfig> OpExecutionStrategyFactory<N, EvmConfig> {
+impl<N: NodePrimitives, ChainSpec, EvmConfig> OpExecutionStrategyFactory<N, ChainSpec, EvmConfig> {
     /// Creates a new executor strategy factory.
     pub fn new(
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<ChainSpec>,
         evm_config: EvmConfig,
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
     ) -> Self {
@@ -64,17 +65,15 @@ impl<N: NodePrimitives, EvmConfig> OpExecutionStrategyFactory<N, EvmConfig> {
     }
 }
 
-impl<N, EvmConfig> BlockExecutionStrategyFactory for OpExecutionStrategyFactory<N, EvmConfig>
+impl<N, ChainSpec, EvmConfig> BlockExecutionStrategyFactory
+    for OpExecutionStrategyFactory<N, ChainSpec, EvmConfig>
 where
-    N: NodePrimitives<
-        BlockHeader = alloy_consensus::Header,
-        Receipt = OpReceipt,
-        SignedTx: OpTransaction,
-    >,
+    N: NodePrimitives<SignedTx: OpTransaction, Receipt: DepositReceipt>,
+    ChainSpec: OpHardforks + Clone + Unpin + Sync + Send + 'static,
     EvmConfig: ConfigureEvmFor<N> + Clone + Unpin + Sync + Send + 'static,
 {
     type Primitives = N;
-    type Strategy<DB: Database> = OpExecutionStrategy<DB, N, EvmConfig>;
+    type Strategy<DB: Database> = OpExecutionStrategy<DB, N, ChainSpec, EvmConfig>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
@@ -93,31 +92,32 @@ where
 
 /// Block execution strategy for Optimism.
 #[allow(missing_debug_implementations)]
-pub struct OpExecutionStrategy<DB, N: NodePrimitives, EvmConfig>
+pub struct OpExecutionStrategy<DB, N: NodePrimitives, ChainSpec, EvmConfig>
 where
     EvmConfig: Clone,
 {
     /// The chainspec
-    chain_spec: Arc<OpChainSpec>,
+    chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
-    system_caller: SystemCaller<EvmConfig, OpChainSpec>,
+    system_caller: SystemCaller<EvmConfig, ChainSpec>,
     /// Receipt builder.
     receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
 }
 
-impl<DB, N, EvmConfig> OpExecutionStrategy<DB, N, EvmConfig>
+impl<DB, N, ChainSpec, EvmConfig> OpExecutionStrategy<DB, N, ChainSpec, EvmConfig>
 where
     N: NodePrimitives,
+    ChainSpec: OpHardforks,
     EvmConfig: Clone,
 {
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(
         state: State<DB>,
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<ChainSpec>,
         evm_config: EvmConfig,
         receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
     ) -> Self {
@@ -126,14 +126,12 @@ where
     }
 }
 
-impl<DB, N, EvmConfig> BlockExecutionStrategy for OpExecutionStrategy<DB, N, EvmConfig>
+impl<DB, N, ChainSpec, EvmConfig> BlockExecutionStrategy
+    for OpExecutionStrategy<DB, N, ChainSpec, EvmConfig>
 where
     DB: Database,
-    N: NodePrimitives<
-        BlockHeader = alloy_consensus::Header,
-        SignedTx: OpTransaction,
-        Receipt: DepositReceipt,
-    >,
+    N: NodePrimitives<SignedTx: OpTransaction, Receipt: DepositReceipt>,
+    ChainSpec: OpHardforks,
     EvmConfig: ConfigureEvmFor<N>,
 {
     type DB = DB;
@@ -152,9 +150,9 @@ where
         let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
 
         self.system_caller.apply_beacon_root_contract_call(
-            block.header().timestamp,
-            block.header().number,
-            block.header().parent_beacon_block_root,
+            block.header().timestamp(),
+            block.header().number(),
+            block.header().parent_beacon_block_root(),
             &mut evm,
         )?;
 
@@ -162,7 +160,7 @@ where
         // blocks will always have at least a single transaction in them (the L1 info transaction),
         // so we can safely assume that this will always be triggered upon the transition and that
         // the above check for empty blocks will never be hit on OP chains.
-        ensure_create2_deployer(self.chain_spec.clone(), block.header().timestamp, evm.db_mut())
+        ensure_create2_deployer(self.chain_spec.clone(), block.header().timestamp(), evm.db_mut())
             .map_err(|_| OpBlockExecutionError::ForceCreate2DeployerFail)?;
 
         Ok(())
@@ -174,8 +172,7 @@ where
     ) -> Result<ExecuteOutput<N::Receipt>, Self::Error> {
         let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
 
-        let is_regolith =
-            self.chain_spec.fork(OpHardfork::Regolith).active_at_timestamp(block.timestamp());
+        let is_regolith = self.chain_spec.is_regolith_active_at_timestamp(block.timestamp());
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body().transaction_count());
@@ -255,10 +252,8 @@ where
                             // this is only set for post-Canyon deposit
                             // transactions.
                             deposit_receipt_version: (transaction.is_deposit() &&
-                                self.chain_spec.is_fork_active_at_timestamp(
-                                    OpHardfork::Canyon,
-                                    block.header().timestamp,
-                                ))
+                                self.chain_spec
+                                    .is_canyon_active_at_timestamp(block.timestamp()))
                             .then_some(1),
                         })
                     }
@@ -333,7 +328,7 @@ mod tests {
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
     use reth_optimism_chainspec::OpChainSpecBuilder;
-    use reth_optimism_primitives::OpTransactionSigned;
+    use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives::{Account, Block, BlockBody};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
