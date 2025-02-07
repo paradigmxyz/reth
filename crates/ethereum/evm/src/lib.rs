@@ -23,7 +23,7 @@ pub use alloy_evm::EthEvm;
 use alloy_evm::EthEvmFactory;
 use alloy_primitives::{Address, U256};
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;

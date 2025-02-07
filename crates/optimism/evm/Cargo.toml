@@ -78,6 +78,8 @@ std = [
     "reth-chainspec/std",
     "reth-optimism-consensus/std",
     "reth-consensus-common/std",
+    "alloy-evm/std",
+    "alloy-op-evm/std",
 ]
 optimism = [
     "reth-execution-types/optimism",

@@ -60,6 +60,7 @@ std = [
     "reth-ethereum-forks/std",
     "reth-chainspec/std",
     "reth-consensus-common/std",
+    "alloy-evm/std",
 ]
 test-utils = [
     "dep:parking_lot",
