@@ -19,7 +19,6 @@ reth-consensus.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
-reth-trie.workspace = true
 reth-storage-errors.workspace = true
 
 # op-reth
@@ -50,6 +49,7 @@ op-alloy-consensus.workspace = true
 alloy-chains.workspace = true
 alloy-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
+reth-trie.workspace = true
 
 [features]
 default = ["std"]

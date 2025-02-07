@@ -1,11 +1,11 @@
 //! Block verification w.r.t. consensus rules new in Isthmus hardfork.
 
 use alloy_consensus::BlockHeader;
+use alloy_primitives::U256;
 use core::fmt;
 use reth_optimism_primitives::predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_storage_api::StorageRootProvider;
-use reth_trie::HashedStorage;
-use revm::db::BundleState;
+use revm::db::AccountStatus;
 
 use crate::OpConsensusError;
 
@@ -21,23 +21,22 @@ pub fn verify_withdrawals_storage_root_is_some<H: BlockHeader + fmt::Debug>(
 
 /// Verifies block header field `withdrawals_root` against storage root of
 /// `l2tol1-message-passer` predeploy post block execution.
-pub fn verify_withdrawals_storage_root<DB: StorageRootProvider, H: BlockHeader + fmt::Debug>(
-    state_updates: &BundleState,
+pub fn verify_withdrawals_storage_root<'a, I, DB, H>(
+    unhashed_storage_updates: Option<(AccountStatus, I)>,
     state: DB,
     header: H,
-) -> Result<(), OpConsensusError> {
+) -> Result<(), OpConsensusError>
+where
+    I: IntoIterator<Item = (&'a U256, &'a U256)>,
+    DB: StorageRootProvider,
+    H: BlockHeader + fmt::Debug,
+{
     let header_storage_root =
         header.withdrawals_root().ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
 
-    let hashed_storage_updates =
-        state_updates.state().get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER).map(|account| {
-            // block contained withdrawals transactions, use predeploy storage updates from
-            // execution
-            HashedStorage::from_plain_storage(
-                account.status,
-                account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-            )
-        });
+    // if block contained l2 withdrawals transactions, use predeploy storage updates from
+    // execution
+    let hashed_storage_updates = unhashed_storage_updates.map(|acc| acc.into());
 
     let storage_root = state
         .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, hashed_storage_updates.unwrap_or_default())
@@ -55,12 +54,11 @@ pub fn verify_withdrawals_storage_root<DB: StorageRootProvider, H: BlockHeader +
 
 #[cfg(test)]
 mod test {
-    use core::str::FromStr;
-    use std::sync::Arc;
-
+    use alloc::sync::Arc;
     use alloy_chains::Chain;
     use alloy_consensus::Header;
     use alloy_primitives::{keccak256, B256, U256};
+    use core::str::FromStr;
     use reth_db_common::init::init_genesis;
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_node::OpNode;
@@ -69,7 +67,7 @@ mod test {
         StateWriter,
     };
     use reth_storage_api::StateProviderFactory;
-    use reth_trie::{test_utils::storage_root_prehashed, HashedPostState};
+    use reth_trie::{test_utils::storage_root_prehashed, HashedPostState, HashedStorage};
 
     use super::*;
 
@@ -114,10 +112,8 @@ mod test {
         let state_provider_factory = BlockchainProvider::new(provider_factory).unwrap();
 
         // validate block against existing state by passing empty state updates
-        let block_execution_state_updates = BundleState::default();
-
         verify_withdrawals_storage_root(
-            &block_execution_state_updates,
+            None::<(revm::db::AccountStatus, Vec<(&U256, &U256)>)>,
             state_provider_factory.latest().expect("load state"),
             &header,
         )

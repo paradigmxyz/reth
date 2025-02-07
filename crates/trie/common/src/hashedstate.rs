@@ -292,6 +292,15 @@ impl HashedStorage {
     }
 }
 
+impl<'a, I> From<(AccountStatus, I)> for HashedStorage
+where
+    I: IntoIterator<Item = (&'a U256, &'a U256)>,
+{
+    fn from((status, storage): (AccountStatus, I)) -> Self {
+        Self::from_plain_storage(status, storage)
+    }
+}
+
 /// Sorted hashed post state optimized for iterating during state trie calculation.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostStateSorted {
