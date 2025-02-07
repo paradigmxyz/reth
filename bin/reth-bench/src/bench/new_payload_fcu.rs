@@ -20,7 +20,7 @@ use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::SealedHeader;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
 /// `reth benchmark new-payload-fcu` command
@@ -34,6 +34,15 @@ pub struct Command {
     benchmark: BenchmarkArgs,
 }
 
+/// Block related data obtained from the RPC endpoint and duration spent to get it.
+struct BlockWithTiming {
+    block: SealedBlock,
+    head_block_hash: B256,
+    safe_block_hash: B256,
+    finalized_block_hash: B256,
+    fetch_duration: Duration,
+}
+
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
@@ -43,6 +52,8 @@ impl Command {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
+                let fetch_start = Instant::now();
+
                 let block_res =
                     block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
@@ -60,9 +71,17 @@ impl Command {
                 let finalized_block_hash =
                     finalized.unwrap().expect("finalized block exists").header.hash;
 
+                let fetch_duration = fetch_start.elapsed();
                 next_block += 1;
+
                 sender
-                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
+                    .send(BlockWithTiming {
+                        block,
+                        head_block_hash,
+                        safe_block_hash,
+                        finalized_block_hash,
+                        fetch_duration,
+                    })
                     .await
                     .unwrap();
             }
@@ -72,7 +91,9 @@ impl Command {
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
 
-        while let Some((block, head, safe, finalized)) = receiver.recv().await {
+        let mut total_fetch_duration = Duration::ZERO;
+        while let Some(block_data) = receiver.recv().await {
+            let block = block_data.block;
             // just put gas used here
             let gas_used = block.gas_used;
             let block_number = block.number;
@@ -87,9 +108,9 @@ impl Command {
 
             // construct fcu to call
             let forkchoice_state = ForkchoiceState {
-                head_block_hash: head,
-                safe_block_hash: safe,
-                finalized_block_hash: finalized,
+                head_block_hash: block_data.head_block_hash,
+                safe_block_hash: block_data.safe_block_hash,
+                finalized_block_hash: block_data.finalized_block_hash,
             };
 
             let start = Instant::now();
@@ -112,8 +133,10 @@ impl Command {
             let combined_result =
                 CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
 
-            // current duration since the start of the benchmark
-            let current_duration = total_benchmark_duration.elapsed();
+            // current duration since the start of the benchmark minus the
+            // accumulated time spent fetching blocks
+            total_fetch_duration += block_data.fetch_duration;
+            let current_duration = total_benchmark_duration.elapsed() - total_fetch_duration;
 
             // convert gas used to gigagas, then compute gigagas per second
             info!(%combined_result);
