@@ -31,7 +31,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use thiserror::Error;
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 /// A heuristic that is used to determine the number of requests that should be prepared for a peer.
 /// This should ensure that there are always requests lined up for peers to handle while the
@@ -203,6 +203,16 @@ where
         self.queued_validated_headers.last().or(self.lowest_validated_header.as_ref())
     }
 
+    /// Resets the request trackers and clears the sync target.
+    ///
+    /// This ensures the downloader will restart after a new sync target has been set.
+    fn reset(&mut self) {
+        debug!(target: "downloaders::headers", "Resetting headers downloader");
+        self.next_request_block_number = 0;
+        self.next_chain_tip_block_number = 0;
+        self.sync_target.take();
+    }
+
     /// Validate that the received header matches the expected sync target.
     fn validate_sync_target(
         &self,
@@ -294,11 +304,23 @@ where
 
             // If the header is valid on its own, but not against its parent, we return it as
             // detached head error.
+            // In stage sync this will trigger an unwind because this means that the the local head
+            // is not part of the chain the sync target is on. In other words, the downloader was
+            // unable to connect the the sync target with the local head because the sync target and
+            // the local head or on different chains.
             if let Err(error) = self.consensus.validate_header_against_parent(&*last_header, head) {
+                let local_head = head.clone();
                 // Replace the last header with a detached variant
                 error!(target: "downloaders::headers", %error, number = last_header.number(), hash = ?last_header.hash(), "Header cannot be attached to known canonical chain");
+
+                // Reset trackers so that we can start over the next time the sync target is
+                // updated.
+                // The expected event flow when that happens is that the node will unwind the local
+                // chain and restart the downloader.
+                self.reset();
+
                 return Err(HeadersDownloaderError::DetachedHead {
-                    local_head: Box::new(head.clone()),
+                    local_head: Box::new(local_head),
                     header: Box::new(last_header.clone()),
                     error: Box::new(error),
                 }

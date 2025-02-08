@@ -25,8 +25,6 @@ pub trait HeaderDownloader:
 
     /// Updates the gap to sync which ranges from local head to the sync target.
     ///
-    /// This will reset the download to start syncing to that target.
-    ///
     /// See also [`HeaderDownloader::update_sync_target`] and
     /// [`HeaderDownloader::update_local_head`]
     fn update_sync_gap(&mut self, head: SealedHeader<Self::Header>, target: SyncTarget) {
@@ -38,8 +36,6 @@ pub trait HeaderDownloader:
     fn update_local_head(&mut self, head: SealedHeader<Self::Header>);
 
     /// Updates the target we want to sync to.
-    ///
-    /// This will reset the download to start syncing to that target.
     fn update_sync_target(&mut self, target: SyncTarget);
 
     /// Sets the headers batch size that the Stream should return.
