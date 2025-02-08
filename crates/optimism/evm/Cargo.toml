@@ -26,7 +26,9 @@ reth-consensus-common.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-evm.workspace = true
 alloy-primitives.workspace = true
+alloy-op-evm.workspace = true
 op-alloy-consensus.workspace = true
 alloy-consensus.workspace = true
 
@@ -76,6 +78,8 @@ std = [
     "reth-chainspec/std",
     "reth-optimism-consensus/std",
     "reth-consensus-common/std",
+    "alloy-evm/std",
+    "alloy-op-evm/std",
 ]
 optimism = [
     "reth-execution-types/optimism",
@@ -83,4 +87,5 @@ optimism = [
     "revm/optimism",
     "revm-primitives/optimism",
     "reth-optimism-primitives/optimism",
+    "alloy-op-evm/optimism",
 ]

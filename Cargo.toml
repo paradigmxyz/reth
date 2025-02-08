@@ -431,6 +431,7 @@ revm-inspectors = "0.15.0"
 alloy-chains = { version = "0.1.32", default-features = false }
 alloy-dyn-abi = "0.8.15"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
+alloy-evm = { version = "0.1", default-features = false }
 alloy-primitives = { version = "0.8.15", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false }
 alloy-sol-types = "0.8.15"
@@ -466,6 +467,7 @@ alloy-transport-ipc = { version = "0.11.0", default-features = false }
 alloy-transport-ws = { version = "0.11.0", default-features = false }
 
 # op
+alloy-op-evm = { version = "0.1", default-features = false }
 op-alloy-rpc-types = { version = "0.10.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.10.0", default-features = false }
 op-alloy-network = { version = "0.10.0", default-features = false }
@@ -604,7 +606,9 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 # See: https://github.com/eira-fransham/crunchy/issues/13
 crunchy = "=0.2.2"
 
-# [patch.crates-io]
+[patch.crates-io]
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "4f5049a" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "4f5049a" }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }

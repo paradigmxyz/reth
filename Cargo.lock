@@ -259,6 +259,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-evm"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm?rev=4f5049a#4f5049abee4c595d68f3fd3bf03ddaa1d9d679e7"
+dependencies = [
+ "alloy-primitives",
+ "derive_more",
+ "revm",
+]
+
+[[package]]
 name = "alloy-genesis"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -350,6 +360,17 @@ dependencies = [
  "thiserror 2.0.11",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "alloy-op-evm"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm?rev=4f5049a#4f5049abee4c595d68f3fd3bf03ddaa1d9d679e7"
+dependencies = [
+ "alloy-evm",
+ "alloy-primitives",
+ "derive_more",
+ "revm",
 ]
 
 [[package]]
@@ -3024,6 +3045,7 @@ name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -3229,6 +3251,7 @@ name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -7559,6 +7582,7 @@ version = "1.1.5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-primitives",
  "auto_impl",
  "futures-util",
@@ -7586,10 +7610,10 @@ version = "1.1.5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-sol-types",
- "derive_more",
  "reth-chainspec",
  "reth-consensus",
  "reth-ethereum-consensus",
@@ -8340,7 +8364,9 @@ version = "1.1.5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-genesis",
+ "alloy-op-evm",
  "alloy-primitives",
  "derive_more",
  "op-alloy-consensus",

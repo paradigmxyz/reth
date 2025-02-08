@@ -19,7 +19,7 @@ use reth_basic_payload_builder::{
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
 use reth_errors::RethError;
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, EvmError, InvalidTxError,
+    system_calls::SystemCaller, ConfigureEvm, Evm, EvmEnv, EvmError, InvalidTxError,
     NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};

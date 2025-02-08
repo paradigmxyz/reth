@@ -3,6 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_consensus::Header;
+use alloy_evm::EvmFactory;
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes};
 use reth::{
@@ -26,7 +27,7 @@ use reth::{
     transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::{env::EvmEnv, Database};
+use reth_evm::{Database, EvmEnv};
 use reth_evm_ethereum::{EthEvm, EthEvmConfig};
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
@@ -42,16 +43,68 @@ use reth_tracing::{RethTracer, Tracer};
 use std::{convert::Infallible, sync::Arc};
 
 /// Custom EVM configuration
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct MyEvmFactory;
+
+impl EvmFactory<EvmEnv> for MyEvmFactory {
+    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+    type Tx = TxEnv;
+    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
+
+    fn create_evm<'a, DB: Database + 'a>(&self, db: DB, input: EvmEnv) -> Self::Evm<'a, DB, ()> {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: input.cfg_env,
+            handler_cfg: HandlerCfg::new(input.spec),
+        };
+        EvmBuilder::default()
+            .with_db(db)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
+            .with_block_env(input.block_env)
+            // add additional precompiles
+            .append_handler_register(MyEvmConfig::set_precompiles)
+            .build()
+            .into()
+    }
+
+    fn create_evm_with_inspector<'a, DB: Database + 'a, I: GetInspector<DB> + 'a>(
+        &self,
+        db: DB,
+        input: EvmEnv,
+        inspector: I,
+    ) -> Self::Evm<'a, DB, I> {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: input.cfg_env,
+            handler_cfg: HandlerCfg::new(input.spec),
+        };
+
+        EvmBuilder::default()
+            .with_db(db)
+            .with_external_context(inspector)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
+            .with_block_env(input.block_env)
+            // add additional precompiles
+            .append_handler_register(MyEvmConfig::set_precompiles)
+            .append_handler_register(inspector_handle_register)
+            .build()
+            .into()
+    }
+}
+
+/// Custom EVM configuration
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MyEvmConfig {
     /// Wrapper around mainnet configuration
     inner: EthEvmConfig,
+    /// Custom EVM factory.
+    evm_factory: MyEvmFactory,
 }
 
 impl MyEvmConfig {
-    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { inner: EthEvmConfig::new(chain_spec) }
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { inner: EthEvmConfig::new(chain_spec), evm_factory: MyEvmFactory::default() }
     }
 }
 
@@ -111,50 +164,10 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
-    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
-    type HaltReason = HaltReason;
+    type EvmFactory = MyEvmFactory;
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg::new(evm_env.spec),
-        };
-        EvmBuilder::default()
-            .with_db(db)
-            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            // add additional precompiles
-            .append_handler_register(MyEvmConfig::set_precompiles)
-            .build()
-            .into()
-    }
-
-    fn evm_with_env_and_inspector<DB, I>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<'_, DB, I>
-    where
-        DB: Database,
-        I: GetInspector<DB>,
-    {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg::new(evm_env.spec),
-        };
-
-        EvmBuilder::default()
-            .with_db(db)
-            .with_external_context(inspector)
-            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            // add additional precompiles
-            .append_handler_register(MyEvmConfig::set_precompiles)
-            .append_handler_register(inspector_handle_register)
-            .build()
-            .into()
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        &self.evm_factory
     }
 }
 
