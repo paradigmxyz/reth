@@ -45,7 +45,8 @@ reth-stages.workspace = true
 reth-stages-types = { workspace = true, optional = true }
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
-reth-trie = { workspace = true, optional = true }
+reth-trie = { workspace = true, features = ["metrics"] }
+reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-trie-common = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
 
@@ -107,7 +108,6 @@ arbitrary = [
     "reth-codecs/arbitrary",
     "reth-prune-types?/arbitrary",
     "reth-stages-types?/arbitrary",
-    "reth-trie",
     "reth-trie-common?/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",

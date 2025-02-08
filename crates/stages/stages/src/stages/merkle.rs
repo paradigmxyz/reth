@@ -3,14 +3,15 @@ use reth_codecs::Compact;
 use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_provider::{
-    DBProvider, HeaderProvider, LatestStateProviderRef, ProviderError, StageCheckpointReader,
-    StageCheckpointWriter, StateCommitmentProvider, StateRootProviderExt, StatsReader, TrieWriter,
+    DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
+    StatsReader, TrieWriter,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage, StageCheckpoint,
     StageError, StageId, UnwindInput, UnwindOutput,
 };
-use reth_trie::{IntermediateStateRootState, StateRootProgress, StoredSubNode};
+use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
+use reth_trie_db::DatabaseStateRoot;
 use std::fmt::Debug;
 use tracing::*;
 
@@ -142,8 +143,7 @@ where
         + StatsReader
         + HeaderProvider
         + StageCheckpointReader
-        + StageCheckpointWriter
-        + StateCommitmentProvider,
+        + StageCheckpointWriter,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -216,8 +216,10 @@ where
                     as u64,
             });
 
-            let progress = LatestStateProviderRef::new(provider).state_root_with_progress
-                (checkpoint.map(IntermediateStateRootState::from))
+            let tx = provider.tx_ref();
+            let progress = StateRoot::from_tx(tx)
+                .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
+                .root_with_progress()
                 .map_err(|e| {
                     error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "State root with progress failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                     StageError::Fatal(Box::new(e))
@@ -254,7 +256,7 @@ where
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie");
             let (root, updates) =
-                LatestStateProviderRef::new(provider).incremental_state_root_with_updates(range)
+                StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
                     .map_err(|e| {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
@@ -328,8 +330,7 @@ where
         if range.is_empty() {
             info!(target: "sync::stages::merkle::unwind", "Nothing to unwind");
         } else {
-            let (block_root, updates) = LatestStateProviderRef::new(provider)
-                .incremental_state_root_with_updates(range)
+            let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calculated state root

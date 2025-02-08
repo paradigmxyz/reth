@@ -1,5 +1,5 @@
 use crate::{
-    providers::{LatestStateProviderRef, ProviderNodeTypes, StaticFileProvider},
+    providers::{ProviderNodeTypes, StaticFileProvider},
     HashingWriter, ProviderFactory, TrieWriter,
 };
 use alloy_primitives::B256;
@@ -11,7 +11,8 @@ use reth_db::{
 use reth_errors::ProviderResult;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
 use reth_primitives::{Account, StorageEntry};
-use reth_storage_api::StateRootProviderExt;
+use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
 
 pub mod blocks;
@@ -84,7 +85,9 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     });
     provider.insert_storage_for_hashing(alloc_storage)?;
 
-    let (root, updates) = LatestStateProviderRef::new(&provider.0).state_root_with_updates()?;
+    let (root, updates) = StateRoot::from_tx(provider.tx_ref())
+        .root_with_updates()
+        .map_err(reth_db::DatabaseError::from)?;
     provider.write_trie_updates(&updates).unwrap();
 
     provider.commit()?;

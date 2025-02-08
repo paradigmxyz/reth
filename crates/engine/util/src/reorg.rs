@@ -408,7 +408,7 @@ where
             gas_used: cumulative_gas_used,
             blob_gas_used,
             excess_blob_gas,
-            state_root: state_provider.state_root_from_state(hashed_state)?,
+            state_root: state_provider.state_root(hashed_state)?,
             requests_hash: None, // TODO(prague)
         },
         body: BlockBody {

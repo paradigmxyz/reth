@@ -15,15 +15,14 @@ use reth_db_api::{
 };
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    BlockNumReader, DBProvider, HashedStorageProvider, KeyHasherProvider, StateCommitmentProvider,
-    StateProofProvider, StorageRootProvider,
+    BlockNumReader, DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, KeyHasher, MultiProof, MultiProofTargets,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
     StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
@@ -155,13 +154,7 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             );
         }
 
-        Ok(
-            HashedStorage::from_reverts::<<Provider::StateCommitment as StateCommitment>::KeyHasher>(
-                self.tx(),
-                address,
-                self.block_number,
-            )?,
-        )
+        Ok(HashedStorage::from_reverts(self.tx(), address, self.block_number)?)
     }
 
     fn history_info<T, K>(
@@ -296,38 +289,27 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
 impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
-    fn state_root_from_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root(
-            self.tx(),
-            revert_state,
-        )
-        .map_err(|err| ProviderError::Database(err.into()))
+        StateRoot::overlay_root(self.tx(), revert_state)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
         input.prepend(self.revert_state()?);
-        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_from_nodes(
-            self.tx(),
-            input,
-        )
-        .map_err(|err| ProviderError::Database(err.into()))
+        StateRoot::overlay_root_from_nodes(self.tx(), input)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_from_state_with_updates(
+    fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
-        let (root, updates, _state_sorted) =
-            <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_with_updates(
-                self.tx(),
-                revert_state,
-            )
-            .map_err(|err| ProviderError::Database(err.into()))?;
-        Ok((root, updates))
+        StateRoot::overlay_root_with_updates(self.tx(), revert_state)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes_with_updates(
@@ -335,7 +317,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateRootP
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         input.prepend(self.revert_state()?);
-        <Provider::StateCommitment as StateCommitment>::StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
+        StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
@@ -419,24 +401,6 @@ impl<Provider: StateCommitmentProvider> HashedPostStateProvider
         HashedPostState::from_bundle_state::<
             <Provider::StateCommitment as StateCommitment>::KeyHasher,
         >(bundle_state.state())
-    }
-}
-
-impl<Provider: StateCommitmentProvider> HashedStorageProvider
-    for HistoricalStateProviderRef<'_, Provider>
-{
-    fn hashed_storage(&self, account: &revm::db::BundleAccount) -> HashedStorage {
-        HashedStorage::from_bundle_account::<
-            <Provider::StateCommitment as StateCommitment>::KeyHasher,
-        >(account)
-    }
-}
-
-impl<Provider: StateCommitmentProvider> KeyHasherProvider
-    for HistoricalStateProviderRef<'_, Provider>
-{
-    fn hash_key(&self, bytes: &[u8]) -> B256 {
-        <<Provider::StateCommitment as StateCommitment>::KeyHasher as KeyHasher>::hash_key(bytes)
     }
 }
 

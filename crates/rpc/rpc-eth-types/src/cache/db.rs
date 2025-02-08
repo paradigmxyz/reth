@@ -5,9 +5,7 @@
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
-use reth_storage_api::{
-    HashedPostStateProvider, HashedStorageProvider, KeyHasherProvider, StateProvider,
-};
+use reth_storage_api::{HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::Database;
 
@@ -20,11 +18,11 @@ pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjW
 pub struct StateProviderTraitObjWrapper<'a>(pub &'a dyn StateProvider);
 
 impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'_> {
-    fn state_root_from_state(
+    fn state_root(
         &self,
         hashed_state: reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<B256> {
-        self.0.state_root_from_state(hashed_state)
+        self.0.state_root(hashed_state)
     }
 
     fn state_root_from_nodes(
@@ -34,11 +32,11 @@ impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper<'_> {
         self.0.state_root_from_nodes(input)
     }
 
-    fn state_root_from_state_with_updates(
+    fn state_root_with_updates(
         &self,
         hashed_state: reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
-        self.0.state_root_from_state_with_updates(hashed_state)
+        self.0.state_root_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
@@ -144,18 +142,6 @@ impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
         bundle_state: &revm::db::BundleState,
     ) -> reth_trie::HashedPostState {
         self.0.hashed_post_state(bundle_state)
-    }
-}
-
-impl HashedStorageProvider for StateProviderTraitObjWrapper<'_> {
-    fn hashed_storage(&self, account: &revm::db::BundleAccount) -> HashedStorage {
-        self.0.hashed_storage(account)
-    }
-}
-
-impl KeyHasherProvider for StateProviderTraitObjWrapper<'_> {
-    fn hash_key(&self, bytes: &[u8]) -> B256 {
-        self.0.hash_key(bytes)
     }
 }
 

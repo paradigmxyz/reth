@@ -27,9 +27,8 @@ use reth_primitives::{
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, HashedPostStateProvider,
-    HashedStorageProvider, KeyHasherProvider, OmmersProvider, StageCheckpointReader,
-    StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, HashedPostStateProvider, OmmersProvider,
+    StageCheckpointReader, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -608,7 +607,7 @@ impl<T: Transaction> StageCheckpointReader for MockEthProvider<T> {
 }
 
 impl<T: Transaction> StateRootProvider for MockEthProvider<T> {
-    fn state_root_from_state(&self, _state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
@@ -616,7 +615,7 @@ impl<T: Transaction> StateRootProvider for MockEthProvider<T> {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
-    fn state_root_from_state_with_updates(
+    fn state_root_with_updates(
         &self,
         _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -691,18 +690,6 @@ impl<T: Transaction> StateProofProvider for MockEthProvider<T> {
 impl<T: Transaction> HashedPostStateProvider for MockEthProvider<T> {
     fn hashed_post_state(&self, _state: &revm::db::BundleState) -> HashedPostState {
         HashedPostState::default()
-    }
-}
-
-impl<T: Transaction> HashedStorageProvider for MockEthProvider<T> {
-    fn hashed_storage(&self, _account: &revm::db::BundleAccount) -> HashedStorage {
-        HashedStorage::default()
-    }
-}
-
-impl<T: Transaction> KeyHasherProvider for MockEthProvider<T> {
-    fn hash_key(&self, _bytes: &[u8]) -> B256 {
-        B256::default()
     }
 }
 

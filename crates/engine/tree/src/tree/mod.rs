@@ -2461,8 +2461,8 @@ where
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                         debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                        let (root, updates) = state_provider
-                            .state_root_from_state_with_updates(hashed_state.clone())?;
+                        let (root, updates) =
+                            state_provider.state_root_with_updates(hashed_state.clone())?;
                         (root, updates, root_time.elapsed())
                     }
                     Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
@@ -2470,8 +2470,7 @@ where
             }
         } else {
             debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
-            let (root, updates) =
-                state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
+            let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
 
@@ -2648,7 +2647,7 @@ where
                     }
 
                     let (regular_root, regular_updates) =
-                        state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
+                        state_provider.state_root_with_updates(hashed_state.clone())?;
 
                     if regular_root == sealed_block.header().state_root() {
                         let provider_ro = state_root_task_config.consistent_view.provider_ro()?;
@@ -2673,7 +2672,7 @@ where
                 info!(target: "engine::tree", ?error, "Failed to wait for state root task result");
                 // Fall back to sequential calculation
                 let (root, updates) =
-                    state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
+                    state_provider.state_root_with_updates(hashed_state.clone())?;
                 Ok((root, updates, root_time.elapsed()))
             }
         }

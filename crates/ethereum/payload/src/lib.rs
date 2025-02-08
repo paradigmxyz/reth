@@ -391,7 +391,7 @@ where
     // calculate the state root
     let hashed_state = db.database.db.hashed_post_state(execution_outcome.state());
     let (state_root, _) = {
-        db.database.inner().state_root_from_state_with_updates(hashed_state).inspect_err(|err| {
+        db.database.inner().state_root_with_updates(hashed_state).inspect_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_header.hash(),
                 %err,

@@ -1,6 +1,6 @@
 use super::{
-    AccountReader, BlockHashReader, BlockIdReader, HashedStorageProvider, StateProofProvider,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, BlockIdReader, StateProofProvider, StateRootProvider,
+    StorageRootProvider,
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
@@ -24,8 +24,6 @@ pub trait StateProvider:
     + StorageRootProvider
     + StateProofProvider
     + HashedPostStateProvider
-    + HashedStorageProvider
-    + KeyHasherProvider
     + Send
     + Sync
 {
@@ -98,13 +96,6 @@ pub trait StateCommitmentProvider: Send + Sync {
 pub trait HashedPostStateProvider: Send + Sync {
     /// Returns the `HashedPostState` of the provided [`BundleState`].
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
-}
-
-/// Trait that provides a method to hash bytes to produce a [`B256`] hash.
-#[auto_impl(&, Arc, Box)]
-pub trait KeyHasherProvider: Send + Sync {
-    /// Hashes the provided bytes into a 256-bit hash.
-    fn hash_key(&self, bytes: &[u8]) -> B256;
 }
 
 /// Trait implemented for database providers that can be converted into a historical state provider.

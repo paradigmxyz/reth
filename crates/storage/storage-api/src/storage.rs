@@ -2,8 +2,6 @@ use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::models::BlockNumberAddress;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::HashedStorage;
-use revm::db::BundleAccount;
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::RangeInclusive,
@@ -65,11 +63,4 @@ impl StorageLocation {
     pub const fn database(&self) -> bool {
         matches!(self, Self::Database | Self::Both)
     }
-}
-
-/// Provider of [`HashedStorage`]
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait HashedStorageProvider: Send + Sync {
-    /// Construct [`HashedStorage`] from the provided [`BundleAccount`].
-    fn hashed_storage(&self, account: &BundleAccount) -> HashedStorage;
 }

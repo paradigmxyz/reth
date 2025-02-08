@@ -6,12 +6,12 @@ use alloy_primitives::{
 };
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
-    KeyHasherProvider, StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
     MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
@@ -72,7 +72,7 @@ impl BlockHashReader for StateProviderTest {
 }
 
 impl StateRootProvider for StateProviderTest {
-    fn state_root_from_state(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, _hashed_state: HashedPostState) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
@@ -80,7 +80,7 @@ impl StateRootProvider for StateProviderTest {
         unimplemented!("state root computation is not supported")
     }
 
-    fn state_root_from_state_with_updates(
+    fn state_root_with_updates(
         &self,
         _hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -153,18 +153,6 @@ impl StateProofProvider for StateProviderTest {
 impl HashedPostStateProvider for StateProviderTest {
     fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
-    }
-}
-
-impl HashedStorageProvider for StateProviderTest {
-    fn hashed_storage(&self, account: &revm::db::BundleAccount) -> HashedStorage {
-        HashedStorage::from_bundle_account::<KeccakKeyHasher>(account)
-    }
-}
-
-impl KeyHasherProvider for StateProviderTest {
-    fn hash_key(&self, bytes: &[u8]) -> B256 {
-        KeccakKeyHasher::hash_key(bytes)
     }
 }
 

@@ -6,10 +6,9 @@ use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
-    KeyHasherProvider, StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+    StateRootProvider, StorageRootProvider,
 };
-use reth_revm::db::BundleAccount;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -140,19 +139,19 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 }
 
 impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
-    fn state_root_from_state(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        self.state_provider.state_root_from_state(hashed_state)
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        self.state_provider.state_root(hashed_state)
     }
 
     fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         self.state_provider.state_root_from_nodes(input)
     }
 
-    fn state_root_from_state_with_updates(
+    fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.state_provider.state_root_from_state_with_updates(hashed_state)
+        self.state_provider.state_root_with_updates(hashed_state)
     }
 
     fn state_root_from_nodes_with_updates(
@@ -187,18 +186,6 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
         target: HashedPostState,
     ) -> ProviderResult<B256HashMap<alloy_primitives::Bytes>> {
         self.state_provider.witness(input, target)
-    }
-}
-
-impl<S: StateProvider> HashedStorageProvider for CachedStateProvider<S> {
-    fn hashed_storage(&self, account: &BundleAccount) -> HashedStorage {
-        self.state_provider.hashed_storage(account)
-    }
-}
-
-impl<S: StateProvider> KeyHasherProvider for CachedStateProvider<S> {
-    fn hash_key(&self, bytes: &[u8]) -> B256 {
-        self.state_provider.hash_key(bytes)
     }
 }
 

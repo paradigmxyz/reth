@@ -3,6 +3,7 @@ use crate::{
     Nibbles,
 };
 use alloy_primitives::{
+    keccak256,
     map::{hash_map, B256HashMap, B256HashSet, HashMap, HashSet},
     Address, B256, U256,
 };
@@ -34,8 +35,8 @@ impl HashedPostState {
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.clone().map(Into::into);
-                let hashed_storage = HashedStorage::from_plain_storage::<KH>(
+                let hashed_account = account.info.as_ref().map(Into::into);
+                let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
                     account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 );
@@ -104,7 +105,6 @@ impl HashedPostState {
         let mut storage_prefix_sets =
             HashMap::with_capacity_and_hasher(self.storages.len(), Default::default());
         for (hashed_address, hashed_storage) in &self.storages {
-            // TODO(scroll): replace this with abstraction.
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
             storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
         }
@@ -205,25 +205,14 @@ impl HashedStorage {
         Self { wiped, storage: HashMap::from_iter(iter) }
     }
 
-    /// Create a new hashed storage from the provided [`BundleAccount`]
-    ///
-    /// This function will use the present value of the storage slots in the account to create the
-    /// hashed storage.
-    pub fn from_bundle_account<KH: KeyHasher>(account: &BundleAccount) -> Self {
-        Self::from_plain_storage::<KH>(
-            account.status,
-            account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-        )
-    }
-
     /// Create new hashed storage from account status and plain storage.
-    pub fn from_plain_storage<'a, KH: KeyHasher>(
+    pub fn from_plain_storage<'a>(
         status: AccountStatus,
         storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
     ) -> Self {
         Self::from_iter(
             status.was_destroyed(),
-            storage.into_iter().map(|(key, value)| (KH::hash_key(B256::from(*key)), *value)),
+            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
         )
     }
 
@@ -345,9 +334,8 @@ impl HashedStorageSorted {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::needless_update)]
     use super::*;
-    use alloy_primitives::{keccak256, Address, Bytes};
+    use alloy_primitives::Bytes;
     use reth_trie_common::KeccakKeyHasher;
     use revm::{
         db::{states::StorageSlot, StorageWithOriginalValues},

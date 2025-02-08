@@ -3,11 +3,10 @@
 use crate::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, HashedPostStateProvider,
-    HashedStorageProvider, HeaderProvider, KeyHasherProvider, NodePrimitivesProvider,
-    OmmersProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, StorageRootProvider, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    HeaderProvider, NodePrimitivesProvider, OmmersProvider, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -23,10 +22,9 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher,
-    MultiProof, MultiProofTargets, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, TrieInput,
 };
-use revm::db::BundleAccount;
 use std::{
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},
@@ -368,7 +366,7 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
 }
 
 impl<C: Send + Sync, N: NodePrimitives> StateRootProvider for NoopProvider<C, N> {
-    fn state_root_from_state(&self, _state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
@@ -376,7 +374,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateRootProvider for NoopProvider<C, N>
         Ok(B256::default())
     }
 
-    fn state_root_from_state_with_updates(
+    fn state_root_with_updates(
         &self,
         _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
@@ -449,18 +447,6 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
     fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
         HashedPostState::default()
-    }
-}
-
-impl<C: Send + Sync, N: NodePrimitives> HashedStorageProvider for NoopProvider<C, N> {
-    fn hashed_storage(&self, _address: &BundleAccount) -> HashedStorage {
-        HashedStorage::default()
-    }
-}
-
-impl<C: Send + Sync, N: NodePrimitives> KeyHasherProvider for NoopProvider<C, N> {
-    fn hash_key(&self, bytes: &[u8]) -> B256 {
-        KeccakKeyHasher::hash_key(bytes)
     }
 }
 

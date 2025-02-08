@@ -82,7 +82,6 @@ arbitrary = [
     "reth-codecs/arbitrary",
     "alloy-primitives/arbitrary",
 ]
-
 secp256k1 = [
     "reth-primitives-traits/secp256k1",
 ]

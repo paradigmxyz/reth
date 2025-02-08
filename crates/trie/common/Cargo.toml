@@ -30,6 +30,7 @@ nybbles = { workspace = true, features = ["rlp"] }
 
 # `serde` feature
 serde = { workspace = true, optional = true }
+
 serde_with = { workspace = true, optional = true }
 
 # `test-utils` feature

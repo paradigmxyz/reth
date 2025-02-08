@@ -20,7 +20,6 @@ reth-storage-errors.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie-common.workspace = true
 
-# revm re-export scroll
 revm.workspace = true
 
 # alloy

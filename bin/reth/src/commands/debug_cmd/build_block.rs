@@ -254,7 +254,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                 let hashed_post_state = state_provider.hashed_post_state(execution_outcome.state());
                 let (state_root, trie_updates) =
-                    state_provider.state_root_from_state_with_updates(hashed_post_state.clone())?;
+                    state_provider.state_root_with_updates(hashed_post_state.clone())?;
 
                 if state_root != block_with_senders.state_root() {
                     eyre::bail!(

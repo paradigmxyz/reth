@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
+use alloy_primitives::{keccak256, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -67,9 +67,10 @@ where
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
         // Setup database.
-        let provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let mut db = StateBuilder::new()
-            .with_database(StateProviderDatabase::new(&provider))
+            .with_database(StateProviderDatabase::new(
+                self.provider.state_by_block_hash(parent_header.hash())?,
+            ))
             .with_bundle_update()
             .build();
 
@@ -115,7 +116,7 @@ where
         // referenced accounts + storage slots.
         let mut hashed_state = db.database.hashed_post_state(&bundle_state);
         for (address, account) in db.cache.accounts {
-            let hashed_address = provider.hash_key(address.as_ref());
+            let hashed_address = keccak256(address);
             hashed_state
                 .accounts
                 .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
@@ -130,7 +131,7 @@ where
 
                 for (slot, value) in account.storage {
                     let slot = B256::from(slot);
-                    let hashed_slot = provider.hash_key(slot.as_ref());
+                    let hashed_slot = keccak256(slot);
                     storage.storage.insert(hashed_slot, value);
 
                     state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());
@@ -220,7 +221,7 @@ where
         // Calculate the state root and trie updates after re-execution. They should match
         // the original ones.
         let (re_executed_root, trie_output) =
-            state_provider.state_root_from_state_with_updates(hashed_state)?;
+            state_provider.state_root_with_updates(hashed_state)?;
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
                 let filename = format!("{}_{}.state_root.diff", block.number(), block.hash());

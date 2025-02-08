@@ -399,8 +399,7 @@ pub trait LoadPendingBlock:
         let hashed_state = db.database.hashed_post_state(&bundle_state);
 
         // calculate the state root
-        let state_root =
-            db.database.state_root_from_state(hashed_state).map_err(Self::Error::from_eth_err)?;
+        let state_root = db.database.state_root(hashed_state).map_err(Self::Error::from_eth_err)?;
 
         let (block, receipts) = self.assemble_block_and_receipts(
             &evm_env.block_env,
