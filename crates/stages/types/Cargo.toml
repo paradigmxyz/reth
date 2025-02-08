@@ -51,10 +51,10 @@ arbitrary = [
     "reth-trie-common/arbitrary",
 ]
 serde = [
-	"dep:serde",
-	"alloy-primitives/serde",
-	"bytes?/serde",
-	"rand/serde",
-	"reth-codecs?/serde",
-	"reth-trie-common/serde"
+    "dep:serde",
+    "alloy-primitives/serde",
+    "bytes?/serde",
+    "rand/serde",
+    "reth-codecs?/serde",
+    "reth-trie-common/serde",
 ]
