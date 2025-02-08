@@ -571,13 +571,7 @@ where
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
             debug!(target: "engine::tree", "Starting sparse trie task");
-            let result = match run_sparse_trie(config, metrics, rx) {
-                Ok((state_root, trie_updates, iterations)) => {
-                    StateRootMessage::RootCalculated { state_root, trie_updates, iterations }
-                }
-                Err(error) => StateRootMessage::RootCalculationError(error),
-            };
-            let _ = task_tx.send(result);
+            let _ = run_sparse_trie(config, metrics, rx, task_tx);
         });
         tx
     }
@@ -964,7 +958,8 @@ fn run_sparse_trie<Factory>(
     config: StateRootConfig<Factory>,
     metrics: StateRootTaskMetrics,
     update_rx: mpsc::Receiver<SparseTrieUpdate>,
-) -> Result<(B256, TrieUpdates, u64), ParallelStateRootError>
+    task_tx: Sender<StateRootMessage>,
+) -> Result<(), ParallelStateRootError>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
 {
@@ -1015,7 +1010,12 @@ where
     let elapsed = start.elapsed();
     metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
 
-    Ok((root, trie_updates, num_iterations))
+    let _ = task_tx.send(StateRootMessage::RootCalculated {
+        state_root: root,
+        trie_updates,
+        iterations: num_iterations,
+    });
+    Ok(())
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
