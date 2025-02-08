@@ -66,6 +66,10 @@ secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recov
 # async
 futures.workspace = true
 
+# tokio
+tokio = { version = "1.0", features = ["time"] }
+
+
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
