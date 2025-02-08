@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn op_deposit_fields_post_canyon() {
-        // ensure_create2_deployer will fail if timestamp is set to less then 2
+        // ensure_create2_deployer will fail if timestamp is set to less than 2
         let header = Header {
             timestamp: 2,
             number: 1,
