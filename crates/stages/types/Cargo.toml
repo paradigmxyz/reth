@@ -34,6 +34,13 @@ rand.workspace = true
 bytes.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "bytes?/std",
+    "reth-trie-common/std",
+    "serde?/std",
+]
 reth-codec = [
     "dep:reth-codecs",
     "dep:bytes",
@@ -41,11 +48,13 @@ reth-codec = [
     "reth-trie-common/reth-codec",
 ]
 test-utils = [
-    "dep:arbitrary",
+    "arbitrary",
     "reth-codecs?/test-utils",
     "reth-trie-common/test-utils",
 ]
 arbitrary = [
+    "std",
+    "dep:arbitrary",
     "alloy-primitives/arbitrary",
     "reth-codecs?/arbitrary",
     "reth-trie-common/arbitrary",

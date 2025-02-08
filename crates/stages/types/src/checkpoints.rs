@@ -1,5 +1,5 @@
 use super::StageId;
-use alloc::vec::Vec;
+use alloc::{format, string::String, vec::Vec};
 use alloy_primitives::{Address, BlockNumber, B256};
 use core::ops::RangeInclusive;
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
@@ -170,6 +170,11 @@ impl EntitiesCheckpoint {
         let percentage = 100.0 * self.processed as f64 / self.total as f64;
 
         // Truncate to 2 decimal places, rounding down so that 99.999% becomes 99.99% and not 100%.
+        #[cfg(not(feature = "std"))]
+        {
+            Some(format!("{:.2}%", (percentage * 100.0) / 100.0))
+        }
+        #[cfg(feature = "std")]
         Some(format!("{:.2}%", (percentage * 100.0).floor() / 100.0))
     }
 }
