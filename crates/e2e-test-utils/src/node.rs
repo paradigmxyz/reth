@@ -60,11 +60,13 @@ where
         node: FullNode<Node, AddOns>,
         attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + 'static,
     ) -> eyre::Result<Self> {
-        let builder = node.payload_builder.clone();
-
         Ok(Self {
             inner: node.clone(),
-            payload: PayloadTestContext::new(builder, attributes_generator).await?,
+            payload: PayloadTestContext::new(
+                node.payload_builder_handle.clone(),
+                attributes_generator,
+            )
+            .await?,
             network: NetworkTestContext::new(node.network.clone()),
             engine_api: EngineApiTestContext {
                 chain_spec: node.chain_spec(),

@@ -131,9 +131,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     /// pipeline and its result as a future.
     #[track_caller]
     pub fn run_as_fut(mut self, target: Option<PipelineTarget>) -> PipelineFut<N> {
-        // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
-        // updating metrics.
-        let _ = self.register_metrics(); // ignore error
+        let _ = self.register_metrics();
         Box::pin(async move {
             // NOTE: the tip should only be None if we are in continuous sync mode.
             if let Some(target) = target {

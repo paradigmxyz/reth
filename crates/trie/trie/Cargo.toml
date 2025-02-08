@@ -68,6 +68,7 @@ serde = [
     "revm/serde",
     "reth-trie-common/serde",
     "reth-primitives-traits/serde",
+    "reth-stages-types/serde",
 ]
 test-utils = [
     "triehash",

@@ -789,6 +789,8 @@ impl PeersManager {
     }
 
     ///  Connects a peer and its address with the given kind.
+    ///
+    /// Note: This is invoked ond demand via an external command received by the manager
     pub(crate) fn add_and_connect_kind(
         &mut self,
         peer_id: PeerId,
@@ -807,6 +809,7 @@ impl PeersManager {
                 peer.state = PeerConnectionState::PendingOut;
                 peer.fork_id = fork_id;
                 entry.insert(peer);
+                self.connection_info.inc_pending_out();
                 self.queued_actions
                     .push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
             }
@@ -2785,5 +2788,15 @@ mod tests {
         // banned peer's state is idle
         peers.on_active_session_gracefully_closed(peer);
         assert_eq!(peers.connection_info.num_inbound, 0);
+    }
+
+    #[tokio::test]
+    async fn test_add_pending_onnect() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::default();
+        peers.add_and_connect(peer, PeerAddr::from_tcp(socket_addr), None);
+        assert_eq!(peers.peers.get(&peer).unwrap().state, PeerConnectionState::PendingOut);
+        assert_eq!(peers.connection_info.num_pending_out, 1);
     }
 }

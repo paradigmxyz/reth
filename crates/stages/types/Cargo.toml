@@ -16,7 +16,7 @@ reth-codecs = { workspace = true, optional = true }
 reth-trie-common.workspace = true
 alloy-primitives.workspace = true
 
-serde.workspace = true
+serde = { workspace = true, optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 bytes = { workspace = true, optional = true }
@@ -49,4 +49,12 @@ arbitrary = [
     "alloy-primitives/arbitrary",
     "reth-codecs?/arbitrary",
     "reth-trie-common/arbitrary",
+]
+serde = [
+    "dep:serde",
+    "alloy-primitives/serde",
+    "bytes?/serde",
+    "rand/serde",
+    "reth-codecs?/serde",
+    "reth-trie-common/serde",
 ]
