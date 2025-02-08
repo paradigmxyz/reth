@@ -53,6 +53,7 @@ test-utils = [
     "reth-trie-common/test-utils",
 ]
 arbitrary = [
+    "std",
     "alloy-primitives/arbitrary",
     "reth-codecs?/arbitrary",
     "reth-trie-common/arbitrary",
