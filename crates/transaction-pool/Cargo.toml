@@ -59,7 +59,6 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 paste.workspace = true
@@ -86,7 +85,6 @@ serde = [
     "parking_lot/serde",
     "rand?/serde",
     "smallvec/serde",
-    "reth-primitives-traits/serde",
     "revm-interpreter/serde",
     "revm-primitives/serde",
 ]
@@ -101,7 +99,6 @@ test-utils = [
 ]
 arbitrary = [
     "proptest",
-    "reth-primitives/arbitrary",
     "proptest-arbitrary-interop",
     "reth-chainspec/arbitrary",
     "reth-eth-wire-types/arbitrary",

@@ -23,8 +23,6 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
 revm-primitives.workspace = true
-# for eip-4844
-c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # op
 op-alloy-consensus = { workspace = true, optional = true }
@@ -72,7 +70,7 @@ test-fuzz.workspace = true
 modular-bitfield.workspace = true
 
 [features]
-default = ["std","c-kzg",]
+default = ["std"]
 std = [
     "alloy-consensus/std",
     "alloy-eips/std",
@@ -121,11 +119,6 @@ serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "op-alloy-consensus?/serde-bincode-compat",
-]
-c-kzg = [
-    "dep:c-kzg",
-    "alloy-consensus/kzg",
-    "alloy-eips/kzg",
 ]
 serde = [
     "dep:serde",

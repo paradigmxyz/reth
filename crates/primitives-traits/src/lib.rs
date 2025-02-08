@@ -191,5 +191,3 @@ pub mod test_utils {
     #[cfg(any(test, feature = "test-utils"))]
     pub use crate::{block::TestBlock, header::test_utils::TestHeader};
 }
-#[cfg(feature = "c-kzg")]
-pub use c_kzg as kzg;

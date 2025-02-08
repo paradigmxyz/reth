@@ -21,7 +21,6 @@ use reth_primitives_traits::{
     transaction::{error::TransactionConversionError, signed::SignedTransactionIntoRecoveredExt},
     Block, InMemorySize, Recovered, SealedBlock, SignedTransaction,
 };
-use revm_primitives::KzgSettings;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -32,6 +31,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use alloy_eips::eip4844::env_settings::KzgSettings;
 use tokio::sync::mpsc::Receiver;
 
 /// The `PeerId` type.
@@ -1088,7 +1088,7 @@ pub trait EthPoolTransaction: PoolTransaction {
     fn validate_blob(
         &self,
         blob: &BlobTransactionSidecar,
-        settings: &KzgSettings,
+        settings: &EnvKzgSettings,
     ) -> Result<(), BlobTransactionValidationError>;
 }
 
