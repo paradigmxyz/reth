@@ -1,7 +1,7 @@
 //! Config traits for various node components.
 
 use alloy_primitives::Bytes;
-use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
+use reth_network::{subprotocol::IntoRlpxSubProtocol, NetworkPrimitives};
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, time::Duration};
 

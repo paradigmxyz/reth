@@ -15,6 +15,8 @@ use std::{
 };
 use tokio::net::TcpStream;
 
+use crate::protocol::ConnectionStream;
+
 /// The type of the underlying peer network connection.
 pub type EthPeerConnection<N> = EthStream<P2PStream<ECIESStream<TcpStream>>, N>;
 
@@ -145,6 +147,16 @@ impl<N: NetworkPrimitives> Sink<EthMessage<N>> for EthRlpxConnection<N> {
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         delegate_call!(self.poll_close(cx))
+    }
+}
+
+impl<N: NetworkPrimitives> ConnectionStream for EthRlpxConnection<N> {
+    fn version(&self) -> EthVersion {
+        self.version()
+    }
+
+    fn into_inner(self) -> P2PStream<ECIESStream<TcpStream>> {
+        self.into_inner()
     }
 }
 

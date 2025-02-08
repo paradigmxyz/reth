@@ -17,9 +17,9 @@ use std::{
 
 /// A trait that allows to offer additional RLPx-based application-level protocols when establishing
 /// a peer-to-peer connection.
-pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
+pub trait SubProtocolHandler: fmt::Debug + Send + Sync + 'static {
     /// The type responsible for negotiating the protocol with the remote.
-    type ConnectionHandler: ConnectionHandler;
+    type ConnectionHandler: SubConnectionHandler;
 
     /// Invoked when a new incoming connection from the remote is requested
     ///
@@ -39,7 +39,7 @@ pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
 }
 
 /// A trait that allows to authenticate a protocol after the `RLPx` connection was established.
-pub trait ConnectionHandler: Send + Sync + 'static {
+pub trait SubConnectionHandler: Send + Sync + 'static {
     /// The connection that yields messages to send to the remote.
     ///
     /// The connection will be closed when this stream resolves.
@@ -92,7 +92,7 @@ pub trait IntoRlpxSubProtocol {
 
 impl<T> IntoRlpxSubProtocol for T
 where
-    T: ProtocolHandler + Send + Sync + 'static,
+    T: SubProtocolHandler + Send + Sync + 'static,
 {
     fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol {
         RlpxSubProtocol(Box::new(self))
@@ -180,7 +180,7 @@ pub(crate) trait DynProtocolHandler: fmt::Debug + Send + Sync + 'static {
     ) -> Option<Box<dyn DynConnectionHandler>>;
 }
 
-impl<T: ProtocolHandler> DynProtocolHandler for T {
+impl<T: SubProtocolHandler> DynProtocolHandler for T {
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Box<dyn DynConnectionHandler>> {
         T::on_incoming(self, socket_addr)
             .map(|handler| Box::new(handler) as Box<dyn DynConnectionHandler>)
@@ -208,7 +208,7 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
     ) -> Pin<Box<dyn Stream<Item = BytesMut> + Send + 'static>>;
 }
 
-impl<T: ConnectionHandler> DynConnectionHandler for T {
+impl<T: SubConnectionHandler> DynConnectionHandler for T {
     fn protocol(&self) -> Protocol {
         T::protocol(self)
     }

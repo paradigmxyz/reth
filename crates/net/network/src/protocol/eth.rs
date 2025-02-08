@@ -1,31 +1,38 @@
-use super::{protocol::EthConnectionHandler, PendingSessionEvent, SessionId};
+use super::{ConnectionFut, PendingSessionEvent};
 use crate::{
-    protocol::RlpxSubProtocolHandlers, session::get_ecies_stream, PendingSessionHandshakeError,
+    get_ecies_stream,
+    protocol::{ConnectionHandler, ProtocolHandler},
+    session::{HandshakeInfo, SessionInfo},
+    EthRlpxConnection, PendingSessionHandshakeError,
 };
-use reth_chainspec::ForkFilter;
 use reth_eth_wire::{
-    multiplex::RlpxProtocolMultiplexer, Capabilities, HelloMessageWithProtocols, NetworkPrimitives,
-    Status, UnauthedEthStream, UnauthedP2PStream,
+    multiplex::RlpxProtocolMultiplexer, Capabilities, NetworkPrimitives, UnauthedEthStream,
+    UnauthedP2PStream,
 };
 use reth_network_api::Direction;
-use secp256k1::SecretKey;
-use std::{fmt, future::Future, net::SocketAddr, pin::Pin, sync::Arc};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 
-/// A type alias for a future that resolves to a `PendingSessionEvent`.
-pub(crate) type ConnectionFut<N> = Pin<Box<dyn Future<Output = PendingSessionEvent<N>> + Send>>;
+/// The Ethereum protocol handler.
+#[derive(Clone, Debug)]
+pub(crate) struct EthProtocol;
+
+impl<N: NetworkPrimitives> ProtocolHandler<N> for EthProtocol {
+    type ConnectionHandler = EthConnection;
+}
 
 pub(crate) struct EthConnection;
 
-impl<N: NetworkPrimitives> EthConnectionHandler<N> for EthConnection {
-    type Connection = ConnectionFut<N>;
+impl ConnectionHandler for EthConnection {
+    type ConnectionFut = ConnectionFut<EthRlpxConnection>;
+    type Connection = EthRlpxConnection;
 
     fn into_connection(
         stream: TcpStream,
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
         direction: Direction,
-    ) -> Self::Connection {
+    ) -> Self::ConnectionFut {
         Box::pin(async move {
             let remote_addr = session_info.remote_addr;
             let session_id = session_info.session_id;
@@ -132,30 +139,5 @@ impl<N: NetworkPrimitives> EthConnectionHandler<N> for EthConnection {
                 client_id: their_hello.client_version,
             }
         })
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct SessionInfo {
-    pub(crate) session_id: SessionId,
-    pub(crate) remote_addr: SocketAddr,
-    pub(crate) secret_key: SecretKey,
-    pub(crate) local_addr: Option<SocketAddr>,
-}
-
-pub struct HandshakeInfo {
-    pub(crate) hello_msg: HelloMessageWithProtocols,
-    pub(crate) status_msg: Status,
-    pub(crate) fork_filter: ForkFilter,
-    pub(crate) extra_handlers: RlpxSubProtocolHandlers,
-}
-
-impl fmt::Debug for HandshakeInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("HandshakeInfo")
-            .field("hello_msg", &self.hello_msg)
-            .field("status_msg", &self.status_msg)
-            .field("fork_filter", &self.fork_filter)
-            .finish()
     }
 }
