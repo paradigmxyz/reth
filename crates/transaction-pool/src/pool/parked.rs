@@ -564,14 +564,13 @@ mod tests {
         // two dependent tx in the pool with decreasing fee
 
         {
-            // TODO: test change might not be intended, re review
             let mut pool2 = pool.clone();
             let removed = pool2.enforce_basefee(root_tx.max_fee_per_gas() as u64);
-            assert_eq!(removed.len(), 1);
-            assert_eq!(pool2.len(), 1);
-            // root got popped - descendant should be skipped
+            // If the root transaction is deleted, all dependent ones must also be deleted
+            assert_eq!(removed.len(), 2);
+            assert_eq!(pool2.len(), 0);
             assert!(!pool2.contains(root_tx.id()));
-            assert!(pool2.contains(descendant_tx.id()));
+            assert!(!pool2.contains(descendant_tx.id()));
         }
 
         // remove root transaction via descendant tx fee
