@@ -49,7 +49,6 @@ use reth::{
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
 use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
-use reth_engine_local::payload::UnsupportedLocalAttributes;
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
@@ -80,9 +79,6 @@ pub struct CustomPayloadAttributes {
     /// A custom field
     pub custom: u64,
 }
-
-// TODO(mattsse): remove this tmp workaround
-impl UnsupportedLocalAttributes for CustomPayloadAttributes {}
 
 /// Custom error type used in payload attributes validation
 #[derive(Debug, Error)]
