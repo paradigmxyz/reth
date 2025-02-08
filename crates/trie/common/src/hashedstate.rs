@@ -176,6 +176,16 @@ impl HashedPostState {
         }
     }
 
+    /// Returns iterator over account hashed addresses
+    pub fn iter_accounts(&self) -> impl Iterator<Item = &B256> {
+        self.accounts.keys()
+    }
+
+    /// Returns iterator over accounts with storage keys
+    pub fn iter_storages(&self) -> impl Iterator<Item = (&B256, impl Iterator<Item = &B256>)> {
+        self.storages.iter().map(|(k, v)| (k, v.storage.keys()))
+    }
+
     fn extend_storages<'a>(
         &mut self,
         storages: impl IntoIterator<Item = (B256, Cow<'a, HashedStorage>)>,
