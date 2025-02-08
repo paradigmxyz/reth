@@ -81,6 +81,7 @@ use crate::{
     CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
     TransactionValidator,
 };
+
 use alloy_primitives::{Address, TxHash, B256};
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -1265,7 +1266,8 @@ mod tests {
         validate::ValidTransaction,
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
-    use alloy_eips::eip4844::{Blob, BlobTransactionSidecar};
+    use alloy_eips::eip4844::BlobTransactionSidecar;
+    use reth_primitives_traits::kzg::Blob;
     use std::{fs, path::PathBuf};
 
     #[test]

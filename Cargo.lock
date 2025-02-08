@@ -8693,6 +8693,7 @@ dependencies = [
  "bincode",
  "byteorder",
  "bytes",
+ "c-kzg",
  "derive_more",
  "k256",
  "modular-bitfield",

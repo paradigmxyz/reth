@@ -5,7 +5,7 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_consensus::{BlockHeader, Signed, Typed2718};
+use alloy_consensus::{transaction::PooledTransaction, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
@@ -19,7 +19,7 @@ use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{
     transaction::{error::TransactionConversionError, signed::SignedTransactionIntoRecoveredExt},
-    Block, InMemorySize, PooledTransaction, Recovered, SealedBlock, SignedTransaction,
+    Block, InMemorySize, Recovered, SealedBlock, SignedTransaction,
 };
 use revm_primitives::KzgSettings;
 #[cfg(feature = "serde")]
