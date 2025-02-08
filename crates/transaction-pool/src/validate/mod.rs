@@ -9,7 +9,7 @@ use crate::{
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{Recovered, SealedBlock};
+use reth_primitives_traits::{Recovered, SealedBlock};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;

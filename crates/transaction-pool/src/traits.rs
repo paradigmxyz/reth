@@ -5,7 +5,7 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_consensus::{BlockHeader, Signed, Typed2718};
+use alloy_consensus::{transaction::PooledTransaction, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
@@ -15,13 +15,12 @@ use alloy_eips::{
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
+use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_execution_types::ChangedAccount;
-use reth_primitives::{
-    kzg::KzgSettings,
-    transaction::{SignedTransactionIntoRecoveredExt, TransactionConversionError},
-    PooledTransaction, Recovered, SealedBlock, TransactionSigned,
+use reth_primitives_traits::{
+    transaction::{error::TransactionConversionError, signed::SignedTransactionIntoRecoveredExt},
+    Block, InMemorySize, Recovered, SealedBlock, SignedTransaction,
 };
-use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -32,6 +31,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use alloy_eips::eip4844::env_settings::KzgSettings;
 use tokio::sync::mpsc::Receiver;
 
 /// The `PeerId` type.
@@ -1088,7 +1088,7 @@ pub trait EthPoolTransaction: PoolTransaction {
     fn validate_blob(
         &self,
         blob: &BlobTransactionSidecar,
-        settings: &KzgSettings,
+        settings: &EnvKzgSettings,
     ) -> Result<(), BlobTransactionValidationError>;
 }
 
@@ -1338,7 +1338,7 @@ impl EthPoolTransaction for EthPooledTransaction {
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         match self.transaction.transaction() {
-            reth_primitives::Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
+            Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.ty())),
         }
     }
