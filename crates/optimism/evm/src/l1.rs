@@ -143,7 +143,7 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     // 132   bytes32 _batcherHash,
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::FeeScalarConversion))?;
+        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
     let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
     })?;
@@ -198,7 +198,7 @@ pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     // 168   uint64 _operatorFeeConstant
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
-        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::FeeScalarConversion))?;
+        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
     let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
     })?;

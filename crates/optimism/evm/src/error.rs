@@ -23,6 +23,9 @@ pub enum L1BlockInfoError {
     /// Fee scalar conversion error
     #[error("could not convert l1 fee scalar")]
     FeeScalarConversion,
+    /// Base Fee Scalar conversion error
+    #[error("could not convert base fee scalar")]
+    BaseFeeScalarConversion,
     /// Blob base fee conversion error
     #[error("could not convert l1 blob base fee")]
     BlobBaseFeeConversion,
