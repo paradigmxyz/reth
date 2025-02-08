@@ -450,6 +450,9 @@ pub enum ConsensusError {
         /// The block's timestamp.
         timestamp: u64,
     },
+    /// Other, likely an L2 error.
+    #[display("other, search logs for l2 error")]
+    Other,
 }
 
 impl ConsensusError {
