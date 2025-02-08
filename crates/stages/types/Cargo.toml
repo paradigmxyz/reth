@@ -34,6 +34,13 @@ rand.workspace = true
 bytes.workspace = true
 
 [features]
+default = ["std"]
+std = [
+	"alloy-primitives/std",
+	"bytes?/std",
+	"reth-trie-common/std",
+	"serde?/std"
+]
 reth-codec = [
     "dep:reth-codecs",
     "dep:bytes",
