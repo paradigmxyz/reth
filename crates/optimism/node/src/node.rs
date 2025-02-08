@@ -7,7 +7,6 @@ use crate::{
     OpEngineTypes,
 };
 use op_alloy_consensus::OpPooledTransaction;
-use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
@@ -23,7 +22,7 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
-    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
@@ -39,14 +38,13 @@ use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
 };
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolTransaction, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
+    TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::TxEnv;
@@ -210,6 +208,8 @@ where
         let Self { rpc_add_ons, da_config } = self;
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
+            ctx.node.pool().clone(),
+            ctx.node.provider().clone(),
             ctx.node.evm_config().clone(),
             BasicOpReceiptBuilder::default(),
         );
@@ -352,25 +352,29 @@ where
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
-#[derive(Debug, Default, Clone)]
-pub struct OpPoolBuilder {
+#[derive(Debug, Clone)]
+pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
+    /// Marker for the pooled transaction type.
+    _pd: core::marker::PhantomData<T>,
 }
 
-impl<Node> PoolBuilder<Node> for OpPoolBuilder
+impl<T> Default for OpPoolBuilder<T> {
+    fn default() -> Self {
+        Self { pool_config_overrides: Default::default(), _pd: Default::default() }
+    }
+}
+
+impl<Node, T> PoolBuilder<Node> for OpPoolBuilder<T>
 where
-    Node: FullNodeTypes<
-        Types: NodeTypes<
-            ChainSpec: OpHardforks,
-            Primitives: NodePrimitives<SignedTx = OpTransactionSigned>,
-        >,
-    >,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
+    T: EthPoolTransaction<Consensus = TxTy<Node::Types>>,
 {
-    type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let Self { pool_config_overrides } = self;
+        let Self { pool_config_overrides, .. } = self;
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
@@ -471,27 +475,31 @@ impl OpPayloadBuilder {
     }
 }
 
-impl<Txs> OpPayloadBuilder<Txs>
-where
-    Txs: OpPayloadTransactions,
-{
+impl<Txs> OpPayloadBuilder<Txs> {
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
-    pub fn with_transactions<T: OpPayloadTransactions>(
-        self,
-        best_transactions: T,
-    ) -> OpPayloadBuilder<T> {
+    pub fn with_transactions<T>(self, best_transactions: T) -> OpPayloadBuilder<T> {
         let Self { compute_pending_block, da_config, .. } = self;
         OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
     }
 
-    /// A helper method to initialize [`PayloadBuilderService`] with the given EVM config.
-    pub fn spawn<Node, Evm, Pool>(
-        self,
+    /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
+    /// given EVM config.
+    #[expect(clippy::type_complexity)]
+    pub fn build<Node, Evm, Pool>(
+        &self,
         evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>>
+    ) -> eyre::Result<
+        reth_optimism_payload_builder::OpPayloadBuilder<
+            Pool,
+            Node::Provider,
+            Evm,
+            PrimitivesTy<Node::Types>,
+            Txs,
+        >,
+    >
     where
         Node: FullNodeTypes<
             Types: NodeTypesWithEngine<
@@ -504,34 +512,17 @@ where
             + Unpin
             + 'static,
         Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
-        Txs: OpPayloadTransactions<TxTy<Node::Types>>,
+        Txs: OpPayloadTransactions<Pool::Transaction>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
+            pool,
+            ctx.provider().clone(),
             evm_config,
             BasicOpReceiptBuilder::default(),
-            OpBuilderConfig { da_config: self.da_config },
+            OpBuilderConfig { da_config: self.da_config.clone() },
         )
-        .with_transactions(self.best_transactions)
+        .with_transactions(self.best_transactions.clone())
         .set_compute_pending_block(self.compute_pending_block);
-        let conf = ctx.payload_builder_config();
-
-        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-            .interval(conf.interval())
-            .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks());
-
-        let payload_generator = BasicPayloadJobGenerator::with_builder(
-            ctx.provider().clone(),
-            pool,
-            ctx.task_executor().clone(),
-            payload_job_config,
-            payload_builder,
-        );
-        let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-
-        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
-
         Ok(payload_builder)
     }
 }
@@ -548,14 +539,22 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    Txs: OpPayloadTransactions<TxTy<Node::Types>>,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
 {
-    async fn spawn_payload_service(
-        self,
+    type PayloadBuilder = reth_optimism_payload_builder::OpPayloadBuilder<
+        Pool,
+        Node::Provider,
+        OpEvmConfig,
+        PrimitivesTy<Node::Types>,
+        Txs,
+    >;
+
+    async fn build_payload_builder(
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<OpEngineTypes>> {
-        self.spawn(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
+    ) -> eyre::Result<Self::PayloadBuilder> {
+        self.build(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
 

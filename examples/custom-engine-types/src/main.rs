@@ -34,12 +34,11 @@ use reth::{
         node::{NodeTypes, NodeTypesWithEngine},
         rpc::{EngineValidatorBuilder, RpcAddOns},
         BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
-        PayloadBuilderConfig,
     },
     network::NetworkHandle,
     payload::ExecutionPayloadValidator,
     primitives::{Block, EthPrimitives, SealedBlock, TransactionSigned},
-    providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
+    providers::{EthStorage, StateProviderFactory},
     rpc::{
         eth::EthApi,
         types::engine::{ExecutionPayload, PayloadError},
@@ -48,10 +47,7 @@ use reth::{
     transaction_pool::{PoolTransaction, TransactionPool},
     version::default_extra_data_bytes,
 };
-use reth_basic_payload_builder::{
-    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
-    PayloadBuilder, PayloadConfig,
-};
+use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
 use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
 use reth_engine_local::payload::UnsupportedLocalAttributes;
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
@@ -68,10 +64,7 @@ use reth_node_ethereum::{
     },
     EthEvmConfig,
 };
-use reth_payload_builder::{
-    EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError, PayloadBuilderHandle,
-    PayloadBuilderService,
-};
+use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
 use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
@@ -367,43 +360,35 @@ where
         + Unpin
         + 'static,
 {
-    async fn spawn_payload_service(
-        self,
+    type PayloadBuilder = CustomPayloadBuilder<Pool, Node::Provider>;
+
+    async fn build_payload_builder(
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
-        let payload_builder = CustomPayloadBuilder::default();
-        let conf = ctx.payload_builder_config();
-
-        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-            .interval(conf.interval())
-            .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks());
-
-        let payload_generator = BasicPayloadJobGenerator::with_builder(
-            ctx.provider().clone(),
-            pool,
-            ctx.task_executor().clone(),
-            payload_job_config,
-            payload_builder,
-        );
-        let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-
-        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
-
+    ) -> eyre::Result<Self::PayloadBuilder> {
+        let payload_builder = CustomPayloadBuilder {
+            inner: reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+                ctx.provider().clone(),
+                pool,
+                EthEvmConfig::new(ctx.provider().chain_spec().clone()),
+                EthereumBuilderConfig::new(default_extra_data_bytes()),
+            ),
+        };
         Ok(payload_builder)
     }
 }
 
 /// The type responsible for building custom payloads
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct CustomPayloadBuilder;
+pub struct CustomPayloadBuilder<Pool, Client> {
+    inner: reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Client>,
+}
 
-impl<Pool, Client> PayloadBuilder<Pool, Client> for CustomPayloadBuilder
+impl<Pool, Client> PayloadBuilder for CustomPayloadBuilder<Pool, Client>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = CustomPayloadBuilderAttributes;
@@ -411,22 +396,14 @@ where
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let BuildArguments { client, pool, cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
         let PayloadConfig { parent_header, attributes } = config;
-
-        let chain_spec = client.chain_spec();
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
-        reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
-            EthEvmConfig::new(chain_spec.clone()),
-            EthereumBuilderConfig::new(default_extra_data_bytes()),
-        )
-        .try_build(BuildArguments {
-            client,
-            pool,
+        self.inner.try_build(BuildArguments {
             cached_reads,
             config: PayloadConfig { parent_header, attributes: attributes.0 },
             cancel,
@@ -436,19 +413,10 @@ where
 
     fn build_empty_payload(
         &self,
-        client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let PayloadConfig { parent_header, attributes } = config;
-        let chain_spec = client.chain_spec();
-        <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(
-            &reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
-                EthEvmConfig::new(chain_spec.clone()),
-                EthereumBuilderConfig::new(default_extra_data_bytes())
-            ),
-            client,
-            PayloadConfig { parent_header, attributes: attributes.0}
-        )
+        self.inner.build_empty_payload(PayloadConfig { parent_header, attributes: attributes.0 })
     }
 }
 

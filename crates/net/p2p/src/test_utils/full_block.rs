@@ -11,8 +11,9 @@ use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_eth_wire_types::HeadersDirection;
+use reth_ethereum_primitives::{Block, BlockBody};
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
+use reth_primitives_traits::{SealedBlock, SealedHeader};
 use std::{collections::HashMap, sync::Arc};
 
 /// A headers+bodies client implementation that does nothing.
@@ -131,7 +132,7 @@ impl TestFullBlockClient {
     }
 
     /// Get the block with the highest block number.
-    pub fn highest_block(&self) -> Option<SealedBlock> {
+    pub fn highest_block(&self) -> Option<SealedBlock<Block>> {
         self.headers.lock().iter().max_by_key(|(_, header)| header.number).and_then(
             |(hash, header)| {
                 self.bodies.lock().get(hash).map(|body| {
@@ -246,5 +247,5 @@ impl BodiesClient for TestFullBlockClient {
 }
 
 impl BlockClient for TestFullBlockClient {
-    type Block = reth_primitives::Block;
+    type Block = reth_ethereum_primitives::Block;
 }

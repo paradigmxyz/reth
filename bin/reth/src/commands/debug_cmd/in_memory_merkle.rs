@@ -15,13 +15,14 @@ use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, Environ
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_api::NodePrimitives;
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
-use reth_primitives::{EthPrimitives, SealedBlock};
+use reth_primitives_traits::SealedBlock;
 use reth_provider::{
     providers::ProviderNodeTypes, AccountExtReader, ChainSpecProvider, DatabaseProviderFactory,
     HashedPostStateProvider, HashingWriter, LatestStateProviderRef, OriginalValuesKnown,
@@ -61,9 +62,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         N: ProviderNodeTypes<
             ChainSpec = C::ChainSpec,
             Primitives: NodePrimitives<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                BlockHeader = reth_primitives::Header,
+                Block = reth_ethereum_primitives::Block,
+                Receipt = reth_ethereum_primitives::Receipt,
+                BlockHeader = alloy_consensus::Header,
             >,
         >,
     >(
