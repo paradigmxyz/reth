@@ -381,7 +381,7 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-envs <MAX_HEADERS>
+      --rpc-cache.max-headers <MAX_HEADERS>
           Max number of headers in cache
 
           [default: 1000]
