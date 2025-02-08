@@ -20,7 +20,7 @@ const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
 
-const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: u64 = 4 * 1024;
+const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
 
 /// The configuration of the engine tree.
 #[derive(Debug)]
@@ -50,7 +50,7 @@ pub struct TreeConfig {
     always_compare_trie_updates: bool,
     /// Whether to use cross-block caching and parallel prewarming
     use_caching_and_prewarming: bool,
-    /// Cross-block cache size,
+    /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
 }
 
@@ -65,7 +65,7 @@ impl Default for TreeConfig {
             use_state_root_task: false,
             always_compare_trie_updates: false,
             use_caching_and_prewarming: false,
-            cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
+            cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
         }
     }
 }
