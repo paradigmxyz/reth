@@ -50,7 +50,7 @@ reth-codec = [
     "dep:modular-bitfield",
 ]
 serde = [
-	"dep:serde",
-	"alloy-primitives/serde",
-	"reth-codecs?/serde"
+    "dep:serde",
+    "alloy-primitives/serde",
+    "reth-codecs?/serde",
 ]
