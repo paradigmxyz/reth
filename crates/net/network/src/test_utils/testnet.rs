@@ -774,7 +774,7 @@ impl NetworkEventStream {
         Some(peer_id)
     }
 
-    /// Awaits the next event for a peer remvoed.
+    /// Awaits the next event for a peer removed.
     pub async fn peer_removed(&mut self) -> Option<PeerId> {
         let peer_id = match self.inner.next().await {
             Some(NetworkEvent::Peer(PeerEvent::PeerRemoved(peer_id))) => peer_id,
