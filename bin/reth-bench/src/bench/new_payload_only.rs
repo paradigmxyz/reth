@@ -18,7 +18,7 @@ use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tracing::{debug, info};
 
 /// `reth benchmark new-payload-only` command
@@ -43,25 +43,27 @@ impl Command {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let fetch_start = Instant::now();
-
                 let block_res =
                     block_provider.get_block_by_number(next_block.into(), true.into()).await;
-                let fetch_duration = fetch_start.elapsed();
                 let block = block_res.unwrap().unwrap();
                 let block = from_any_rpc_block(block);
 
                 next_block += 1;
-                sender.send((block, fetch_duration)).await.unwrap();
+                sender.send(block).await.unwrap();
             }
         });
 
         // put results in a summary vec so they can be printed at the end
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
+        let mut total_wait_time = Duration::ZERO;
 
-        let mut total_fetch_duration = Duration::ZERO;
-        while let Some((block, fetch_duration)) = receiver.recv().await {
+        while let Some(block) = {
+            let wait_start = Instant::now();
+            let result = receiver.recv().await;
+            total_wait_time += wait_start.elapsed();
+            result
+        } {
             // just put gas used here
             let gas_used = block.gas_used;
 
@@ -86,10 +88,9 @@ impl Command {
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
             info!(%new_payload_result);
 
-            // current duration since the start of the benchmark minus the
-            // accumulated time spent fetching blocks
-            total_fetch_duration += fetch_duration;
-            let current_duration = total_benchmark_duration.elapsed() - total_fetch_duration;
+            // current duration since the start of the benchmark minus the time
+            // waiting for blocks
+            let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
 
             // record the current result
             let row = TotalGasRow { block_number, gas_used, time: current_duration };
