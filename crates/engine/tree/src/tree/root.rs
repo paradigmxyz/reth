@@ -562,13 +562,7 @@ where
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
             debug!(target: "engine::tree", "Starting sparse trie task");
-            let result = match run_sparse_trie(config, metrics, rx) {
-                Ok((state_root, trie_updates, iterations)) => {
-                    StateRootMessage::RootCalculated { state_root, trie_updates, iterations }
-                }
-                Err(error) => StateRootMessage::RootCalculationError(error),
-            };
-            let _ = task_tx.send(result);
+            let _ = run_sparse_trie(config, metrics, rx, task_tx);
         });
         tx
     }
@@ -964,7 +958,8 @@ fn run_sparse_trie<Factory>(
     config: StateRootConfig<Factory>,
     metrics: StateRootTaskMetrics,
     update_rx: mpsc::Receiver<SparseTrieUpdate>,
-) -> Result<(B256, TrieUpdates, u64), ParallelStateRootError>
+    task_tx: Sender<StateRootMessage>,
+) -> Result<(), ParallelStateRootError>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
 {
@@ -1011,12 +1006,31 @@ where
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
 
     let start = Instant::now();
-    let root = trie.root().expect("sparse trie should be revealed");
+    let root = trie.root();
     let elapsed = start.elapsed();
     metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
 
-    let trie_updates = trie.take_trie_updates().expect("retention must be enabled");
-    Ok((root, trie_updates, num_iterations))
+    let trie_updates = trie.take_trie_updates();
+
+    let result = match (root, trie_updates) {
+        (Some(state_root), Some(trie_updates)) => StateRootMessage::RootCalculated {
+            state_root,
+            trie_updates,
+            iterations: num_iterations,
+        },
+        (None, None) => StateRootMessage::RootCalculationError(ParallelStateRootError::Other(
+            "Both root and trie_update should be visible".to_owned(),
+        )),
+        (None, _) => StateRootMessage::RootCalculationError(ParallelStateRootError::Other(
+            "sparse tree should be revealed".to_owned(),
+        )),
+        (_, None) => StateRootMessage::RootCalculationError(ParallelStateRootError::Other(
+            "retention must be enabled".to_owned(),
+        )),
+    };
+
+    let _ = task_tx.send(result);
+    Ok(())
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
