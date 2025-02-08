@@ -708,6 +708,11 @@ Engine:
       --engine.caching-and-prewarming
           Enable cross-block caching and parallel prewarming
 
+      --engine.cross-block-cache-size <CROSS_BLOCK_CACHE_SIZE>
+          Configure the size of cross-block cache in megabytes
+
+          [default: 4096]
+
       --engine.state-root-task-compare-updates
           Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
 
