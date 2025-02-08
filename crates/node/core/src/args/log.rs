@@ -28,7 +28,7 @@ pub struct LogArgs {
     pub log_file_format: LogFormat,
 
     /// The filter to use for logs written to the log file.
-    #[arg(long = "log.file.filter", value_name = "FILTER", global = true, default_value = "debug")]
+    #[arg(long = "log.file.filter", value_name = "FILTER", global = true, default_value = "error")]
     pub log_file_filter: String,
 
     /// The path to put log files in.
