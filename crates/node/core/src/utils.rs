@@ -34,7 +34,7 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
     }
 }
 
-/// Get a single header from network
+/// Get a single header from the network
 pub async fn get_single_header<Client>(
     client: Client,
     id: BlockHashOrNumber,
@@ -68,7 +68,7 @@ where
     Ok(header)
 }
 
-/// Get a body from network based on header
+/// Get a body from the network based on header
 pub async fn get_single_body<B, Client>(
     client: Client,
     header: SealedHeader<B::Header>,
