@@ -100,6 +100,7 @@ serde = [
     "reth-trie-db/serde",
     "reth-trie/serde",
     "reth-stages-types/serde",
+    "reth-prune-types/serde",
 ]
 test-utils = [
     "reth-db/test-utils",

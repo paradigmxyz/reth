@@ -23,7 +23,6 @@ pub use pruner::{
     SegmentOutputCheckpoint,
 };
 pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
 
@@ -31,7 +30,8 @@ use alloy_primitives::{Address, BlockNumber};
 use std::ops::Deref;
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct ReceiptsLogPruneConfig(pub BTreeMap<Address, PruneMode>);
 
 impl ReceiptsLogPruneConfig {
