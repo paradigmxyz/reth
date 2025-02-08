@@ -346,8 +346,8 @@ where
         let network = network_builder.build_network(context, pool.clone()).await?;
         let payload_builder =
             payload_builder_builder.build_payload_builder(context, pool.clone()).await?;
-        let payload_builder_handle =
-            payload_builder_builder.spawn_payload_builder_service(context, payload_builder.clone());
+        let payload_builder_handle = payload_builder_builder
+            .spawn_payload_builder_service(context, payload_builder.clone())?;
         let consensus = consensus_builder.build_consensus(context).await?;
 
         Ok(Components {

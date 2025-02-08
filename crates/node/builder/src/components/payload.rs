@@ -30,7 +30,7 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
         self,
         ctx: &BuilderContext<Node>,
         payload_builder: Self::PayloadBuilder,
-    ) -> PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
         let conf = ctx.config().builder.clone();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
@@ -49,7 +49,7 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
 
         ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
 
-        payload_service_handle
+        Ok(payload_service_handle)
     }
 }
 
