@@ -87,10 +87,10 @@ impl EthereumNode {
     /// use reth_db::open_db_read_only;
     /// use reth_node_ethereum::EthereumNode;
     /// use reth_provider::providers::StaticFileProvider;
-    /// use std::{path::Path, sync::Arc};
+    /// use std::sync::Arc;
     ///
     /// let factory = EthereumNode::provider_factory_builder()
-    ///     .db(Arc::new(open_db_read_only(Path::new("db"), Default::default()).unwrap()))
+    ///     .db(Arc::new(open_db_read_only("db", Default::default()).unwrap()))
     ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
     ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
     ///     .build_provider_factory();

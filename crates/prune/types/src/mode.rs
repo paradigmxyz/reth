@@ -1,13 +1,13 @@
 use crate::{segment::PrunePurpose, PruneSegment, PruneSegmentError};
 use alloy_primitives::BlockNumber;
-use reth_codecs::{add_arbitrary_tests, Compact};
-use serde::{Deserialize, Serialize};
 
 /// Prune mode.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize, Compact)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), serde(rename_all = "lowercase"))]
 pub enum PruneMode {
     /// Prune all blocks.
     Full,

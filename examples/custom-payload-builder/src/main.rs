@@ -11,15 +11,19 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use crate::generator::EmptyBlockPayloadJobGenerator;
 use reth::{
     builder::{components::PayloadServiceBuilder, node::FullNodeTypes, BuilderContext},
     cli::{config::PayloadBuilderConfig, Cli},
+    providers::CanonStateSubscriptions,
     transaction_pool::{PoolTransaction, TransactionPool},
 };
+use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumPayloadBuilder};
 use reth_node_api::NodeTypesWithEngine;
 use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{EthPrimitives, TransactionSigned};
 
 pub mod generator;
@@ -58,6 +62,34 @@ where
             EthEvmConfig::new(ctx.chain_spec()),
             EthereumBuilderConfig::new(conf.extra_data_bytes()),
         ))
+    }
+
+    fn spawn_payload_builder_service(
+        self,
+        ctx: &BuilderContext<Node>,
+        payload_builder: Self::PayloadBuilder,
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
+        let conf = ctx.payload_builder_config();
+
+        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+            .interval(conf.interval())
+            .deadline(conf.deadline())
+            .max_payload_tasks(conf.max_payload_tasks());
+
+        let payload_generator = EmptyBlockPayloadJobGenerator::with_builder(
+            ctx.provider().clone(),
+            ctx.task_executor().clone(),
+            payload_job_config,
+            payload_builder,
+        );
+
+        let (payload_service, payload_builder) =
+            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
+
+        ctx.task_executor()
+            .spawn_critical("custom payload builder service", Box::pin(payload_service));
+
+        Ok(payload_builder)
     }
 }
 

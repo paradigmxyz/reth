@@ -404,7 +404,7 @@ reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
-reth-stages-types = { path = "crates/stages/types" }
+reth-stages-types = { path = "crates/stages/types", default-features = false }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types" }
 reth-storage-api = { path = "crates/storage/storage-api" }
