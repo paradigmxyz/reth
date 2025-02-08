@@ -46,7 +46,7 @@ mod proto {
         PongMessage(String),
     }
 
-    /// An protocol message, containing a message ID and payload.
+    /// A protocol message, containing a message ID and payload.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct PingPongProtoMessage {
         pub message_type: PingPongProtoMessageId,
