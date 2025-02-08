@@ -61,13 +61,14 @@ criterion.workspace = true
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
-    "alloy-primitives/serde",
-    "alloy-consensus/serde",
-    "alloy-trie/serde",
-    "alloy-eips/serde",
-    "revm/serde",
-    "reth-trie-common/serde",
-    "reth-primitives-traits/serde",
+	"alloy-primitives/serde",
+	"alloy-consensus/serde",
+	"alloy-trie/serde",
+	"alloy-eips/serde",
+	"revm/serde",
+	"reth-trie-common/serde",
+	"reth-primitives-traits/serde",
+	"reth-stages-types/serde"
 ]
 test-utils = [
     "triehash",
