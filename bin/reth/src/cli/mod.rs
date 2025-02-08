@@ -236,7 +236,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Config(config_cmd::Command),
     /// Various debug routines
     #[command(name = "debug")]
-    Debug(debug_cmd::Command<C>),
+    Debug(Box<debug_cmd::Command<C>>),
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command<C>),

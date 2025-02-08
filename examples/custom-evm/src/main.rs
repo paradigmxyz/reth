@@ -204,12 +204,15 @@ where
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
     >,
 {
-    async fn spawn_payload_service(
-        self,
+    type PayloadBuilder =
+        reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, MyEvmConfig>;
+
+    async fn build_payload_builder(
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<reth::payload::PayloadBuilderHandle<Types::Engine>> {
-        self.inner.spawn(MyEvmConfig::new(ctx.chain_spec()), ctx, pool)
+    ) -> eyre::Result<Self::PayloadBuilder> {
+        self.inner.build(MyEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
 #[tokio::main]
