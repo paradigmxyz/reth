@@ -1049,8 +1049,8 @@ mod tests {
     use reth_chainspec::{ChainSpec, EthereumHardfork, MAINNET};
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
+    use reth_ethereum_primitives::Block;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{Block, TransactionSigned};
     use reth_provider::test_utils::MockEthProvider;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators::random_block;
@@ -1118,11 +1118,9 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         tokio::spawn(async move {
-            api.new_payload_v1(ExecutionPayloadV1::from_block_slow(
-                &Block::<TransactionSigned>::default(),
-            ))
-            .await
-            .unwrap();
+            api.new_payload_v1(ExecutionPayloadV1::from_block_slow(&Block::default()))
+                .await
+                .unwrap();
         });
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }
