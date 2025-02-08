@@ -13,6 +13,7 @@ use std::{
 
 use crate::{
     message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
+    protocol::ConnectionStream,
     session::{
         conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
@@ -77,11 +78,11 @@ const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 ///    - incoming requests/broadcasts _from remote_ via the connection
 ///    - responses for handled ETH requests received from the remote peer.
 #[allow(dead_code)]
-pub(crate) struct ActiveSession<N: NetworkPrimitives> {
+pub(crate) struct ActiveSession<N: NetworkPrimitives, Conn: ConnectionStream> {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
     /// The underlying connection.
-    pub(crate) conn: EthRlpxConnection<N>,
+    pub(crate) conn: Conn,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -116,7 +117,7 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
 }
 
-impl<N: NetworkPrimitives> ActiveSession<N> {
+impl<N: NetworkPrimitives, Conn: ConnectionStream> ActiveSession<N, Conn> {
     /// Returns `true` if the session is currently in the process of disconnecting
     fn is_disconnecting(&self) -> bool {
         self.conn.inner().is_disconnecting()
@@ -488,7 +489,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     }
 }
 
-impl<N: NetworkPrimitives> Future for ActiveSession<N> {
+impl<N: NetworkPrimitives, Conn: ConnectionStream> Future for ActiveSession<N, Conn> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

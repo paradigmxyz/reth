@@ -13,7 +13,7 @@ use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network::{
-    protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
+    subprotocol::{OnNotSupported, SubConnectionHandler, SubProtocolHandler},
     test_utils::Testnet,
 };
 use reth_network_api::{Direction, PeerId};
@@ -143,7 +143,7 @@ struct PingPongProtoHandler {
     state: ProtocolState,
 }
 
-impl ProtocolHandler for PingPongProtoHandler {
+impl SubProtocolHandler for PingPongProtoHandler {
     type ConnectionHandler = PingPongConnectionHandler;
 
     fn on_incoming(&self, _socket_addr: SocketAddr) -> Option<Self::ConnectionHandler> {
@@ -187,7 +187,7 @@ struct PingPongConnectionHandler {
     state: ProtocolState,
 }
 
-impl ConnectionHandler for PingPongConnectionHandler {
+impl SubConnectionHandler for PingPongConnectionHandler {
     type Connection = PingPongProtoConnection;
 
     fn protocol(&self) -> Protocol {

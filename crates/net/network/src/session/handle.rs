@@ -2,7 +2,8 @@
 
 use crate::{
     message::PeerMessage,
-    session::{conn::EthRlpxConnection, Direction, SessionId},
+    protocol::ConnectionStream,
+    session::{Direction, SessionId},
     PendingSessionHandshakeError,
 };
 use reth_ecies::ECIESError;
@@ -159,7 +160,7 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
 ///
 /// A session starts with a `Handshake`, followed by a `Hello` message which
 #[derive(Debug)]
-pub enum PendingSessionEvent<N: NetworkPrimitives> {
+pub enum PendingSessionEvent<C: ConnectionStream> {
     /// Represents a successful `Hello` and `Status` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
     Established {
         /// An internal identifier for the established session
@@ -176,7 +177,7 @@ pub enum PendingSessionEvent<N: NetworkPrimitives> {
         status: Arc<Status>,
         /// The actual connection stream which can be used to send and receive `eth` protocol
         /// messages
-        conn: EthRlpxConnection<N>,
+        conn: C,
         /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
         /// The remote node's user agent, usually containing the client name and version

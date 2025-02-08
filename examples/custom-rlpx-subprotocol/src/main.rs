@@ -14,7 +14,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use reth::builder::NodeHandle;
 use reth_network::{
-    config::SecretKey, protocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
+    config::SecretKey, subprotocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
     NetworkProtocols,
 };
 use reth_network_api::{test_utils::PeersHandleProvider, NetworkInfo};

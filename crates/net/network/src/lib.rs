@@ -128,7 +128,9 @@ pub mod eth_requests;
 pub mod import;
 pub mod message;
 pub mod peers;
+/// Trait helper that helps abstract the p2p protocol handling.
 pub mod protocol;
+pub mod subprotocol;
 pub mod transactions;
 
 mod budget;
@@ -153,9 +155,9 @@ pub use reth_network_api::{
 pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 pub use reth_network_types::{PeersConfig, SessionsConfig};
 pub use session::{
-    ActiveSessionHandle, ActiveSessionMessage, Direction, EthRlpxConnection, PeerInfo,
-    PendingSessionEvent, PendingSessionHandle, PendingSessionHandshakeError, SessionCommand,
-    SessionEvent, SessionId, SessionManager,
+    get_ecies_stream, ActiveSessionHandle, ActiveSessionMessage, Direction, EthRlpxConnection,
+    PeerInfo, PendingSessionEvent, PendingSessionHandle, PendingSessionHandshakeError,
+    SessionCommand, SessionEvent, SessionId, SessionManager,
 };
 
 pub use builder::NetworkBuilder;

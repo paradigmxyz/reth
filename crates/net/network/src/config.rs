@@ -3,8 +3,9 @@
 use crate::{
     error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
+    protocol::{eth::EthProtocol, ConnectionStream, DynProtocolHandler, IntoProtocol},
     transactions::TransactionsManagerConfig,
-    NetworkHandle, NetworkManager,
+    EthRlpxConnection, NetworkHandle, NetworkManager,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
@@ -22,7 +23,7 @@ use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 // re-export for convenience
-use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
+use crate::subprotocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
 pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
@@ -32,7 +33,13 @@ pub fn rng_secret_key() -> SecretKey {
 
 /// All network related initialization settings.
 #[derive(Debug)]
-pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct NetworkConfig<
+    C,
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    Conn: ConnectionStream = EthRlpxConnection,
+> {
+    /// The Ethereum protocol handler
+    pub eth_protocol_handler: Arc<dyn DynProtocolHandler<N, Conn>>,
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
@@ -170,7 +177,10 @@ where
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
 #[derive(Debug)]
-pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct NetworkConfigBuilder<
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    Conn: ConnectionStream = EthRlpxConnection,
+> {
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
     /// How to configure discovery over DNS.
@@ -197,6 +207,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
     extra_protocols: RlpxSubProtocols,
+    /// The Ethereum protocol handler
+    eth_protocol_handler: Arc<dyn DynProtocolHandler<N, Conn>>,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
     /// Whether tx gossip is disabled
@@ -219,7 +231,7 @@ impl NetworkConfigBuilder<EthNetworkPrimitives> {
 // === impl NetworkConfigBuilder ===
 
 #[allow(missing_docs)]
-impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
+impl<N: NetworkPrimitives, Conn: ConnectionStream> NetworkConfigBuilder<N, Conn> {
     /// Create a new builder instance with a random secret key.
     pub fn with_rng_secret_key() -> Self {
         Self::new(rng_secret_key())
@@ -241,6 +253,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor: None,
             hello_message: None,
             extra_protocols: Default::default(),
+            eth_protocol_handler: Arc::new(EthProtocol),
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
@@ -503,6 +516,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Overrides the eth protocol used by the network to handle outgoing and incoming connections.
+    pub fn eth_protocol(mut self, protocol: impl IntoProtocol<N, Conn>) -> Self {
+        self.eth_protocol_handler = protocol.into_protocol();
+        self
+    }
+
     /// Sets whether tx gossip is disabled.
     pub const fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
         self.tx_gossip_disabled = disable_tx_gossip;
@@ -559,6 +578,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor,
             hello_message,
             extra_protocols,
+            eth_protocol_handler,
             head,
             tx_gossip_disabled,
             block_import,
@@ -627,6 +647,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             status,
             hello_message,
             extra_protocols,
+            eth_protocol_handler,
             fork_filter,
             tx_gossip_disabled,
             transactions_manager_config,
