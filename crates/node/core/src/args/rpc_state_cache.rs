@@ -24,7 +24,8 @@ pub struct RpcStateCacheArgs {
 
     /// Max number of headers in cache.
     #[arg(
-        long = "rpc-cache.max-envs",
+        long = "rpc-cache.max-headers",
+        alias = "rpc-cache.max-envs",
         default_value_t = DEFAULT_HEADER_CACHE_MAX_LEN,
     )]
     pub max_headers: u32,
