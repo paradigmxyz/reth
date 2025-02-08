@@ -2,9 +2,11 @@ use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::PeerMessage,
     peers::InboundConnectionError,
-    protocol::IntoRlpxSubProtocol,
+    protocol::ConnectionStream,
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
+    subprotocol::IntoRlpxSubProtocol,
+    EthRlpxConnection,
 };
 use futures::Stream;
 use reth_eth_wire::{
@@ -48,22 +50,25 @@ use tracing::trace;
 /// `include_mmd!("docs/mermaid/swarm.mmd`")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
-pub(crate) struct Swarm<N: NetworkPrimitives = EthNetworkPrimitives> {
+pub(crate) struct Swarm<
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    Conn: ConnectionStream = EthRlpxConnection,
+> {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
-    sessions: SessionManager<N>,
+    sessions: SessionManager<N, Conn>,
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<N>,
 }
 
 // === impl Swarm ===
 
-impl<N: NetworkPrimitives> Swarm<N> {
+impl<N: NetworkPrimitives, Conn: ConnectionStream> Swarm<N, Conn> {
     /// Configures a new swarm instance.
     pub(crate) const fn new(
         incoming: ConnectionListener,
-        sessions: SessionManager<N>,
+        sessions: SessionManager<N, Conn>,
         state: NetworkState<N>,
     ) -> Self {
         Self { incoming, sessions, state }
@@ -90,12 +95,12 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Access to the [`SessionManager`].
-    pub(crate) const fn sessions(&self) -> &SessionManager<N> {
+    pub(crate) const fn sessions(&self) -> &SessionManager<N, Conn> {
         &self.sessions
     }
 
     /// Mutable access to the [`SessionManager`].
-    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<N> {
+    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<N, Conn> {
         &mut self.sessions
     }
 }

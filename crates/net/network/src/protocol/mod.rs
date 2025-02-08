@@ -1,40 +1,21 @@
-use super::{
-    pending::{ConnectionFut, EthConnection, SessionInfo},
-    PendingSessionEvent,
-};
-use crate::session::pending::HandshakeInfo;
-use reth_eth_wire::NetworkPrimitives;
+use super::PendingSessionEvent;
+use crate::session::{HandshakeInfo, SessionInfo};
+use futures::Stream;
+use reth_ecies::stream::ECIESStream;
+use reth_eth_wire::{EthVersion, NetworkPrimitives, P2PStream};
 use reth_network_api::{Direction, PeerId};
-use std::{fmt, future::Future, sync::Arc};
+use std::{fmt, future::Future, pin::Pin, sync::Arc};
 use tokio::net::TcpStream;
 
-/// The Ethereum protocol handler.
-#[derive(Clone, Debug)]
-pub(crate) struct EthProtocol;
+pub(crate) mod eth;
 
-impl<N: NetworkPrimitives> EthProtocolHandler<N> for EthProtocol {
-    type ConnectionHandler = EthConnection;
-}
+/// A type alias for a future that resolves to a `PendingSessionEvent`.
+pub(crate) type ConnectionFut<C> = Pin<Box<dyn Future<Output = PendingSessionEvent<C>> + Send>>;
 
-/// A helper trait to convert an [`EthProtocolHandler`] into a dynamic type.
-pub trait IntoEthProtocol<N: NetworkPrimitives> {
-    fn into_eth_protocol(self) -> Arc<dyn DynEthProtocolHandler<N>>;
-}
-
-impl<N: NetworkPrimitives, T> IntoEthProtocol<N> for T
-where
-    T: EthProtocolHandler<N> + Send + Sync + 'static,
-{
-    fn into_eth_protocol(self) -> Arc<dyn DynEthProtocolHandler<N>> {
-        Arc::new(self)
-    }
-}
-
-/// A trait responsible for implementing the Ethereum protocol specifications
-/// for a TCP stream when establishing a peer-to-peer connection.
-pub trait EthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + 'static {
+/// This trait is responsible for handling the protocol negotiation and authentication.
+pub trait ProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + 'static {
     /// The type responsible for negotiating the protocol with the remote.
-    type ConnectionHandler: EthConnectionHandler<N>;
+    type ConnectionHandler: ConnectionHandler;
 
     /// Invoked when a new incoming connection from the remote is requested
     ///
@@ -45,7 +26,7 @@ pub trait EthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + '
         stream: TcpStream,
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
-    ) -> ConnectionFut<N> {
+    ) -> ConnectionFut<<Self::ConnectionHandler as ConnectionHandler>::Connection> {
         Box::pin(async move {
             Self::ConnectionHandler::into_connection(
                 stream,
@@ -67,7 +48,7 @@ pub trait EthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + '
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
         remote_peer_id: PeerId,
-    ) -> ConnectionFut<N> {
+    ) -> ConnectionFut<<Self::ConnectionHandler as ConnectionHandler>::Connection> {
         Box::pin(async move {
             Self::ConnectionHandler::into_connection(
                 stream,
@@ -80,11 +61,12 @@ pub trait EthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + '
     }
 }
 
-/// A trait responsible for handling the authentication and initialization  
-/// of a protocol after a peer-to-peer connection is established.
-pub trait EthConnectionHandler<N: NetworkPrimitives>: Send + Sync + 'static {
+/// A trait responsible to handle authentication and initialization of a p2p connection.
+pub trait ConnectionHandler: Send + Sync + 'static {
     /// A connection resolves to a `PendingSessionEvent`.
-    type Connection: Future<Output = PendingSessionEvent<N>> + Send + 'static;
+    type ConnectionFut: Future<Output = PendingSessionEvent<Self::Connection>> + Send + 'static;
+
+    type Connection: ConnectionStream;
 
     /// Invoked when a new connection needs to be established, from either an incoming or outgoing
     /// connection.
@@ -93,18 +75,29 @@ pub trait EthConnectionHandler<N: NetworkPrimitives>: Send + Sync + 'static {
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
         direction: Direction,
-    ) -> Self::Connection;
+    ) -> Self::ConnectionFut;
+}
+
+/// This trait is responsible to abstract the underlying connection stream.
+pub trait ConnectionStream: Stream + Send + Unpin + 'static {
+    /// Returns the negotiated ETH version.
+    fn version(&self) -> EthVersion;
+
+    /// Consumes the connection and returns the inner stream.
+    fn into_inner(self) -> P2PStream<ECIESStream<TcpStream>>;
 }
 
 /// A dynamically-dispatchable Ethereum protocol handler.
-pub trait DynEthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + 'static {
+pub trait DynProtocolHandler<N: NetworkPrimitives, C: ConnectionStream>:
+    fmt::Debug + Send + Sync + 'static
+{
     /// Handles an incoming connection.
     fn on_incoming(
         &self,
         stream: TcpStream,
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
-    ) -> ConnectionFut<N>;
+    ) -> ConnectionFut<C>;
 
     /// Handles an outgoing connection.
     fn on_outgoing(
@@ -113,19 +106,20 @@ pub trait DynEthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync 
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
         remote_peer_id: PeerId,
-    ) -> ConnectionFut<N>;
+    ) -> ConnectionFut<C>;
 }
 
-impl<N: NetworkPrimitives, T> DynEthProtocolHandler<N> for T
+impl<N: NetworkPrimitives, T>
+    DynProtocolHandler<N, <T::ConnectionHandler as ConnectionHandler>::Connection> for T
 where
-    T: EthProtocolHandler<N> + Send + Sync + 'static,
+    T: ProtocolHandler<N> + Send + Sync + 'static,
 {
     fn on_incoming(
         &self,
         stream: TcpStream,
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
-    ) -> ConnectionFut<N> {
+    ) -> ConnectionFut<<T::ConnectionHandler as ConnectionHandler>::Connection> {
         T::on_incoming(self, stream, session_info, handshake_info)
     }
 
@@ -135,7 +129,24 @@ where
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
         remote_peer_id: PeerId,
-    ) -> ConnectionFut<N> {
+    ) -> ConnectionFut<<T::ConnectionHandler as ConnectionHandler>::Connection> {
         T::on_outgoing(self, stream, session_info, handshake_info, remote_peer_id)
+    }
+}
+
+pub trait IntoProtocol<N: NetworkPrimitives, C: ConnectionStream> {
+    fn into_protocol(self) -> Arc<dyn DynProtocolHandler<N, C>>;
+}
+
+impl<N: NetworkPrimitives, T>
+    IntoProtocol<N, <T::ConnectionHandler as ConnectionHandler>::Connection> for T
+where
+    T: ProtocolHandler<N> + Send + Sync + 'static,
+{
+    fn into_protocol(
+        self,
+    ) -> Arc<dyn DynProtocolHandler<N, <T::ConnectionHandler as ConnectionHandler>::Connection>>
+    {
+        Arc::new(self)
     }
 }
