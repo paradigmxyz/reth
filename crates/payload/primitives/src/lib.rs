@@ -349,22 +349,22 @@ pub enum EngineApiMessageVersion {
 
 impl EngineApiMessageVersion {
     /// Returns true if the version is V1.
-    pub fn is_v1(&self) -> bool {
+    pub const fn is_v1(&self) -> bool {
         matches!(self, Self::V1)
     }
 
     /// Returns true if the version is V2.
-    pub fn is_v2(&self) -> bool {
+    pub const fn is_v2(&self) -> bool {
         matches!(self, Self::V2)
     }
 
     /// Returns true if the version is V3.
-    pub fn is_v3(&self) -> bool {
+    pub const fn is_v3(&self) -> bool {
         matches!(self, Self::V3)
     }
 
     /// Returns true if the version is V4.
-    pub fn is_v4(&self) -> bool {
+    pub const fn is_v4(&self) -> bool {
         matches!(self, Self::V4)
     }
 }
