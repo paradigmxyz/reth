@@ -11,14 +11,21 @@
 
 extern crate alloc;
 
-use alloy_primitives::B256;
-use reth_payload_primitives::{BuiltPayload, PayloadAttributes};
-mod error;
-
-use core::fmt::{self, Debug};
-
 use alloy_consensus::BlockHeader;
+use alloy_eips::{eip7685::Requests, Decodable2718};
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ExecutionPayloadSidecar, PayloadError};
+use core::fmt::{self, Debug};
+use reth_payload_primitives::{
+    validate_execution_requests, BuiltPayload, EngineApiMessageVersion,
+    EngineObjectValidationError, InvalidPayloadAttributesError, PayloadAttributes,
+    PayloadOrAttributes, PayloadTypes,
+};
+use reth_primitives::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::Block;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+mod error;
 pub use error::*;
 
 mod forkchoice;
@@ -32,15 +39,6 @@ pub use event::*;
 
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
-
-use alloy_eips::{eip7685::Requests, Decodable2718};
-use reth_payload_primitives::{
-    validate_execution_requests, EngineApiMessageVersion, EngineObjectValidationError,
-    InvalidPayloadAttributesError, PayloadOrAttributes, PayloadTypes,
-};
-use reth_primitives::{NodePrimitives, SealedBlock};
-use reth_primitives_traits::Block;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 /// Struct aggregating [`alloy_rpc_types_engine::ExecutionPayload`] and [`ExecutionPayloadSidecar`]
 /// and encapsulating complete payload supplied for execution.

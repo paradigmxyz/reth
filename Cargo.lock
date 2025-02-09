@@ -7226,6 +7226,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "auto_impl",
  "futures",
+ "reth-chain-state",
  "reth-errors",
  "reth-execution-types",
  "reth-payload-builder-primitives",
