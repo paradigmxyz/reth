@@ -7,6 +7,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use crate::{BeaconConsensusEngineEvent, EthApiBuilderCtx};
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
 use reth_node_api::{
@@ -32,10 +33,9 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
+use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::sync::Arc;
-
-use crate::EthApiBuilderCtx;
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -301,12 +301,27 @@ where
 }
 
 /// Handle to the launched RPC servers.
-#[derive(Clone)]
 pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// Handles to launched servers.
     pub rpc_server_handles: RethRpcServerHandles,
     /// Configured RPC modules.
     pub rpc_registry: RpcRegistry<Node, EthApi>,
+    /// Notification channel for engine API events
+    ///
+    /// Caution: This is a multi-producer, multi-consumer broadcast and allows grants access to
+    /// dispatch events
+    pub engine_events:
+        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, EthApi> {
+    fn clone(&self) -> Self {
+        Self {
+            rpc_server_handles: self.rpc_server_handles.clone(),
+            rpc_registry: self.rpc_registry.clone(),
+            engine_events: self.engine_events.clone(),
+        }
+    }
 }
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes> Deref for RpcHandle<Node, EthApi> {
@@ -424,7 +439,7 @@ where
         let Self { eth_api_builder, engine_validator_builder, hooks, _pd: _ } = self;
 
         let engine_validator = engine_validator_builder.build(&ctx).await?;
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret } = ctx;
+        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
 
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
@@ -524,7 +539,7 @@ where
 
         on_rpc_started.on_rpc_started(ctx, handles.clone())?;
 
-        Ok(RpcHandle { rpc_server_handles: handles, rpc_registry: registry })
+        Ok(RpcHandle { rpc_server_handles: handles, rpc_registry: registry, engine_events })
     }
 }
 

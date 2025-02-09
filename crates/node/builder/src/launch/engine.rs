@@ -198,6 +198,7 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         let event_sender = EventSender::default();
+
         let beacon_engine_handle = BeaconConsensusEngineHandle::new(consensus_engine_tx.clone());
 
         // extract the jwt secret from the args if possible
@@ -208,6 +209,7 @@ where
             config: ctx.node_config(),
             beacon_engine_handle: beacon_engine_handle.clone(),
             jwt_secret,
+            engine_events: event_sender.clone(),
         };
         let engine_payload_validator = add_ons.engine_validator(&add_ons_ctx).await?;
 
@@ -270,6 +272,7 @@ where
             pruner_events.map(Into::into),
             static_file_producer_events.map(Into::into),
         );
+
         ctx.task_executor().spawn_critical(
             "events task",
             node::handle_events(
@@ -279,7 +282,7 @@ where
             ),
         );
 
-        let RpcHandle { rpc_server_handles, rpc_registry } =
+        let RpcHandle { rpc_server_handles, rpc_registry, engine_events } =
             add_ons.launch_add_ons(add_ons_ctx).await?;
 
         // TODO: migrate to devmode with https://github.com/paradigmxyz/reth/issues/10104
@@ -403,7 +406,7 @@ where
             task_executor: ctx.task_executor().clone(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
-            add_ons_handle: RpcHandle { rpc_server_handles, rpc_registry },
+            add_ons_handle: RpcHandle { rpc_server_handles, rpc_registry, engine_events },
         };
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;

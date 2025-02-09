@@ -8077,6 +8077,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-provider",
  "reth-tasks",
+ "reth-tokio-util",
  "reth-transaction-pool",
 ]
 
