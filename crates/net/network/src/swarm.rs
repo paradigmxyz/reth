@@ -2,7 +2,7 @@ use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::PeerMessage,
     peers::InboundConnectionError,
-    protocol::{eth::EthProtocol, ProtocolHandler},
+    protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
     subprotocol::IntoRlpxSubProtocol,
@@ -51,7 +51,7 @@ use tracing::trace;
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<
     N: NetworkPrimitives = EthNetworkPrimitives,
-    P: ProtocolHandler<N> = EthProtocol,
+    P: NetworkProtocolHandler<N> = EthNetworkProtocol,
 > {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
@@ -63,7 +63,7 @@ pub(crate) struct Swarm<
 
 // === impl Swarm ===
 
-impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Swarm<N, P> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> Swarm<N, P> {
     /// Configures a new swarm instance.
     pub(crate) const fn new(
         incoming: ConnectionListener,
@@ -104,7 +104,7 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Swarm<N, P> {
     }
 }
 
-impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Swarm<N, P> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> Swarm<N, P> {
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -285,7 +285,7 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Swarm<N, P> {
     }
 }
 
-impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Stream for Swarm<N, P> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> Stream for Swarm<N, P> {
     type Item = SwarmEvent<N>;
 
     /// This advances all components.

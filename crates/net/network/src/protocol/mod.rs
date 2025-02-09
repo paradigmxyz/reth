@@ -20,7 +20,7 @@ pub(crate) type ConnectionFut<N: NetworkPrimitives, C> =
     Pin<Box<dyn Future<Output = PendingSessionEvent<N, C>> + Send>>;
 
 /// This trait is responsible for handling the protocol negotiation and authentication.
-pub trait ProtocolHandler<N: NetworkPrimitives>:
+pub trait NetworkProtocolHandler<N: NetworkPrimitives>:
     fmt::Debug + derive_more::Debug + Send + Sync + 'static
 {
     /// The type responsible for negotiating the protocol with the remote.

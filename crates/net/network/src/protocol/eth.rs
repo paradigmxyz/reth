@@ -1,7 +1,7 @@
 use super::{ConnectionFut, PendingSessionEvent};
 use crate::{
     get_ecies_stream,
-    protocol::{ConnectionHandler, ProtocolHandler},
+    protocol::{ConnectionHandler, NetworkProtocolHandler},
     session::{HandshakeInfo, SessionInfo},
     EthRlpxConnection, PendingSessionHandshakeError,
 };
@@ -15,9 +15,9 @@ use tokio::net::TcpStream;
 
 /// The Ethereum protocol handler.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct EthProtocol;
+pub(crate) struct EthNetworkProtocol;
 
-impl<N: NetworkPrimitives> ProtocolHandler<N> for EthProtocol {
+impl<N: NetworkPrimitives> NetworkProtocolHandler<N> for EthNetworkProtocol {
     type ConnectionHandler = EthConnection;
 }
 
