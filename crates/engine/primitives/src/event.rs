@@ -9,7 +9,7 @@ use core::{
     fmt::{Display, Formatter, Result},
     time::Duration,
 };
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 
@@ -19,9 +19,9 @@ pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.
-    ForkBlockAdded(ExecutedBlock<N>, Duration),
+    ForkBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
     /// A block was added to the canonical chain, and the elapsed time validating the block
-    CanonicalBlockAdded(ExecutedBlock<N>, Duration),
+    CanonicalBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine is involved in live sync, and has specific progress
