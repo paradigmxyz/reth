@@ -31,14 +31,13 @@
 //! use reth_transaction_pool::{PoolTransaction, TransactionPool};
 //! use std::sync::Arc;
 //!
-//! pub async fn launch<Provider, Pool, Network, BlockExecutor, Consensus, Validator>(
+//! pub async fn launch<Provider, Pool, Network, BlockExecutor, Consensus>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
 //!     evm_config: EthEvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
-//!     validator: Validator,
 //! ) where
 //!     Provider: FullRpcProvider<
 //!             Transaction = TransactionSigned,
@@ -58,7 +57,6 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
 //!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
-//!     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -76,7 +74,7 @@
 //!         block_executor,
 //!         consensus,
 //!     )
-//!     .build(transports, Box::new(EthApi::with_spawner), Arc::new(validator));
+//!     .build(transports, Box::new(EthApi::with_spawner));
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(&transport_modules)
@@ -107,16 +105,7 @@
 //! use std::sync::Arc;
 //! use tokio::try_join;
 //!
-//! pub async fn launch<
-//!     Provider,
-//!     Pool,
-//!     Network,
-//!     EngineApi,
-//!     EngineT,
-//!     BlockExecutor,
-//!     Consensus,
-//!     Validator,
-//! >(
+//! pub async fn launch<Provider, Pool, Network, EngineApi, EngineT, BlockExecutor, Consensus>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
@@ -124,7 +113,6 @@
 //!     evm_config: EthEvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
-//!     validator: Validator,
 //! ) where
 //!     Provider: FullRpcProvider<
 //!             Transaction = TransactionSigned,
@@ -144,7 +132,6 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
 //!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
-//!     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -164,12 +151,8 @@
 //!     );
 //!
 //!     // configure the server modules
-//!     let (modules, auth_module, _registry) = builder.build_with_auth_server(
-//!         transports,
-//!         engine_api,
-//!         Box::new(EthApi::with_spawner),
-//!         Arc::new(validator),
-//!     );
+//!     let (modules, auth_module, _registry) =
+//!         builder.build_with_auth_server(transports, engine_api, Box::new(EthApi::with_spawner));
 //!
 //!     // start the servers
 //!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -669,11 +652,9 @@ where
     /// use reth_transaction_pool::noop::NoopTransactionPool;
     /// use std::sync::Arc;
     ///
-    /// fn init<Evm, Validator>(evm: Evm, validator: Validator)
+    /// fn init<Evm>(evm: Evm)
     /// where
     ///     Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
-    ///     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>
-    ///         + 'static,
     /// {
     ///     let mut registry = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
@@ -683,7 +664,7 @@ where
     ///         .with_evm_config(evm)
     ///         .with_block_executor(EthExecutorProvider::mainnet())
     ///         .with_consensus(NoopConsensus::default())
-    ///         .into_registry(Default::default(), Box::new(EthApi::with_spawner), Arc::new(validator));
+    ///         .into_registry(Default::default(), Box::new(EthApi::with_spawner));
     ///
     ///     let eth_api = registry.eth_api();
     /// }
