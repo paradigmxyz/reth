@@ -15,7 +15,6 @@ use crate::{
     message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
     protocol::ConnectionStream,
     session::{
-        conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,
     },

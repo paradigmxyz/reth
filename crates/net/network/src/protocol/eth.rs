@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::net::TcpStream;
 
 /// The Ethereum protocol handler.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct EthProtocol;
 
 impl<N: NetworkPrimitives> ProtocolHandler<N> for EthProtocol {

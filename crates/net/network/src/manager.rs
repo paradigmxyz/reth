@@ -28,6 +28,7 @@ use crate::{
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     poll_nested_stream_with_budget,
+    protocol::{eth::EthProtocol, ProtocolHandler},
     session::SessionManager,
     state::NetworkState,
     subprotocol::IntoRlpxSubProtocol,
@@ -100,9 +101,12 @@ use tracing::{debug, error, trace, warn};
 /// ```
 #[derive(Debug)]
 #[must_use = "The NetworkManager does nothing unless polled"]
-pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct NetworkManager<
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    P: ProtocolHandler<N> = EthProtocol,
+> {
     /// The type that manages the actual network part, which includes connections.
-    swarm: Swarm<N>,
+    swarm: Swarm<N, P>,
     /// Underlying network handle that can be shared.
     handle: NetworkHandle<N>,
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
@@ -152,13 +156,13 @@ impl NetworkManager {
     /// # }
     /// ```
     pub async fn eth<C: BlockNumReader + 'static>(
-        config: NetworkConfig<C, EthNetworkPrimitives>,
+        config: NetworkConfig<C, EthNetworkPrimitives, EthProtocol>,
     ) -> Result<Self, NetworkError> {
         Self::new(config).await
     }
 }
 
-impl<N: NetworkPrimitives> NetworkManager<N> {
+impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkManager<N, P> {
     /// Sets the dedicated channel for events indented for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>) {
@@ -207,7 +211,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
     /// state of the entire network.
     pub async fn new<C: BlockNumReader + 'static>(
-        config: NetworkConfig<C, N>,
+        config: NetworkConfig<C, N, P>,
     ) -> Result<Self, NetworkError> {
         let NetworkConfig {
             client,
@@ -283,7 +287,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             hello_message,
             fork_filter,
             extra_protocols,
-            eth_protocol_handler,
+            eth_protocol_handler.unwrap(),
         );
 
         let state = NetworkState::new(
@@ -361,14 +365,14 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// }
     /// ```
     pub async fn builder<C: BlockNumReader + 'static>(
-        config: NetworkConfig<C, N>,
-    ) -> Result<NetworkBuilder<(), (), N>, NetworkError> {
+        config: NetworkConfig<C, N, P>,
+    ) -> Result<NetworkBuilder<(), (), N, P>, NetworkError> {
         let network = Self::new(config).await?;
         Ok(network.into_builder())
     }
 
     /// Create a [`NetworkBuilder`] to configure all components of the network
-    pub const fn into_builder(self) -> NetworkBuilder<(), (), N> {
+    pub const fn into_builder(self) -> NetworkBuilder<(), (), N, P> {
         NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
@@ -1017,7 +1021,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 }
 
-impl<N: NetworkPrimitives> Future for NetworkManager<N> {
+impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Future for NetworkManager<N, P> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
