@@ -26,7 +26,7 @@ use std::{
 use crate::{
     message::PeerMessage,
     metrics::SessionManagerMetrics,
-    protocol::{ConnectionStream, DynProtocolHandler},
+    protocol::{ConnectionHandler, ConnectionStream, ProtocolHandler},
     session::active::ActiveSession,
     subprotocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols},
 };
@@ -61,7 +61,7 @@ pub struct SessionId(usize);
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
 #[derive(Debug)]
-pub struct SessionManager<N: NetworkPrimitives, C: ConnectionStream> {
+pub struct SessionManager<N: NetworkPrimitives, P: ProtocolHandler<N>> {
     /// Tracks the identifier for the next session.
     next_id: usize,
     /// Keeps track of all sessions
@@ -97,11 +97,17 @@ pub struct SessionManager<N: NetworkPrimitives, C: ConnectionStream> {
     ///
     /// When a new (pending) session is created, the corresponding [`PendingSessionHandle`] will
     /// get a clone of this sender half.
-    pending_sessions_tx: mpsc::Sender<PendingSessionEvent<C>>,
+    pending_sessions_tx: mpsc::Sender<
+        PendingSessionEvent<
+            <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler>::Connection,
+        >,
+    >,
     /// Receiver half that listens for [`PendingSessionEvent`] produced by pending sessions.
-    pending_session_rx: ReceiverStream<PendingSessionEvent<C>>,
-    /// The original Sender half of the [`ActiveSessionMessage`] channel.
-    ///
+    pending_session_rx: ReceiverStream<
+        PendingSessionEvent<
+            <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler>::Connection,
+        >,
+    >,
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
     active_session_tx: MeteredPollSender<ActiveSessionMessage<N>>,
@@ -114,12 +120,12 @@ pub struct SessionManager<N: NetworkPrimitives, C: ConnectionStream> {
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
     /// The eth protocol handler
-    eth_protocol_handler: Arc<dyn DynProtocolHandler<N, C>>,
+    eth_protocol_handler: Arc<P>,
 }
 
 // === impl SessionManager ===
 
-impl<N: NetworkPrimitives, C: ConnectionStream> SessionManager<N, C> {
+impl<N: NetworkPrimitives, P: ProtocolHandler<N>> SessionManager<N, P> {
     /// Creates a new empty [`SessionManager`].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -130,7 +136,7 @@ impl<N: NetworkPrimitives, C: ConnectionStream> SessionManager<N, C> {
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
-        eth_protocol_handler: Arc<dyn DynProtocolHandler<N, C>>,
+        eth_protocol_handler: Arc<P>,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -227,9 +233,13 @@ impl<N: NetworkPrimitives, C: ConnectionStream> SessionManager<N, C> {
     }
 
     pub(crate) async fn handle_incoming_session(
-        eth_protocol_handler: Arc<dyn DynProtocolHandler<N, C>>,
+        eth_protocol_handler: Arc<P>,
         disconnect_rx: oneshot::Receiver<()>,
-        events: mpsc::Sender<PendingSessionEvent<C>>,
+        events: mpsc::Sender<
+            PendingSessionEvent<
+                <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler>::Connection,
+            >,
+        >,
         stream: TcpStream,
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
@@ -255,9 +265,13 @@ impl<N: NetworkPrimitives, C: ConnectionStream> SessionManager<N, C> {
     }
 
     pub(crate) async fn handle_outgoing_session(
-        eth_protocol_handler: Arc<dyn DynProtocolHandler<N, C>>,
+        eth_protocol_handler: Arc<P>,
         disconnect_rx: oneshot::Receiver<()>,
-        events: mpsc::Sender<PendingSessionEvent<C>>,
+        events: mpsc::Sender<
+            PendingSessionEvent<
+                <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler>::Connection,
+            >,
+        >,
         handshake_info: HandshakeInfo,
         session_id: SessionId,
         remote_addr: SocketAddr,

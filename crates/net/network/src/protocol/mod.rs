@@ -1,5 +1,6 @@
 use super::PendingSessionEvent;
 use crate::session::{HandshakeInfo, SessionInfo};
+use derive_more::Debug;
 use futures::Stream;
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{EthVersion, NetworkPrimitives, P2PStream};
@@ -13,7 +14,9 @@ pub(crate) mod eth;
 pub(crate) type ConnectionFut<C> = Pin<Box<dyn Future<Output = PendingSessionEvent<C>> + Send>>;
 
 /// This trait is responsible for handling the protocol negotiation and authentication.
-pub trait ProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + 'static {
+pub trait ProtocolHandler<N: NetworkPrimitives>:
+    fmt::Debug + derive_more::Debug + Send + Sync + 'static
+{
     /// The type responsible for negotiating the protocol with the remote.
     type ConnectionHandler: ConnectionHandler;
 
@@ -79,7 +82,7 @@ pub trait ConnectionHandler: Send + Sync + 'static {
 }
 
 /// This trait is responsible to abstract the underlying connection stream.
-pub trait ConnectionStream: Stream + Send + Unpin + 'static {
+pub trait ConnectionStream: Stream + Debug + Send + Unpin + 'static {
     /// Returns the negotiated ETH version.
     fn version(&self) -> EthVersion;
 

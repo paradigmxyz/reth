@@ -2,11 +2,10 @@ use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::PeerMessage,
     peers::InboundConnectionError,
-    protocol::ConnectionStream,
+    protocol::{eth::EthProtocol, ProtocolHandler},
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
     subprotocol::IntoRlpxSubProtocol,
-    EthRlpxConnection,
 };
 use futures::Stream;
 use reth_eth_wire::{
@@ -52,23 +51,23 @@ use tracing::trace;
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<
     N: NetworkPrimitives = EthNetworkPrimitives,
-    Conn: ConnectionStream = EthRlpxConnection,
+    P: ProtocolHandler<N> = EthProtocol,
 > {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
-    sessions: SessionManager<N, Conn>,
+    sessions: SessionManager<N, P>,
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<N>,
 }
 
 // === impl Swarm ===
 
-impl<N: NetworkPrimitives, Conn: ConnectionStream> Swarm<N, Conn> {
+impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Swarm<N, P> {
     /// Configures a new swarm instance.
     pub(crate) const fn new(
         incoming: ConnectionListener,
-        sessions: SessionManager<N, Conn>,
+        sessions: SessionManager<N, P>,
         state: NetworkState<N>,
     ) -> Self {
         Self { incoming, sessions, state }
@@ -95,17 +94,17 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream> Swarm<N, Conn> {
     }
 
     /// Access to the [`SessionManager`].
-    pub(crate) const fn sessions(&self) -> &SessionManager<N, Conn> {
+    pub(crate) const fn sessions(&self) -> &SessionManager<N, P> {
         &self.sessions
     }
 
     /// Mutable access to the [`SessionManager`].
-    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<N, Conn> {
+    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<N, P> {
         &mut self.sessions
     }
 }
 
-impl<N: NetworkPrimitives> Swarm<N> {
+impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Swarm<N, P> {
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -286,7 +285,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 }
 
-impl<N: NetworkPrimitives> Stream for Swarm<N> {
+impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Stream for Swarm<N, P> {
     type Item = SwarmEvent<N>;
 
     /// This advances all components.
