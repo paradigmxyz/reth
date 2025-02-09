@@ -12,11 +12,10 @@
 
 extern crate alloc;
 
-use core::fmt::Debug;
-
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
+use core::fmt::Debug;
 #[cfg_attr(target_os = "windows", allow(unused_imports))]
 use crunchy as _;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -32,11 +31,11 @@ use reth_consensus_common::validation::{
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{Block, BlockBody, BlockHeader, SealedBlock};
 use tracing::trace;
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
-use reth_primitives_traits::{Block, BlockBody, BlockHeader, SealedBlock};
 
 pub mod validation;
 pub use validation::{

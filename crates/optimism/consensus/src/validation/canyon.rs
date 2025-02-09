@@ -1,12 +1,11 @@
 //! Canyon consensus rule checks.
 
+use crate::OpConsensusError;
 use alloy_consensus::BlockHeader;
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_consensus::ConsensusError;
 use reth_primitives::GotExpected;
 use reth_primitives_traits::BlockBody;
-
-use crate::OpConsensusError;
 
 /// Verifies that withdrawals in block body (Shanghai) is always empty in Canyon.
 /// <https://specs.optimism.io/protocol/rollup-node-p2p.html#block-validation>

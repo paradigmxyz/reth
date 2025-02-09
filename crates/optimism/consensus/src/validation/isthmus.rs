@@ -1,13 +1,12 @@
 //! Block verification w.r.t. consensus rules new in Isthmus hardfork.
 
+use crate::OpConsensusError;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::U256;
 use core::fmt;
 use reth_optimism_primitives::predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_storage_api::StorageRootProvider;
 use revm::db::AccountStatus;
-
-use crate::OpConsensusError;
 
 /// Verifies that `withdrawals_root` (i.e. `l2tol1-msg-passer` storage root since Isthmus) field is
 /// set in block header.
@@ -54,6 +53,7 @@ where
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use alloc::sync::Arc;
     use alloy_chains::Chain;
     use alloy_consensus::Header;
@@ -68,8 +68,6 @@ mod test {
     };
     use reth_storage_api::StateProviderFactory;
     use reth_trie::{test_utils::storage_root_prehashed, HashedPostState, HashedStorage};
-
-    use super::*;
 
     #[test]
     fn l2tol1_message_passer_no_withdrawals() {
