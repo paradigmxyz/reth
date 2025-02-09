@@ -250,7 +250,8 @@ impl NodeState {
                     }
                 }
             }
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed) => {
+                let block = executed.sealed_block();
                 info!(
                     number=block.number(),
                     hash=?block.hash(),
@@ -272,7 +273,8 @@ impl NodeState {
 
                 info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
-            BeaconConsensusEngineEvent::ForkBlockAdded(block, elapsed) => {
+            BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
+                let block = executed.sealed_block();
                 info!(number=block.number(), hash=?block.hash(), ?elapsed, "Block added to fork chain");
             }
         }

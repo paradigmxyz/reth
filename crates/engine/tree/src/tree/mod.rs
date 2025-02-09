@@ -1392,14 +1392,10 @@ where
                             self.canonical_in_memory_state.set_pending_block(block.clone());
                         }
 
-                        let sealed_block = Arc::new(block.sealed_block().clone());
-                        self.state.tree_state.insert_executed(block);
+                        self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
-                            BeaconConsensusEngineEvent::CanonicalBlockAdded(
-                                sealed_block,
-                                now.elapsed(),
-                            ),
+                            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
                         ));
                     }
                     EngineApiRequest::Beacon(request) => {
@@ -2409,8 +2405,6 @@ where
             return Err(e.into())
         }
 
-        let sealed_block = Arc::new(block.clone_sealed_block());
-
         // We only run the parallel state root if we are currently persisting blocks that are all
         // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
         // trie updates being committed are a subset of the in-memory trie updates collected before
@@ -2558,7 +2552,7 @@ where
                 self.handle_state_root_result(
                     state_root_handle,
                     state_root_config,
-                    sealed_block.as_ref(),
+                    block.sealed_block(),
                     &hashed_state,
                     &state_provider,
                     root_time,
@@ -2617,8 +2611,7 @@ where
             // prewarm tasks are still running at this point however
             drop(prewarm_task_lock.write().unwrap());
             // apply state updates to cache and save it (if saving was successful)
-            self.most_recent_cache =
-                state_provider.save_cache(sealed_block.hash(), &output.state).ok();
+            self.most_recent_cache = state_provider.save_cache(block.hash(), &output.state).ok();
             let elapsed = save_cache_start.elapsed();
 
             // record how long it took to save caches
@@ -2641,15 +2634,15 @@ where
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
-        self.state.tree_state.insert_executed(executed);
+        self.state.tree_state.insert_executed(executed.clone());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event
         let elapsed = start.elapsed();
         let engine_event = if self.is_fork(block_num_hash.hash)? {
-            BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block, elapsed)
+            BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, elapsed)
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
@@ -3540,9 +3533,9 @@ mod tests {
             let event = self.from_tree_rx.recv().await.unwrap();
             match event {
                 EngineApiEvent::BeaconConsensus(
-                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, _),
                 ) => {
-                    assert_eq!(block.hash(), expected_hash);
+                    assert_eq!(executed.recovered_block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }
@@ -3552,10 +3545,10 @@ mod tests {
             let event = self.from_tree_rx.recv().await.unwrap();
             match event {
                 EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
-                    block,
+                    executed,
                     _,
                 )) => {
-                    assert_eq!(block.hash(), expected_hash);
+                    assert_eq!(executed.recovered_block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }
