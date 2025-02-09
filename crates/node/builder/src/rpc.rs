@@ -33,7 +33,6 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
-use std::sync::Arc;
 
 use crate::EthApiBuilderCtx;
 
@@ -458,12 +457,7 @@ where
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(
-                module_config,
-                engine_api,
-                eth_api_builder,
-                Arc::new(engine_validator),
-            );
+            .build_with_auth_server(module_config, engine_api, eth_api_builder);
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {

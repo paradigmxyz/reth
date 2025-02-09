@@ -13,17 +13,20 @@ use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, TxTy};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{EngineValidatorBuilder, RpcAddOns},
+    rpc::{EngineValidatorBuilder, RpcAddOns, RpcHandle},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
-use reth_rpc::EthApi;
+use reth_rpc::{EthApi, ValidationApi};
+use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
+use reth_rpc_builder::config::RethRpcServerConfig;
+use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,
@@ -109,6 +112,49 @@ impl NodeTypes for EthereumNode {
 
 impl NodeTypesWithEngine for EthereumNode {
     type Engine = EthEngineTypes;
+}
+
+/// Add-ons w.r.t. ethereum.
+#[derive(Debug)]
+#[expect(clippy::type_complexity)]
+pub struct EthhereumAddOns<N: FullNodeComponents> {
+    inner: RpcAddOns<
+        N,
+        EthApi<N::Provider, N::Pool, N::Network, N::Evm>,
+        EthereumEngineValidatorBuilder,
+    >,
+}
+
+impl<N> NodeAddOns<N> for EthhereumAddOns<N>
+where
+    N: FullNodeComponents<Types = EthereumNode, Evm = EthEvmConfig>,
+{
+    type Handle = RpcHandle<N, EthApi<N::Provider, N::Pool, N::Network, N::Evm>>;
+
+    async fn launch_add_ons(
+        self,
+        ctx: reth_node_api::AddOnsContext<'_, N>,
+    ) -> eyre::Result<Self::Handle> {
+        let validation_api = ValidationApi::new(
+            ctx.node.provider().clone(),
+            Arc::new(ctx.node.consensus().clone()),
+            ctx.node.block_executor().clone(),
+            ctx.config.rpc.flashbots_config(),
+            Box::new(ctx.node.task_executor().clone()),
+            Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
+        );
+
+        self.inner
+            .launch_add_ons_with(ctx, move |modules, _| {
+                modules.merge_if_module_configured(
+                    RethRpcModule::Flashbots,
+                    validation_api.into_rpc(),
+                )?;
+
+                Ok(())
+            })
+            .await
+    }
 }
 
 /// Add-ons w.r.t. l1 ethereum.

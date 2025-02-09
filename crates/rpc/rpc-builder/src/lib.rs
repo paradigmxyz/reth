@@ -211,7 +211,6 @@ use jsonrpsee::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{ExecutionData, PayloadValidator};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
@@ -221,7 +220,7 @@ use reth_provider::{
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi,
-    TraceApi, TxPoolApi, ValidationApi, ValidationApiConfig, Web3Api,
+    TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -282,9 +281,6 @@ pub async fn launch<Provider, Pool, Network, Tasks, EvmConfig, EthApi, BlockExec
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
     block_executor: BlockExecutor,
     consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives, Error = ConsensusError>>,
-    payload_validator: Arc<
-        dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
-    >,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider<
@@ -323,7 +319,7 @@ where
                 block_executor,
                 consensus,
             )
-            .build(module_config, eth, payload_validator),
+            .build(module_config, eth),
         )
         .await
 }
@@ -614,9 +610,6 @@ where
         module_config: TransportRpcModuleConfig,
         engine: impl IntoEngineApiRpcModule,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
-        payload_validator: Arc<
-            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
-        >,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
@@ -646,7 +639,6 @@ where
             evm_config,
             eth,
             block_executor,
-            payload_validator,
         );
 
         let modules = registry.create_transport_rpc_modules(module_config);
@@ -700,9 +692,6 @@ where
         self,
         config: RpcModuleConfig,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
-        payload_validator: Arc<
-            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
-        >,
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
@@ -719,7 +708,6 @@ where
             evm_config,
             eth,
             block_executor,
-            payload_validator,
         )
     }
 
@@ -729,9 +717,6 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
-        payload_validator: Arc<
-            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
-        >,
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<
@@ -761,7 +746,6 @@ where
                 evm_config,
                 eth,
                 block_executor,
-                payload_validator,
             );
 
             modules.config = module_config;
@@ -859,6 +843,7 @@ impl RpcModuleConfigBuilder {
 
 /// A Helper type the holds instances of the configured modules.
 #[derive(Debug, Clone)]
+#[expect(dead_code)] // Consensus generic, might be useful in the future
 pub struct RpcRegistryInner<
     Provider: BlockReader,
     Pool,
@@ -874,10 +859,6 @@ pub struct RpcRegistryInner<
     executor: Tasks,
     block_executor: BlockExecutor,
     consensus: Consensus,
-    payload_validator:
-        Arc<dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>>,
-    /// Holds the configuration for the RPC modules
-    config: RpcModuleConfig,
     /// Holds a all `eth_` namespace handlers
     eth: EthHandlers<Provider, EthApi>,
     /// to put trace calls behind semaphore
@@ -916,9 +897,6 @@ where
         evm_config: EvmConfig,
         eth_api_builder: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
         block_executor: BlockExecutor,
-        payload_validator: Arc<
-            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
-        >,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Header = Provider::Header>,
@@ -942,11 +920,9 @@ where
             eth,
             executor,
             consensus,
-            config,
             modules: Default::default(),
             blocking_pool_guard,
             block_executor,
-            payload_validator,
         }
     }
 }
@@ -1220,23 +1196,6 @@ where
     pub fn reth_api(&self) -> RethApi<Provider> {
         RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
     }
-
-    /// Instantiates `ValidationApi`
-    pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor>
-    where
-        Consensus:
-            FullConsensus<BlockExecutor::Primitives, Error = ConsensusError> + Clone + 'static,
-        Provider: BlockReader<Block = <BlockExecutor::Primitives as NodePrimitives>::Block>,
-    {
-        ValidationApi::new(
-            self.provider.clone(),
-            Arc::new(self.consensus.clone()),
-            self.block_executor.clone(),
-            self.config.flashbots.clone(),
-            Box::new(self.executor.clone()),
-            self.payload_validator.clone(),
-        )
-    }
 }
 
 impl<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
@@ -1393,16 +1352,10 @@ where
                                 .into_rpc()
                                 .into()
                         }
-                        RethRpcModule::Flashbots => ValidationApi::new(
-                            eth_api.provider().clone(),
-                            Arc::new(self.consensus.clone()),
-                            self.block_executor.clone(),
-                            self.config.flashbots.clone(),
-                            Box::new(self.executor.clone()),
-                            self.payload_validator.clone(),
-                        )
-                        .into_rpc()
-                        .into(),
+                        // only relevant for Ethereum and configured in `EthereumAddOns`
+                        // implementation
+                        // TODO: can we get rid of this here?
+                        RethRpcModule::Flashbots => Default::default(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                     })
                     .clone()
