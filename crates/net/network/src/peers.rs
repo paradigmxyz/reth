@@ -790,7 +790,7 @@ impl PeersManager {
 
     ///  Connects a peer and its address with the given kind.
     ///
-    /// Note: This is invoked ond demand via an external command received by the manager
+    /// Note: This is invoked on demand via an external command received by the manager
     pub(crate) fn add_and_connect_kind(
         &mut self,
         peer_id: PeerId,

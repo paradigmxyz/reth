@@ -7,7 +7,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{BeaconConsensusEngineEvent, EthApiBuilderCtx};
+use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
 use reth_node_api::{
@@ -312,6 +312,9 @@ pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// dispatch events
     pub engine_events:
         EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    /// Handle to the beacon consensus engine.
+    pub beacon_engine_handle:
+        BeaconConsensusEngineHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
 }
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, EthApi> {
@@ -320,6 +323,7 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, Et
             rpc_server_handles: self.rpc_server_handles.clone(),
             rpc_registry: self.rpc_registry.clone(),
             engine_events: self.engine_events.clone(),
+            beacon_engine_handle: self.beacon_engine_handle.clone(),
         }
     }
 }
@@ -451,7 +455,7 @@ where
         let engine_api = EngineApi::new(
             node.provider().clone(),
             config.chain.clone(),
-            beacon_engine_handle,
+            beacon_engine_handle.clone(),
             PayloadStore::new(node.payload_builder_handle().clone()),
             node.pool().clone(),
             Box::new(node.task_executor().clone()),
@@ -539,7 +543,12 @@ where
 
         on_rpc_started.on_rpc_started(ctx, handles.clone())?;
 
-        Ok(RpcHandle { rpc_server_handles: handles, rpc_registry: registry, engine_events })
+        Ok(RpcHandle {
+            rpc_server_handles: handles,
+            rpc_registry: registry,
+            engine_events,
+            beacon_engine_handle,
+        })
     }
 }
 

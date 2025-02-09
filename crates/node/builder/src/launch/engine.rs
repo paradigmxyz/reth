@@ -282,7 +282,7 @@ where
             ),
         );
 
-        let RpcHandle { rpc_server_handles, rpc_registry, engine_events } =
+        let RpcHandle { rpc_server_handles, rpc_registry, engine_events, beacon_engine_handle } =
             add_ons.launch_add_ons(add_ons_ctx).await?;
 
         // TODO: migrate to devmode with https://github.com/paradigmxyz/reth/issues/10104
@@ -406,7 +406,12 @@ where
             task_executor: ctx.task_executor().clone(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
-            add_ons_handle: RpcHandle { rpc_server_handles, rpc_registry, engine_events },
+            add_ons_handle: RpcHandle {
+                rpc_server_handles,
+                rpc_registry,
+                engine_events,
+                beacon_engine_handle,
+            },
         };
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;
