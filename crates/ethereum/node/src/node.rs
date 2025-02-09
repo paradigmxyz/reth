@@ -23,7 +23,7 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
-use reth_rpc::{EthApi, ValidationApi};
+use reth_rpc::{eth::core::EthApiFor, EthApi, ValidationApi};
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_server_types::RethRpcModule;
@@ -116,13 +116,8 @@ impl NodeTypesWithEngine for EthereumNode {
 
 /// Add-ons w.r.t. ethereum.
 #[derive(Debug)]
-#[expect(clippy::type_complexity)]
 pub struct EthhereumAddOns<N: FullNodeComponents> {
-    inner: RpcAddOns<
-        N,
-        EthApi<N::Provider, N::Pool, N::Network, N::Evm>,
-        EthereumEngineValidatorBuilder,
-    >,
+    inner: RpcAddOns<N, EthApiFor<N>, EthereumEngineValidatorBuilder>,
 }
 
 impl<N> NodeAddOns<N> for EthhereumAddOns<N>
