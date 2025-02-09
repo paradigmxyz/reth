@@ -75,6 +75,7 @@ std = [
     "revm/std",
     "derive_more/std",
     "tracing/std",
+    "crunchy/std",
 ]
 optimism = [
     "reth-optimism-primitives/optimism",
