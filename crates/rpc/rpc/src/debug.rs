@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -14,7 +15,7 @@ use alloy_rpc_types_trace::geth::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
     env::EvmEnv,
     execute::{BlockExecutorProvider, Executor},
@@ -1033,6 +1034,10 @@ where
 
     async fn debug_chaindb_compact(&self) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn debug_chain_config(&self) -> RpcResult<ChainConfig> {
+        Ok(self.provider().chain_spec().genesis().config.clone())
     }
 
     async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {
