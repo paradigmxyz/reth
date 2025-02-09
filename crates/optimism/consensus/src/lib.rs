@@ -17,6 +17,8 @@ use core::fmt::Debug;
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
+#[cfg_attr(target_os = "windows", allow(unused_imports))]
+use crunchy as _;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{
     Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
