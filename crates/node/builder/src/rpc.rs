@@ -19,7 +19,6 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadStore;
-use reth_primitives::EthPrimitives;
 use reth_provider::ChainSpecProvider;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
@@ -35,7 +34,6 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
-use std::sync::Arc;
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -473,12 +471,7 @@ where
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(
-                module_config,
-                engine_api,
-                eth_api_builder,
-                Arc::new(engine_validator),
-            );
+            .build_with_auth_server(module_config, engine_api, eth_api_builder);
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -591,12 +584,8 @@ pub trait EthApiBuilder<N: FullNodeComponents>: 'static {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self;
 }
 
-impl<
-        N: FullNodeComponents<
-            Provider: ChainSpecProvider,
-            Types: NodeTypes<Primitives = EthPrimitives>,
-        >,
-    > EthApiBuilder<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
+impl<N: FullNodeComponents<Provider: ChainSpecProvider>> EthApiBuilder<N>
+    for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self {
         Self::with_spawner(ctx)

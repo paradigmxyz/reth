@@ -9,6 +9,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
+use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ProviderBlock,
@@ -30,6 +31,14 @@ use reth_tasks::{
 use tokio::sync::{broadcast, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
+
+/// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
+pub type EthApiFor<N> = EthApi<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Network,
+    <N as FullNodeComponents>::Evm,
+>;
 
 /// `Eth` API implementation.
 ///
