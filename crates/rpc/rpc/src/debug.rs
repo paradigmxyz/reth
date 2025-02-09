@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -14,6 +15,7 @@ use alloy_rpc_types_trace::geth::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use reth_chainspec::EthChainSpec;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     env::EvmEnv,
@@ -293,7 +295,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(&inspector).into())
+                        return Ok(FourByteFrame::from(&inspector).into());
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -316,7 +318,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        return Ok(frame);
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -347,7 +349,7 @@ where
                                 Ok(frame)
                             })
                             .await?;
-                        return Ok(frame.into())
+                        return Ok(frame.into());
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                     GethDebugBuiltInTracerType::MuxTracer => {
@@ -390,7 +392,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        return Ok(frame);
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
                         let flat_call_config = tracer_config
@@ -456,7 +458,7 @@ where
 
                     Ok(GethTrace::JS(res))
                 }
-            }
+            };
         }
 
         // default structlog tracer
@@ -492,7 +494,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> Result<Vec<Vec<GethTrace>>, Eth::Error> {
         if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -702,7 +704,7 @@ where
                         let mut inspector = FourByteInspector::default();
                         let (res, _) =
                             self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-                        return Ok((FourByteFrame::from(&inspector).into(), res.state))
+                        return Ok((FourByteFrame::from(&inspector).into(), res.state));
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -725,7 +727,7 @@ where
                             .geth_builder()
                             .geth_call_traces(call_config, res.result.gas_used());
 
-                        return Ok((frame.into(), res.state))
+                        return Ok((frame.into(), res.state));
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -747,7 +749,7 @@ where
                             .geth_prestate_traces(&res, &prestate_config, db)
                             .map_err(Eth::Error::from_eth_err)?;
 
-                        return Ok((frame.into(), res.state))
+                        return Ok((frame.into(), res.state));
                     }
                     GethDebugBuiltInTracerType::NoopTracer => {
                         Ok((NoopFrame::default().into(), Default::default()))
@@ -766,7 +768,7 @@ where
                         let frame = inspector
                             .try_into_mux_frame(&res, db, tx_info)
                             .map_err(Eth::Error::from_eth_err)?;
-                        return Ok((frame.into(), res.state))
+                        return Ok((frame.into(), res.state));
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
                         let flat_call_config = tracer_config
@@ -815,7 +817,7 @@ where
                         inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)?;
                     Ok((GethTrace::JS(result), state))
                 }
-            }
+            };
         }
 
         // default structlog tracer
@@ -1033,6 +1035,10 @@ where
 
     async fn debug_chaindb_compact(&self) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn debug_chain_config(&self) -> RpcResult<ChainConfig> {
+        Ok(self.provider().chain_spec().genesis().clone().config)
     }
 
     async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {

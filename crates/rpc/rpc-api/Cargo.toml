@@ -32,6 +32,7 @@ alloy-rpc-types-admin.workspace = true
 alloy-serde.workspace = true
 alloy-rpc-types-beacon.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-genesis.workspace = true
 
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
