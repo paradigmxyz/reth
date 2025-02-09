@@ -1,24 +1,30 @@
 use super::PendingSessionEvent;
 use crate::session::{HandshakeInfo, SessionInfo};
 use derive_more::Debug;
-use futures::Stream;
+use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
-use reth_eth_wire::{EthVersion, NetworkPrimitives, P2PStream};
+use reth_eth_wire::{
+    capability::RawCapabilityMessage,
+    errors::{EthStreamError, P2PStreamError},
+    message::EthBroadcastMessage,
+    DisconnectReason, EthVersion, NetworkPrimitives, P2PStream,
+};
 use reth_network_api::{Direction, PeerId};
-use std::{fmt, future::Future, pin::Pin, sync::Arc};
+use std::{fmt, future::Future, pin::Pin};
 use tokio::net::TcpStream;
 
 pub(crate) mod eth;
 
 /// A type alias for a future that resolves to a `PendingSessionEvent`.
-pub(crate) type ConnectionFut<C> = Pin<Box<dyn Future<Output = PendingSessionEvent<C>> + Send>>;
+pub(crate) type ConnectionFut<N: NetworkPrimitives, C> =
+    Pin<Box<dyn Future<Output = PendingSessionEvent<N, C>> + Send>>;
 
 /// This trait is responsible for handling the protocol negotiation and authentication.
 pub trait ProtocolHandler<N: NetworkPrimitives>:
     fmt::Debug + derive_more::Debug + Send + Sync + 'static
 {
     /// The type responsible for negotiating the protocol with the remote.
-    type ConnectionHandler: ConnectionHandler;
+    type ConnectionHandler: ConnectionHandler<N>;
 
     /// Invoked when a new incoming connection from the remote is requested
     ///
@@ -29,7 +35,7 @@ pub trait ProtocolHandler<N: NetworkPrimitives>:
         stream: TcpStream,
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
-    ) -> ConnectionFut<<Self::ConnectionHandler as ConnectionHandler>::Connection> {
+    ) -> ConnectionFut<N, <Self::ConnectionHandler as ConnectionHandler<N>>::Connection> {
         Box::pin(async move {
             Self::ConnectionHandler::into_connection(
                 stream,
@@ -51,7 +57,7 @@ pub trait ProtocolHandler<N: NetworkPrimitives>:
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
         remote_peer_id: PeerId,
-    ) -> ConnectionFut<<Self::ConnectionHandler as ConnectionHandler>::Connection> {
+    ) -> ConnectionFut<N, <Self::ConnectionHandler as ConnectionHandler<N>>::Connection> {
         Box::pin(async move {
             Self::ConnectionHandler::into_connection(
                 stream,
@@ -65,11 +71,11 @@ pub trait ProtocolHandler<N: NetworkPrimitives>:
 }
 
 /// A trait responsible to handle authentication and initialization of a p2p connection.
-pub trait ConnectionHandler: Send + Sync + 'static {
+pub trait ConnectionHandler<N: NetworkPrimitives>: Send + Sync + 'static {
     /// A connection resolves to a `PendingSessionEvent`.
-    type ConnectionFut: Future<Output = PendingSessionEvent<Self::Connection>> + Send + 'static;
+    type ConnectionFut: Future<Output = PendingSessionEvent<N, Self::Connection>> + Send + 'static;
 
-    type Connection: ConnectionStream;
+    type Connection: ConnectionStream<N>;
 
     /// Invoked when a new connection needs to be established, from either an incoming or outgoing
     /// connection.
@@ -82,74 +88,29 @@ pub trait ConnectionHandler: Send + Sync + 'static {
 }
 
 /// This trait is responsible to abstract the underlying connection stream.
-pub trait ConnectionStream: Stream + Debug + Send + Unpin + 'static {
+pub trait ConnectionStream<N: NetworkPrimitives>: Stream + Debug + Send + Unpin + 'static {
+    type Message;
     /// Returns the negotiated ETH version.
     fn version(&self) -> EthVersion;
 
     /// Consumes the connection and returns the inner stream.
     fn into_inner(self) -> P2PStream<ECIESStream<TcpStream>>;
-}
 
-/// A dynamically-dispatchable Ethereum protocol handler.
-pub trait DynProtocolHandler<N: NetworkPrimitives, C: ConnectionStream>:
-    fmt::Debug + Send + Sync + 'static
-{
-    /// Handles an incoming connection.
-    fn on_incoming(
-        &self,
-        stream: TcpStream,
-        session_info: SessionInfo,
-        handshake_info: HandshakeInfo,
-    ) -> ConnectionFut<C>;
+    /// Returns the inner stream.
+    fn inner_mut(&mut self) -> &mut P2PStream<ECIESStream<TcpStream>>;
 
-    /// Handles an outgoing connection.
-    fn on_outgoing(
-        &self,
-        stream: TcpStream,
-        session_info: SessionInfo,
-        handshake_info: HandshakeInfo,
-        remote_peer_id: PeerId,
-    ) -> ConnectionFut<C>;
-}
+    /// Returns `true` if the connection is about to disconnect.
+    fn is_disconnecting(&self) -> bool;
 
-impl<N: NetworkPrimitives, T>
-    DynProtocolHandler<N, <T::ConnectionHandler as ConnectionHandler>::Connection> for T
-where
-    T: ProtocolHandler<N> + Send + Sync + 'static,
-{
-    fn on_incoming(
-        &self,
-        stream: TcpStream,
-        session_info: SessionInfo,
-        handshake_info: HandshakeInfo,
-    ) -> ConnectionFut<<T::ConnectionHandler as ConnectionHandler>::Connection> {
-        T::on_incoming(self, stream, session_info, handshake_info)
-    }
+    /// Starts the disconnect process.
+    fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError>;
 
-    fn on_outgoing(
-        &self,
-        stream: TcpStream,
-        session_info: SessionInfo,
-        handshake_info: HandshakeInfo,
-        remote_peer_id: PeerId,
-    ) -> ConnectionFut<<T::ConnectionHandler as ConnectionHandler>::Connection> {
-        T::on_outgoing(self, stream, session_info, handshake_info, remote_peer_id)
-    }
-}
+    /// Returns a sink for the connection.
+    fn as_sink(&mut self) -> Pin<Box<dyn Sink<Self::Message, Error = EthStreamError> + '_>>;
 
-pub trait IntoProtocol<N: NetworkPrimitives, C: ConnectionStream> {
-    fn into_protocol(self) -> Arc<dyn DynProtocolHandler<N, C>>;
-}
+    /// Starts send broadcast.
+    fn start_send_broadcast(&mut self, msg: EthBroadcastMessage<N>) -> Result<(), EthStreamError>;
 
-impl<N: NetworkPrimitives, T>
-    IntoProtocol<N, <T::ConnectionHandler as ConnectionHandler>::Connection> for T
-where
-    T: ProtocolHandler<N> + Send + Sync + 'static,
-{
-    fn into_protocol(
-        self,
-    ) -> Arc<dyn DynProtocolHandler<N, <T::ConnectionHandler as ConnectionHandler>::Connection>>
-    {
-        Arc::new(self)
-    }
+    /// Starts send raw.
+    fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError>;
 }

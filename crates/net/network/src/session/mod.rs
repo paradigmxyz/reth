@@ -99,13 +99,15 @@ pub struct SessionManager<N: NetworkPrimitives, P: ProtocolHandler<N>> {
     /// get a clone of this sender half.
     pending_sessions_tx: mpsc::Sender<
         PendingSessionEvent<
-            <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler>::Connection,
+            N,
+            <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
         >,
     >,
     /// Receiver half that listens for [`PendingSessionEvent`] produced by pending sessions.
     pending_session_rx: ReceiverStream<
         PendingSessionEvent<
-            <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler>::Connection,
+            N,
+            <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
         >,
     >,
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
@@ -237,7 +239,8 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> SessionManager<N, P> {
         disconnect_rx: oneshot::Receiver<()>,
         events: mpsc::Sender<
             PendingSessionEvent<
-                <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler>::Connection,
+                N,
+                <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
             >,
         >,
         stream: TcpStream,
@@ -269,7 +272,8 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> SessionManager<N, P> {
         disconnect_rx: oneshot::Receiver<()>,
         events: mpsc::Sender<
             PendingSessionEvent<
-                <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler>::Connection,
+                N,
+                <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
             >,
         >,
         handshake_info: HandshakeInfo,
@@ -584,6 +588,7 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> SessionManager<N, P> {
                 status,
                 direction,
                 client_id,
+                ..
             } => {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
@@ -897,12 +902,12 @@ impl PendingSessionHandshakeError {
 pub struct ExceedsSessionLimit(pub(crate) u32);
 
 /// Starts a pending session authentication with a timeout.
-pub(crate) async fn pending_session_with_timeout<F, C: ConnectionStream>(
+pub(crate) async fn pending_session_with_timeout<N: NetworkPrimitives, F, C: ConnectionStream<N>>(
     timeout: Duration,
     session_id: SessionId,
     remote_addr: SocketAddr,
     direction: Direction,
-    events: mpsc::Sender<PendingSessionEvent<C>>,
+    events: mpsc::Sender<PendingSessionEvent<N, C>>,
     f: F,
 ) where
     F: Future<Output = ()>,

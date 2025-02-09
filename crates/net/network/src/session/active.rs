@@ -26,7 +26,7 @@ use reth_eth_wire::{
     capability::RawCapabilityMessage,
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
+    Capabilities, DisconnectReason, EthMessage, NetworkPrimitives,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
@@ -77,11 +77,11 @@ const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 ///    - incoming requests/broadcasts _from remote_ via the connection
 ///    - responses for handled ETH requests received from the remote peer.
 #[allow(dead_code)]
-pub(crate) struct ActiveSession<N: NetworkPrimitives, Conn: ConnectionStream> {
-    /// Keeps track of request ids.
-    pub(crate) next_id: u64,
+pub(crate) struct ActiveSession<N: NetworkPrimitives, Conn: ConnectionStream<N>> {
     /// The underlying connection.
     pub(crate) conn: Conn,
+    /// Keeps track of request ids.
+    pub(crate) next_id: u64,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -116,10 +116,10 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives, Conn: ConnectionStream> {
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
 }
 
-impl<N: NetworkPrimitives, Conn: ConnectionStream> ActiveSession<N, Conn> {
+impl<N: NetworkPrimitives, Conn: ConnectionStream<N>> ActiveSession<N, Conn> {
     /// Returns `true` if the session is currently in the process of disconnecting
     fn is_disconnecting(&self) -> bool {
-        self.conn.inner().is_disconnecting()
+        self.conn.is_disconnecting()
     }
 
     /// Returns the next request id
@@ -408,7 +408,7 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream> ActiveSession<N, Conn> {
 
     /// Starts the disconnect process
     fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
-        Ok(self.conn.inner_mut().start_disconnect(reason)?)
+        Ok(self.conn.start_disconnect(reason)?)
     }
 
     /// Flushes the disconnect message and emits the corresponding message
@@ -416,7 +416,7 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream> ActiveSession<N, Conn> {
         debug_assert!(self.is_disconnecting(), "not disconnecting");
 
         // try to close the flush out the remaining Disconnect message
-        let _ = ready!(self.conn.poll_close_unpin(cx));
+        let _ = ready!(self.conn.inner_mut().poll_close_unpin(cx));
         self.emit_disconnect(cx)
     }
 
@@ -488,7 +488,7 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream> ActiveSession<N, Conn> {
     }
 }
 
-impl<N: NetworkPrimitives, Conn: ConnectionStream> Future for ActiveSession<N, Conn> {
+impl<N: NetworkPrimitives, Conn: ConnectionStream<N>> Future for ActiveSession<N, Conn> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -569,11 +569,11 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream> Future for ActiveSession<N, C
             }
 
             // Send messages by advancing the sink and queuing in buffered messages
-            while this.conn.poll_ready_unpin(cx).is_ready() {
+            while this.conn.as_sink().poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.queued_outgoing.pop_front() {
                     progress = true;
                     let res = match msg {
-                        OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
+                        OutgoingMessage::Eth(msg) => this.conn.as_sink().start_send_unpin(msg),
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                         OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
                     };
