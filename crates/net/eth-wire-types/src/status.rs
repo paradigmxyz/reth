@@ -242,28 +242,6 @@ pub struct StatusEth69 {
     pub forkid: ForkId,
 }
 
-impl StatusEth69 {
-    /// Helper for returning a builder for the status message.
-    pub fn builder() -> StatusEth69Builder {
-        Default::default()
-    }
-
-    /// Create a [`StatusEth69Builder`] from the given [`EthChainSpec`] and head block.
-    ///
-    /// Sets the `chain` and `genesis`, `blockhash`, and `forkid` fields based on the
-    /// [`EthChainSpec`] and head.
-    pub fn spec_builder<Spec>(spec: Spec, head: &Head) -> StatusEth69Builder
-    where
-        Spec: EthChainSpec + Hardforks,
-    {
-        Self::builder()
-            .chain(spec.chain())
-            .genesis(spec.genesis_hash())
-            .blockhash(head.hash)
-            .forkid(spec.fork_id(head))
-    }
-}
-
 impl Display for StatusEth69 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let hexed_blockhash = hex::encode(self.blockhash);
@@ -307,81 +285,19 @@ impl Debug for StatusEth69 {
 // <https://etherscan.io/block/0>
 impl Default for StatusEth69 {
     fn default() -> Self {
-        let mainnet_genesis = MAINNET.genesis_hash();
+        Status::default().into()
+    }
+}
+
+impl From<Status> for StatusEth69 {
+    fn from(status: Status) -> Self {
         Self {
             version: EthVersion::Eth69,
-            chain: Chain::from_named(NamedChain::Mainnet),
-            blockhash: mainnet_genesis,
-            genesis: mainnet_genesis,
-            forkid: MAINNET
-                .hardfork_fork_id(EthereumHardfork::Frontier)
-                .expect("The Frontier hardfork should always exist"),
+            chain: status.chain,
+            blockhash: status.blockhash,
+            genesis: status.genesis,
+            forkid: status.forkid,
         }
-    }
-}
-
-/// Builder for [`StatusEth69`] messages.
-///
-/// # Example
-/// ```
-/// use alloy_consensus::constants::MAINNET_GENESIS_HASH;
-/// use alloy_primitives::{B256, U256};
-/// use reth_chainspec::{Chain, EthereumHardfork, MAINNET};
-/// use reth_eth_wire_types::{EthVersion, StatusEth69};
-///
-/// // this is just an example status message!
-/// let status = StatusEth69::builder()
-///     .chain(Chain::mainnet())
-///     .blockhash(B256::from(MAINNET_GENESIS_HASH))
-///     .genesis(B256::from(MAINNET_GENESIS_HASH))
-///     .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Paris).unwrap())
-///     .build();
-///
-/// assert_eq!(
-///     status,
-///     StatusEth69 {
-///         version: EthVersion::Eth69,
-///         chain: Chain::mainnet(),
-///         blockhash: B256::from(MAINNET_GENESIS_HASH),
-///         genesis: B256::from(MAINNET_GENESIS_HASH),
-///         forkid: MAINNET.hardfork_fork_id(EthereumHardfork::Paris).unwrap(),
-///     }
-/// );
-/// ```
-#[derive(Debug, Default)]
-pub struct StatusEth69Builder {
-    status: StatusEth69,
-}
-
-impl StatusEth69Builder {
-    /// Consumes the type and creates the actual [`StatusEth69`] message.
-    pub const fn build(mut self) -> StatusEth69 {
-        self.status.version = EthVersion::Eth69;
-        self.status
-    }
-
-    /// Sets the chain id.
-    pub const fn chain(mut self, chain: Chain) -> Self {
-        self.status.chain = chain;
-        self
-    }
-
-    /// Sets the block hash.
-    pub const fn blockhash(mut self, blockhash: B256) -> Self {
-        self.status.blockhash = blockhash;
-        self
-    }
-
-    /// Sets the genesis hash.
-    pub const fn genesis(mut self, genesis: B256) -> Self {
-        self.status.genesis = genesis;
-        self
-    }
-
-    /// Sets the fork id.
-    pub const fn forkid(mut self, forkid: ForkId) -> Self {
-        self.status.forkid = forkid;
-        self
     }
 }
 
@@ -436,6 +352,33 @@ mod tests {
     }
 
     #[test]
+    fn test_status_to_statuseth69_conversion() {
+        let status = StatusEth69 {
+            version: EthVersion::Eth69,
+            chain: Chain::from_named(NamedChain::Mainnet),
+            blockhash: B256::from_str(
+                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
+            )
+            .unwrap(),
+            genesis: MAINNET_GENESIS_HASH,
+            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+        };
+        let status_converted: StatusEth69 = Status {
+            version: EthVersion::Eth69,
+            chain: Chain::from_named(NamedChain::Mainnet),
+            total_difficulty: U256::from(36206751599115524359527u128),
+            blockhash: B256::from_str(
+                "feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d",
+            )
+            .unwrap(),
+            genesis: MAINNET_GENESIS_HASH,
+            forkid: ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 },
+        }
+        .into();
+        assert_eq!(status, status_converted);
+    }
+
+    #[test]
     fn encode_eth69_status_message() {
         let expected = hex!("f84b4501a0feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13da0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3c684b715077d80");
         let status = StatusEth69 {
@@ -453,7 +396,7 @@ mod tests {
         status.encode(&mut rlp_status);
         assert_eq!(rlp_status, expected);
 
-        let status = StatusEth69::builder()
+        let status: StatusEth69 = Status::builder()
             .chain(Chain::from_named(NamedChain::Mainnet))
             .blockhash(
                 B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
@@ -461,7 +404,8 @@ mod tests {
             )
             .genesis(MAINNET_GENESIS_HASH)
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
-            .build();
+            .build()
+            .into();
         let mut rlp_status = vec![];
         status.encode(&mut rlp_status);
         assert_eq!(rlp_status, expected);
