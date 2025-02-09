@@ -3,7 +3,7 @@
 use crate::{
     error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
-    protocol::{eth::EthProtocol, ProtocolHandler},
+    protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
@@ -36,10 +36,10 @@ pub fn rng_secret_key() -> SecretKey {
 pub struct NetworkConfig<
     C,
     N: NetworkPrimitives = EthNetworkPrimitives,
-    P: ProtocolHandler<N> = EthProtocol,
+    P: NetworkProtocolHandler<N> = EthNetworkProtocol,
 > {
     /// The Ethereum protocol handler
-    pub eth_protocol_handler: Option<Arc<P>>,
+    pub eth_protocol_handler: Arc<P>,
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
@@ -94,7 +94,7 @@ pub struct NetworkConfig<
 
 // === impl NetworkConfig ===
 
-impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkConfig<(), N, P> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkConfig<(), N, P> {
     /// Convenience method for creating the corresponding builder type
     pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder<N, P> {
         NetworkConfigBuilder::new(secret_key)
@@ -106,7 +106,7 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkConfig<(), N, P> {
     }
 }
 
-impl<C, N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkConfig<C, N, P> {
+impl<C, N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkConfig<C, N, P> {
     /// Create a new instance with all mandatory fields set, rest is field with defaults.
     pub fn new(client: C, secret_key: SecretKey) -> Self
     where
@@ -141,7 +141,7 @@ impl<C, N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkConfig<C, N, P> {
     }
 }
 
-impl<C, N, P: ProtocolHandler<N>> NetworkConfig<C, N, P>
+impl<C, N, P: NetworkProtocolHandler<N>> NetworkConfig<C, N, P>
 where
     C: BlockNumReader + 'static,
     N: NetworkPrimitives,
@@ -152,7 +152,7 @@ where
     }
 }
 
-impl<C, N, P: ProtocolHandler<N>> NetworkConfig<C, N, P>
+impl<C, N, P: NetworkProtocolHandler<N>> NetworkConfig<C, N, P>
 where
     N: NetworkPrimitives,
     C: BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
@@ -177,7 +177,7 @@ where
 #[derive(Debug)]
 pub struct NetworkConfigBuilder<
     N: NetworkPrimitives = EthNetworkPrimitives,
-    P: ProtocolHandler<N> = EthProtocol,
+    P: NetworkProtocolHandler<N> = EthNetworkProtocol,
 > {
     /// The Ethereum protocol handler
     eth_protocol_handler: Option<Arc<P>>,
@@ -223,7 +223,7 @@ pub struct NetworkConfigBuilder<
 // === impl NetworkConfigBuilder ===
 
 #[allow(missing_docs)]
-impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkConfigBuilder<N, P> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkConfigBuilder<N, P> {
     /// Create a new builder instance with a random secret key.
     pub fn with_rng_secret_key() -> Self {
         Self::new(rng_secret_key())
@@ -615,6 +615,8 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkConfigBuilder<N, P> {
             }
         }
 
+        let eth_protocol_handler = eth_protocol_handler.expect("eth protocol handler is required");
+
         NetworkConfig {
             client,
             secret_key,
@@ -633,7 +635,7 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkConfigBuilder<N, P> {
             status,
             hello_message,
             extra_protocols,
-            eth_protocol_handler: Some(eth_protocol_handler.unwrap()),
+            eth_protocol_handler,
             fork_filter,
             tx_gossip_disabled,
             transactions_manager_config,

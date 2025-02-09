@@ -28,7 +28,7 @@ use crate::{
     network::{NetworkHandle, NetworkHandleMessage},
     peers::PeersManager,
     poll_nested_stream_with_budget,
-    protocol::{eth::EthProtocol, ProtocolHandler},
+    protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     session::SessionManager,
     state::NetworkState,
     subprotocol::IntoRlpxSubProtocol,
@@ -103,7 +103,7 @@ use tracing::{debug, error, trace, warn};
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<
     N: NetworkPrimitives = EthNetworkPrimitives,
-    P: ProtocolHandler<N> = EthProtocol,
+    P: NetworkProtocolHandler<N> = EthNetworkProtocol,
 > {
     /// The type that manages the actual network part, which includes connections.
     swarm: Swarm<N, P>,
@@ -156,13 +156,13 @@ impl NetworkManager {
     /// # }
     /// ```
     pub async fn eth<C: BlockNumReader + 'static>(
-        config: NetworkConfig<C, EthNetworkPrimitives, EthProtocol>,
+        config: NetworkConfig<C, EthNetworkPrimitives, EthNetworkProtocol>,
     ) -> Result<Self, NetworkError> {
         Self::new(config).await
     }
 }
 
-impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkManager<N, P> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkManager<N, P> {
     /// Sets the dedicated channel for events indented for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>) {
@@ -287,7 +287,7 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkManager<N, P> {
             hello_message,
             fork_filter,
             extra_protocols,
-            eth_protocol_handler.unwrap(),
+            eth_protocol_handler,
         );
 
         let state = NetworkState::new(
@@ -1021,7 +1021,7 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkManager<N, P> {
     }
 }
 
-impl<N: NetworkPrimitives, P: ProtocolHandler<N>> Future for NetworkManager<N, P> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> Future for NetworkManager<N, P> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

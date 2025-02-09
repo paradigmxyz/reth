@@ -26,7 +26,7 @@ use std::{
 use crate::{
     message::PeerMessage,
     metrics::SessionManagerMetrics,
-    protocol::{ConnectionHandler, ConnectionStream, ProtocolHandler},
+    protocol::{ConnectionHandler, ConnectionStream, NetworkProtocolHandler},
     session::active::ActiveSession,
     subprotocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols},
 };
@@ -61,7 +61,7 @@ pub struct SessionId(usize);
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
 #[derive(Debug)]
-pub struct SessionManager<N: NetworkPrimitives, P: ProtocolHandler<N>> {
+pub struct SessionManager<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> {
     /// Tracks the identifier for the next session.
     next_id: usize,
     /// Keeps track of all sessions
@@ -100,14 +100,14 @@ pub struct SessionManager<N: NetworkPrimitives, P: ProtocolHandler<N>> {
     pending_sessions_tx: mpsc::Sender<
         PendingSessionEvent<
             N,
-            <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
+            <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
         >,
     >,
     /// Receiver half that listens for [`PendingSessionEvent`] produced by pending sessions.
     pending_session_rx: ReceiverStream<
         PendingSessionEvent<
             N,
-            <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
+            <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
         >,
     >,
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
@@ -127,7 +127,7 @@ pub struct SessionManager<N: NetworkPrimitives, P: ProtocolHandler<N>> {
 
 // === impl SessionManager ===
 
-impl<N: NetworkPrimitives, P: ProtocolHandler<N>> SessionManager<N, P> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> SessionManager<N, P> {
     /// Creates a new empty [`SessionManager`].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -240,7 +240,7 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> SessionManager<N, P> {
         events: mpsc::Sender<
             PendingSessionEvent<
                 N,
-                <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
+                <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
             >,
         >,
         stream: TcpStream,
@@ -273,7 +273,7 @@ impl<N: NetworkPrimitives, P: ProtocolHandler<N>> SessionManager<N, P> {
         events: mpsc::Sender<
             PendingSessionEvent<
                 N,
-                <<P as ProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
+                <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
             >,
         >,
         handshake_info: HandshakeInfo,
@@ -926,7 +926,7 @@ pub(crate) async fn pending_session_with_timeout<N: NetworkPrimitives, F, C: Con
 
 /// Returns an [`ECIESStream`] if it can be built. If not, send a
 /// [`PendingSessionEvent::EciesAuthError`] and returns `None`
-pub async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
+pub(crate) async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
     stream: Io,
     secret_key: SecretKey,
     direction: Direction,

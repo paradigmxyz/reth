@@ -2,7 +2,7 @@
 
 use crate::{
     eth_requests::EthRequestHandler,
-    protocol::{eth::EthProtocol, ProtocolHandler},
+    protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     transactions::{TransactionsManager, TransactionsManagerConfig},
     NetworkHandle, NetworkManager,
 };
@@ -21,7 +21,7 @@ pub struct NetworkBuilder<
     Tx,
     Eth,
     N: NetworkPrimitives = EthNetworkPrimitives,
-    P: ProtocolHandler<N> = EthProtocol,
+    P: NetworkProtocolHandler<N> = EthNetworkProtocol,
 > {
     pub(crate) network: NetworkManager<N, P>,
     pub(crate) transactions: Tx,
@@ -30,7 +30,7 @@ pub struct NetworkBuilder<
 
 // === impl NetworkBuilder ===
 
-impl<Tx, Eth, N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkBuilder<Tx, Eth, N, P> {
+impl<Tx, Eth, N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkBuilder<Tx, Eth, N, P> {
     /// Consumes the type and returns all fields.
     pub fn split(self) -> (NetworkManager<N, P>, Tx, Eth) {
         let Self { network, transactions, request_handler } = self;
