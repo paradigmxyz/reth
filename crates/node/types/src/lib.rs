@@ -25,7 +25,7 @@ use reth_trie_db::StateCommitment;
 /// This includes the primitive types of a node and chain specification.
 ///
 /// This trait is intended to be stateless and only define the types of the node.
-pub trait NodeTypes: Send + Sync + Unpin + 'static {
+pub trait NodeTypes: Clone + Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The type used for configuration of the EVM.
@@ -79,7 +79,7 @@ impl<Types, DB> Clone for NodeTypesWithDBAdapter<Types, DB> {
 
 impl<Types, DB> NodeTypes for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypes,
+    Types: NodeTypes + Clone,
     DB: Send + Sync + Unpin + 'static,
 {
     type Primitives = Types::Primitives;
@@ -90,7 +90,7 @@ where
 
 impl<Types, DB> NodeTypesWithEngine for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypesWithEngine,
+    Types: NodeTypesWithEngine + Clone,
     DB: Send + Sync + Unpin + 'static,
 {
     type Engine = Types::Engine;
@@ -98,14 +98,14 @@ where
 
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypes,
+    Types: NodeTypes + Clone,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     type DB = DB;
 }
 
 /// A [`NodeTypes`] type builder.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AnyNodeTypes<P = (), C = (), SC = (), S = ()>(
     PhantomData<P>,
     PhantomData<C>,
@@ -148,11 +148,11 @@ impl<P, C, SC, S> AnyNodeTypes<P, C, SC, S> {
 
 impl<P, C, SC, S> NodeTypes for AnyNodeTypes<P, C, SC, S>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static,
-    C: EthChainSpec<Header = P::BlockHeader> + 'static,
-    SC: StateCommitment,
-    S: Default + Send + Sync + Unpin + Debug + 'static,
-{
+    P: NodePrimitives + Send + Sync + Unpin + 'static + Clone,
+    C: EthChainSpec<Header = P::BlockHeader> + 'static + Clone,
+    SC: StateCommitment + Clone,
+    S: Default + Send + Sync + Unpin + Debug + 'static + Clone,
+    {
     type Primitives = P;
     type ChainSpec = C;
     type StateCommitment = SC;
@@ -160,7 +160,7 @@ where
 }
 
 /// A [`NodeTypesWithEngine`] type builder.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AnyNodeTypesWithEngine<P = (), E = (), C = (), SC = (), S = ()> {
     /// Embedding the basic node types.
     _base: AnyNodeTypes<P, C, SC, S>,
@@ -208,11 +208,11 @@ impl<P, E, C, SC, S> AnyNodeTypesWithEngine<P, E, C, SC, S> {
 
 impl<P, E, C, SC, S> NodeTypes for AnyNodeTypesWithEngine<P, E, C, SC, S>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static,
-    E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec<Header = P::BlockHeader> + 'static,
-    SC: StateCommitment,
-    S: Default + Send + Sync + Unpin + Debug + 'static,
+    P: NodePrimitives + Send + Sync + Unpin + 'static + Clone,
+    E: EngineTypes + Send + Sync + Unpin + Clone,
+    C: EthChainSpec<Header = P::BlockHeader> + 'static + Clone,
+    SC: StateCommitment + Clone,
+    S: Default + Send + Sync + Unpin + Debug + 'static + Clone,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -222,11 +222,11 @@ where
 
 impl<P, E, C, SC, S> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C, SC, S>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static,
-    E: EngineTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin,
-    C: EthChainSpec<Header = P::BlockHeader> + 'static,
-    SC: StateCommitment,
-    S: Default + Send + Sync + Unpin + Debug + 'static,
+    P: NodePrimitives + Send + Sync + Unpin + 'static + Clone,
+    E: EngineTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin + Clone,
+    C: EthChainSpec<Header = P::BlockHeader> + 'static + Clone,
+    SC: StateCommitment + Clone,
+    S: Default + Send + Sync + Unpin + Debug + 'static + Clone,
 {
     type Engine = E;
 }
