@@ -4,10 +4,11 @@ use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     capability::RawCapabilityMessage,
-    errors::EthStreamError,
+    errors::{EthStreamError, P2PStreamError},
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
-    EthMessage, EthNetworkPrimitives, EthStream, EthVersion, NetworkPrimitives, P2PStream,
+    DisconnectP2P, DisconnectReason, EthMessage, EthNetworkPrimitives, EthStream, EthVersion,
+    NetworkPrimitives, P2PStream,
 };
 use std::{
     pin::Pin,
@@ -150,13 +151,39 @@ impl<N: NetworkPrimitives> Sink<EthMessage<N>> for EthRlpxConnection<N> {
     }
 }
 
-impl<N: NetworkPrimitives> ConnectionStream for EthRlpxConnection<N> {
+impl<N: NetworkPrimitives> ConnectionStream<N> for EthRlpxConnection<N> {
+    type Message = EthMessage<N>;
+
     fn version(&self) -> EthVersion {
         self.version()
     }
 
     fn into_inner(self) -> P2PStream<ECIESStream<TcpStream>> {
         self.into_inner()
+    }
+
+    fn is_disconnecting(&self) -> bool {
+        self.inner().is_disconnecting()
+    }
+
+    fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
+        self.inner_mut().start_disconnect(reason)
+    }
+
+    fn inner_mut(&mut self) -> &mut P2PStream<ECIESStream<TcpStream>> {
+        self.inner_mut()
+    }
+
+    fn as_sink(&mut self) -> Pin<Box<dyn Sink<EthMessage<N>, Error = EthStreamError> + '_>> {
+        Box::pin(self)
+    }
+
+    fn start_send_broadcast(&mut self, msg: EthBroadcastMessage<N>) -> Result<(), EthStreamError> {
+        self.start_send_broadcast(msg)
+    }
+
+    fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
+        self.start_send_raw(msg)
     }
 }
 

@@ -10,7 +10,7 @@ use reth_eth_wire::{
     UnauthedP2PStream,
 };
 use reth_network_api::Direction;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 use tokio::net::TcpStream;
 
 /// The Ethereum protocol handler.
@@ -23,9 +23,9 @@ impl<N: NetworkPrimitives> ProtocolHandler<N> for EthProtocol {
 
 pub(crate) struct EthConnection;
 
-impl ConnectionHandler for EthConnection {
-    type ConnectionFut = ConnectionFut<EthRlpxConnection>;
-    type Connection = EthRlpxConnection;
+impl<N: NetworkPrimitives> ConnectionHandler<N> for EthConnection {
+    type ConnectionFut = ConnectionFut<N, EthRlpxConnection<N>>;
+    type Connection = EthRlpxConnection<N>;
 
     fn into_connection(
         stream: TcpStream,
@@ -137,6 +137,7 @@ impl ConnectionHandler for EthConnection {
                 conn,
                 direction,
                 client_id: their_hello.client_version,
+                _phantom: PhantomData,
             }
         })
     }

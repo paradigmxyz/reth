@@ -13,7 +13,7 @@ use reth_eth_wire::{
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::PeerKind;
-use std::{io, net::SocketAddr, sync::Arc, time::Instant};
+use std::{io, marker::PhantomData, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{
     mpsc::{self, error::SendError},
     oneshot,
@@ -160,7 +160,7 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
 ///
 /// A session starts with a `Handshake`, followed by a `Hello` message which
 #[derive(Debug)]
-pub enum PendingSessionEvent<C: ConnectionStream> {
+pub enum PendingSessionEvent<N: NetworkPrimitives, C: ConnectionStream<N>> {
     /// Represents a successful `Hello` and `Status` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
     Established {
         /// An internal identifier for the established session
@@ -182,6 +182,7 @@ pub enum PendingSessionEvent<C: ConnectionStream> {
         direction: Direction,
         /// The remote node's user agent, usually containing the client name and version
         client_id: String,
+        _phantom: PhantomData<N>,
     },
     /// Handshake unsuccessful, session was disconnected.
     Disconnected {
