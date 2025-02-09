@@ -209,6 +209,7 @@ where
             config: ctx.node_config(),
             beacon_engine_handle: beacon_engine_handle.clone(),
             jwt_secret,
+            engine_events: event_sender.clone(),
         };
         let engine_payload_validator = add_ons.engine_validator(&add_ons_ctx).await?;
 
@@ -258,7 +259,7 @@ where
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
-            event_sender.clone().new_listener().map(Into::into),
+            event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
                 Either::Left(
@@ -271,7 +272,7 @@ where
             pruner_events.map(Into::into),
             static_file_producer_events.map(Into::into),
         );
-        let event_sender_clone = event_sender.clone();
+
         ctx.task_executor().spawn_critical(
             "events task",
             node::handle_events(
@@ -281,7 +282,7 @@ where
             ),
         );
 
-        let RpcHandle { rpc_server_handles, rpc_registry } =
+        let RpcHandle { rpc_server_handles, rpc_registry, engine_events } =
             add_ons.launch_add_ons(add_ons_ctx).await?;
 
         // TODO: migrate to devmode with https://github.com/paradigmxyz/reth/issues/10104
@@ -384,7 +385,7 @@ where
                                     };
                                     network_handle.update_status(head_block);
                                 }
-                                event_sender_clone.clone().notify(ev);
+                                event_sender.notify(ev);
                             }
                         }
                     }
@@ -405,8 +406,7 @@ where
             task_executor: ctx.task_executor().clone(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
-            add_ons_handle: RpcHandle { rpc_server_handles, rpc_registry },
-            event_sender: event_sender.clone(),
+            add_ons_handle: RpcHandle { rpc_server_handles, rpc_registry, engine_events },
         };
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;
