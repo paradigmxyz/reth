@@ -10,7 +10,7 @@ use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
-use reth_evm::execute::BasicBlockExecutorProvider;
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
@@ -19,13 +19,14 @@ use reth_node_builder::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{EngineValidatorBuilder, RpcAddOns, RpcHandle},
+    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
-use reth_rpc::{eth::core::EthApiFor, EthApi, ValidationApi};
+use reth_rpc::{eth::core::EthApiFor, ValidationApi};
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
 use reth_rpc_builder::config::RethRpcServerConfig;
+use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -33,6 +34,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
+use revm::primitives::TxEnv;
 use std::sync::Arc;
 
 /// Type configuration for a regular Ethereum node.
@@ -114,17 +116,31 @@ impl NodeTypesWithEngine for EthereumNode {
     type Engine = EthEngineTypes;
 }
 
-/// Add-ons w.r.t. ethereum.
+/// Add-ons w.r.t. l1 ethereum.
 #[derive(Debug)]
-pub struct EthhereumAddOns<N: FullNodeComponents> {
+pub struct EthereumAddOns<N: FullNodeComponents> {
     inner: RpcAddOns<N, EthApiFor<N>, EthereumEngineValidatorBuilder>,
 }
 
-impl<N> NodeAddOns<N> for EthhereumAddOns<N>
+impl<N: FullNodeComponents> Default for EthereumAddOns<N> {
+    fn default() -> Self {
+        Self { inner: Default::default() }
+    }
+}
+
+impl<N> NodeAddOns<N> for EthereumAddOns<N>
 where
-    N: FullNodeComponents<Types = EthereumNode, Evm = EthEvmConfig>,
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Engine = EthEngineTypes,
+        >,
+        Evm: ConfigureEvm<TxEnv = TxEnv>,
+    >,
+    EthApiError: FromEvmError<N::Evm>,
 {
-    type Handle = RpcHandle<N, EthApi<N::Provider, N::Pool, N::Network, N::Evm>>;
+    type Handle = RpcHandle<N, EthApiFor<N>>;
 
     async fn launch_add_ons(
         self,
@@ -152,17 +168,41 @@ where
     }
 }
 
-/// Add-ons w.r.t. l1 ethereum.
-pub type EthereumAddOns<N> = RpcAddOns<
-    N,
-    EthApi<
-        <N as FullNodeTypes>::Provider,
-        <N as FullNodeComponents>::Pool,
-        NetworkHandle,
-        <N as FullNodeComponents>::Evm,
+impl<N> RethRpcAddOns<N> for EthereumAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Engine = EthEngineTypes,
+        >,
+        Evm: ConfigureEvm<TxEnv = TxEnv>,
     >,
-    EthereumEngineValidatorBuilder,
->;
+    EthApiError: FromEvmError<N::Evm>,
+{
+    type EthApi = EthApiFor<N>;
+
+    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
+        self.inner.hooks_mut()
+    }
+}
+
+impl<N> EngineValidatorAddOn<N> for EthereumAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Engine = EthEngineTypes,
+        >,
+    >,
+{
+    type Validator = EthereumEngineValidator;
+
+    async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        EthereumEngineValidatorBuilder::default().build(ctx).await
+    }
+}
 
 impl<N> Node<N> for EthereumNode
 where

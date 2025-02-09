@@ -8180,6 +8180,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-builder",
  "reth-rpc-eth-api",
+ "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-tasks",
  "reth-tracing",
