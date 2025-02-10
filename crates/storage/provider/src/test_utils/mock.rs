@@ -182,7 +182,7 @@ impl ExtendedAccount {
 }
 
 /// Mock node.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct MockNode;
 
 impl NodeTypes for MockNode {

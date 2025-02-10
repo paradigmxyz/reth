@@ -152,7 +152,7 @@ where
     C: EthChainSpec<Header = P::BlockHeader> + 'static + Clone,
     SC: StateCommitment + Clone,
     S: Default + Send + Sync + Unpin + Debug + 'static + Clone,
-    {
+{
     type Primitives = P;
     type ChainSpec = C;
     type StateCommitment = SC;
