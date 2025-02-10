@@ -16,7 +16,7 @@ const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
 
 /// OP-Reth `Eth` API extensions implementation.
 ///
-/// Separate from [`OpEthApi`] to allow to enable it conditionally,
+/// Separate from [`super::OpEthApi`] to allow to enable it conditionally,
 #[derive(Clone)]
 #[allow(dead_code)]
 pub(crate) struct OpEthApiExt<N: OpNodeCore> {
