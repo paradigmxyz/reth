@@ -176,6 +176,10 @@ pub struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
+    /// Total number of account targets
+    account_targets: usize,
+    /// Total number of storage slot targets
+    storage_targets: usize,
     /// The time taken to calculate the proof.
     elapsed: Duration,
 }
@@ -394,19 +398,26 @@ where
         let thread_pool = self.thread_pool.clone();
 
         self.thread_pool.spawn(move || {
+            let account_targets = proof_targets.len();
+            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum();
+
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
                 ?proof_targets,
+                ?account_targets,
+                ?storage_targets,
                 "Starting multiproof calculation",
             );
             let start = Instant::now();
-            let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
+            let result = calculate_multiproof(thread_pool, config, proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
                 ?elapsed,
+                ?account_targets,
+                ?storage_targets,
                 "Multiproof calculated",
             );
 
@@ -419,6 +430,8 @@ where
                                 state: hashed_state_update,
                                 multiproof: proof,
                             },
+                            account_targets,
+                            storage_targets,
                             elapsed,
                         }),
                     ));
@@ -817,15 +830,10 @@ where
                             .record(proof_calculated.elapsed);
                         self.metrics
                             .proof_calculation_account_targets_histogram
-                            .record(proof_calculated.update.targets.len() as f64);
-                        self.metrics.proof_calculation_storage_targets_histogram.record(
-                            proof_calculated
-                                .update
-                                .targets
-                                .values()
-                                .map(|targets| targets.len() as f64)
-                                .sum::<f64>(),
-                        );
+                            .record(proof_calculated.account_targets as f64);
+                        self.metrics
+                            .proof_calculation_storage_targets_histogram
+                            .record(proof_calculated.storage_targets as f64);
 
                         debug!(
                             target: "engine::root",
@@ -1132,12 +1140,6 @@ where
     let elapsed = started_at.elapsed();
 
     Ok(elapsed)
-}
-
-fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProofTargets) {
-    for (address, slots) in other {
-        targets.entry(address).or_default().extend(slots);
-    }
 }
 
 fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
