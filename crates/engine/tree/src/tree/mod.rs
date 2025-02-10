@@ -42,8 +42,7 @@ use reth_evm::{
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_primitives_traits::{
-    Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-    SignedTransaction,
+    Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,

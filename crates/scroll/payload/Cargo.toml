@@ -27,7 +27,7 @@ futures-util = { workspace = true, optional = true }
 [features]
 scroll = [
     "reth-primitives-traits/scroll",
-    "reth-scroll-engine-primitives/scroll"
+    "reth-scroll-engine-primitives/scroll",
 ]
 optimism = ["reth-scroll-engine-primitives/optimism"]
 test-utils = [
@@ -35,5 +35,5 @@ test-utils = [
     "dep:reth-payload-builder",
     "reth-payload-builder/test-utils",
     "reth-primitives-traits/test-utils",
-    "reth-transaction-pool/test-utils"
+    "reth-transaction-pool/test-utils",
 ]

@@ -70,5 +70,5 @@ scroll = [
 optimism = [
     "reth-scroll-engine-primitives/optimism",
     "reth-scroll-node/optimism",
-    "reth-scroll-payload/optimism"
+    "reth-scroll-payload/optimism",
 ]
