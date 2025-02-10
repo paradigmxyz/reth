@@ -274,9 +274,8 @@ impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
-            ChainSpec = OpChainSpec,
+            ChainSpec: OpHardforks,
             Primitives = OpPrimitives,
-            Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
