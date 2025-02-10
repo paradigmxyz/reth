@@ -380,42 +380,56 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
             // Reveal the node itself.
             if let Some(account) = maybe_account {
-                let storage_trie_entry = self.storages.entry(account).or_default();
+                // Check that the path was not already revealed.
+                if self
+                    .revealed_storage_paths
+                    .get(&account)
+                    .is_none_or(|paths| !paths.contains(&path))
+                {
+                    let storage_trie_entry = self.storages.entry(account).or_default();
+                    if path.is_empty() {
+                        // Handle special storage state root node case.
+                        storage_trie_entry.reveal_root_with_provider(
+                            self.provider_factory.storage_node_provider(account),
+                            trie_node,
+                            None,
+                            None,
+                            self.retain_updates,
+                        )?;
+                    } else {
+                        // Reveal non-root storage trie node.
+                        storage_trie_entry
+                            .as_revealed_mut()
+                            .ok_or(SparseTrieErrorKind::Blind)?
+                            .reveal_node(path.clone(), trie_node, None, None)?;
+                    }
+
+                    // Track the revealed path.
+                    self.revealed_storage_paths.entry(account).or_default().insert(path);
+                }
+            }
+            // Check that the path was not already revealed.
+            else if !self.revealed_account_paths.contains(&path) {
                 if path.is_empty() {
-                    // Handle special storage state root node case.
-                    storage_trie_entry.reveal_root_with_provider(
-                        self.provider_factory.storage_node_provider(account),
+                    // Handle special state root node case.
+                    self.state.reveal_root_with_provider(
+                        self.provider_factory.account_node_provider(),
                         trie_node,
                         None,
                         None,
                         self.retain_updates,
                     )?;
                 } else {
-                    // Reveal non-root storage trie node.
-                    storage_trie_entry
-                        .as_revealed_mut()
-                        .ok_or(SparseTrieErrorKind::Blind)?
-                        .reveal_node(path.clone(), trie_node, None, None)?;
+                    // Reveal non-root state trie node.
+                    self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?.reveal_node(
+                        path.clone(),
+                        trie_node,
+                        None,
+                        None,
+                    )?;
                 }
-                self.revealed_storage_paths.entry(account).or_default().insert(path);
-            } else if path.is_empty() {
-                // Handle special state root node case.
-                self.state.reveal_root_with_provider(
-                    self.provider_factory.account_node_provider(),
-                    trie_node,
-                    None,
-                    None,
-                    self.retain_updates,
-                )?;
-                self.revealed_account_paths.insert(path);
-            } else {
-                // Reveal non-root state trie node.
-                self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?.reveal_node(
-                    path.clone(),
-                    trie_node,
-                    None,
-                    None,
-                )?;
+
+                // Track the revealed path.
                 self.revealed_account_paths.insert(path);
             }
         }
