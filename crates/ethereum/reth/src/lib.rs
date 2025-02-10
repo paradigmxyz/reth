@@ -77,7 +77,6 @@ pub mod node {
     pub use reth_node_ethereum::*;
 }
 
-
 /// Re-exported rpc types
 #[cfg(feature = "rpc")]
 pub mod rpc {
@@ -85,9 +84,9 @@ pub mod rpc {
     pub use reth_rpc::*;
 
     #[doc(inline)]
-    pub use reth_rpc_builder as builder;
-    #[doc(inline)]
     pub use reth_rpc_api as api;
+    #[doc(inline)]
+    pub use reth_rpc_builder as builder;
     #[doc(inline)]
     pub use reth_rpc_eth_types as eth;
 }
