@@ -352,6 +352,7 @@ impl OpAddOnsBuilder {
             rpc_add_ons: RpcAddOns::new(
                 move |ctx| OpEthApi::<N>::builder().with_sequencer(sequencer_client).build(ctx),
                 Default::default(),
+                Default::default(),
             ),
             da_config: da_config.unwrap_or_default(),
         }
