@@ -167,6 +167,7 @@ where
             .with_types_and_provider::<N, BlockchainProvider<_>>()
             .with_components(node.components_builder())
             .with_add_ons(node.add_ons())
+
             .launch_with_fn(|builder| {
                 let launcher = EngineNodeLauncher::new(
                     builder.task_executor().clone(),

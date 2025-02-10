@@ -2420,7 +2420,7 @@ where
         let cancel_execution = ManualCancel::default();
 
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
-            if is_descendant_of_persisting_blocks && !self.config.disable_state_root_task() {
+            if is_descendant_of_persisting_blocks && !self.config.legacy_state_root() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
                 // Compute trie input
@@ -2548,7 +2548,7 @@ where
         // a different database transaction per thread and it might end up with a
         // different view of the database.
         let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks {
-            if self.config.disable_state_root_task() {
+            if self.config.legacy_state_root() {
                 match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
                 {
                     Ok(result) => {
@@ -3339,7 +3339,7 @@ mod tests {
                 PersistenceState::default(),
                 payload_builder,
                 // TODO: fix tests for state root task https://github.com/paradigmxyz/reth/issues/14376
-                TreeConfig::default().with_disable_state_root_task(true),
+                TreeConfig::default().with_legacy_state_root(true),
                 EngineApiKind::Ethereum,
                 evm_config,
             );
