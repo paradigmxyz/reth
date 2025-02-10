@@ -37,6 +37,7 @@ members = [
     "crates/ethereum/node",
     "crates/ethereum/payload/",
     "crates/ethereum/primitives/",
+    "crates/ethereum/reth/",
     "crates/etl/",
     "crates/evm/",
     "crates/evm/execution-errors",
@@ -341,6 +342,7 @@ reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", 
 reth-ethereum-forks = { path = "crates/ethereum-forks", default-features = false }
 reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
+reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
