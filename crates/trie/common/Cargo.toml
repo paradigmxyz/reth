@@ -131,6 +131,7 @@ arbitrary = [
     "revm/arbitrary",
 ]
 rayon = ["dep:rayon"]
+scroll = ["revm/scroll"]
 
 [[bench]]
 name = "prefix_set"

@@ -7,8 +7,9 @@
 )]
 #![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
 // The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
+#![cfg(all(feature = "optimism", not(feature = "scroll")))]
 
 mod validator;
 pub use validator::{OpL1BlockInfo, OpTransactionValidator};

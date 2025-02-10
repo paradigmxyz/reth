@@ -14,10 +14,10 @@ use alloy_eips::eip2718::Decodable2718;
 use alloy_rlp::BufMut;
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-    ExecutionPayloadEnvelopeV4, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV2,
-    ExecutionPayloadV3, PayloadError,
+    ExecutionPayloadEnvelopeV4, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    PayloadError,
 };
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{EngineTypes, ExecutionData};
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives::{Block, BlockBody, Header};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
@@ -52,13 +52,16 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
+    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block())
+    ) -> ExecutionData {
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        ExecutionData { payload, sidecar }
     }
 }
 
@@ -79,18 +82,17 @@ impl PayloadTypes for ScrollPayloadTypes {
 /// [`PayloadError::ExtraData`] due to the Scroll blocks containing extra data for the Clique
 /// consensus.
 pub fn try_into_block<T: Decodable2718>(
-    value: ExecutionPayload,
-    sidecar: &ExecutionPayloadSidecar,
+    value: ExecutionData,
     chainspec: Arc<ScrollChainSpec>,
 ) -> Result<Block<T>, PayloadError> {
-    let mut block = match value {
+    let mut block = match value.payload {
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload, chainspec)?,
         ExecutionPayload::V2(payload) => try_payload_v2_to_block(payload, chainspec)?,
         ExecutionPayload::V3(payload) => try_payload_v3_to_block(payload, chainspec)?,
     };
 
-    block.header.parent_beacon_block_root = sidecar.parent_beacon_block_root();
-    block.header.requests_hash = sidecar.requests_hash();
+    block.header.parent_beacon_block_root = value.sidecar.parent_beacon_block_root();
+    block.header.requests_hash = value.sidecar.requests_hash();
 
     Ok(block)
 }
@@ -225,9 +227,10 @@ mod tests {
             block_hash: B256::random(),
             transactions: vec![],
         });
+        let execution_data = ExecutionData::new(execution_payload, Default::default());
 
         let _: Block<ScrollTransactionSigned> =
-            try_into_block(execution_payload, &Default::default(), SCROLL_MAINNET.clone())?;
+            try_into_block(execution_data, SCROLL_MAINNET.clone())?;
 
         Ok(())
     }
@@ -260,9 +263,10 @@ mod tests {
             },
             withdrawals: vec![],
         });
+        let execution_data = ExecutionData::new(execution_payload, Default::default());
 
         let _: Block<ScrollTransactionSigned> =
-            try_into_block(execution_payload, &Default::default(), SCROLL_MAINNET.clone())?;
+            try_into_block(execution_data, SCROLL_MAINNET.clone())?;
 
         Ok(())
     }
@@ -299,9 +303,10 @@ mod tests {
             blob_gas_used: 0,
             excess_blob_gas: 0,
         });
+        let execution_data = ExecutionData::new(execution_payload, Default::default());
 
         let _: Block<ScrollTransactionSigned> =
-            try_into_block(execution_payload, &Default::default(), SCROLL_MAINNET.clone())?;
+            try_into_block(execution_data, SCROLL_MAINNET.clone())?;
 
         Ok(())
     }

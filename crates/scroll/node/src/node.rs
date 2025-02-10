@@ -8,15 +8,12 @@ use crate::{
 use reth_node_builder::{
     components::ComponentsBuilder,
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
+    Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_scroll_chainspec::ScrollChainSpec;
-use reth_scroll_engine_primitives::{
-    ScrollBuiltPayload, ScrollEngineTypes, ScrollPayloadBuilderAttributes,
-};
+use reth_scroll_engine_primitives::ScrollEngineTypes;
 use reth_scroll_primitives::ScrollPrimitives;
 use reth_trie_db::MerklePatriciaTrie;
-use scroll_alloy_rpc_types_engine::ScrollPayloadAttributes;
 
 /// The Scroll node implementation.
 #[derive(Clone, Debug, Default)]
@@ -34,18 +31,17 @@ impl ScrollNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypes<ChainSpec = ScrollChainSpec, Primitives = ScrollPrimitives>,
-        >,
-        <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
-            BuiltPayload = ScrollBuiltPayload,
-            PayloadAttributes = ScrollPayloadAttributes,
-            PayloadBuilderAttributes = ScrollPayloadBuilderAttributes,
+            Types: NodeTypesWithEngine<
+                ChainSpec = ScrollChainSpec,
+                Primitives = ScrollPrimitives,
+                Engine = ScrollEngineTypes,
+            >,
         >,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(ScrollPoolBuilder)
-            .payload(ScrollPayloadBuilder)
+            .payload(ScrollPayloadBuilder::default())
             .network(ScrollNetworkBuilder)
             .executor(ScrollExecutorBuilder)
             .consensus(ScrollConsensusBuilder)

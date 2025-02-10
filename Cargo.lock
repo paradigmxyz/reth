@@ -9391,7 +9391,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-types",
- "reth-payload-builder",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
@@ -9417,8 +9416,13 @@ name = "reth-scroll-payload"
 version = "1.1.5"
 dependencies = [
  "futures-util",
+ "reth-basic-payload-builder",
  "reth-payload-builder",
  "reth-payload-primitives",
+ "reth-payload-util",
+ "reth-primitives-traits",
+ "reth-scroll-engine-primitives",
+ "reth-transaction-pool",
 ]
 
 [[package]]

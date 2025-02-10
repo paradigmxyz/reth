@@ -72,26 +72,6 @@ impl BuiltPayload for ScrollBuiltPayload {
     }
 }
 
-impl BuiltPayload for &ScrollBuiltPayload {
-    type Primitives = ScrollPrimitives;
-
-    fn block(&self) -> &SealedBlock<ScrollBlock> {
-        (**self).block()
-    }
-
-    fn fees(&self) -> U256 {
-        (**self).fees()
-    }
-
-    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<ScrollPrimitives>> {
-        Some(self.block.clone())
-    }
-
-    fn requests(&self) -> Option<Requests> {
-        None
-    }
-}
-
 // V1 engine_getPayloadV1 response
 impl From<ScrollBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: ScrollBuiltPayload) -> Self {

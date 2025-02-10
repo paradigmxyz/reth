@@ -23,7 +23,6 @@ reth-network.workspace = true
 reth-node-api.workspace = true
 reth-node-types.workspace = true
 reth-node-builder.workspace = true
-reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
@@ -64,6 +63,7 @@ optimism = [
     "reth-scroll-evm/optimism",
     "reth-scroll-rpc/optimism",
     "reth-scroll-engine-primitives/optimism",
+    "reth-scroll-payload/optimism",
     "revm/optimism",
 ]
 scroll = [
