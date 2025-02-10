@@ -13,7 +13,7 @@ use chainspec::CustomChainSpec;
 use engine::{CustomEngineTypes, CustomPayloadBuilder};
 use evm::CustomEvmConfig;
 use op_alloy_consensus::OpPooledTransaction;
-use reth_optimism_node::BasicOpReceiptBuilder;
+use reth_optimism_node::{BasicOpReceiptBuilder, OpNetworkPrimitives};
 use primitives::{Block, BlockBody, CustomHeader, CustomNodePrimitives};
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::execute::BasicBlockExecutorProvider;
@@ -57,28 +57,29 @@ impl NodeTypesWithEngine for CustomNode {
     type Engine = CustomEngineTypes;
 }
 
-// impl<N: FullNodeTypes<Types = Self>> Node<N> for CustomNode {
-//     type ComponentsBuilder = ComponentsBuilder<
-//         N,
-//         OpPoolBuilder,
-//         OpPayloadBuilder,
-//         OpNetworkBuilder,
-//         OpExecutorBuilder,
-//         OpConsensusBuilder,
-//     >;
+impl<N: FullNodeTypes<Types = Self>> Node<N> for CustomNode {
+    type ComponentsBuilder = ComponentsBuilder<
+        N,
+        OpPoolBuilder,
+        CustomPayloadServiceBuilder,
+        OpNetworkBuilder<CustomNetworkPrimitives>,
+        CustomExecutorBuilder,
+        OpConsensusBuilder,
+    >;
 
-//     type AddOns =
-//         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as
-// NodeComponentsBuilder<N>>::Components>>;
+    type AddOns =
+        OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as
+NodeComponentsBuilder<N>>::Components>>;
 
-//     fn components_builder(&self) -> Self::ComponentsBuilder {
-//         self.0.components()
-//     }
+    fn components_builder(&self) -> Self::ComponentsBuilder {
+        todo!()
+    }
 
-//     fn add_ons(&self) -> Self::AddOns {
-//         self.0.add_ons()
-//     }
-// }
+    fn add_ons(&self) -> Self::AddOns {
+        todo!()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 struct CustomNetworkPrimitives;
 
@@ -100,6 +101,7 @@ where
     }
 }
 
+#[derive(Debug, Clone, Default)]
 struct CustomExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for CustomExecutorBuilder
