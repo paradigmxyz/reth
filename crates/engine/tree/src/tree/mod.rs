@@ -2460,12 +2460,16 @@ where
                 (None, None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
             };
 
-        let (caches, cache_metrics) =
-            if let Some(cache) = self.take_latest_cache(block.parent_hash()) {
-                cache.split()
-            } else {
-                (ProviderCacheBuilder::default().build_caches(), CachedStateMetrics::zeroed())
-            };
+        let (caches, cache_metrics) = if let Some(cache) =
+            self.take_latest_cache(block.parent_hash())
+        {
+            cache.split()
+        } else {
+            (
+                ProviderCacheBuilder::default().build_caches(self.config.cross_block_cache_size()),
+                CachedStateMetrics::zeroed(),
+            )
+        };
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
