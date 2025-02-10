@@ -19,6 +19,8 @@ pub trait NetworkMessage<N: NetworkPrimitives>:
     /// Returns `true` if the message is a response.
     fn is_response(&self) -> bool;
 
+    // TODO: Split me into multiple Request and Response trait and extend this trait
+
     /// Creates a new `GetBlockHeaders` message.    
     fn get_block_headers(pair: RequestPair<GetBlockHeaders>) -> Self;
 
@@ -34,7 +36,6 @@ pub trait NetworkMessage<N: NetworkPrimitives>:
     /// Creates a new `GetReceipts` message.
     fn get_receipts(pair: RequestPair<GetReceipts>) -> Self;
 
-    // TODO: Split me into multiple Request and Response trait as associated type of this trait
     /// Creates a new `BlockHeaders` message.
     fn block_headers(pair: RequestPair<BlockHeaders<N::BlockHeader>>) -> Self;
 
