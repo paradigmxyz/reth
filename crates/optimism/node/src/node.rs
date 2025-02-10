@@ -13,7 +13,7 @@ use reth_evm::{
 };
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+    AddOnsContext, BlockTy, BodyTy, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives, PrimitivesTy, ReceiptTy, TxTy
 };
 use reth_node_builder::{
     components::{
@@ -43,8 +43,7 @@ use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
-    TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::TxEnv;
@@ -111,6 +110,7 @@ impl OpNode {
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
+                _marker: Default::default(),
             })
             .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
@@ -595,25 +595,27 @@ where
 
 /// A basic optimism network builder.
 #[derive(Debug, Default, Clone)]
-pub struct OpNetworkBuilder {
+pub struct OpNetworkBuilder<N = OpNetworkPrimitives> {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
     /// Disable discovery v4
     pub disable_discovery_v4: bool,
+    /// Marker for network primitives
+    _marker: core::marker::PhantomData<N>,
 }
 
-impl OpNetworkBuilder {
+impl<N: NetworkPrimitives> OpNetworkBuilder<N> {
     /// Returns the [`NetworkConfig`] that contains the settings to launch the p2p network.
     ///
     /// This applies the configured [`OpNetworkBuilder`] settings.
     pub fn network_config<Node>(
         &self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, OpNetworkPrimitives>>
+    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, N>>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
-        let Self { disable_txpool_gossip, disable_discovery_v4 } = self.clone();
+        let Self { disable_txpool_gossip, disable_discovery_v4, _marker: _ } = self.clone();
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?
@@ -650,18 +652,25 @@ impl OpNetworkBuilder {
     }
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
+impl<Node, Pool, N> NetworkBuilder<Node, Pool> for OpNetworkBuilder<N>
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     Pool: TransactionPool<
             Transaction: PoolTransaction<
                 Consensus = TxTy<Node::Types>,
-                Pooled = OpPooledTransaction,
             >,
         > + Unpin
         + 'static,
+    N: NetworkPrimitives<
+        Block = BlockTy<Node::Types>,
+        BlockHeader = HeaderTy<Node::Types>,
+        BlockBody = BodyTy<Node::Types>,
+        Receipt = ReceiptTy<Node::Types>,
+        BroadcastedTransaction = TxTy<Node::Types>,
+        PooledTransaction = PoolPooledTx<Pool>,
+    >,
 {
-    type Primitives = OpNetworkPrimitives;
+    type Primitives = N;
 
     async fn build_network(
         self,

@@ -7,7 +7,7 @@ use crate::{
     OpPayloadPrimitives,
 };
 use alloy_consensus::{
-    constants::EMPTY_WITHDRAWALS, Eip658Value, Header, Transaction, Typed2718,
+    constants::EMPTY_WITHDRAWALS, BlockHeader, Eip658Value, Header, Transaction, Typed2718,
     EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
@@ -146,6 +146,25 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
     pub const fn is_compute_pending_block(&self) -> bool {
         self.compute_pending_block
     }
+
+    /// Returns the configured [`EvmEnv`] for the targeted payload
+    /// (that has the `parent` as its parent).
+    pub fn evm_env(
+        &self,
+        attributes: &OpPayloadBuilderAttributes<N::SignedTx>,
+        parent: &N::BlockHeader,
+    ) -> Result<EvmEnv<EvmConfig::Spec>, EvmConfig::Error>
+    where
+        EvmConfig: ConfigureEvmFor<N>,
+    {
+        let next_attributes = NextBlockEnvAttributes {
+            timestamp: attributes.timestamp(),
+            suggested_fee_recipient: attributes.suggested_fee_recipient(),
+            prev_randao: attributes.prev_randao(),
+            gas_limit: attributes.gas_limit.unwrap_or(parent.gas_limit()),
+        };
+        self.evm_config.next_evm_env(parent, next_attributes)
+    }
 }
 
 impl<Pool, Client, EvmConfig, N, T> OpPayloadBuilder<Pool, Client, EvmConfig, N, T>
@@ -205,22 +224,6 @@ where
             builder.build(db, ctx)
         }
         .map(|out| out.with_cached_reads(cached_reads))
-    }
-
-    /// Returns the configured [`EvmEnv`] for the targeted payload
-    /// (that has the `parent` as its parent).
-    pub fn evm_env(
-        &self,
-        attributes: &OpPayloadBuilderAttributes<N::SignedTx>,
-        parent: &Header,
-    ) -> Result<EvmEnv<EvmConfig::Spec>, EvmConfig::Error> {
-        let next_attributes = NextBlockEnvAttributes {
-            timestamp: attributes.timestamp(),
-            suggested_fee_recipient: attributes.suggested_fee_recipient(),
-            prev_randao: attributes.prev_randao(),
-            gas_limit: attributes.gas_limit.unwrap_or(parent.gas_limit),
-        };
-        self.evm_config.next_evm_env(parent, next_attributes)
     }
 
     /// Computes the witness for the payload.
@@ -326,7 +329,8 @@ pub struct OpBuilder<'a, Txs> {
 }
 
 impl<'a, Txs> OpBuilder<'a, Txs> {
-    fn new(best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a) -> Self {
+    /// Creates a new [`OpBuilder`].
+    pub fn new(best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a) -> Self {
         Self { best: Box::new(best) }
     }
 }
@@ -347,7 +351,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         P: StorageRootProvider,
     {
         let Self { best } = self;
-        debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
+        debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number(), "building new payload");
 
         // 1. apply eip-4788 pre block contract call
         ctx.apply_pre_beacon_root_contract_call(state)?;
@@ -641,7 +645,7 @@ pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv, ChainSpec, N: NodePri
     /// The chainspec
     pub chain_spec: Arc<ChainSpec>,
     /// How to build the payload.
-    pub config: PayloadConfig<OpPayloadBuilderAttributes<N::SignedTx>>,
+    pub config: PayloadConfig<OpPayloadBuilderAttributes<N::SignedTx>, N::BlockHeader>,
     /// Evm Settings
     pub evm_env: EvmEnv<EvmConfig::Spec>,
     /// Marker to check whether the job has been cancelled.
@@ -659,7 +663,7 @@ where
     N: NodePrimitives,
 {
     /// Returns the parent block the payload will be build on.
-    pub fn parent(&self) -> &SealedHeader {
+    pub fn parent(&self) -> &SealedHeader<N::BlockHeader> {
         &self.config.parent_header
     }
 
