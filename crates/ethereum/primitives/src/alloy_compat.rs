@@ -8,10 +8,10 @@ use alloy_rpc_types_eth::Transaction as AlloyRpcTransaction;
 use alloy_serde::WithOtherFields;
 
 impl TryFrom<AnyRpcTransaction> for TransactionSigned {
-    type Error = alloy_rpc_types::ConversionError;
+    type Error = alloy_rpc_types_eth::ConversionError;
 
     fn try_from(tx: AnyRpcTransaction) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
+        use alloy_rpc_types_eth::ConversionError;
 
         let WithOtherFields { inner: tx, other: _ } = tx;
 
