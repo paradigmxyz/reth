@@ -8,7 +8,7 @@ use std::sync::{
 use alloy_primitives::hex;
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use reqwest::Client;
-use serde_json::json;
+use serde_json::{json, Value};
 use tracing::warn;
 
 use crate::SequencerClientError;
@@ -51,74 +51,50 @@ impl SequencerClient {
         self.inner.id.fetch_add(1, atomic::Ordering::SeqCst)
     }
 
-    /// Forwards a transaction to the sequencer endpoint.
-    pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerClientError> {
-        let body = serde_json::to_string(&json!({
-            "jsonrpc": "2.0",
-            "method": "eth_sendRawTransaction",
-            "params": [format!("0x{}", hex::encode(tx))],
+    /// Helper function to get body of the request
+    fn body_rpc(&self, method: &str, params: Value) -> Value {
+        json!({
+                "jsonrpc": "2.0",
+            "method": method,
+            "params": params,
             "id": self.next_request_id()
-        }))
-        .map_err(|_| {
-            warn!(
-                target = "rpc::eth",
-                "Failed to serialize transaction for forwarding to sequencer"
-            );
-            SequencerClientError::InvalidSequencerTransaction
-        })?;
+        })
+    }
 
+    /// Sends a POST request to the sequencer endpoint.
+    async fn post_request(
+        &self,
+        body: String,
+        error_message: &str,
+    ) -> Result<(), SequencerClientError> {
         self.http_client()
             .post(self.endpoint())
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body)
             .send()
             .await
-            .inspect_err(|err| {
-                warn!(
-                    target = "rpc::eth",
-                    %err,
-                    "Failed to forward transaction to sequencer",
-                );
+            .inspect_err(|_| {
+                warn!("{}", error_message);
             })?;
-
         Ok(())
     }
-
     /// Forwards a transaction conditional to the sequencer endpoint.
     pub async fn forward_raw_transaction_conditional(
         &self,
         tx: &[u8],
         condition: TransactionConditional,
     ) -> Result<(), SequencerClientError> {
-        let body = serde_json::to_string(&json!({
-            "jsonrpc": "2.0",
-            "method": "eth_sendRawTransactionConditional",
-            "params": [format!("0x{}", hex::encode(tx)), condition],
-            "id": self.next_request_id()
-        }))
-        .map_err(|_| {
+        let params = json!([format!("0x{}", hex::encode(tx)), condition]);
+        let body = self.body_rpc("eth_sendRawTransaction", params);
+        let body_str = serde_json::to_string(&body).map_err(|_| {
             warn!(
-                target = "rpc::eth",
+                target: "rpc::eth",
                 "Failed to serialize transaction conditional for forwarding to sequencer"
             );
             SequencerClientError::InvalidSequencerTransaction
         })?;
 
-        self.http_client()
-            .post(self.endpoint())
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(body)
-            .send()
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    target = "rpc::eth",
-                    %err,
-                    "Failed to forward transaction conditional to sequencer",
-                );
-            })?;
-
-        Ok(())
+        self.post_request(body_str, "Failed to forward transaction conditional to sequencer").await
     }
 }
 
