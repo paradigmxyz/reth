@@ -296,8 +296,8 @@ mod test {
                 l1_base_fee_scalar: Some(5227),
                 l1_blob_base_fee: Some(1),
                 l1_blob_base_fee_scalar: Some(1014213),
-                operator_fee_scalar: Some(2000),
-                operator_fee_constant: Some(50),
+                operator_fee_scalar: None,
+                operator_fee_constant: None,
             },
             deposit_nonce: None,
             deposit_receipt_version: None,
@@ -428,7 +428,7 @@ mod test {
         assert_eq!(l1_base_fee_scalar, Some(2269), "incorrect l1 base fee scalar");
         assert_eq!(l1_blob_base_fee, Some(1324954204), "incorrect l1 blob base fee");
         assert_eq!(l1_blob_base_fee_scalar, Some(1055762), "incorrect l1 blob base fee scalar");
-        assert_eq!(operator_fee_scalar, Some(2000), "incorrect operator fee scalar");
-        assert_eq!(operator_fee_constant, Some(50), "incorrect operator fee constant");
+        assert_eq!(operator_fee_scalar, None, "incorrect operator fee scalar");
+        assert_eq!(operator_fee_constant, None, "incorrect operator fee constant");
     }
 }
