@@ -882,6 +882,69 @@ impl<N: NetworkPrimitives> TryFromPeerMessage<N> for EthMessage<N> {
     }
 }
 
+pub trait TryIntoPeerMessage<N: NetworkPrimitives> {
+    fn try_into_peer_message(self) -> Option<PeerMessage<N>>;
+}
+
+/// Default implementation for [`TryIntoPeerMessage`] for [`EthMessage`]
+impl<N: NetworkPrimitives> TryIntoPeerMessage<N> for EthMessage<N> {
+    fn try_into_peer_message(self) -> Option<PeerMessage<N>> {
+        match self {
+            // Convert handshake/status messages
+            EthMessage::Status(_) => None,
+
+            // Broadcast messages
+            EthMessage::NewBlockHashes(msg) => Some(PeerMessage::NewBlockHashes(msg)),
+            EthMessage::NewBlock(msg) => {
+                let block =
+                    NewBlockMessage { hash: msg.block.header().hash_slow(), block: Arc::new(*msg) };
+                Some(PeerMessage::NewBlock(block))
+            }
+            EthMessage::Transactions(msg) => Some(PeerMessage::ReceivedTransaction(msg)),
+            EthMessage::NewPooledTransactionHashes66(msg) => {
+                Some(PeerMessage::PooledTransactions(msg.into()))
+            }
+            EthMessage::NewPooledTransactionHashes68(msg) => {
+                Some(PeerMessage::PooledTransactions(msg.into()))
+            }
+
+            // Request messages
+            EthMessage::GetBlockHeaders(req) => {
+                Some(PeerMessage::EthRequest(PeerRequest::GetBlockHeaders {
+                    request: req.message,
+                    response: oneshot::channel().0,
+                }))
+            }
+            EthMessage::GetBlockBodies(req) => {
+                Some(PeerMessage::EthRequest(PeerRequest::GetBlockBodies {
+                    request: req.message,
+                    response: oneshot::channel().0,
+                }))
+            }
+            EthMessage::GetPooledTransactions(req) => {
+                Some(PeerMessage::EthRequest(PeerRequest::GetPooledTransactions {
+                    request: req.message,
+                    response: oneshot::channel().0,
+                }))
+            }
+            EthMessage::GetNodeData(req) => {
+                Some(PeerMessage::EthRequest(PeerRequest::GetNodeData {
+                    request: req.message,
+                    response: oneshot::channel().0,
+                }))
+            }
+            EthMessage::GetReceipts(req) => {
+                Some(PeerMessage::EthRequest(PeerRequest::GetReceipts {
+                    request: req.message,
+                    response: oneshot::channel().0,
+                }))
+            }
+            // TODO handle response messages
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
