@@ -1,12 +1,6 @@
-## reth Contributor Documentation
+## reth SDK docs and guides for developers
 
-This directory contains documentation for contributors.
 
-- [Repository and Project Structure](./repo)
-- [Design](./design)
-- [Crates](./crates)
+### Reth and Alloy
 
-### Meta
 
-- [Workflow](./workflow.md): The lifecycle of PRs
-- [Releases](./release.md): How reth is released and when (for maintainers)
