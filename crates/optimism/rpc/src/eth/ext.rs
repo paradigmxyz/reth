@@ -1,5 +1,5 @@
 use super::{OpEthApiInner, OpNodeCore};
-use crate::{error::Op4337Error, OpEthApiError, SequencerClient};
+use crate::{error::TxConditionalErr, OpEthApiError, SequencerClient};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Bytes, B256};
@@ -60,7 +60,7 @@ where
         // calculate and validate cost
         let cost = condition.cost();
         if cost > MAX_CONDITIONAL_EXECUTION_COST {
-            return Err(Op4337Error::ConditionalCostExceeded.into());
+            return Err(TxConditionalErr::ConditionalCostExceeded.into());
         }
 
         let tx: Transaction = serde_json::from_slice(&bytes).map_err(|_| {
@@ -83,7 +83,7 @@ where
         if !condition.has_exceeded_block_number(header.header().number()) ||
             !condition.has_exceeded_timestamp(header.header().timestamp())
         {
-            return Err(Op4337Error::InvalidCondition.into());
+            return Err(TxConditionalErr::InvalidCondition.into());
         }
 
         // TODO: check condition against state

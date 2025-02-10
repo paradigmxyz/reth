@@ -62,9 +62,9 @@ pub enum OpInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
-    /// ERC4337-related errors.
+    /// Transaction conditional errors.
     #[error(transparent)]
-    Op4337(#[from] Op4337Error),
+    TxConditionalErr(#[from] TxConditionalErr),
 }
 
 impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
@@ -74,7 +74,7 @@ impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'st
             OpInvalidTransactionError::HaltedDepositPostRegolith => {
                 rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
-            OpInvalidTransactionError::Op4337(_) => err.into(),
+            OpInvalidTransactionError::TxConditionalErr(_) => err.into(),
         }
     }
 }
@@ -97,9 +97,9 @@ impl TryFrom<InvalidTransaction> for OpInvalidTransactionError {
     }
 }
 
-/// 4337 related error type
+/// Transaction conditional related error type
 #[derive(Debug, thiserror::Error)]
-pub enum Op4337Error {
+pub enum TxConditionalErr {
     /// Transaction conditional cost exceeded maximum allowed
     #[error("conditional cost exceeded maximum allowed")]
     ConditionalCostExceeded,
