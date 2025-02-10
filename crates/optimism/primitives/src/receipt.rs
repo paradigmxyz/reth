@@ -229,7 +229,7 @@ impl DepositReceipt for OpReceipt {
 #[cfg(feature = "reth-codec")]
 mod compact {
     use super::*;
-    use alloc::{borrow::Cow, vec::Vec};
+    use alloc::borrow::Cow;
     use reth_codecs::Compact;
 
     #[derive(reth_codecs::CompactZstd)]
