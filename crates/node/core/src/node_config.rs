@@ -163,7 +163,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             config: None,
             chain,
             metrics: None,
-            instance: Some(1),
+            instance: None,
             network: NetworkArgs::default(),
             rpc: RpcServerArgs::default(),
             txpool: TxPoolArgs::default(),
