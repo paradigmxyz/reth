@@ -25,6 +25,12 @@ reth-scroll-engine-primitives.workspace = true
 futures-util = { workspace = true, optional = true }
 
 [features]
+std = [
+    "futures-util/std",
+    "reth-payload-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-scroll-engine-primitives/std"
+]
 scroll = [
     "reth-primitives-traits/scroll",
     "reth-scroll-engine-primitives/scroll",

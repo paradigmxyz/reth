@@ -1,12 +1,11 @@
+use core::fmt::Debug;
 use reth_basic_payload_builder::{
-    BuildArguments, BuildOutcome, HeaderForPayload, MissingPayloadBehaviour, PayloadBuilder,
-    PayloadConfig,
+    BuildArguments, BuildOutcome, HeaderForPayload, PayloadBuilder, PayloadConfig,
 };
 use reth_payload_primitives::PayloadBuilderError;
 use reth_payload_util::{BestPayloadTransactions, PayloadTransactions};
 use reth_scroll_engine_primitives::{ScrollBuiltPayload, ScrollPayloadBuilderAttributes};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use std::fmt::Debug;
 
 /// A type that implements [`PayloadBuilder`] by building empty payloads.
 #[derive(Debug, Default, Clone)]

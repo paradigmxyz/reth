@@ -1,19 +1,19 @@
-use reth_payload_builder::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
-use reth_payload_primitives::{
-    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
-};
-use std::{
+use core::{
     fmt::Debug,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
+};
+use reth_payload_builder::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
+use reth_payload_primitives::{
+    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
 };
 
 /// A [`PayloadJobGenerator`] that doesn't produce any useful payload.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct NoopPayloadJobGenerator<PA, BP> {
-    _types: std::marker::PhantomData<(PA, BP)>,
+    _types: core::marker::PhantomData<(PA, BP)>,
 }
 
 impl<PA, BP> PayloadJobGenerator for NoopPayloadJobGenerator<PA, BP>
@@ -31,7 +31,7 @@ where
 /// A [`PayloadJobGenerator`] that doesn't produce any payload.
 #[derive(Debug, Default)]
 pub struct NoopPayloadJob<PA, BP> {
-    _types: std::marker::PhantomData<(PA, BP)>,
+    _types: core::marker::PhantomData<(PA, BP)>,
 }
 
 impl<PA, BP> Future for NoopPayloadJob<PA, BP> {
