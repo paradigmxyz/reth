@@ -16,8 +16,9 @@ use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
+use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
 use reth_evm::{
     env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, EvmError, InvalidTxError,
     NextBlockEnvAttributes,
@@ -27,9 +28,6 @@ use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives::{
-    Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, TransactionSigned,
-};
 use reth_primitives_traits::{
     proofs::{self},
     Block as _, SignedTransaction,
@@ -50,6 +48,7 @@ use tracing::{debug, trace, warn};
 
 mod config;
 pub use config::*;
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_transaction_pool::error::Eip4844PoolTransactionError;
 
 type BestTransactionsIter<Pool> = Box<
