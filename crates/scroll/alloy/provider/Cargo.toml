@@ -62,6 +62,7 @@ std = [
     "reth-engine-primitives/std",
     "reth-primitives/std",
     "reth-primitives-traits/std",
+    "reth-scroll-payload/std",
 ]
 scroll = [
     "reth-scroll-node/scroll",

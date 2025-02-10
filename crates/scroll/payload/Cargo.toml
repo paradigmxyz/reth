@@ -29,7 +29,7 @@ std = [
     "futures-util/std",
     "reth-payload-primitives/std",
     "reth-primitives-traits/std",
-    "reth-scroll-engine-primitives/std"
+    "reth-scroll-engine-primitives/std",
 ]
 scroll = [
     "reth-primitives-traits/scroll",

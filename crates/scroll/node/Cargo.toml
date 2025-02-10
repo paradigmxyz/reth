@@ -77,7 +77,7 @@ scroll = [
     "reth-primitives-traits/scroll",
     "reth-engine-local/scroll-alloy-traits",
     "reth-scroll-engine-primitives/scroll",
-    "reth-scroll-payload/scroll"
+    "reth-scroll-payload/scroll",
 ]
 reth-codec = [
     "reth-primitives/reth-codec",
