@@ -2841,6 +2841,9 @@ where
 
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
+        self.emit_event(EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(
+            Box::new(block),
+        )));
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,

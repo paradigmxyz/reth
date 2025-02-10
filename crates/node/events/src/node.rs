@@ -277,6 +277,9 @@ impl NodeState {
                 let block = executed.sealed_block();
                 info!(number=block.number(), hash=?block.hash(), ?elapsed, "Block added to fork chain");
             }
+            BeaconConsensusEngineEvent::InvalidBlock(block) => {
+                warn!(number=block.number(), hash=?block.hash(), "Encountered invalid block");
+            }
         }
     }
 
