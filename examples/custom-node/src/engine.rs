@@ -6,15 +6,20 @@ use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
 use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
-use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder};
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_node_api::{BuiltPayload, EngineTypes, ExecutionData, NodePrimitives, PayloadAttributes, PayloadBuilderAttributes, PayloadBuilderError, PayloadTypes};
+use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
+use reth_chainspec::ChainSpecProvider;
+use reth_node_api::{
+    BuiltPayload, EngineTypes, ExecutionData, NodePrimitives, PayloadAttributes,
+    PayloadBuilderAttributes, PayloadBuilderError, PayloadTypes,
+};
 use reth_optimism_node::{
     BasicOpReceiptBuilder, OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadAttributes,
     OpPayloadBuilder, OpPayloadBuilderAttributes,
 };
 use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
-use reth_primitives_traits::{node::AnyNodePrimitives, SealedBlock};
+use reth_primitives_traits::{node::AnyNodePrimitives, RecoveredBlock, SealedBlock};
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 
@@ -44,7 +49,9 @@ impl reth_node_api::ExecutionPayload for CustomExecutionData {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomPayloadAttributes {
+    #[serde(flatten)]
     inner: OpPayloadAttributes,
     extension: u64,
 }
@@ -63,6 +70,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct CustomPayloadBuilderAttributes {
     inner: OpPayloadBuilderAttributes<OpTransactionSigned>,
     extension: u64,
@@ -70,17 +78,20 @@ pub struct CustomPayloadBuilderAttributes {
 
 impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
     type RpcPayloadAttributes = CustomPayloadAttributes;
-    type Error = <OpPayloadBuilderAttributes as PayloadBuilderAttributes>::Error;
+    type Error = alloy_rlp::Error;
 
     fn try_new(
-            parent: revm_primitives::B256,
-            rpc_payload_attributes: Self::RpcPayloadAttributes,
-            version: u8,
-        ) -> Result<Self, Self::Error>
-        where
-            Self: Sized {
+        parent: revm_primitives::B256,
+        rpc_payload_attributes: Self::RpcPayloadAttributes,
+        version: u8,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized,
+    {
+        let CustomPayloadAttributes { inner, extension } = rpc_payload_attributes;
+
         Ok(Self {
-            inner: OpPayloadBuilderAttributes::try_new(parent, rpc_payload_attributes, version),
+            inner: OpPayloadBuilderAttributes::try_new(parent, inner, version)?,
             extension: rpc_payload_attributes.extension,
         })
     }
@@ -206,7 +217,7 @@ impl From<CustomBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
 impl PayloadTypes for CustomEngineTypes {
     type BuiltPayload = CustomBuiltPayload;
     type PayloadAttributes = CustomPayloadAttributes;
-    type PayloadBuilderAttributes = OpPayloadBuilderAttributes<OpTransactionSigned>;
+    type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
 }
 
 impl EngineTypes for CustomEngineTypes {
@@ -232,6 +243,36 @@ impl EngineTypes for CustomEngineTypes {
 /// Helper primitives to pass to the OP payload builder.
 type PayloadPrimitives = AnyNodePrimitives<Block<OpTransactionSigned>, OpReceipt>;
 
+impl From<CustomBuiltPayload> for OpBuiltPayload<PayloadPrimitives> {
+    fn from(value: CustomBuiltPayload) -> Self {
+        let OpBuiltPayload { id, block, fees, executed_block } = value.0;
+        let (block, hash) = Arc::unwrap_or_clone(block).split();
+        let block =
+            Arc::new(SealedBlock::new_unchecked(block.map_header(|header| header.inner), hash));
+        let executed_block = executed_block.map(|block| {
+            let ExecutedBlockWithTrieUpdates {
+                block: ExecutedBlock { recovered_block, execution_output, hashed_state },
+                trie,
+            } = block;
+
+            let RecoveredBlock { block, senders } = Arc::unwrap_or_clone(recovered_block);
+            let (block, hash) = block.split();
+            let block = SealedBlock::new_unchecked(block.map_header(|header| header.inner), hash);
+
+            ExecutedBlockWithTrieUpdates {
+                block: ExecutedBlock {
+                    recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
+                    execution_output,
+                    hashed_state,
+                },
+                trie,
+            }
+        });
+
+        OpBuiltPayload { id, block, fees, executed_block }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CustomPayloadBuilder<Provider> {
     inner: OpPayloadBuilder<
@@ -243,7 +284,11 @@ pub struct CustomPayloadBuilder<Provider> {
 }
 
 impl<Provider> CustomPayloadBuilder<Provider> {
-    pub fn new(pool: CustomTxPool<Provider>, provider: Provider, chain_spec: Arc<CustomChainSpec>) -> Self {
+    pub fn new(
+        pool: CustomTxPool<Provider>,
+        provider: Provider,
+        chain_spec: Arc<CustomChainSpec>,
+    ) -> Self {
         Self {
             inner: OpPayloadBuilder::new(
                 pool,
@@ -255,14 +300,36 @@ impl<Provider> CustomPayloadBuilder<Provider> {
     }
 }
 
-impl<Provider> PayloadBuilder for CustomPayloadBuilder<Provider> {
+impl<Provider> PayloadBuilder for CustomPayloadBuilder<Provider>
+where
+    Provider: Clone
+        + StateProviderFactory
+        + BlockReaderIdExt
+        + ChainSpecProvider<ChainSpec = CustomChainSpec>,
+{
     type Attributes = CustomPayloadBuilderAttributes;
     type BuiltPayload = CustomBuiltPayload;
 
     fn try_build(
-            &self,
-            args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
-        ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let inner = self.inner.try_build(args)?;
+        &self,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        let BuildArguments {
+            cached_reads,
+            config:
+                PayloadConfig {
+                    parent_header,
+                    attributes: CustomPayloadAttributes { inner, extension },
+                },
+            cancel,
+            best_payload,
+        } = args;
+
+        let inner = self.inner.try_build(BuildArguments {
+            cached_reads,
+            config: PayloadConfig { parent_header: parent_header.inner.clone(), attributes: inner },
+            cancel: cancel.clone(),
+            best_payload: best_payload.map(Into::into),
+        })?;
     }
 }
