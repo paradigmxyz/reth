@@ -912,7 +912,7 @@ where
 
         // now check the block itself
         if let Some(status) =
-            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_hash)?
+            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, &block)?
         {
             return Ok(TreeOutcome::new(status))
         }
@@ -1887,7 +1887,7 @@ where
     fn check_invalid_ancestor_with_head(
         &mut self,
         check: B256,
-        head: B256,
+        head: &SealedBlock<N::Block>,
     ) -> ProviderResult<Option<PayloadStatus>> {
         // check if the check hash was previously marked as invalid
         let Some(header) = self.state.invalid_headers.get(&check) else { return Ok(None) };
@@ -1896,7 +1896,8 @@ where
         let status = self.prepare_invalid_response(header.parent)?;
 
         // insert the head block into the invalid header cache
-        self.state.invalid_headers.insert_with_invalid_ancestor(head, header);
+        self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), header);
+        self.emit_event(BeaconConsensusEngineEvent::InvalidBlock(Box::new(head.clone())));
 
         Ok(Some(status))
     }
@@ -2276,7 +2277,7 @@ where
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
         if self
-            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_num_hash.hash)?
+            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.sealed_block())?
             .is_some()
         {
             return Ok(None)
