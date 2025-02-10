@@ -1,0 +1,154 @@
+use super::{OpEthApiInner, OpNodeCore};
+use crate::{error::Op4337Error, OpEthApiError, SequencerClient};
+use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::{Bytes, B256};
+use alloy_rpc_types_eth::erc4337::TransactionConditional;
+use jsonrpsee_core::RpcResult;
+use op_alloy_rpc_types::Transaction;
+use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use reth_rpc_eth_api::{L2EthApiExtServer, RpcNodeCore};
+use reth_transaction_pool::TransactionPool;
+use std::sync::Arc;
+
+/// Maximum execution const for conditional transactions.
+const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
+
+/// OP-Reth `Eth` API extensions implementation.
+///
+/// Separate from [`OpEthApi`] to allow to enable it conditionally,
+#[derive(Clone)]
+pub struct OpEthApiExt<N: OpNodeCore> {
+    /// Gateway to node's core components.
+    inner: Arc<OpEthApiInner<N>>,
+}
+
+impl<N> OpEthApiExt<N>
+where
+    N: OpNodeCore<Provider: BlockReaderIdExt + Clone + 'static>,
+{
+    /// Returns the configured sequencer client, if any.
+    pub fn sequencer_client(&self) -> Option<&SequencerClient> {
+        self.inner.sequencer_client()
+    }
+}
+
+impl<N> RpcNodeCore for OpEthApiExt<N>
+where
+    N: OpNodeCore,
+{
+    type Provider = N::Provider;
+    type Pool = N::Pool;
+    type Evm = <N as RpcNodeCore>::Evm;
+    type Network = <N as RpcNodeCore>::Network;
+    type PayloadBuilder = ();
+
+    #[inline]
+    fn pool(&self) -> &Self::Pool {
+        self.inner.eth_api.pool()
+    }
+
+    #[inline]
+    fn evm_config(&self) -> &Self::Evm {
+        self.inner.eth_api.evm_config()
+    }
+
+    #[inline]
+    fn network(&self) -> &Self::Network {
+        self.inner.eth_api.network()
+    }
+
+    #[inline]
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
+    }
+
+    #[inline]
+    fn provider(&self) -> &Self::Provider {
+        self.inner.eth_api.provider()
+    }
+}
+
+#[async_trait::async_trait]
+impl<N> L2EthApiExtServer for OpEthApiExt<N>
+where
+    N: OpNodeCore + 'static,
+    N::Provider: BlockReaderIdExt + StateProviderFactory,
+    N::Pool: TransactionPool,
+{
+    async fn send_raw_transaction_conditional(
+        &self,
+        bytes: Bytes,
+        condition: TransactionConditional,
+    ) -> RpcResult<B256> {
+        // calculate and validate cost
+        let cost = condition.cost();
+        if cost > MAX_CONDITIONAL_EXECUTION_COST {
+            return Err(Op4337Error::ConditionalCostExceeded.into());
+        }
+
+        let tx: Transaction = serde_json::from_slice(&bytes).map_err(|_| {
+            OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::FailedToDecodeSignedTransaction)
+        })?;
+
+        // get current header
+        let header_not_found = || {
+            OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::HeaderNotFound(
+                alloy_eips::BlockId::Number(BlockNumberOrTag::Latest),
+            ))
+        };
+        let header = self
+            .provider()
+            .latest_header()
+            .map_err(|_| header_not_found())?
+            .ok_or_else(header_not_found)?
+            .header();
+
+        // check condition against header
+        if !condition.has_exceeded_block_number(header.number()) ||
+            !condition.has_exceeded_timestamp(header.timestamp())
+        {
+            return Err(Op4337Error::InvalidCondition.into());
+        }
+
+        /*
+            // Check condition against state
+            if let Err(e) = self.provider().check_transaction_conditional(&condition) {
+                return Err(OpEthApiError::InvalidTransaction(
+                    OpInvalidTransactionError::InvalidCondition,
+                )
+                .into());
+        }
+
+
+            // Check against parent state to reduce MEV
+            let parent_hash = header.parent_hash;
+            let (parent_state, _) = self
+                .provider()
+                .state_and_header_by_hash(parent_hash)
+                .await
+                .map_err(OpEthApiError::Eth)?;
+
+            if let Err(e) = parent_state.check_transaction_conditional(&condition) {
+                return Err(OpEthApiError::InvalidTransaction(
+                    OpInvalidTransactionError::InvalidCondition,
+                )
+                .into());
+            }
+             */
+
+        let hash = self.pool().add_transaction(tx, condition).await.map_err(|e| {
+            OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into()))
+        })?;
+
+        // If we have a sequencer client, forward the transaction
+        if let Some(sequencer) = self.sequencer_client() {
+            let _ = sequencer
+                .forward_raw_transaction(bytes.as_ref())
+                .await
+                .map_err(OpEthApiError::Sequencer)?;
+        }
+
+        Ok(hash)
+    }
+}
