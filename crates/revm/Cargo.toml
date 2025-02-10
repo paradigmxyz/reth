@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, optional = true }
@@ -39,7 +38,6 @@ std = [
     "revm/std",
     "alloy-consensus/std",
     "reth-ethereum-forks/std",
-    "reth-ethereum-primitives/std",
 ]
 witness = ["dep:reth-trie"]
 test-utils = [
@@ -47,7 +45,6 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie?/test-utils",
     "revm/test-utils",
-    "reth-ethereum-primitives/test-utils",
 ]
 serde = [
     "revm/serde",
