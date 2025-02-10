@@ -83,7 +83,7 @@ impl Command {
             let (payload, _) =
                 ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
 
-            debug!(?block_number, "Sending payload",);
+            debug!(target: "reth-bench", ?block_number, "Sending payload",);
 
             // construct fcu to call
             let forkchoice_state = ForkchoiceState {

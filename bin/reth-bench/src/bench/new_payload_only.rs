@@ -70,6 +70,7 @@ impl Command {
             let block_number = payload.block_number();
 
             debug!(
+                target: "reth-bench",
                 number=?payload.block_number(),
                 "Sending payload to engine",
             );

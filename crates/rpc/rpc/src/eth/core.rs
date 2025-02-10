@@ -9,6 +9,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
+use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ProviderBlock,
@@ -31,6 +32,14 @@ use tokio::sync::{broadcast, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
+/// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
+pub type EthApiFor<N> = EthApi<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Network,
+    <N as FullNodeComponents>::Evm,
+>;
+
 /// `Eth` API implementation.
 ///
 /// This type provides the functionality for handling `eth_` related requests.
@@ -40,6 +49,11 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 /// separately in submodules. The rpc handler implementation can then delegate to the main impls.
 /// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
 /// network handlers (for example ipc).
+///
+/// ## Trait requirements
+///
+/// While this type requires various unrestricted generic components, trait bounds are enforced when
+/// additional traits are implemented for this type.
 #[derive(Deref)]
 pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
@@ -62,7 +76,31 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
 where
     Provider: BlockReaderIdExt,
 {
-    /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components
+    /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
+    ///
+    /// Creating an [`EthApi`] requires a few mandatory components:
+    ///  - provider: The type responsible for fetching requested data from disk.
+    ///  - transaction pool: To interact with the pool, submitting new transactions (e.g.
+    ///    `eth_sendRawTransactions`).
+    ///  - network: required to handle requests related to network state (e.g. `eth_syncing`).
+    ///  - evm config: Knows how create a new EVM instance to transact,estimate,call,trace.
+    ///
+    /// # Create an instance with noop ethereum implementations
+    ///
+    /// ```no_run
+    /// use reth_evm_ethereum::EthEvmConfig;
+    /// use reth_network_api::noop::NoopNetwork;
+    /// use reth_provider::noop::NoopProvider;
+    /// use reth_rpc::EthApi;
+    /// use reth_transaction_pool::noop::NoopTransactionPool;
+    /// let eth_api = EthApi::builder(
+    ///     NoopProvider::default(),
+    ///     NoopTransactionPool::default(),
+    ///     NoopNetwork::default(),
+    ///     EthEvmConfig::mainnet(),
+    /// )
+    /// .build();
+    /// ```
     pub fn builder(
         provider: Provider,
         pool: Pool,

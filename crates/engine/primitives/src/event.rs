@@ -1,7 +1,7 @@
 //! Events emitted by the beacon consensus engine.
 
 use crate::ForkchoiceStatus;
-use alloc::{boxed::Box, sync::Arc};
+use alloc::boxed::Box;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -9,7 +9,8 @@ use core::{
     fmt::{Display, Formatter, Result},
     time::Duration,
 };
-use reth_primitives::{EthPrimitives, SealedBlock};
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 
 /// Events emitted by the consensus engine.
@@ -18,9 +19,9 @@ pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.
-    ForkBlockAdded(Arc<SealedBlock<N::Block>>, Duration),
+    ForkBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
     /// A block was added to the canonical chain, and the elapsed time validating the block
-    CanonicalBlockAdded(Arc<SealedBlock<N::Block>>, Duration),
+    CanonicalBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine is involved in live sync, and has specific progress
@@ -48,10 +49,14 @@ where
                 write!(f, "ForkchoiceUpdated({state:?}, {status:?})")
             }
             Self::ForkBlockAdded(block, duration) => {
-                write!(f, "ForkBlockAdded({:?}, {duration:?})", block.num_hash())
+                write!(f, "ForkBlockAdded({:?}, {duration:?})", block.recovered_block.num_hash())
             }
             Self::CanonicalBlockAdded(block, duration) => {
-                write!(f, "CanonicalBlockAdded({:?}, {duration:?})", block.num_hash())
+                write!(
+                    f,
+                    "CanonicalBlockAdded({:?}, {duration:?})",
+                    block.recovered_block.num_hash()
+                )
             }
             Self::CanonicalChainCommitted(block, duration) => {
                 write!(f, "CanonicalChainCommitted({:?}, {duration:?})", block.num_hash())

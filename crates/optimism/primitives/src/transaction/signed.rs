@@ -166,7 +166,6 @@ impl From<OpTxEnvelope> for OpTransactionSigned {
             OpTxEnvelope::Eip1559(tx) => tx.into(),
             OpTxEnvelope::Eip7702(tx) => tx.into(),
             OpTxEnvelope::Deposit(tx) => tx.into(),
-            _ => unreachable!(),
         }
     }
 }

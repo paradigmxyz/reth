@@ -113,7 +113,7 @@ fn generate_test_data(
 
 mod implementations {
     use super::*;
-    use reth_transaction_pool::PoolTransaction;
+    use alloy_consensus::Transaction;
     use std::collections::BinaryHeap;
 
     /// This implementation appends the transactions and uses [`Vec::sort_by`] function for sorting.

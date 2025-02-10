@@ -34,7 +34,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@clippy
         with:
-          toolchain: nightly-2025-01-16
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -57,7 +56,6 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2025-01-16
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
