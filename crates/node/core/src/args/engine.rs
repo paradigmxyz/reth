@@ -19,13 +19,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
     pub memory_block_buffer_target: u64,
 
-    /// Enable state root task
-    ///
-    /// DEPRECATED: state root task is default now, use --engine.legacy-state-root
-    /// to enable the legacy functionality
-    #[arg(long = "engine.state-root-task")]
-    pub state_root_task_enabled: bool,
-
     /// Enable legacy state root
     #[arg(long = "engine.legacy-state-root", default_value = "false")]
     pub legacy_state_root_task_enabled: bool,
@@ -49,7 +42,6 @@ impl Default for EngineArgs {
         Self {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-            state_root_task_enabled: false,
             legacy_state_root_task_enabled: false,
             state_root_task_compare_updates: false,
             caching_and_prewarming_enabled: false,
