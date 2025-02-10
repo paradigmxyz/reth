@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{
     hex,
-    map::{B256HashMap, B256HashSet},
+    map::{B256HashMap, B256HashSet, HashSet},
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -28,6 +28,10 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     storages: B256HashMap<SparseTrie<F::StorageNodeProvider>>,
     /// Collection of revealed account and storage keys.
     revealed: B256HashMap<B256HashSet>,
+    /// Collection of revealed account trie nodes.
+    revealed_account_nodes: HashSet<Nibbles>,
+    /// Collection of revealed storage trie nodes, per account.
+    revealed_storage_nodes: B256HashMap<HashSet<Nibbles>>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
@@ -41,6 +45,8 @@ impl Default for SparseStateTrie {
             state: Default::default(),
             storages: Default::default(),
             revealed: Default::default(),
+            revealed_account_nodes: Default::default(),
+            revealed_storage_nodes: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
         }
@@ -53,6 +59,8 @@ impl<P: BlindedProviderFactory> fmt::Debug for SparseStateTrie<P> {
             .field("state", &self.state)
             .field("storages", &self.storages)
             .field("revealed", &self.revealed)
+            .field("revealed_account_nodes", &self.revealed_account_nodes)
+            .field("revealed_storage_nodes", &self.revealed_storage_nodes)
             .field("retain_updates", &self.retain_updates)
             .field("account_rlp_buf", &hex::encode(&self.account_rlp_buf))
             .finish_non_exhaustive()
@@ -74,6 +82,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             state: Default::default(),
             storages: Default::default(),
             revealed: Default::default(),
+            revealed_account_nodes: Default::default(),
+            revealed_storage_nodes: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
         }
@@ -248,6 +258,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
             // Reveal the remaining proof nodes.
             for (path, bytes) in account_nodes {
+                if self.revealed_account_nodes.contains(&path) {
+                    continue
+                }
                 let node = TrieNode::decode(&mut &bytes[..])?;
                 let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
                     (
@@ -259,7 +272,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 };
 
                 trace!(target: "trie::sparse", ?path, ?node, ?hash_mask, ?tree_mask, "Revealing account node");
-                trie.reveal_node(path, node, tree_mask, hash_mask)?;
+                trie.reveal_node(path.clone(), node, tree_mask, hash_mask)?;
+                self.revealed_account_nodes.insert(path);
             }
         }
 
@@ -276,9 +290,13 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     storage_subtree.branch_node_tree_masks.get(&Nibbles::default()).copied(),
                     self.retain_updates,
                 )?;
+                let revealed_nodes = self.revealed_storage_nodes.entry(account).or_default();
 
                 // Reveal the remaining proof nodes.
                 for (path, bytes) in nodes {
+                    if revealed_nodes.contains(&path) {
+                        continue
+                    }
                     let node = TrieNode::decode(&mut &bytes[..])?;
                     let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
                         (
@@ -290,7 +308,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     };
 
                     trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
-                    trie.reveal_node(path, node, tree_mask, hash_mask)?;
+                    trie.reveal_node(path.clone(), node, tree_mask, hash_mask)?;
+                    revealed_nodes.insert(path);
                 }
             }
         }
