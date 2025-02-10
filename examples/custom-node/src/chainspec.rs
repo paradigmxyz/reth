@@ -1,11 +1,12 @@
 use crate::primitives::CustomHeader;
 use alloy_genesis::Genesis;
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_network_peers::NodeRecord;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::SealedHeader;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CustomChainSpec {
     inner: OpChainSpec,
     genesis_header: SealedHeader<CustomHeader>,
@@ -56,5 +57,31 @@ impl EthChainSpec for CustomChainSpec {
 
     fn genesis_header(&self) -> &Self::Header {
         &self.genesis_header
+    }
+}
+
+impl EthereumHardforks for CustomChainSpec {
+    fn ethereum_fork_activation(
+        &self,
+        fork: reth_chainspec::EthereumHardfork,
+    ) -> reth_chainspec::ForkCondition {
+        self.inner.ethereum_fork_activation(fork)
+    }
+
+    fn get_final_paris_total_difficulty(&self) -> Option<revm_primitives::U256> {
+        self.inner.get_final_paris_total_difficulty()
+    }
+
+    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<revm_primitives::U256> {
+        self.inner.final_paris_total_difficulty(block_number)
+    }
+}
+
+impl OpHardforks for CustomChainSpec {
+    fn op_fork_activation(
+        &self,
+        fork: reth_optimism_forks::OpHardfork,
+    ) -> reth_chainspec::ForkCondition {
+        self.inner.op_fork_activation(fork)
     }
 }
