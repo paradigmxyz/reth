@@ -1,4 +1,5 @@
 use crate::{
+    maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     PoolSize, TransactionOrigin,
 };
@@ -59,17 +60,17 @@ pub struct PoolConfig {
     /// How many new pending transactions to buffer and send iterators in progress.
     pub max_new_pending_txs_notifications: usize,
     /// Maximum lifetime for transactions in the pool
-    pub max_tx_lifetime: Duration,
+    pub max_queued_lifetime: Duration,
 }
 
 impl PoolConfig {
     /// Returns whether the size and amount constraints in any sub-pools are exceeded.
     #[inline]
     pub const fn is_exceeded(&self, pool_size: PoolSize) -> bool {
-        self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size)
-            || self.pending_limit.is_exceeded(pool_size.pending, pool_size.pending_size)
-            || self.basefee_limit.is_exceeded(pool_size.basefee, pool_size.basefee_size)
-            || self.queued_limit.is_exceeded(pool_size.queued, pool_size.queued_size)
+        self.blob_limit.is_exceeded(pool_size.blob, pool_size.blob_size) ||
+            self.pending_limit.is_exceeded(pool_size.pending, pool_size.pending_size) ||
+            self.basefee_limit.is_exceeded(pool_size.basefee, pool_size.basefee_size) ||
+            self.queued_limit.is_exceeded(pool_size.queued, pool_size.queued_size)
     }
 }
 
@@ -88,7 +89,7 @@ impl Default for PoolConfig {
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
-            max_tx_lifetime: Duration::default(),
+            max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
         }
     }
 }

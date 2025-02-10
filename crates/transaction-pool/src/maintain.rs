@@ -36,6 +36,9 @@ use tokio::{
 };
 use tracing::{debug, error, info, trace, warn};
 
+/// Maximum amount of time non-executable transaction are queued.
+pub const MAX_QUEUED_TRANSACTION_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
+
 /// Additional settings for maintaining the transaction pool
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MaintainPoolConfig {
@@ -59,7 +62,7 @@ impl Default for MaintainPoolConfig {
         Self {
             max_update_depth: 64,
             max_reload_accounts: 100,
-            max_tx_lifetime: Duration::from_secs(3 * 60 * 60),
+            max_tx_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
         }
     }
 }
