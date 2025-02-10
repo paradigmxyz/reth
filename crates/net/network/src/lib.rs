@@ -124,13 +124,13 @@ pub mod test_utils;
 pub mod cache;
 pub mod config;
 pub mod error;
+mod eth_protocol;
 pub mod eth_requests;
 pub mod import;
 pub mod message;
 pub mod peers;
 /// Trait helper that helps abstract the p2p protocol handling.
 pub mod protocol;
-pub mod subprotocol;
 pub mod transactions;
 
 mod budget;

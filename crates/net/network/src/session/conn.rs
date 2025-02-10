@@ -1,6 +1,6 @@
 //! Connection types for a session
 
-use crate::protocol::NetworkStream;
+use crate::eth_protocol::NetworkStream;
 use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{

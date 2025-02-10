@@ -1,7 +1,6 @@
-use super::{ConnectionFut, PendingSessionEvent};
+use super::{ConnectionFut, ConnectionHandler, NetworkProtocolHandler, PendingSessionEvent};
 use crate::{
     get_ecies_stream,
-    protocol::{ConnectionHandler, NetworkProtocolHandler},
     session::{HandshakeInfo, SessionInfo},
     EthRlpxConnection, PendingSessionHandshakeError,
 };

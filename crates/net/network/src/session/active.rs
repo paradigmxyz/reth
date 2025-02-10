@@ -12,8 +12,8 @@ use std::{
 };
 
 use crate::{
+    eth_protocol::NetworkStream,
     message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
-    protocol::NetworkStream,
     session::{
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,

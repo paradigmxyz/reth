@@ -4,7 +4,7 @@ use crate::{
     builder::ETH_REQUEST_CHANNEL_CAPACITY,
     error::NetworkError,
     eth_requests::EthRequestHandler,
-    subprotocol::IntoRlpxSubProtocol,
+    protocol::IntoRlpxSubProtocol,
     transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
     NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };

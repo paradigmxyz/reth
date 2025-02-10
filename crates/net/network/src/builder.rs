@@ -1,8 +1,8 @@
 //! Builder support for configuring the entire setup.
 
 use crate::{
+    eth_protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     eth_requests::EthRequestHandler,
-    protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     transactions::{TransactionsManager, TransactionsManagerConfig},
     NetworkHandle, NetworkManager,
 };

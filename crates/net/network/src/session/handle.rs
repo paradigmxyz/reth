@@ -1,8 +1,8 @@
 //! Session handles.
 
 use crate::{
+    eth_protocol::NetworkStream,
     message::PeerMessage,
-    protocol::NetworkStream,
     session::{Direction, SessionId},
     PendingSessionHandshakeError,
 };
