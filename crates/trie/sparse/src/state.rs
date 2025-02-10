@@ -258,6 +258,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
             // Reveal the remaining proof nodes.
             for (path, bytes) in account_nodes {
+                // If the node is already revealed, skip it.
                 if self.revealed_account_nodes.contains(&path) {
                     continue
                 }
@@ -273,6 +274,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
                 trace!(target: "trie::sparse", ?path, ?node, ?hash_mask, ?tree_mask, "Revealing account node");
                 trie.reveal_node(path.clone(), node, tree_mask, hash_mask)?;
+
+                // Track the revealed node.
                 self.revealed_account_nodes.insert(path);
             }
         }
@@ -294,6 +297,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
                 // Reveal the remaining proof nodes.
                 for (path, bytes) in nodes {
+                    // If the node is already revealed, skip it.
                     if revealed_nodes.contains(&path) {
                         continue
                     }
@@ -309,6 +313,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
                     trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
                     trie.reveal_node(path.clone(), node, tree_mask, hash_mask)?;
+
+                    // Track the revealed node.
                     revealed_nodes.insert(path);
                 }
             }
