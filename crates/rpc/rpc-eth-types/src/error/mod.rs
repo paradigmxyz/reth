@@ -132,6 +132,13 @@ pub enum EthApiError {
     /// Evm generic purpose error.
     #[error("Revm error: {0}")]
     EvmCustom(String),
+    /// Bytecode override is invalid.
+    ///
+    /// This can happen if bytecode provided in an
+    /// [`AccountOverride`](alloy_rpc_types_eth::state::AccountOverride) is malformed, e.g. invalid
+    /// 7702 bytecode.
+    #[error("Invalide bytecode: {0}")]
+    InvalidBytecode(String),
     /// Evm precompile error
     #[error("Revm precompile error: {0}")]
     EvmPrecompile(String),
@@ -175,7 +182,8 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
             EthApiError::InvalidTracerConfig |
-            EthApiError::TransactionConversionError => invalid_params_rpc_err(error.to_string()),
+            EthApiError::TransactionConversionError |
+            EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
             EthApiError::PoolError(err) => err.into(),
             EthApiError::PrevrandaoNotSet |
