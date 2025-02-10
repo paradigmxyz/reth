@@ -7,7 +7,6 @@ use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
 use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
 };

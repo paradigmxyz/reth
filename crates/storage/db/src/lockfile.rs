@@ -86,7 +86,7 @@ impl StorageLockInner {
     fn new(file_path: PathBuf) -> Result<Self, StorageLockError> {
         // Create the directory if it doesn't exist
         if let Some(parent) = file_path.parent() {
-            reth_fs_util::create_dir_all(parent)?;
+            reth_fs_util::create_dir_all(parent).map_err(StorageLockError::other)?;
         }
 
         // Write this process unique identifier (pid & start_time) to file
@@ -148,7 +148,8 @@ impl ProcessUID {
 
     /// Writes `pid` and `start_time` to a file.
     fn write(&self, path: &Path) -> Result<(), StorageLockError> {
-        Ok(reth_fs_util::write(path, format!("{}\n{}", self.pid, self.start_time))?)
+        reth_fs_util::write(path, format!("{}\n{}", self.pid, self.start_time))
+            .map_err(StorageLockError::other)
     }
 }
 

@@ -139,6 +139,16 @@ pub trait EstimateCall: Call {
                         &mut db,
                     ))
                 }
+                Err(err) if err.is_gas_too_low() => {
+                    // This failed because the configured gas cost of the tx was lower than what
+                    // actually consumed by the tx This can happen if the
+                    // request provided fee values manually and the resulting gas cost exceeds the
+                    // sender's allowance, so we return the appropriate error here
+                    return Err(RpcInvalidTransactionError::GasRequiredExceedsAllowance {
+                        gas_limit: tx_env.gas_limit(),
+                    }
+                    .into_eth_err())
+                }
                 // Propagate other results (successful or other errors).
                 ethres => ethres?,
             };
