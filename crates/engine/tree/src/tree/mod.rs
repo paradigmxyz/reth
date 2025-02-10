@@ -912,7 +912,7 @@ where
 
         // now check the block itself
         if let Some(status) =
-            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_hash)?
+            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, &block)?
         {
             return Ok(TreeOutcome::new(status))
         }
@@ -1887,7 +1887,7 @@ where
     fn check_invalid_ancestor_with_head(
         &mut self,
         check: B256,
-        head: B256,
+        head: &SealedBlock<N::Block>,
     ) -> ProviderResult<Option<PayloadStatus>> {
         // check if the check hash was previously marked as invalid
         let Some(header) = self.state.invalid_headers.get(&check) else { return Ok(None) };
@@ -1896,7 +1896,8 @@ where
         let status = self.prepare_invalid_response(header.parent)?;
 
         // insert the head block into the invalid header cache
-        self.state.invalid_headers.insert_with_invalid_ancestor(head, header);
+        self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), header);
+        self.emit_event(BeaconConsensusEngineEvent::InvalidBlock(Box::new(head.clone())));
 
         Ok(Some(status))
     }
@@ -2276,7 +2277,7 @@ where
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
         if self
-            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_num_hash.hash)?
+            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.sealed_block())?
             .is_some()
         {
             return Ok(None)
@@ -2841,6 +2842,9 @@ where
 
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
+        self.emit_event(EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(
+            Box::new(block),
+        )));
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
@@ -3549,6 +3553,18 @@ mod tests {
                     _,
                 )) => {
                     assert_eq!(executed.recovered_block.hash(), expected_hash);
+                }
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
+
+        async fn check_invalid_block(&mut self, expected_hash: B256) {
+            let event = self.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(
+                    block,
+                )) => {
+                    assert_eq!(block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }
@@ -4765,6 +4781,9 @@ mod tests {
                 chain_a[..chain_a.len() - invalid_index - 1].iter().cloned(),
             )
             .await;
+        for block in &chain_a[chain_a.len() - invalid_index - 1..] {
+            test_harness.check_invalid_block(block.hash()).await;
+        }
 
         // send FCU to make the tip of chain A, expect invalid
         let chain_a_tip_hash = chain_a.last().unwrap().hash();
