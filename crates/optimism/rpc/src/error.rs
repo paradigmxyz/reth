@@ -1,7 +1,7 @@
 //! RPC errors specific to OP.
 
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
-use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
+use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
@@ -62,6 +62,9 @@ pub enum OpInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
+    /// Transaction conditional errors.
+    #[error(transparent)]
+    TxConditionalErr(#[from] TxConditionalErr),
 }
 
 impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
@@ -71,6 +74,7 @@ impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'st
             OpInvalidTransactionError::HaltedDepositPostRegolith => {
                 rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
+            OpInvalidTransactionError::TxConditionalErr(_) => err.into(),
         }
     }
 }
@@ -90,6 +94,27 @@ impl TryFrom<InvalidTransaction> for OpInvalidTransactionError {
             },
             _ => Err(err),
         }
+    }
+}
+
+/// Transaction conditional related error type
+#[derive(Debug, thiserror::Error)]
+pub enum TxConditionalErr {
+    /// Transaction conditional cost exceeded maximum allowed
+    #[error("conditional cost exceeded maximum allowed")]
+    ConditionalCostExceeded,
+    /// Invalid conditional parameters
+    #[error("invalid conditional parameters")]
+    InvalidCondition,
+}
+
+impl From<TxConditionalErr> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(err: TxConditionalErr) -> Self {
+        jsonrpsee_types::error::ErrorObject::owned(
+            INVALID_PARAMS_CODE,
+            err.to_string(),
+            None::<String>,
+        )
     }
 }
 
