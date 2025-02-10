@@ -981,6 +981,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
         self.prefix_set.insert(path.clone());
         let existing = self.values.insert(path.clone(), value);
         if existing.is_some() {
+            trace!(target: "trie::sparse", ?path, "Leaf already exists, noop");
             // trie structure unchanged, return immediately
             return Ok(())
         }
