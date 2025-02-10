@@ -2,6 +2,7 @@
 use std::collections::HashSet;
 
 use alloy_primitives::B256;
+use did::BlockConfirmationData;
 use evm_canister_client::{CanisterClient, EvmCanisterClient};
 use itertools::Itertools;
 use reth_chain_state::MemoryOverlayStateProvider;
@@ -52,29 +53,44 @@ where
         }
 
         let execution_result = self.execute_blocks(blocks)?;
-        let validation_hash = self.calculate_validation_hash(execution_result)?;
+        let last_block = blocks.iter().last().expect("no blocks");
 
-        let last_block = blocks.iter().last().expect("no blocks").hash_slow();
+        let confirmation_data = self.calculate_confirmation_data(last_block, execution_result)?;
 
-        self.send_validation_request(last_block, validation_hash).await?;
+        self.send_confirmation_request(confirmation_data).await?;
 
         Ok(())
     }
 
-    async fn send_validation_request(
+    /// Sends the block confirmation request to the EVM.
+    async fn send_confirmation_request(
         &self,
-        block_hash: B256,
-        validation_hash: B256,
+        confirmation_data: BlockConfirmationData,
     ) -> eyre::Result<()> {
-        todo!()
+        match self.evm_client.confirm_block(confirmation_data).await? {
+            Ok(_) => Ok(()),
+            Err(err) => Err(eyre::eyre!("{err}")),
+        }
     }
 
-    fn calculate_validation_hash(&self, execution_result: ExecutionOutcome) -> eyre::Result<B256> {
+    /// Calculates confirmation data for a block based on execution result.
+    fn calculate_confirmation_data(
+        &self,
+        block: &Block,
+        execution_result: ExecutionOutcome,
+    ) -> eyre::Result<BlockConfirmationData> {
         let provider = self.provider_factory.provider()?;
         let state_provider = LatestStateProviderRef::new(&provider);
         let updated_state = state_provider.hashed_post_state(execution_result.state());
 
-        todo!()
+        Ok(BlockConfirmationData {
+            block_number: block.number,
+            hash: block.hash_slow().into(),
+            state_root: block.state_root.into(),
+            transactions_root: block.transactions_root.into(),
+            receipts_root: block.receipts_root.into(),
+            proof_of_work: self.calculate_pow_hash(updated_state),
+        })
     }
 
     /// Execute block and return validation arguments.
@@ -118,5 +134,13 @@ where
                 .create_strategy(StateProviderDatabase::new(db)),
             BlockBatchRecord::default(),
         )
+    }
+
+    /// Calculates POW hash based on the given trie state.
+    fn calculate_pow_hash(
+        &self,
+        updated_state: reth_trie::HashedPostState,
+    ) -> did::hash::Hash<alloy_primitives::FixedBytes<32>> {
+        todo!()
     }
 }
