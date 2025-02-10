@@ -22,6 +22,12 @@ reth-optimism-payload-builder.workspace = true
 reth-transaction-pool.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-optimism-forks.workspace = true
+reth-revm.workspace = true
+reth-evm.workspace = true
+reth-execution-types.workspace = true
+reth-optimism-consensus.workspace = true
+reth-payload-util.workspace = true
+reth-eth-wire-types.workspace = true
 
 revm.workspace = true
 
@@ -37,6 +43,7 @@ alloy-rpc-types = { workspace = true, optional = true }
 revm-primitives.workspace = true
 reth-chain-state.workspace = true
 
+op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-engine.workspace = true
 
