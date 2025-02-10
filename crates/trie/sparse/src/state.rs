@@ -600,7 +600,10 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, EMPTY_ROOT_HASH};
-    use reth_trie_common::{proof::ProofRetainer, StorageMultiProof, TrieMask};
+    use reth_trie_common::{
+        proof::{ProofNodes, ProofRetainer},
+        BranchNode, LeafNode, StorageMultiProof, TrieMask,
+    };
 
     #[test]
     fn validate_root_node_first_node_not_root() {
@@ -658,6 +661,159 @@ mod tests {
             sparse.storages,
             HashMap::from_iter([(Default::default(), SparseTrie::revealed_empty())])
         );
+    }
+
+    #[test]
+    fn reveal_account_path_twice() {
+        let mut sparse = SparseStateTrie::default();
+
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+            Nibbles::default(),
+            leaf_value.clone(),
+        )));
+        let leaf_2 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+            Nibbles::default(),
+            leaf_value.clone(),
+        )));
+
+        let multiproof = MultiProof {
+            account_subtree: ProofNodes::from_iter([
+                (
+                    Nibbles::default(),
+                    alloy_rlp::encode(TrieNode::Branch(BranchNode {
+                        stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
+                        state_mask: TrieMask::new(0b11),
+                    }))
+                    .into(),
+                ),
+                (Nibbles::from_nibbles([0x0]), leaf_1.clone().into()),
+                (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
+            ]),
+            ..Default::default()
+        };
+
+        // Reveal multiproof and check that the state trie contains the leaf node and value
+        sparse.reveal_multiproof(multiproof.clone()).unwrap();
+        assert!(sparse
+            .state_trie_ref()
+            .unwrap()
+            .nodes_ref()
+            .contains_key(&Nibbles::from_nibbles([0x0])),);
+        assert_eq!(
+            sparse.state_trie_ref().unwrap().get_leaf_value(&Nibbles::from_nibbles([0x0])),
+            Some(&leaf_value)
+        );
+
+        // Remove the leaf node and check that the state trie does not contain the leaf node and
+        // value
+        sparse.remove_account_leaf(&Nibbles::from_nibbles([0x0])).unwrap();
+        assert!(!sparse
+            .state_trie_ref()
+            .unwrap()
+            .nodes_ref()
+            .contains_key(&Nibbles::from_nibbles([0x0])),);
+        assert!(sparse
+            .state_trie_ref()
+            .unwrap()
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
+            .is_none());
+
+        // Reveal multiproof again and check that the state trie still does not contain the leaf
+        // node and value, because they were already revealed before
+        sparse.reveal_multiproof(multiproof).unwrap();
+        assert!(!sparse
+            .state_trie_ref()
+            .unwrap()
+            .nodes_ref()
+            .contains_key(&Nibbles::from_nibbles([0x0])));
+        assert!(sparse
+            .state_trie_ref()
+            .unwrap()
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
+            .is_none());
+    }
+
+    #[test]
+    fn reveal_storage_path_twice() {
+        let mut sparse = SparseStateTrie::default();
+
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+            Nibbles::default(),
+            leaf_value.clone(),
+        )));
+        let leaf_2 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+            Nibbles::default(),
+            leaf_value.clone(),
+        )));
+
+        let multiproof = MultiProof {
+            storages: HashMap::from_iter([(
+                B256::ZERO,
+                StorageMultiProof {
+                    root: B256::ZERO,
+                    subtree: ProofNodes::from_iter([
+                        (
+                            Nibbles::default(),
+                            alloy_rlp::encode(TrieNode::Branch(BranchNode {
+                                stack: vec![RlpNode::from_rlp(&leaf_1), RlpNode::from_rlp(&leaf_2)],
+                                state_mask: TrieMask::new(0b11),
+                            }))
+                            .into(),
+                        ),
+                        (Nibbles::from_nibbles([0x0]), leaf_1.clone().into()),
+                        (Nibbles::from_nibbles([0x1]), leaf_1.clone().into()),
+                    ]),
+                    branch_node_hash_masks: Default::default(),
+                    branch_node_tree_masks: Default::default(),
+                },
+            )]),
+            ..Default::default()
+        };
+
+        // Reveal multiproof and check that the storage trie contains the leaf node and value
+        sparse.reveal_multiproof(multiproof.clone()).unwrap();
+        assert!(sparse
+            .storage_trie_ref(&B256::ZERO)
+            .unwrap()
+            .nodes_ref()
+            .contains_key(&Nibbles::from_nibbles([0x0])),);
+        assert_eq!(
+            sparse
+                .storage_trie_ref(&B256::ZERO)
+                .unwrap()
+                .get_leaf_value(&Nibbles::from_nibbles([0x0])),
+            Some(&leaf_value)
+        );
+
+        // Remove the leaf node and check that the storage trie does not contain the leaf node and
+        // value
+        sparse.remove_storage_leaf(B256::ZERO, &Nibbles::from_nibbles([0x0])).unwrap();
+        assert!(!sparse
+            .storage_trie_ref(&B256::ZERO)
+            .unwrap()
+            .nodes_ref()
+            .contains_key(&Nibbles::from_nibbles([0x0])),);
+        assert!(sparse
+            .storage_trie_ref(&B256::ZERO)
+            .unwrap()
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
+            .is_none());
+
+        // Reveal multiproof again and check that the storage trie still does not contain the leaf
+        // node and value, because they were already revealed before
+        sparse.reveal_multiproof(multiproof).unwrap();
+        assert!(!sparse
+            .storage_trie_ref(&B256::ZERO)
+            .unwrap()
+            .nodes_ref()
+            .contains_key(&Nibbles::from_nibbles([0x0])));
+        assert!(sparse
+            .storage_trie_ref(&B256::ZERO)
+            .unwrap()
+            .get_leaf_value(&Nibbles::from_nibbles([0x0]))
+            .is_none());
     }
 
     #[test]
