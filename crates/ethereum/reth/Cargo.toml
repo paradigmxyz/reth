@@ -1,0 +1,70 @@
+[package]
+name = "reth-ethereum"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives-traits.workspace = true
+reth-chainspec.workspace = true
+reth-network = { workspace = true, optional = true }
+reth-provider = { workspace = true, optional = true }
+reth-db = { workspace = true, optional = true, features = ["mdbx"] }
+reth-storage-api = { workspace = true, optional = true }
+reth-node-api = { workspace = true, optional = true }
+reth-consensus = { workspace = true, optional = true }
+reth-consensus-common = { workspace = true, optional = true }
+reth-evm = { workspace = true, optional = true }
+
+# reth-ethereum
+reth-ethereum-primitives.workspace = true
+reth-ethereum-consensus = { workspace = true, optional = true }
+reth-evm-ethereum = { workspace = true, optional = true }
+reth-node-ethereum = { workspace = true, optional = true }
+
+[features]
+default = ["std"]
+std = [
+    "reth-chainspec/std",
+    "reth-ethereum-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-consensus?/std",
+    "reth-consensus-common?/std",
+]
+arbitrary = [
+    "std",
+    "reth-chainspec/arbitrary",
+    "reth-ethereum-primitives/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "reth-db?/arbitrary",
+]
+
+test-utils = [
+    "reth-chainspec/test-utils",
+    "reth-consensus?/test-utils",
+    "reth-db?/test-utils",
+    "reth-ethereum-primitives/test-utils",
+    "reth-evm?/test-utils",
+    "reth-network?/test-utils",
+    "reth-node-ethereum?/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider?/test-utils",
+]
+
+full = ["consensus", "evm", "node", "provider"]
+
+alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
+consensus = ["dep:reth-consensus", "dep:reth-consensus-common", "dep:reth-ethereum-consensus"]
+evm = ["dep:reth-evm", "dep:reth-evm-ethereum"]
+node-api = ["dep:reth-node-api"]
+node = ["provider", "consensus", "evm", "node-api", "dep:reth-node-ethereum"]
+network = ["dep:reth-network"]
+provider = ["storage-api", "dep:reth-provider", "dep:reth-db"]
+storage-api = ["dep:reth-storage-api"]
