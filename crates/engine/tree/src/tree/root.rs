@@ -1,6 +1,7 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::HashSet;
+use alloy_rlp::Decodable;
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use rayon::iter::{ParallelBridge, ParallelIterator};
@@ -18,13 +19,13 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, Nibbles,
-    TrieInput,
+    TrieInput, TrieNode,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
-    errors::{SparseStateTrieResult, SparseTrieErrorKind},
+    errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
 use revm_primitives::{keccak256, EvmState, B256};
@@ -73,6 +74,8 @@ pub struct SparseTrieUpdate {
     targets: MultiProofTargets,
     /// The calculated multiproof
     multiproof: MultiProof,
+    /// Decoded Proof Struct
+    decoded_proofs: DecodedProofs,
 }
 
 impl SparseTrieUpdate {
@@ -369,7 +372,7 @@ where
 
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
-            return;
+            return
         }
 
         self.spawn_multiproof(input);
@@ -412,9 +415,9 @@ where
                 ?elapsed,
                 "Multiproof calculated",
             );
-
             match result {
                 Ok(proof) => {
+                    let decoded_proofs = decode_proofs(proof.clone()).unwrap();
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
                         Box::new(ProofCalculated {
                             sequence_number: proof_sequence_number,
@@ -422,6 +425,7 @@ where
                                 state: hashed_state_update,
                                 targets: proof_targets,
                                 multiproof: proof,
+                                decoded_proofs,
                             },
                             elapsed,
                         }),
@@ -436,6 +440,24 @@ where
 
         self.inflight += 1;
     }
+}
+
+#[derive(Debug, Default)]
+struct DecodedProofs {
+    pub decoded_nodes: Vec<TrieNode>,
+}
+
+fn decode_proofs(multiproof: MultiProof) -> Result<DecodedProofs, SparseStateTrieError> {
+    let mut nodes: Vec<TrieNode> = vec![];
+    let account_subtree = multiproof.account_subtree.into_nodes_sorted();
+    let account_nodes = account_subtree.into_iter();
+
+    // Reveal the remaining proof nodes.
+    for (_path, bytes) in account_nodes {
+        let node = TrieNode::decode(&mut &bytes[..])?;
+        nodes.push(node);
+    }
+    Ok(DecodedProofs { decoded_nodes: nodes })
 }
 
 #[derive(Metrics, Clone)]
@@ -791,6 +813,7 @@ where
                                 state,
                                 targets: MultiProofTargets::default(),
                                 multiproof: MultiProof::default(),
+                                decoded_proofs: DecodedProofs::default(),
                             },
                         ) {
                             let _ = sparse_trie_tx
@@ -1077,7 +1100,7 @@ where
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
-    SparseTrieUpdate { state, targets, multiproof }: SparseTrieUpdate,
+    SparseTrieUpdate { state, targets, multiproof, decoded_proofs: _ }: SparseTrieUpdate,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,
