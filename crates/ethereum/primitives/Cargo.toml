@@ -25,7 +25,7 @@ alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-serde = { workspace = true, optional = true }
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, optional = true }
-alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true }
 revm-primitives.workspace = true
 
 # misc
