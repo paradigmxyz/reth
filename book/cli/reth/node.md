@@ -710,6 +710,11 @@ Engine:
       --engine.state-root-task
           Enable state root task
 
+          DEPRECATED: state root task is default now, use --engine.legacy-state-root to enable the legacy functionality
+
+      --engine.legacy-state-root
+          Enable legacy state root
+
       --engine.caching-and-prewarming
           Enable cross-block caching and parallel prewarming
 
