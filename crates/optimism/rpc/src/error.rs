@@ -1,7 +1,7 @@
 //! RPC errors specific to OP.
 
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
-use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
+use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
@@ -108,10 +108,10 @@ pub enum TxConditionalErr {
     InvalidCondition,
 }
 
-impl From<Op4337Error> for jsonrpsee_types::error::ErrorObject<'static> {
-    fn from(err: Op4337Error) -> Self {
+impl From<TxConditionalErr> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(err: TxConditionalErr) -> Self {
         jsonrpsee_types::error::ErrorObject::owned(
-            INTERNAL_ERROR_CODE,
+            INVALID_PARAMS_CODE,
             err.to_string(),
             None::<String>,
         )
