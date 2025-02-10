@@ -339,7 +339,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx: &OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
-        N: OpPayloadPrimitives,
+        N: NodePrimitives<SignedTx: OpTransaction>,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         EvmConfig: ConfigureEvmFor<N>,
         ChainSpec: EthChainSpec + OpHardforks,
@@ -793,7 +793,7 @@ impl<EvmConfig, ChainSpec, N> OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>
 where
     EvmConfig: ConfigureEvmFor<N>,
     ChainSpec: EthChainSpec + OpHardforks,
-    N: OpPayloadPrimitives,
+    N: NodePrimitives<SignedTx: OpTransaction>,
 {
     /// apply eip-4788 pre block contract call
     pub fn apply_pre_beacon_root_contract_call<DB>(
