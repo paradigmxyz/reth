@@ -8,7 +8,7 @@ use jsonrpsee_core::RpcResult;
 use op_alloy_rpc_types::Transaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::{L2EthApiExtServer, RpcNodeCore};
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
 /// Maximum execution const for conditional transactions.
@@ -74,7 +74,7 @@ impl<N> L2EthApiExtServer for OpEthApiExt<N>
 where
     N: OpNodeCore + 'static,
     N::Provider: BlockReaderIdExt + StateProviderFactory,
-    N::Pool: TransactionPool,
+    N::Pool: TransactionPool<Transaction = Transaction>,
 {
     async fn send_raw_transaction_conditional(
         &self,
@@ -137,9 +137,10 @@ where
             }
              */
 
-        let hash = self.pool().add_transaction(tx, condition).await.map_err(|e| {
-            OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into()))
-        })?;
+        let hash =
+            self.pool().add_transaction(TransactionOrigin::External, tx).await.map_err(|e| {
+                OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into()))
+            })?;
 
         // If we have a sequencer client, forward the transaction
         if let Some(sequencer) = self.sequencer_client() {
