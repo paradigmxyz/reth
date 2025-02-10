@@ -1456,6 +1456,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
 
 [[package]]
+name = "bitfinity-block-validator"
+version = "1.1.5"
+dependencies = [
+ "alloy-consensus",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-signer",
+ "alloy-signer-local",
+ "async-trait",
+ "candid",
+ "did",
+ "ethereum-json-rpc-client",
+ "evm-canister-client",
+ "eyre",
+ "itertools 0.13.0",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-db",
+ "reth-db-common",
+ "reth-engine-tree",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-node-types",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-trie",
+ "reth-trie-db",
+ "serde",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7209,6 +7245,7 @@ dependencies = [
  "async-channel 2.3.1",
  "async-trait",
  "backon",
+ "bitfinity-block-validator",
  "candid",
  "clap",
  "did",
@@ -7217,6 +7254,7 @@ dependencies = [
  "evm-canister-client",
  "eyre",
  "futures",
+ "hex",
  "jsonrpsee",
  "lightspeed_scheduler",
  "parking_lot",

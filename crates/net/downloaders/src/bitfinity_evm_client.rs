@@ -2,7 +2,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_genesis::{ChainConfig, Genesis, GenesisAccount};
 use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use candid::Principal;
-use did::certified::CertifiedResult;
+use did::{certified::CertifiedResult, Transaction};
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use eyre::Result;
 use futures::future::Remote;
@@ -25,7 +25,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, ForkCondition, Header, TransactionSigned};
+use reth_primitives::{Block, BlockBody, ForkCondition, Header, TransactionSigned};
 use serde_json::json;
 
 use std::{self, cmp::min, collections::HashMap, sync::OnceLock, time::Duration};
@@ -226,39 +226,6 @@ impl BitfinityEvmClient {
         Ok(Self { headers, hash_to_number, bodies, safe_block_number })
     }
 
-    /// Validates the block with the given hash and update the latest safe block number if
-    /// successful.
-    pub async fn validate_block(&self, block_hash: B256) -> Result<(), RemoteClientError> {
-        let validation_hash: B256 = todo!();
-        match self.send_validation_request(block_hash, validation_hash).await {
-            Ok(_) => {
-                let Some(safe_block) = self.hash_to_number.get(&block_hash) else {
-                    return Err(RemoteClientError::ValidationError("validation succeeded but the block is not found in the headers".into()));
-                };
-
-                self.safe_block_number = *safe_block;
-                info!(target: "downloaders::bitfinity_evm_client", "Block validated: {}", block_hash);
-
-                Ok(())
-            }
-            Err(err) => {
-                warn!(target: "downloaders::bitfinity_evm_client", "Block validation failed: {}", err);
-                Err(err)
-            }
-        }
-    }
-
-    /// Sends the validation request to the EVM.
-    ///
-    /// If `Ok` is returned, validation was successful and the new safe block is the validated one.
-    async fn send_validation_request(
-        &self,
-        block_hash: B256,
-        validation_hash: B256,
-    ) -> Result<(), RemoteClientError> {
-        todo!()
-    }
-
     /// Get the remote tip hash of the chain.
     pub fn tip(&self) -> Option<B256> {
         self.headers
@@ -266,6 +233,35 @@ impl BitfinityEvmClient {
             .max()
             .and_then(|max_key| self.headers.get(max_key))
             .map(|h| h.hash_slow())
+    }
+
+    /// Returns the parent block hash of the given one.
+    pub fn parent(&self, block: &B256) -> Option<B256> {
+        let block_number = self.hash_to_number.get(block)?;
+        if *block_number == 0 {
+            return None;
+        }
+
+        self.headers.get(&(block_number - 1)).map(|h| h.hash_slow())
+    }
+
+    /// Returns unsafe blocks with transactions up to the `tip`.
+    pub fn unsafe_blocks(&self, tip: &B256) -> eyre::Result<Vec<Block>> {
+        let mut next_block_number = self.safe_block_number + 1;
+        let mut blocks = vec![];
+        while let Some(header) = self.headers.get(&next_block_number) {
+            let block_hash = header.hash_slow();
+            let body = self.bodies.get(&block_hash).ok_or_else(|| eyre::eyre!("Block body not found"))?;
+            blocks.push(body.clone().into_block(header.clone()));
+
+            if block_hash == *tip {
+                return Ok(blocks);
+            }
+
+            next_block_number += 1;
+        }
+
+        Err(eyre::eyre!("Block {tip} not found"))
     }
 
     /// Returns the hash of the first block after the latest safe block. If the tip of the chain is

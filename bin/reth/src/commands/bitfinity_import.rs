@@ -1,6 +1,9 @@
 //! Command that initializes the node by importing a chain from a remote EVM node.
 
 use crate::{dirs::DataDirPath, version::SHORT_VERSION};
+use bitfinity_block_validator::BitfinityBlockValidator;
+use candid::Principal;
+use evm_canister_client::{ic_agent::{identity::AnonymousIdentity, Agent}, EvmCanisterClient, IcAgentClient};
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -17,7 +20,7 @@ use reth_downloaders::{
 };
 use reth_exex::ExExManagerHandle;
 use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
+use reth_node_core::{args::{BitfinityImportArgs, IC_MAINNET_KEY, IC_MAINNET_URL}, dirs::ChainPath};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
@@ -34,7 +37,7 @@ use reth_stages::{
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::watch;
-use tracing::{debug, error, info};
+use tracing::{debug, info, warn};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Clone)]
@@ -180,30 +183,59 @@ impl BitfinityImportCommand {
         .await?;
 
         if self.bitfinity.validate_unsafe_blocks {
-            while let Some(unsafe_block) = remote_client.unsafe_block() {
-                if let Err(err) = remote_client.validate_block(unsafe_block).await {
-                    error!(target: "reth::cli - BitfinityImportCommand", "Block validation failed: {}", err);
-                    break;
+            let Some(mut tip) = remote_client.tip() else {
+                warn!(target: "reth::cli - BitfinityImportCommand", "Cannot find block for validation. Skipping.");
+                return Ok(());
+            };
+
+            while tip != safe_block {
+                match self.validate_block(&tip, remote_client.clone(), provider_factory.clone()).await {
+                    Ok(_) => {
+                        self.import_to_block(tip, remote_client, provider_factory, consensus)
+                            .await?;
+                        break;
+                    }
+
+                    Err(err) => {
+                        warn!(target: "reth::cli - BitfinityImportCommand", "Failed to validate block {}: {}", tip, err);
+
+                        if let Some(parent) = remote_client.parent(&tip) {
+                            tip = parent;
+                        } else {
+                            warn!(target: "reth::cli - BitfinityImportCommand", "Cannot find a parent block for {}", tip);
+                            break;
+                        }
+                    }
                 }
-
-                info!(target: "reth::cli - BitfinityImportCommand", "Block validated: {}", unsafe_block);
-            }
-        }
-
-        if let Some(new_safe_block) = remote_client.safe_block() {
-            if new_safe_block != safe_block {
-                self.import_to_block(
-                    new_safe_block,
-                    remote_client.clone(),
-                    provider_factory.clone(),
-                    consensus.clone(),
-                )
-                .await?;
             }
         }
 
         info!(target: "reth::cli - BitfinityImportCommand", "Finishing up");
         Ok(())
+    }
+
+    async fn validate_block(
+        &self,
+        block: &B256,
+        remote_client: Arc<BitfinityEvmClient>,
+        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+    ) -> eyre::Result<()> {
+        let agent = Agent::builder().with_identity(AnonymousIdentity).with_url(self.bitfinity.evm_network.clone()).build()?;
+        if self.bitfinity.evm_network == IC_MAINNET_URL {
+            let key = hex::decode(IC_MAINNET_KEY)?;
+            agent.set_root_key(key);
+        } else {
+            agent.fetch_root_key().await?;
+        }
+
+        let evm_principal = Principal::from_text(&self.bitfinity.evmc_principal)?;
+        let agent_client = IcAgentClient::with_agent(evm_principal, agent);
+        let canister_client = EvmCanisterClient::new(agent_client);
+
+        let validator = BitfinityBlockValidator::new(canister_client, provider_factory);
+        let blocks = remote_client.unsafe_blocks(block)?;
+
+        validator.validate_blocks(&blocks).await
     }
 
     /// Imports the blocks up to the given block hash of the `remove_client`.
