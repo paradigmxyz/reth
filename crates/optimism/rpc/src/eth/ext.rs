@@ -97,6 +97,7 @@ where
             Ok(tx.tx_hash())
         } else {
             // otherwise, add to pool
+            // TODO: include conditional
             let hash = self.pool().add_transaction(TransactionOrigin::External, tx).await.map_err(
                 |e| OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into())),
             )?;
