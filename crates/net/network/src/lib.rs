@@ -157,7 +157,7 @@ pub use reth_network_types::{PeersConfig, SessionsConfig};
 pub use session::{
     get_ecies_stream, ActiveSessionHandle, ActiveSessionMessage, Direction, EthRlpxConnection,
     PeerInfo, PendingSessionEvent, PendingSessionHandle, PendingSessionHandshakeError,
-    SessionCommand, SessionEvent, SessionId, SessionManager,
+    SessionCommand, SessionEvent, SessionId, SessionManager, TryFromPeerMessage,
 };
 
 pub use builder::NetworkBuilder;

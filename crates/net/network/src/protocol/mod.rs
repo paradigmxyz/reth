@@ -1,5 +1,8 @@
 use super::PendingSessionEvent;
-use crate::session::{HandshakeInfo, SessionInfo};
+use crate::{
+    session::{HandshakeInfo, SessionInfo},
+    TryFromPeerMessage,
+};
 use derive_more::Debug;
 use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
@@ -9,7 +12,7 @@ use reth_eth_wire::{
     message::EthBroadcastMessage,
     DisconnectReason, EthVersion, NetworkPrimitives, P2PStream,
 };
-use reth_network_api::{Direction, PeerId};
+use reth_network_api::{message::NetworkMessage, Direction, PeerId};
 use std::{fmt, future::Future, pin::Pin};
 use tokio::net::TcpStream;
 
@@ -75,7 +78,7 @@ pub trait ConnectionHandler<N: NetworkPrimitives>: Send + Sync + 'static {
     /// A connection resolves to a `PendingSessionEvent`.
     type ConnectionFut: Future<Output = PendingSessionEvent<N, Self::Connection>> + Send + 'static;
 
-    type Connection: ConnectionStream<N>;
+    type Connection: NetworkStream<N>;
 
     /// Invoked when a new connection needs to be established, from either an incoming or outgoing
     /// connection.
@@ -87,9 +90,13 @@ pub trait ConnectionHandler<N: NetworkPrimitives>: Send + Sync + 'static {
     ) -> Self::ConnectionFut;
 }
 
-/// This trait is responsible to abstract the underlying connection stream.
-pub trait ConnectionStream<N: NetworkPrimitives>: Stream + Debug + Send + Unpin + 'static {
-    type Message;
+/// This trait is responsible to abstract the underlying network connection stream.
+pub trait NetworkStream<N: NetworkPrimitives>:
+    Stream<Item = Result<Self::Message, EthStreamError>> + Debug + Send + Unpin + 'static
+{
+    /// The network message.
+    type Message: NetworkMessage<N> + TryFromPeerMessage<N>;
+
     /// Returns the negotiated ETH version.
     fn version(&self) -> EthVersion;
 

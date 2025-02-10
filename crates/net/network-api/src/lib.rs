@@ -17,6 +17,8 @@ pub mod downloaders;
 /// Network Error
 pub mod error;
 pub mod events;
+/// Network message types
+pub mod message;
 /// Implementation of network traits for that does nothing.
 pub mod noop;
 pub mod test_utils;

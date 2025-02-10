@@ -2,7 +2,7 @@
 
 use crate::{
     message::PeerMessage,
-    protocol::ConnectionStream,
+    protocol::NetworkStream,
     session::{Direction, SessionId},
     PendingSessionHandshakeError,
 };
@@ -160,7 +160,7 @@ impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
 ///
 /// A session starts with a `Handshake`, followed by a `Hello` message which
 #[derive(Debug)]
-pub enum PendingSessionEvent<N: NetworkPrimitives, C: ConnectionStream<N>> {
+pub enum PendingSessionEvent<N: NetworkPrimitives, C: NetworkStream<N>> {
     /// Represents a successful `Hello` and `Status` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
     Established {
         /// An internal identifier for the established session
