@@ -445,4 +445,31 @@ mod tests {
         assert_eq!(l1_block_info.l1_blob_base_fee, l1_blob_base_fee);
         assert_eq!(l1_block_info.l1_blob_base_fee_scalar, l1_blob_base_fee_scalar);
     }
+
+    #[test]
+    fn parse_l1_info_isthmus() {
+        // rig
+
+        // L1 block info from a devnet with Isthmus activated
+        const DATA: &[u8] = &hex!("098999be00000558000c5fc500000000000000030000000067a9f765000000000000002900000000000000000000000000000000000000000000000000000000006a6d09000000000000000000000000000000000000000000000000000000000000000172fcc8e8886636bdbe96ba0e4baab67ea7e7811633f52b52e8cf7a5123213b6f000000000000000000000000d3f2c5afb2d76f5579f326b0cd7da5f5a4126c3500004e2000000000000001f4");
+
+        // expected l1 block info verified against expected l1 fee and operator fee for tx.
+        let l1_base_fee = U256::from(6974729);
+        let l1_base_fee_scalar = U256::from(1368);
+        let l1_blob_base_fee = Some(U256::from(1));
+        let l1_blob_base_fee_scalar = Some(U256::from(810949));
+        let operator_fee_scalar = Some(U256::from(20000));
+        let operator_fee_constant = Some(U256::from(500));
+
+        // test
+
+        let l1_block_info = parse_l1_info(DATA).unwrap();
+
+        assert_eq!(l1_block_info.l1_base_fee, l1_base_fee);
+        assert_eq!(l1_block_info.l1_base_fee_scalar, l1_base_fee_scalar);
+        assert_eq!(l1_block_info.l1_blob_base_fee, l1_blob_base_fee);
+        assert_eq!(l1_block_info.l1_blob_base_fee_scalar, l1_blob_base_fee_scalar);
+        assert_eq!(l1_block_info.operator_fee_scalar, operator_fee_scalar);
+        assert_eq!(l1_block_info.operator_fee_constant, operator_fee_constant);
+    }
 }
