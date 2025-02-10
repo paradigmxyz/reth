@@ -4781,7 +4781,9 @@ mod tests {
                 chain_a[..chain_a.len() - invalid_index - 1].iter().cloned(),
             )
             .await;
-        test_harness.check_invalid_block(chain_a[chain_a.len() - invalid_index - 1].hash()).await;
+        for block in &chain_a[chain_a.len() - invalid_index - 1..] {
+            test_harness.check_invalid_block(block.hash()).await;
+        }
 
         // send FCU to make the tip of chain A, expect invalid
         let chain_a_tip_hash = chain_a.last().unwrap().hash();
