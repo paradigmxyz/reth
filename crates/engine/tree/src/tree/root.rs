@@ -69,8 +69,6 @@ pub struct StateRootComputeOutcome {
 pub struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
     state: HashedPostState,
-    /// The proof targets
-    targets: MultiProofTargets,
     /// The calculated multiproof
     multiproof: MultiProof,
 }
@@ -84,7 +82,6 @@ impl SparseTrieUpdate {
     /// Extend update with contents of the other.
     pub fn extend(&mut self, other: Self) {
         self.state.extend(other.state);
-        extend_multi_proof_targets(&mut self.targets, other.targets);
         self.multiproof.extend(other.multiproof);
     }
 }
@@ -420,7 +417,6 @@ where
                             sequence_number: proof_sequence_number,
                             update: SparseTrieUpdate {
                                 state: hashed_state_update,
-                                targets: proof_targets,
                                 multiproof: proof,
                             },
                             elapsed,
@@ -787,11 +783,7 @@ where
 
                         if let Some(combined_update) = self.on_proof(
                             sequence_number,
-                            SparseTrieUpdate {
-                                state,
-                                targets: MultiProofTargets::default(),
-                                multiproof: MultiProof::default(),
-                            },
+                            SparseTrieUpdate { state, multiproof: MultiProof::default() },
                         ) {
                             let _ = sparse_trie_tx
                                 .as_ref()
@@ -1077,7 +1069,7 @@ where
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
-    SparseTrieUpdate { state, targets, multiproof }: SparseTrieUpdate,
+    SparseTrieUpdate { state, multiproof }: SparseTrieUpdate,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,
@@ -1088,7 +1080,7 @@ where
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
-    trie.reveal_multiproof(targets, multiproof)?;
+    trie.reveal_multiproof(multiproof)?;
 
     // Update storage slots with new values and calculate storage roots.
     let (tx, rx) = mpsc::channel();
