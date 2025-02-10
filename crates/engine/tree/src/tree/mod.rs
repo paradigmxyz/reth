@@ -3553,6 +3553,9 @@ mod tests {
                 )) => {
                     assert_eq!(executed.recovered_block.hash(), expected_hash);
                 }
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(_)) => {
+                    // skip
+                }
                 _ => panic!("Unexpected event: {:#?}", event),
             }
         }
