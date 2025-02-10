@@ -7485,6 +7485,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-ethereum"
+version = "1.1.5"
+dependencies = [
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-consensus-common",
+ "reth-db",
+ "reth-ethereum-consensus",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-network",
+ "reth-node-api",
+ "reth-node-ethereum",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-storage-api",
+]
+
+[[package]]
 name = "reth-ethereum-cli"
 version = "1.1.5"
 dependencies = [
