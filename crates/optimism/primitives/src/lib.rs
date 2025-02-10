@@ -12,10 +12,12 @@
 extern crate alloc;
 
 pub mod bedrock;
-pub mod transaction;
 
-use reth_primitives_traits::Block;
+pub mod transaction;
 pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
+
+pub mod predeploys;
+pub use predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 
 mod receipt;
 pub use receipt::{DepositReceipt, OpReceipt};
@@ -24,7 +26,7 @@ pub use receipt::{DepositReceipt, OpReceipt};
 pub type OpBlock = alloy_consensus::Block<OpTransactionSigned>;
 
 /// Optimism-specific block body type.
-pub type OpBlockBody = <OpBlock as Block>::Body;
+pub type OpBlockBody = <OpBlock as reth_primitives_traits::Block>::Body;
 
 /// Primitive types for Optimism Node.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
