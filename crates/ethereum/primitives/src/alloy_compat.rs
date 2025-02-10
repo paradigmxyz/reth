@@ -43,12 +43,11 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
     }
 }
 
-impl<T> TryFrom<AlloyRpcTransaction<T>> for TransactionSigned
+impl<T> From<AlloyRpcTransaction<T>> for TransactionSigned
 where
-    T: TryInto<Self>,
+    Self: From<T>,
 {
-    type Error = T::Error;
-    fn try_from(tx: AlloyRpcTransaction<T>) -> Result<Self, Self::Error> {
-        tx.inner.try_into()
+    fn from(value: AlloyRpcTransaction<T>) -> Self {
+        value.inner.into()
     }
 }
