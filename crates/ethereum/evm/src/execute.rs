@@ -21,7 +21,7 @@ use reth_evm::{
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_revm::db::State;
+use revm::db::State;
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 
 /// Factory for [`EthExecutionStrategy`].

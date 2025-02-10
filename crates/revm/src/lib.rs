@@ -11,8 +11,6 @@
 
 extern crate alloc;
 
-pub mod batch;
-
 /// Cache database that reads from an underlying [`DatabaseRef`].
 /// Database adapters for payload building.
 pub mod cached;

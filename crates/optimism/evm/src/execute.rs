@@ -24,7 +24,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt, OpPrimitives};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_revm::State;
+use revm::State;
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use tracing::trace;
 
