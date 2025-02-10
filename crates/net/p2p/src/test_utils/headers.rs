@@ -15,7 +15,7 @@ use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_consensus::{test_utils::TestConsensus, HeaderValidator};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use std::{
     fmt,
     pin::Pin,

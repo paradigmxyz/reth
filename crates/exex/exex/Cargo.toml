@@ -78,4 +78,5 @@ serde = [
     "rand/serde",
     "secp256k1/serde",
     "reth-primitives-traits/serde",
+    "reth-prune-types/serde",
 ]

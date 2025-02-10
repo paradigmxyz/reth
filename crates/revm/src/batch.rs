@@ -10,7 +10,7 @@ use alloy_primitives::BlockNumber;
 ///  - pruning receipts according to the pruning configuration.
 ///  - batch range if known
 #[derive(Debug)]
-pub struct BlockBatchRecord<T = reth_primitives::Receipt> {
+pub struct BlockBatchRecord<T = reth_ethereum_primitives::Receipt> {
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.

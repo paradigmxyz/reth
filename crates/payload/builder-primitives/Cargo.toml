@@ -15,11 +15,7 @@ workspace = true
 # reth
 reth-payload-primitives.workspace = true
 
-# alloy
-alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
-
 # async
-async-trait.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true

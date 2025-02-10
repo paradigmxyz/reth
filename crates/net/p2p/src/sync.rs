@@ -1,6 +1,6 @@
 //! Traits used when interacting with the sync status of the network.
 
-use reth_primitives::Head;
+use alloy_eips::eip2124::Head;
 
 /// A type that provides information about whether the node is currently syncing and the network is
 /// currently serving syncing related requests.
