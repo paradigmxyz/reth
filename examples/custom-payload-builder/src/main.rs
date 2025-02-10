@@ -11,20 +11,15 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use generator::EmptyBlockPayloadJobGenerator;
 use reth::{
     builder::{components::PayloadServiceBuilder, node::FullNodeTypes, BuilderContext},
     cli::{config::PayloadBuilderConfig, Cli},
-    payload::PayloadBuilderHandle,
-    providers::CanonStateSubscriptions,
     transaction_pool::{PoolTransaction, TransactionPool},
 };
-use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_chainspec::ChainSpec;
-use reth_ethereum_payload_builder::EthereumBuilderConfig;
+use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumPayloadBuilder};
 use reth_node_api::NodeTypesWithEngine;
 use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode};
-use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::{EthPrimitives, TransactionSigned};
 
 pub mod generator;
@@ -47,38 +42,22 @@ where
         + Unpin
         + 'static,
 {
-    async fn spawn_payload_service(
-        self,
+    type PayloadBuilder = EthereumPayloadBuilder<Pool, Node::Provider, EthEvmConfig>;
+
+    async fn build_payload_builder(
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
+    ) -> eyre::Result<Self::PayloadBuilder> {
         tracing::info!("Spawning a custom payload builder");
         let conf = ctx.payload_builder_config();
 
-        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-            .interval(conf.interval())
-            .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks());
-
-        let payload_generator = EmptyBlockPayloadJobGenerator::with_builder(
+        Ok(reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             ctx.provider().clone(),
-            ctx.task_executor().clone(),
-            payload_job_config,
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
-                ctx.provider().clone(),
-                pool,
-                EthEvmConfig::new(ctx.chain_spec()),
-                EthereumBuilderConfig::new(conf.extra_data_bytes()),
-            ),
-        );
-
-        let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-
-        ctx.task_executor()
-            .spawn_critical("custom payload builder service", Box::pin(payload_service));
-
-        Ok(payload_builder)
+            pool,
+            EthEvmConfig::new(ctx.chain_spec()),
+            EthereumBuilderConfig::new(conf.extra_data_bytes()),
+        ))
     }
 }
 

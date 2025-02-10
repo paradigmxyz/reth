@@ -58,8 +58,8 @@ pub struct PoolConfig {
     pub new_tx_listener_buffer_size: usize,
     /// How many new pending transactions to buffer and send iterators in progress.
     pub max_new_pending_txs_notifications: usize,
-    /// How long stale transactions are kept in the pool
-    pub stale_tx_timeout: Duration,
+    /// Maximum lifetime for transactions in the pool
+    pub max_tx_lifetime: Duration,
 }
 
 impl PoolConfig {
@@ -88,7 +88,7 @@ impl Default for PoolConfig {
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
-            stale_tx_timeout: Default::default(),
+            max_tx_lifetime: Duration::default(),
         }
     }
 }
@@ -148,7 +148,7 @@ impl PriceBumpConfig {
     #[inline]
     pub(crate) const fn price_bump(&self, tx_type: u8) -> u128 {
         if tx_type == EIP4844_TX_TYPE_ID {
-            return self.replace_blob_tx_price_bump;
+            return self.replace_blob_tx_price_bump
         }
         self.default_price_bump
     }
@@ -209,7 +209,7 @@ impl LocalTransactionConfig {
     #[inline]
     pub fn is_local(&self, origin: TransactionOrigin, sender: &Address) -> bool {
         if self.no_local_exemptions() {
-            return false;
+            return false
         }
         origin.is_local() || self.contains_local_address(sender)
     }

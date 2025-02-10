@@ -67,6 +67,7 @@ exclude_crates=(
   reth-payload-util # reth-transaction-pool
   reth-trie-parallel # tokio
   reth-testing-utils
+  reth-optimism-txpool # reth-transaction-pool
 )
 
 # Array to hold the results
