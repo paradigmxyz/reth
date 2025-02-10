@@ -707,11 +707,6 @@ Engine:
 
           [default: 2]
 
-      --engine.state-root-task
-          Enable state root task
-
-          DEPRECATED: state root task is default now, use --engine.legacy-state-root to enable the legacy functionality
-
       --engine.legacy-state-root
           Enable legacy state root
 
