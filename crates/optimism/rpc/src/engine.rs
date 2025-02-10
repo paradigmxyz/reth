@@ -69,8 +69,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
     ///
     /// OP modifications:
-    /// - The `payload_attributes` parameter is extended with the [`OpPayloadAttributes`] type
-    ///   as described in <https://specs.optimism.io/protocol/exec-engine.html#extended-payloadattributesv2>
+    /// - The `payload_attributes` parameter is extended with the [`EngineTypes::PayloadAttributes`](EngineTypes) type as described in <https://specs.optimism.io/protocol/exec-engine.html#extended-payloadattributesv2>
     #[method(name = "forkchoiceUpdatedV2")]
     async fn fork_choice_updated_v2(
         &self,
@@ -86,8 +85,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     /// OP modifications:
     /// - Must be called with an Ecotone payload
     /// - Attributes must contain the parent beacon block root field
-    /// - The `payload_attributes` parameter is extended with the [`OpPayloadAttributes`] type
-    ///   as described in <https://specs.optimism.io/protocol/exec-engine.html#extended-payloadattributesv2>
+    /// - The `payload_attributes` parameter is extended with the [`EngineTypes::PayloadAttributes`](EngineTypes) type as described in <https://specs.optimism.io/protocol/exec-engine.html#extended-payloadattributesv2>
     #[method(name = "forkchoiceUpdatedV3")]
     async fn fork_choice_updated_v3(
         &self,
@@ -119,7 +117,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     /// > Provider software MAY stop the corresponding build process after serving this call.
     ///
     /// OP modifications:
-    /// - the response type is extended to [`OpExecutionPayloadEnvelopeV3`].
+    /// - the response type is extended to [`EngineTypes::ExecutionPayloadEnvelopeV3`].
     #[method(name = "getPayloadV3")]
     async fn get_payload_v3(
         &self,
@@ -135,7 +133,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     /// > Provider software MAY stop the corresponding build process after serving this call.
     ///
     /// OP modifications:
-    /// - the response type is extended to [`OpExecutionPayloadEnvelopeV4`].
+    /// - the response type is extended to [`EngineTypes::ExecutionPayloadEnvelopeV4`].
     #[method(name = "getPayloadV4")]
     async fn get_payload_v4(
         &self,
