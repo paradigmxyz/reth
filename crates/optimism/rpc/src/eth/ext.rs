@@ -111,31 +111,7 @@ where
             return Err(Op4337Error::InvalidCondition.into());
         }
 
-        /*
-            // Check condition against state
-            if let Err(e) = self.provider().check_transaction_conditional(&condition) {
-                return Err(OpEthApiError::InvalidTransaction(
-                    OpInvalidTransactionError::InvalidCondition,
-                )
-                .into());
-        }
-
-
-            // Check against parent state to reduce MEV
-            let parent_hash = header.parent_hash;
-            let (parent_state, _) = self
-                .provider()
-                .state_and_header_by_hash(parent_hash)
-                .await
-                .map_err(OpEthApiError::Eth)?;
-
-            if let Err(e) = parent_state.check_transaction_conditional(&condition) {
-                return Err(OpEthApiError::InvalidTransaction(
-                    OpInvalidTransactionError::InvalidCondition,
-                )
-                .into());
-            }
-             */
+        // TODO: check condition against state
 
         let hash =
             self.pool().add_transaction(TransactionOrigin::External, tx).await.map_err(|e| {
