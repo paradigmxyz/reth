@@ -6,6 +6,7 @@ mod counter;
 mod handle;
 
 use active::QueuedOutgoingMessages;
+pub use active::TryFromPeerMessage;
 pub use conn::EthRlpxConnection;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
@@ -26,7 +27,7 @@ use std::{
 use crate::{
     message::PeerMessage,
     metrics::SessionManagerMetrics,
-    protocol::{ConnectionHandler, ConnectionStream, NetworkProtocolHandler},
+    protocol::{ConnectionHandler, NetworkProtocolHandler, NetworkStream},
     session::active::ActiveSession,
     subprotocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols},
 };
@@ -902,7 +903,7 @@ impl PendingSessionHandshakeError {
 pub struct ExceedsSessionLimit(pub(crate) u32);
 
 /// Starts a pending session authentication with a timeout.
-pub(crate) async fn pending_session_with_timeout<N: NetworkPrimitives, F, C: ConnectionStream<N>>(
+pub(crate) async fn pending_session_with_timeout<N: NetworkPrimitives, F, C: NetworkStream<N>>(
     timeout: Duration,
     session_id: SessionId,
     remote_addr: SocketAddr,
@@ -926,7 +927,7 @@ pub(crate) async fn pending_session_with_timeout<N: NetworkPrimitives, F, C: Con
 
 /// Returns an [`ECIESStream`] if it can be built. If not, send a
 /// [`PendingSessionEvent::EciesAuthError`] and returns `None`
-pub(crate) async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
+pub async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
     stream: Io,
     secret_key: SecretKey,
     direction: Direction,

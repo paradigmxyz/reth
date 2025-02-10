@@ -7811,6 +7811,7 @@ name = "reth-network-api"
 version = "1.1.5"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-admin",
  "auto_impl",
  "derive_more",

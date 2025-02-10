@@ -1,5 +1,6 @@
 //! Connection types for a session
 
+use crate::protocol::NetworkStream;
 use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
@@ -15,8 +16,6 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::net::TcpStream;
-
-use crate::protocol::ConnectionStream;
 
 /// The type of the underlying peer network connection.
 pub type EthPeerConnection<N> = EthStream<P2PStream<ECIESStream<TcpStream>>, N>;
@@ -151,7 +150,7 @@ impl<N: NetworkPrimitives> Sink<EthMessage<N>> for EthRlpxConnection<N> {
     }
 }
 
-impl<N: NetworkPrimitives> ConnectionStream<N> for EthRlpxConnection<N> {
+impl<N: NetworkPrimitives> NetworkStream<N> for EthRlpxConnection<N> {
     type Message = EthMessage<N>;
 
     fn version(&self) -> EthVersion {

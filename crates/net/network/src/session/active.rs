@@ -13,7 +13,7 @@ use std::{
 
 use crate::{
     message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
-    protocol::ConnectionStream,
+    protocol::NetworkStream,
     session::{
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,
@@ -29,7 +29,7 @@ use reth_eth_wire::{
     Capabilities, DisconnectReason, EthMessage, NetworkPrimitives,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
-use reth_network_api::PeerRequest;
+use reth_network_api::{message::NetworkMessage, PeerRequest};
 use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
 use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
@@ -77,7 +77,11 @@ const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 ///    - incoming requests/broadcasts _from remote_ via the connection
 ///    - responses for handled ETH requests received from the remote peer.
 #[allow(dead_code)]
-pub(crate) struct ActiveSession<N: NetworkPrimitives, Conn: ConnectionStream<N>> {
+pub(crate) struct ActiveSession<
+    N: NetworkPrimitives,
+    Conn: NetworkStream<N, Message = M>,
+    M: NetworkMessage<N> + TryFromPeerMessage<N>,
+> {
     /// The underlying connection.
     pub(crate) conn: Conn,
     /// Keeps track of request ids.
@@ -103,7 +107,7 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives, Conn: ConnectionStream<N>>
     /// All requests that were sent by the remote peer and we're waiting on an internal response
     pub(crate) received_requests_from_remote: Vec<ReceivedRequest<N>>,
     /// Buffered messages that should be handled and sent to the peer.
-    pub(crate) queued_outgoing: QueuedOutgoingMessages<N>,
+    pub(crate) queued_outgoing: QueuedOutgoingMessages<N, M>,
     /// The maximum time we wait for a response from a peer.
     pub(crate) internal_request_timeout: Arc<AtomicU64>,
     /// Interval when to check for timed out requests.
@@ -116,7 +120,12 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives, Conn: ConnectionStream<N>>
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
 }
 
-impl<N: NetworkPrimitives, Conn: ConnectionStream<N>> ActiveSession<N, Conn> {
+impl<
+        N: NetworkPrimitives,
+        Conn: NetworkStream<N, Message = Msg>,
+        Msg: NetworkMessage<N> + TryFromPeerMessage<N>,
+    > ActiveSession<N, Conn, Msg>
+{
     /// Returns `true` if the session is currently in the process of disconnecting
     fn is_disconnecting(&self) -> bool {
         self.conn.is_disconnecting()
@@ -261,8 +270,8 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream<N>> ActiveSession<N, Conn> {
     /// Handle an internal peer request that will be sent to the remote.
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
         let request_id = self.next_id();
-        let msg = request.create_request_message(request_id);
-        self.queued_outgoing.push_back(msg.into());
+        let msg = request.create_request_message::<Msg>(request_id);
+        self.queued_outgoing.push_back(Into::<OutgoingMessage<N, Msg>>::into(msg));
         let req = InflightRequest {
             request: RequestState::Waiting(request),
             timestamp: Instant::now(),
@@ -275,14 +284,26 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream<N>> ActiveSession<N, Conn> {
     fn on_internal_peer_message(&mut self, msg: PeerMessage<N>) {
         match msg {
             PeerMessage::NewBlockHashes(msg) => {
-                self.queued_outgoing.push_back(EthMessage::NewBlockHashes(msg).into());
+                if let Some(protocol_msg) =
+                    Msg::try_from_peer_message(PeerMessage::NewBlockHashes(msg))
+                {
+                    self.queued_outgoing
+                        .push_back(Into::<OutgoingMessage<N, Msg>>::into(protocol_msg));
+                }
             }
             PeerMessage::NewBlock(msg) => {
-                self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
+                self.queued_outgoing.push_back(OutgoingMessage::Broadcast(
+                    EthBroadcastMessage::NewBlock(msg.block).into(),
+                ));
             }
             PeerMessage::PooledTransactions(msg) => {
                 if msg.is_valid_for_version(self.conn.version()) {
-                    self.queued_outgoing.push_back(EthMessage::from(msg).into());
+                    if let Some(protocol_msg) =
+                        Msg::try_from_peer_message(PeerMessage::PooledTransactions(msg))
+                    {
+                        self.queued_outgoing
+                            .push_back(Into::<OutgoingMessage<N, Msg>>::into(protocol_msg));
+                    }
                 }
             }
             PeerMessage::EthRequest(req) => {
@@ -290,7 +311,9 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream<N>> ActiveSession<N, Conn> {
                 self.on_internal_peer_request(req, deadline);
             }
             PeerMessage::SendTransactions(msg) => {
-                self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
+                self.queued_outgoing.push_back(OutgoingMessage::Broadcast(
+                    EthBroadcastMessage::Transactions(msg).into(),
+                ));
             }
             PeerMessage::ReceivedTransaction(_) => {
                 unreachable!("Not emitted by network")
@@ -314,7 +337,7 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream<N>> ActiveSession<N, Conn> {
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
         match resp.try_into_message(id) {
             Ok(msg) => {
-                self.queued_outgoing.push_back(msg.into());
+                self.queued_outgoing.push_back(OutgoingMessage::Eth(msg));
             }
             Err(err) => {
                 debug!(target: "net", %err, "Failed to respond to received request");
@@ -488,7 +511,12 @@ impl<N: NetworkPrimitives, Conn: ConnectionStream<N>> ActiveSession<N, Conn> {
     }
 }
 
-impl<N: NetworkPrimitives, Conn: ConnectionStream<N>> Future for ActiveSession<N, Conn> {
+impl<
+        N: NetworkPrimitives,
+        Conn: NetworkStream<N, Message = M>,
+        M: NetworkMessage<N> + TryFromPeerMessage<N>,
+    > Future for ActiveSession<N, Conn, M>
+{
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -772,18 +800,18 @@ enum RequestState<R> {
 }
 
 /// Outgoing messages that can be sent over the wire.
-pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
+pub(crate) enum OutgoingMessage<N: NetworkPrimitives, M: NetworkMessage<N>> {
     /// A message that is owned.
-    Eth(EthMessage<N>),
+    Eth(M),
     /// A message that may be shared by multiple sessions.
     Broadcast(EthBroadcastMessage<N>),
     /// A raw capability message
     Raw(RawCapabilityMessage),
 }
 
-impl<N: NetworkPrimitives> OutgoingMessage<N> {
+impl<N: NetworkPrimitives, M: NetworkMessage<N>> OutgoingMessage<N, M> {
     /// Returns true if this is a response.
-    const fn is_response(&self) -> bool {
+    fn is_response(&self) -> bool {
         match self {
             Self::Eth(msg) => msg.is_response(),
             _ => false,
@@ -791,15 +819,9 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
     }
 }
 
-impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
-    fn from(value: EthMessage<N>) -> Self {
+impl<N: NetworkPrimitives, M: NetworkMessage<N>> From<M> for OutgoingMessage<N, M> {
+    fn from(value: M) -> Self {
         Self::Eth(value)
-    }
-}
-
-impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for OutgoingMessage<N> {
-    fn from(value: EthBroadcastMessage<N>) -> Self {
-        Self::Broadcast(value)
     }
 }
 
@@ -815,27 +837,48 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 }
 
 /// A helper struct that wraps the queue of outgoing messages and a metric to track their count
-pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
-    messages: VecDeque<OutgoingMessage<N>>,
+pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives, M: NetworkMessage<N>> {
+    messages: VecDeque<OutgoingMessage<N, M>>,
     count: Gauge,
 }
 
-impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
+impl<N: NetworkPrimitives, M: NetworkMessage<N>> QueuedOutgoingMessages<N, M> {
     pub(crate) const fn new(metric: Gauge) -> Self {
         Self { messages: VecDeque::new(), count: metric }
     }
 
-    pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
-        self.messages.push_back(message);
+    pub(crate) fn push_back<T>(&mut self, message: T)
+    where
+        T: Into<OutgoingMessage<N, M>>,
+    {
+        self.messages.push_back(message.into());
         self.count.increment(1);
     }
 
-    pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage<N>> {
+    pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage<N, M>> {
         self.messages.pop_front().inspect(|_| self.count.decrement(1))
     }
 
     pub(crate) fn shrink_to_fit(&mut self) {
         self.messages.shrink_to_fit();
+    }
+}
+
+/// Helper trait to convert a [`PeerMessage`] into a [`NetworkMessage`]
+pub trait TryFromPeerMessage<N: NetworkPrimitives> {
+    fn try_from_peer_message(msg: PeerMessage<N>) -> Option<Self>
+    where
+        Self: Sized;
+}
+
+/// Default implementation for [`TryFromPeerMessage`] for [`EthMessage`]
+impl<N: NetworkPrimitives> TryFromPeerMessage<N> for EthMessage<N> {
+    fn try_from_peer_message(msg: PeerMessage<N>) -> Option<Self> {
+        match msg {
+            PeerMessage::NewBlockHashes(msg) => Some(EthMessage::NewBlockHashes(msg.into())),
+            PeerMessage::PooledTransactions(msg) => Some(EthMessage::from(msg).into()),
+            _ => None,
+        }
     }
 }
 

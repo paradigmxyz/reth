@@ -21,6 +21,8 @@ reth-eth-wire-types.workspace = true
 reth-tokio-util.workspace = true
 reth-ethereum-forks.workspace = true
 
+alloy-rlp.workspace = true
+
 # ethereum
 alloy-primitives.workspace = true
 
