@@ -517,6 +517,11 @@ TxPool:
 
           [default: 200]
 
+      --txpool.lifetime <DURATION>
+          Maximum amount of time non-executable transaction are queued
+
+          [default: 10800]
+
 Builder:
       --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder
