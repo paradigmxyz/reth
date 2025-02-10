@@ -18,7 +18,8 @@ const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
 ///
 /// Separate from [`OpEthApi`] to allow to enable it conditionally,
 #[derive(Clone)]
-pub struct OpEthApiExt<N: OpNodeCore> {
+#[allow(dead_code)]
+pub(crate) struct OpEthApiExt<N: OpNodeCore> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N>>,
 }
@@ -28,7 +29,7 @@ where
     N: OpNodeCore<Provider: BlockReaderIdExt + Clone + 'static>,
 {
     /// Returns the configured sequencer client, if any.
-    pub fn sequencer_client(&self) -> Option<&SequencerClient> {
+    pub(crate) fn sequencer_client(&self) -> Option<&SequencerClient> {
         self.inner.sequencer_client()
     }
 }
@@ -101,12 +102,11 @@ where
             .provider()
             .latest_header()
             .map_err(|_| header_not_found())?
-            .ok_or_else(header_not_found)?
-            .header();
+            .ok_or_else(header_not_found)?;
 
         // check condition against header
-        if !condition.has_exceeded_block_number(header.number()) ||
-            !condition.has_exceeded_timestamp(header.timestamp())
+        if !condition.has_exceeded_block_number(header.header().number()) ||
+            !condition.has_exceeded_timestamp(header.header().timestamp())
         {
             return Err(Op4337Error::InvalidCondition.into());
         }

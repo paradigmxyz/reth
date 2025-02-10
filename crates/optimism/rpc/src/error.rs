@@ -62,6 +62,7 @@ pub enum OpInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
+    /// ERC4337-related errors.
     #[error(transparent)]
     Op4337(#[from] Op4337Error),
 }
