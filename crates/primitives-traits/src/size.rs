@@ -5,7 +5,7 @@ use alloy_consensus::{
 };
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
-use revm_primitives::{Log, U256};
+use revm_primitives::Log;
 
 /// Trait for calculating a heuristic for the in-memory size of a struct.
 #[auto_impl::auto_impl(&, Arc, Box)]
@@ -112,7 +112,7 @@ impl<T: InMemorySize> InMemorySize for Vec<T> {
     }
 }
 
-impl InMemorySize for U256 {
+impl InMemorySize for u64 {
     fn size(&self) -> usize {
         return core::mem::size_of::<Self>();
     }

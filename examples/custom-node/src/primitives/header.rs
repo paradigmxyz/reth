@@ -33,7 +33,7 @@ pub struct CustomHeader {
     #[serde(flatten)]
     pub inner: Header,
     /// The extended header
-    pub extension: U256,
+    pub extension: u64,
 }
 
 impl CustomHeader {}
@@ -171,7 +171,7 @@ mod serde_bincode_compat {
     #[derive(Serialize, Deserialize, Debug)]
     pub struct CustomHeader<'a> {
         inner: Header<'a>,
-        extension: U256,
+        extension: u64,
     }
 
     impl From<CustomHeader<'_>> for super::CustomHeader {

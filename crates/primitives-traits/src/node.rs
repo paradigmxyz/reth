@@ -1,5 +1,5 @@
 use crate::{
-    Block, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx,
+    Block, BlockBody, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx,
     MaybeSerdeBincodeCompat, Receipt,
 };
 use core::fmt;
@@ -67,3 +67,33 @@ pub type BodyTy<N> = <N as NodePrimitives>::BlockBody;
 
 /// Helper adapter type for accessing [`NodePrimitives`] receipt types.
 pub type ReceiptTy<N> = <N as NodePrimitives>::Receipt;
+
+/// Helper adapter to construct [`NodePrimitives`] implementations.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AnyNodePrimitives<B, R>(core::marker::PhantomData<(B, R)>);
+
+impl<B, R> Default for AnyNodePrimitives<B, R> {
+    fn default() -> Self {
+        Self(core::marker::PhantomData)
+    }
+}
+
+impl<B, R> Clone for AnyNodePrimitives<B, R> {
+    fn clone(&self) -> Self {
+        Self(core::marker::PhantomData)
+    }
+}
+
+impl<B, R> NodePrimitives for AnyNodePrimitives<B, R>
+where
+    B: Block<Header: FullBlockHeader, Body: FullBlockBody<Transaction: FullSignedTx>>
+        + MaybeSerdeBincodeCompat
+        + 'static,
+    R: Receipt + 'static,
+{
+    type Block = B;
+    type BlockHeader = <B as Block>::Header;
+    type BlockBody = <B as Block>::Body;
+    type SignedTx = <<B as Block>::Body as BlockBody>::Transaction;
+    type Receipt = R;
+}
