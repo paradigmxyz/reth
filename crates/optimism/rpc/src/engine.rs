@@ -8,6 +8,7 @@ use alloy_rpc_types_engine::{
 };
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee_core::RpcResult;
+use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_node_api::EngineTypes;
 
 /// Extension trait that gives access to Optimism engine API RPC methods.
@@ -41,7 +42,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     #[method(name = "newPayloadV3")]
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: OpExecutionPayloadV4,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;

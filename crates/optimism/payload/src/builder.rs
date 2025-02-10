@@ -19,13 +19,12 @@ use op_alloy_consensus::OpDepositReceipt;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_basic_payload_builder::*;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{
     env::EvmEnv, system_calls::SystemCaller, ConfigureEvmEnv, ConfigureEvmFor, Database, Evm,
     EvmError, InvalidTxError, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_evm::{OpReceiptBuilder, ReceiptBuilderCtx};
 use reth_optimism_forks::OpHardforks;
@@ -152,7 +151,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
 impl<Pool, Client, EvmConfig, N, T> OpPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
     EvmConfig: ConfigureEvmFor<N>,
 {
@@ -236,7 +235,7 @@ where
         let evm_env = self.evm_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
 
         let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
-        let ctx: OpPayloadBuilderCtx<EvmConfig, N> = OpPayloadBuilderCtx {
+        let ctx: OpPayloadBuilderCtx<EvmConfig, Client::ChainSpec, N> = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             da_config: self.config.da_config.clone(),
             chain_spec: self.client.chain_spec(),
@@ -260,7 +259,7 @@ where
 impl<Pool, Client, EvmConfig, N, Txs> PayloadBuilder
     for OpPayloadBuilder<Pool, Client, EvmConfig, N, Txs>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
     N: OpPayloadPrimitives,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     EvmConfig: ConfigureEvmFor<N>,
@@ -334,15 +333,16 @@ impl<'a, Txs> OpBuilder<'a, Txs> {
 
 impl<Txs> OpBuilder<'_, Txs> {
     /// Executes the payload and returns the outcome.
-    pub fn execute<EvmConfig, N, DB, P>(
+    pub fn execute<EvmConfig, ChainSpec, N, DB, P>(
         self,
         state: &mut State<DB>,
-        ctx: &OpPayloadBuilderCtx<EvmConfig, N>,
+        ctx: &OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         EvmConfig: ConfigureEvmFor<N>,
+        ChainSpec: EthChainSpec + OpHardforks,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StorageRootProvider,
     {
@@ -397,13 +397,14 @@ impl<Txs> OpBuilder<'_, Txs> {
     }
 
     /// Builds the payload on top of the state.
-    pub fn build<EvmConfig, N, DB, P>(
+    pub fn build<EvmConfig, ChainSpec, N, DB, P>(
         self,
         mut state: State<DB>,
-        ctx: OpPayloadBuilderCtx<EvmConfig, N>,
+        ctx: OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvmFor<N>,
+        ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         DB: Database<Error = ProviderError> + AsRef<P>,
@@ -522,13 +523,14 @@ impl<Txs> OpBuilder<'_, Txs> {
     }
 
     /// Builds the payload and returns its [`ExecutionWitness`] based on the state after execution.
-    pub fn witness<EvmConfig, N, DB, P>(
+    pub fn witness<EvmConfig, ChainSpec, N, DB, P>(
         self,
         state: &mut State<DB>,
-        ctx: &OpPayloadBuilderCtx<EvmConfig, N>,
+        ctx: &OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvmFor<N>,
+        ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         DB: Database<Error = ProviderError> + AsRef<P>,
@@ -631,13 +633,13 @@ impl<N: NodePrimitives> ExecutionInfo<N> {
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
-pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> {
+pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv, ChainSpec, N: NodePrimitives> {
     /// The type that knows how to perform system calls and configure the evm.
     pub evm_config: EvmConfig,
     /// The DA config for the payload builder
     pub da_config: OpDAConfig,
     /// The chainspec
-    pub chain_spec: Arc<OpChainSpec>,
+    pub chain_spec: Arc<ChainSpec>,
     /// How to build the payload.
     pub config: PayloadConfig<OpPayloadBuilderAttributes<N::SignedTx>>,
     /// Evm Settings
@@ -650,7 +652,12 @@ pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> {
     pub receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
 }
 
-impl<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> OpPayloadBuilderCtx<EvmConfig, N> {
+impl<EvmConfig, ChainSpec, N> OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>
+where
+    EvmConfig: ConfigureEvmEnv,
+    ChainSpec: EthChainSpec + OpHardforks,
+    N: NodePrimitives,
+{
     /// Returns the parent block the payload will be build on.
     pub fn parent(&self) -> &SealedHeader {
         &self.config.parent_header
@@ -782,9 +789,10 @@ impl<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> OpPayloadBuilderCtx<EvmConfi
     }
 }
 
-impl<EvmConfig, N> OpPayloadBuilderCtx<EvmConfig, N>
+impl<EvmConfig, ChainSpec, N> OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>
 where
     EvmConfig: ConfigureEvmFor<N>,
+    ChainSpec: EthChainSpec + OpHardforks,
     N: OpPayloadPrimitives,
 {
     /// apply eip-4788 pre block contract call
