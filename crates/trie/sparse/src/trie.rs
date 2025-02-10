@@ -1010,20 +1010,27 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     let new_ext_key = current.slice(current.len() - current_key.len()..common);
                     *node = SparseNode::new_ext(new_ext_key);
 
+                    let branch_path = current.slice(..common);
+                    let new_leaf_path = path.slice(..=common);
+                    let old_leaf_path = current.slice(..=common);
+                    trace!(
+                        target: "trie::sparse",
+                        ?branch_path,
+                        ?new_leaf_path,
+                        ?old_leaf_path,
+                        "Splitting leaf node into a branch node"
+                    );
+
                     // create a branch node and corresponding leaves
                     self.nodes.reserve(3);
                     self.nodes.insert(
-                        current.slice(..common),
+                        branch_path,
                         SparseNode::new_split_branch(current[common], path[common]),
                     );
-                    self.nodes.insert(
-                        path.slice(..=common),
-                        SparseNode::new_leaf(path.slice(common + 1..)),
-                    );
-                    self.nodes.insert(
-                        current.slice(..=common),
-                        SparseNode::new_leaf(current.slice(common + 1..)),
-                    );
+                    self.nodes
+                        .insert(new_leaf_path, SparseNode::new_leaf(path.slice(common + 1..)));
+                    self.nodes
+                        .insert(old_leaf_path, SparseNode::new_leaf(current.slice(common + 1..)));
 
                     break;
                 }
