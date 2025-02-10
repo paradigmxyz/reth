@@ -36,7 +36,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, error, span, trace, Level};
+use tracing::{debug, error, trace, trace_span};
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
@@ -1098,7 +1098,7 @@ where
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
-            let span = span!(Level::TRACE, "engine::root::sparse", ?address);
+            let span = trace_span!(target: "engine::root::sparse", "Storage trie", ?address);
             let _enter = span.enter();
             trace!(target: "engine::root::sparse", "Updating storage");
             let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
