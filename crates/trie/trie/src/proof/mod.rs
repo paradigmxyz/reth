@@ -278,7 +278,7 @@ where
             return Ok(StorageMultiProof::empty())
         }
 
-        let target_nibbles = targets.into_iter().map(Nibbles::unpack).collect::<Vec<_>>();
+        let target_nibbles = targets.iter().map(Nibbles::unpack).collect::<Vec<_>>();
         self.prefix_set.extend_keys(target_nibbles.clone());
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
@@ -295,10 +295,13 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_slot, value) => {
-                    hash_builder.add_leaf(
-                        Nibbles::unpack(hashed_slot),
-                        alloy_rlp::encode_fixed_size(&value).as_ref(),
-                    );
+                    // We might be adding leaves that are not necessarily our proof targets.
+                    if targets.contains(&hashed_slot) {
+                        hash_builder.add_leaf(
+                            Nibbles::unpack(hashed_slot),
+                            alloy_rlp::encode_fixed_size(&value).as_ref(),
+                        );
+                    }
                 }
             }
         }
