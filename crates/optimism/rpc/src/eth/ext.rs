@@ -5,6 +5,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use jsonrpsee_core::RpcResult;
+use op_alloy_network::TransactionResponse;
 use op_alloy_rpc_types::Transaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::{L2EthApiExtServer, RpcNodeCore};
@@ -113,19 +114,19 @@ where
 
         // TODO: check condition against state
 
-        let hash =
-            self.pool().add_transaction(TransactionOrigin::External, tx).await.map_err(|e| {
-                OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into()))
-            })?;
-
-        // If we have a sequencer client, forward the transaction
         if let Some(sequencer) = self.sequencer_client() {
+            // If we have a sequencer client, forward the transaction
             let _ = sequencer
-                .forward_raw_transaction(bytes.as_ref())
+                .forward_raw_transaction_conditional(bytes.as_ref(), condition)
                 .await
                 .map_err(OpEthApiError::Sequencer)?;
+            Ok(tx.tx_hash())
+        } else {
+            // otherwise, add to pool
+            let hash = self.pool().add_transaction(TransactionOrigin::External, tx).await.map_err(
+                |e| OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into())),
+            )?;
+            Ok(hash)
         }
-
-        Ok(hash)
     }
 }
