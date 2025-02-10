@@ -2,14 +2,12 @@
 
 use alloy_primitives::{BlockHash, B256};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadInputV2,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee_core::RpcResult;
-use op_alloy_rpc_types_engine::{
-    OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
-};
+use reth_node_api::EngineTypes;
 
 /// Extension trait that gives access to Optimism engine API RPC methods.
 ///
@@ -20,7 +18,7 @@ use op_alloy_rpc_types_engine::{
 /// <https://specs.optimism.io/protocol/exec-engine.html#engine-api>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned)))]
-pub trait OpEngineApi<N, T> {
+pub trait OpEngineApi<Engine: EngineTypes> {
     /// Sends the given payload to the execution layer client, as specified for the Shanghai fork.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
@@ -71,7 +69,7 @@ pub trait OpEngineApi<N, T> {
     async fn fork_choice_updated_v2(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<OpPayloadAttributes>,
+        payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// Updates the execution layer client with the given fork choice, as specified for the Cancun
@@ -88,7 +86,7 @@ pub trait OpEngineApi<N, T> {
     async fn fork_choice_updated_v3(
         &self,
         fork_choice_state: ForkchoiceState,
-        payload_attributes: Option<OpPayloadAttributes>,
+        payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
 
     /// Retrieves an execution payload from a previously started build process, as specified for the
@@ -101,7 +99,10 @@ pub trait OpEngineApi<N, T> {
     ///
     /// No modifications needed for OP compatibility.
     #[method(name = "getPayloadV2")]
-    async fn get_payload_v2(&self, payload_id: PayloadId) -> RpcResult<ExecutionPayloadEnvelopeV2>;
+    async fn get_payload_v2(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV2>;
 
     /// Retrieves an execution payload from a previously started build process, as specified for the
     /// Cancun fork.
@@ -117,7 +118,7 @@ pub trait OpEngineApi<N, T> {
     async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<OpExecutionPayloadEnvelopeV3>;
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV3>;
 
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
@@ -133,7 +134,7 @@ pub trait OpEngineApi<N, T> {
     async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
-    ) -> RpcResult<OpExecutionPayloadEnvelopeV4>;
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV4>;
 
     /// Returns the execution payload bodies by the given hash.
     ///
