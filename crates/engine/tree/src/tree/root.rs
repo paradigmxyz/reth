@@ -410,6 +410,7 @@ where
                 target: "engine::root",
                 proof_sequence_number,
                 ?elapsed,
+                ?result,
                 "Multiproof calculated",
             );
 
