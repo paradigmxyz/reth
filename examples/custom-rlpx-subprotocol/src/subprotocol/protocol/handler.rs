@@ -1,6 +1,6 @@
 use super::event::ProtocolEvent;
 use crate::subprotocol::connection::handler::CustomRlpxConnectionHandler;
-use reth_network::subprotocol::SubProtocolHandler;
+use reth_network::protocol::ProtocolHandler;
 use reth_network_api::PeerId;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
@@ -17,7 +17,7 @@ pub(crate) struct CustomRlpxProtoHandler {
     pub state: ProtocolState,
 }
 
-impl SubProtocolHandler for CustomRlpxProtoHandler {
+impl ProtocolHandler for CustomRlpxProtoHandler {
     type ConnectionHandler = CustomRlpxConnectionHandler;
 
     fn on_incoming(&self, _socket_addr: SocketAddr) -> Option<Self::ConnectionHandler> {

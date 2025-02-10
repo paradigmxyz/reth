@@ -2,8 +2,8 @@
 
 use crate::{
     error::NetworkError,
+    eth_protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     import::{BlockImport, ProofOfStakeBlockImport},
-    protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
@@ -23,7 +23,7 @@ use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 // re-export for convenience
-use crate::subprotocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
+use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
 pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]

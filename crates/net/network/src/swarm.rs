@@ -1,11 +1,11 @@
 use crate::{
+    eth_protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     listener::{ConnectionListener, ListenerEvent},
     message::PeerMessage,
     peers::InboundConnectionError,
-    protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
+    protocol::IntoRlpxSubProtocol,
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
-    subprotocol::IntoRlpxSubProtocol,
 };
 use futures::Stream;
 use reth_eth_wire::{

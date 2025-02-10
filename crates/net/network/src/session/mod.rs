@@ -25,11 +25,11 @@ use std::{
 };
 
 use crate::{
+    eth_protocol::{ConnectionHandler, NetworkProtocolHandler, NetworkStream},
     message::PeerMessage,
     metrics::SessionManagerMetrics,
-    protocol::{ConnectionHandler, NetworkProtocolHandler, NetworkStream},
+    protocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols},
     session::active::ActiveSession,
-    subprotocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols},
 };
 use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};

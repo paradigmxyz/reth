@@ -5,7 +5,7 @@ use crate::subprotocol::protocol::{
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
-use reth_network::subprotocol::{OnNotSupported, SubConnectionHandler};
+use reth_network::protocol::{ConnectionHandler, OnNotSupported};
 use reth_network_api::{Direction, PeerId};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -15,7 +15,7 @@ pub(crate) struct CustomRlpxConnectionHandler {
     pub(crate) state: ProtocolState,
 }
 
-impl SubConnectionHandler for CustomRlpxConnectionHandler {
+impl ConnectionHandler for CustomRlpxConnectionHandler {
     type Connection = CustomRlpxConnection;
 
     fn protocol(&self) -> Protocol {

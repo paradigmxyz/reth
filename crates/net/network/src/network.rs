@@ -1,5 +1,5 @@
 use crate::{
-    config::NetworkMode, message::PeerMessage, subprotocol::RlpxSubProtocol,
+    config::NetworkMode, message::PeerMessage, protocol::RlpxSubProtocol,
     swarm::NetworkConnectionState, transactions::TransactionsHandle, FetchClient,
 };
 use alloy_primitives::B256;
