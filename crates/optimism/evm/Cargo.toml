@@ -58,6 +58,7 @@ default = ["std"]
 std = [
     "reth-consensus/std",
     "reth-primitives/std",
+    "reth-revm/std",
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-genesis/std",
