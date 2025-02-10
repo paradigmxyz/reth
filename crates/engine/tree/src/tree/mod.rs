@@ -3338,7 +3338,7 @@ mod tests {
                 persistence_handle,
                 PersistenceState::default(),
                 payload_builder,
-                TreeConfig::default(),
+                TreeConfig::default().with_disable_state_root_task(true),
                 EngineApiKind::Ethereum,
                 evm_config,
             );
