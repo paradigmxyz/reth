@@ -468,12 +468,12 @@ alloy-transport-ipc = { version = "0.11.0", default-features = false }
 alloy-transport-ws = { version = "0.11.0", default-features = false }
 
 # op
-op-alloy-rpc-types = { version = "0.10.0", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.10.0", default-features = false }
-op-alloy-network = { version = "0.10.0", default-features = false }
-op-alloy-consensus = { version = "0.10.0", default-features = false }
-op-alloy-flz = { version = "0.10.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.10.0", default-features = false }
+op-alloy-rpc-types = { version = "0.10.3", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.10.3", default-features = false }
+op-alloy-network = { version = "0.10.3", default-features = false }
+op-alloy-consensus = { version = "0.10.3", default-features = false }
+op-alloy-flz = { version = "0.10.3", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.10.3", default-features = false }
 
 # misc
 aquamarine = "0.6"
