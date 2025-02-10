@@ -8,7 +8,7 @@ use jsonrpsee_core::RpcResult;
 use op_alloy_network::TransactionResponse;
 use op_alloy_rpc_types::Transaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
-use reth_rpc_eth_api::{L2EthApiExtServer, RpcNodeCore};
+use reth_rpc_eth_api::L2EthApiExtServer;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
@@ -33,40 +33,14 @@ where
     pub(crate) fn sequencer_client(&self) -> Option<&SequencerClient> {
         self.inner.sequencer_client()
     }
-}
-
-impl<N> RpcNodeCore for OpEthApiExt<N>
-where
-    N: OpNodeCore,
-{
-    type Provider = N::Provider;
-    type Pool = N::Pool;
-    type Evm = <N as RpcNodeCore>::Evm;
-    type Network = <N as RpcNodeCore>::Network;
-    type PayloadBuilder = ();
 
     #[inline]
-    fn pool(&self) -> &Self::Pool {
+    fn pool(&self) -> &N::Pool {
         self.inner.eth_api.pool()
     }
 
     #[inline]
-    fn evm_config(&self) -> &Self::Evm {
-        self.inner.eth_api.evm_config()
-    }
-
-    #[inline]
-    fn network(&self) -> &Self::Network {
-        self.inner.eth_api.network()
-    }
-
-    #[inline]
-    fn payload_builder(&self) -> &Self::PayloadBuilder {
-        &()
-    }
-
-    #[inline]
-    fn provider(&self) -> &Self::Provider {
+    fn provider(&self) -> &N::Provider {
         self.inner.eth_api.provider()
     }
 }
