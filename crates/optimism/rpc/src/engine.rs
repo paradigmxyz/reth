@@ -1,5 +1,6 @@
 //! Implements the Optimism engine API RPC methods.
 
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
