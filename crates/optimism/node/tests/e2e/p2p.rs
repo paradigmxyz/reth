@@ -47,7 +47,7 @@ async fn can_sync() -> eyre::Result<()> {
         .await?;
     second_node.engine_api.canonical_stream.next().await.unwrap();
 
-    // Trigger backfil sync until block 80
+    // Trigger backfill sync until block 80
     third_node
         .engine_api
         .update_forkchoice(canonical_chain[tip_index - 10], canonical_chain[tip_index - 10])
