@@ -196,7 +196,7 @@ impl<N: NodePrimitives> OpBuiltPayload<N> {
 
     /// Converts the value into [`SealedBlock`].
     pub fn into_sealed_block(self) -> SealedBlock<N::Block> {
-        self.block.into_sealed_block()
+        Arc::unwrap_or_clone(self.block)
     }
 }
 

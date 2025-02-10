@@ -18,6 +18,10 @@ reth-trie-db.workspace = true
 reth-storage-api.workspace = true
 reth-network-peers.workspace = true
 reth-optimism-node.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-transaction-pool.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-optimism-forks.workspace = true
 
 revm.workspace = true
 
@@ -39,6 +43,7 @@ alloy-rpc-types-engine.workspace = true
 # misc
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
 derive_more.workspace = true
+eyre.workspace = true
 rand = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, features = ["rand"] }
 serde.workspace = true
