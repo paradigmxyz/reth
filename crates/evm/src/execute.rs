@@ -8,7 +8,7 @@ pub use reth_execution_errors::{
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use crate::{system_calls::OnStateHook, Database};
+use crate::{batch::BlockBatchRecord, system_calls::OnStateHook, Database};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
@@ -17,7 +17,6 @@ use alloy_primitives::{
 };
 use reth_consensus::ConsensusError;
 use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
-use reth_revm::batch::BlockBatchRecord;
 use revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     State,
