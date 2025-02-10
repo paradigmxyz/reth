@@ -3553,8 +3553,17 @@ mod tests {
                 )) => {
                     assert_eq!(executed.recovered_block.hash(), expected_hash);
                 }
-                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(_)) => {
-                    // skip
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
+
+        async fn check_invalid_block(&mut self, expected_hash: B256) {
+            let event = self.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(
+                    block,
+                )) => {
+                    assert_eq!(block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }
@@ -4771,6 +4780,7 @@ mod tests {
                 chain_a[..chain_a.len() - invalid_index - 1].iter().cloned(),
             )
             .await;
+        test_harness.check_invalid_block(chain_a[chain_a.len() - invalid_index - 1].hash()).await;
 
         // send FCU to make the tip of chain A, expect invalid
         let chain_a_tip_hash = chain_a.last().unwrap().hash();
