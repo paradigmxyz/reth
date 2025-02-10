@@ -3338,6 +3338,7 @@ mod tests {
                 persistence_handle,
                 PersistenceState::default(),
                 payload_builder,
+                // TODO: fix tests for state root task https://github.com/paradigmxyz/reth/issues/14376
                 TreeConfig::default().with_disable_state_root_task(true),
                 EngineApiKind::Ethereum,
                 evm_config,
