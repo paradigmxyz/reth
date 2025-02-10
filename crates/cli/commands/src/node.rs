@@ -173,7 +173,7 @@ impl<
             config,
             chain,
             metrics,
-            instance,
+            instance: Some(instance),
             network,
             rpc,
             txpool,
