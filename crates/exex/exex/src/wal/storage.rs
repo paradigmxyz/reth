@@ -141,12 +141,19 @@ where
         };
         let size = file.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len();
 
-        // Deserialize using the bincode- and msgpack-compatible serde wrapper
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
-            rmp_serde::decode::from_read(&mut file)
-                .map_err(|err| WalError::Decode(file_id, file_path, err))?;
+        let mut jd = rmp_serde::decode::Deserializer::new(&mut file);
 
-        Ok(Some((notification.into(), size)))
+        let result: Result<reth_exex_types::serde_bincode_compat::ExExNotification<'_, N>, _> = serde_path_to_error::deserialize(&mut jd);
+        dbg!(&result);
+
+        todo!()
+
+        // // Deserialize using the bincode- and msgpack-compatible serde wrapper
+        // let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
+        //     rmp_serde::decode::from_read(&mut file)
+        //         .map_err(|err| WalError::Decode(file_id, file_path, err))?;
+        //
+        // Ok(Some((notification.into(), size)))
     }
 
     /// Writes the notification to the file with the given ID.
@@ -228,5 +235,14 @@ mod tests {
         assert_eq!(storage.files_range()?, Some(1..=3));
 
         Ok(())
+    }
+
+    #[test]
+    fn read_wal_op() {
+        let data = include_bytes!("../../test-data/28957.wal");
+        let temp_dir = tempfile::tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("28957.wal"), data).unwrap();
+        let storage = Storage::<reth_optimism_primitives::OpPrimitives>::new(&temp_dir.path()).unwrap();
+        let notification = storage.read_notification(28957).unwrap();
     }
 }

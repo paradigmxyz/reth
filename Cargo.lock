@@ -7717,6 +7717,7 @@ dependencies = [
  "reth-metrics",
  "reth-node-api",
  "reth-node-core",
+ "reth-optimism-primitives",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
@@ -7726,8 +7727,10 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
+ "revm",
  "rmp-serde",
  "secp256k1",
+ "serde_path_to_error",
  "tempfile",
  "thiserror 2.0.11",
  "tokio",
@@ -10293,6 +10296,16 @@ dependencies = [
  "itoa",
  "memchr",
  "ryu",
+ "serde",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af99884400da37c88f5e9146b7f1fd0fbcae8f6eec4e9da38b67d05486f814a6"
+dependencies = [
+ "itoa",
  "serde",
 ]
 

@@ -111,6 +111,7 @@ pub(super) mod serde_bincode_compat {
         N: NodePrimitives,
     {
         fn from(value: &'a super::ExExNotification<N>) -> Self {
+            dbg!("from");
             match value {
                 super::ExExNotification::ChainCommitted { new } => {
                     ExExNotification::ChainCommitted { new: Chain::from(new.as_ref()) }
@@ -164,6 +165,7 @@ pub(super) mod serde_bincode_compat {
         where
             D: Deserializer<'de>,
         {
+            dbg!("DeserializeAs exexnotif");
             ExExNotification::deserialize(deserializer).map(Into::into)
         }
     }
