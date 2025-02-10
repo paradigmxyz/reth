@@ -8965,6 +8965,7 @@ name = "reth-rpc-api"
 version = "1.1.5"
 dependencies = [
  "alloy-eips",
+ "alloy-genesis",
  "alloy-json-rpc",
  "alloy-primitives",
  "alloy-rpc-types",
