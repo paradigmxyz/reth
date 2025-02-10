@@ -1,23 +1,118 @@
-use crate::primitives::CustomNodePrimitives;
+use std::sync::Arc;
+
+use crate::{chainspec::CustomChainSpec, primitives::CustomNodePrimitives, txpool::CustomTxPool};
 use alloy_consensus::{Block, BlockBody};
 use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
 use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
+use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_node_api::{BuiltPayload, EngineTypes, NodePrimitives, PayloadTypes};
+use reth_node_api::{BuiltPayload, EngineTypes, ExecutionData, NodePrimitives, PayloadAttributes, PayloadBuilderAttributes, PayloadBuilderError, PayloadTypes};
 use reth_optimism_node::{
-    OpBuiltPayload, OpEngineTypes, OpPayloadAttributes, OpPayloadBuilderAttributes,
+    BasicOpReceiptBuilder, OpBuiltPayload, OpEngineTypes, OpEvmConfig, OpPayloadAttributes,
+    OpPayloadBuilder, OpPayloadBuilderAttributes,
 };
-use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
-use reth_primitives_traits::SealedBlock;
+use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::{node::AnyNodePrimitives, SealedBlock};
 use revm_primitives::U256;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy)]
 pub struct CustomEngineTypes;
 
 #[derive(Debug, Clone)]
 pub struct CustomBuiltPayload(OpBuiltPayload<CustomNodePrimitives>);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomExecutionData {
+    inner: ExecutionData,
+    extension: u64,
+}
+
+impl reth_node_api::ExecutionPayload for CustomExecutionData {
+    fn block_hash(&self) -> revm_primitives::B256 {
+        self.inner.block_hash()
+    }
+
+    fn block_number(&self) -> u64 {
+        self.inner.block_number()
+    }
+
+    fn parent_hash(&self) -> revm_primitives::B256 {
+        self.inner.parent_hash()
+    }
+}
+
+pub struct CustomPayloadAttributes {
+    inner: OpPayloadAttributes,
+    extension: u64,
+}
+
+impl PayloadAttributes for CustomPayloadAttributes {
+    fn parent_beacon_block_root(&self) -> Option<revm_primitives::B256> {
+        self.inner.parent_beacon_block_root()
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.inner.timestamp()
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<alloy_eips::eip4895::Withdrawal>> {
+        self.inner.withdrawals()
+    }
+}
+
+pub struct CustomPayloadBuilderAttributes {
+    inner: OpPayloadBuilderAttributes<OpTransactionSigned>,
+    extension: u64,
+}
+
+impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
+    type RpcPayloadAttributes = CustomPayloadAttributes;
+    type Error = <OpPayloadBuilderAttributes as PayloadBuilderAttributes>::Error;
+
+    fn try_new(
+            parent: revm_primitives::B256,
+            rpc_payload_attributes: Self::RpcPayloadAttributes,
+            version: u8,
+        ) -> Result<Self, Self::Error>
+        where
+            Self: Sized {
+        Ok(Self {
+            inner: OpPayloadBuilderAttributes::try_new(parent, rpc_payload_attributes, version),
+            extension: rpc_payload_attributes.extension,
+        })
+    }
+
+    fn parent(&self) -> revm_primitives::B256 {
+        self.inner.parent()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<revm_primitives::B256> {
+        self.inner.parent_beacon_block_root()
+    }
+
+    fn payload_id(&self) -> alloy_rpc_types_engine::PayloadId {
+        self.inner.payload_id()
+    }
+
+    fn prev_randao(&self) -> revm_primitives::B256 {
+        self.inner.prev_randao()
+    }
+
+    fn suggested_fee_recipient(&self) -> revm_primitives::Address {
+        self.inner.suggested_fee_recipient()
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.inner.timestamp()
+    }
+
+    fn withdrawals(&self) -> &alloy_eips::eip4895::Withdrawals {
+        self.inner.withdrawals()
+    }
+}
 
 impl BuiltPayload for CustomBuiltPayload {
     type Primitives = CustomNodePrimitives;
@@ -110,7 +205,7 @@ impl From<CustomBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
 
 impl PayloadTypes for CustomEngineTypes {
     type BuiltPayload = CustomBuiltPayload;
-    type PayloadAttributes = OpPayloadAttributes;
+    type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = OpPayloadBuilderAttributes<OpTransactionSigned>;
 }
 
@@ -119,18 +214,55 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
+    type ExecutionData = CustomExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> (alloy_rpc_types_engine::ExecutionPayload, alloy_rpc_types_engine::ExecutionPayloadSidecar)
-    {
-        let hash = block.hash();
+    ) -> Self::ExecutionData {
+        let extension = block.header().extension;
+        let block_hash = block.hash();
+        let block = block.into_block().map_header(|header| header.inner);
+        let (payload, sidecar) = ExecutionPayload::from_block_unchecked(block_hash, &block);
+        CustomExecutionData { inner: ExecutionData { payload, sidecar }, extension }
+    }
+}
 
-        ExecutionPayload::from_block_unchecked(
-            hash,
-            &block.into_block().map_header(|header| header.inner),
-        )
+/// Helper primitives to pass to the OP payload builder.
+type PayloadPrimitives = AnyNodePrimitives<Block<OpTransactionSigned>, OpReceipt>;
+
+#[derive(Debug, Clone)]
+pub struct CustomPayloadBuilder<Provider> {
+    inner: OpPayloadBuilder<
+        CustomTxPool<Provider>,
+        Provider,
+        OpEvmConfig<CustomChainSpec>,
+        PayloadPrimitives,
+    >,
+}
+
+impl<Provider> CustomPayloadBuilder<Provider> {
+    pub fn new(pool: CustomTxPool<Provider>, provider: Provider, chain_spec: Arc<CustomChainSpec>) -> Self {
+        Self {
+            inner: OpPayloadBuilder::new(
+                pool,
+                provider,
+                OpEvmConfig::new(chain_spec),
+                BasicOpReceiptBuilder::default(),
+            ),
+        }
+    }
+}
+
+impl<Provider> PayloadBuilder for CustomPayloadBuilder<Provider> {
+    type Attributes = CustomPayloadBuilderAttributes;
+    type BuiltPayload = CustomBuiltPayload;
+
+    fn try_build(
+            &self,
+            args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+        ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        let inner = self.inner.try_build(args)?;
     }
 }

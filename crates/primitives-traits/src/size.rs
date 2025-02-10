@@ -125,7 +125,7 @@ impl<T: InMemorySize> InMemorySize for Vec<T> {
     }
 }
 
-impl InMemorySize for U256 {
+impl InMemorySize for u64 {
     fn size(&self) -> usize {
         return core::mem::size_of::<Self>();
     }
