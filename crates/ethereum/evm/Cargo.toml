@@ -15,10 +15,10 @@ workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-evm.workspace = true
-reth-primitives = { workspace = true, features = ["reth-codec"] }
-reth-revm.workspace = true
+reth-primitives.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-consensus.workspace = true
+revm.workspace = true
 
 # Ethereum
 revm-primitives.workspace = true
@@ -53,6 +53,7 @@ std = [
     "alloy-eips/std",
     "alloy-genesis/std",
     "alloy-primitives/std",
+    "revm/std",
     "revm-primitives/std",
     "secp256k1/std",
     "reth-ethereum-forks/std",

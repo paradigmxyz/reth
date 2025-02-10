@@ -1,4 +1,5 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{transaction::TransactionRequest, Block, Bundle, StateContext};
@@ -185,6 +186,10 @@ pub trait DebugApi {
     /// merging all keys.
     #[method(name = "chaindbCompact")]
     async fn debug_chaindb_compact(&self) -> RpcResult<()>;
+
+    /// Returns the current chain config.
+    #[method(name = "chainConfig")]
+    async fn debug_chain_config(&self) -> RpcResult<ChainConfig>;
 
     /// Returns leveldb properties of the key-value database.
     #[method(name = "chaindbProperty")]

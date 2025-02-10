@@ -20,6 +20,8 @@ const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
 
+const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+
 /// The configuration of the engine tree.
 #[derive(Debug)]
 pub struct TreeConfig {
@@ -48,6 +50,8 @@ pub struct TreeConfig {
     always_compare_trie_updates: bool,
     /// Whether to use cross-block caching and parallel prewarming
     use_caching_and_prewarming: bool,
+    /// Cross-block cache size in bytes.
+    cross_block_cache_size: u64,
 }
 
 impl Default for TreeConfig {
@@ -61,6 +65,7 @@ impl Default for TreeConfig {
             use_state_root_task: false,
             always_compare_trie_updates: false,
             use_caching_and_prewarming: false,
+            cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
         }
     }
 }
@@ -77,6 +82,7 @@ impl TreeConfig {
         use_state_root_task: bool,
         always_compare_trie_updates: bool,
         use_caching_and_prewarming: bool,
+        cross_block_cache_size: u64,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -87,6 +93,7 @@ impl TreeConfig {
             use_state_root_task,
             always_compare_trie_updates,
             use_caching_and_prewarming,
+            cross_block_cache_size,
         }
     }
 
@@ -129,6 +136,11 @@ impl TreeConfig {
     /// from the regular state root calculation.
     pub const fn always_compare_trie_updates(&self) -> bool {
         self.always_compare_trie_updates
+    }
+
+    /// Return the cross-block cache size.
+    pub const fn cross_block_cache_size(&self) -> u64 {
+        self.cross_block_cache_size
     }
 
     /// Setter for persistence threshold.
@@ -189,6 +201,12 @@ impl TreeConfig {
         always_compare_trie_updates: bool,
     ) -> Self {
         self.always_compare_trie_updates = always_compare_trie_updates;
+        self
+    }
+
+    /// Setter for cross block cache size.
+    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: u64) -> Self {
+        self.cross_block_cache_size = cross_block_cache_size;
         self
     }
 }

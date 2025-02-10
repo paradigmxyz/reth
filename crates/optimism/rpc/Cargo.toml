@@ -43,6 +43,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types.workspace = true
 op-alloy-rpc-types-engine.workspace = true
@@ -54,10 +55,12 @@ revm.workspace = true
 parking_lot.workspace = true
 tokio.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
+async-trait.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
+jsonrpsee.workspace = true
 serde_json.workspace = true
 
 # misc
@@ -74,4 +77,9 @@ optimism = [
     "reth-optimism-consensus/optimism",
     "reth-optimism-payload-builder/optimism",
     "reth-optimism-primitives/optimism",
+]
+client = [
+    "jsonrpsee/client",
+    "jsonrpsee/async-client",
+    "reth-rpc-eth-api/client",
 ]
