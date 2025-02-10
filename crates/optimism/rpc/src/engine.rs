@@ -36,10 +36,12 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     ///   parameter is removed.
     /// - parent beacon block root MUST be the parent beacon block root from the L1 origin block of
     ///   the L2 block.
+    /// - blob versioned hashes MUST be empty list.
     #[method(name = "newPayloadV3")]
     async fn new_payload_v3(
         &self,
         payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;
 
@@ -47,12 +49,15 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/prague.md#engine_newpayloadv4>
     ///
-    /// OP modifications: TODO
+    /// - blob versioned hashes MUST be empty list.
+    /// - execution layer requests MUST be empty list.
     #[method(name = "newPayloadV4")]
     async fn new_payload_v4(
         &self,
         payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
+        execution_requests: Requests,
     ) -> RpcResult<PayloadStatus>;
 
     /// Updates the execution layer client with the given fork choice, as specified for the Shanghai
