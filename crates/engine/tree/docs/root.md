@@ -3,11 +3,11 @@
 The heart of Reth is the Engine, which is responsible for driving the chain forward.
 Each time it receives a new payload ([engine_newPayloadV4](https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4)
 at the time of writing this document), it:
-1. Does a bunch of validations
-2. Executes the block contained in the payload
+1. Does a bunch of validations.
+2. Executes the block contained in the payload.
 3. Calculates the [MPT](https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/)
-root of the new state
-4. Compares the root with the one received in the block header,
+root of the new state.
+4. Compares the root with the one received in the block header.
 5. Considers the block committed.
 
 This document describes the lifecycle of a payload with the focus on state root calculation,
