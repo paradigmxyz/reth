@@ -775,7 +775,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
 
             if let Some(unwind) = match segment {
-                StaticFileSegment::Headers => self.ensure_invariants::<_, tables::Headers>(
+                StaticFileSegment::Headers => self.ensure_invariants::<_, tables::Headers<N::BlockHeader>>(
                     provider,
                     segment,
                     highest_block,
