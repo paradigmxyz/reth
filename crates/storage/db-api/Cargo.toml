@@ -91,4 +91,8 @@ optimism = [
     "reth-optimism-primitives?/optimism",
     "op",
 ]
-op = ["dep:reth-optimism-primitives", "reth-codecs/op"]
+op = [
+    "dep:reth-optimism-primitives",
+    "reth-codecs/op",
+    "reth-primitives-traits/op",
+]
