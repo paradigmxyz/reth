@@ -350,13 +350,12 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use alloy_consensus::{Block, BlockBody};
     use alloy_eips::eip2718::Decodable2718;
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_forks::OpHardforks;
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives::{Block, BlockBody};
-
-    use super::*;
 
     #[test]
     fn sanity_l1_block() {
