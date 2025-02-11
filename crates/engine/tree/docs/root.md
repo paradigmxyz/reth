@@ -1,4 +1,4 @@
-# State Root Calculation of Engine Payloads
+# State Root Calculation for Engine Payloads
 
 The heart of Reth is the Engine, which is responsible for driving the chain forward.
 Each time it receives a new payload ([engine_newPayloadV4](https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4)
