@@ -18,10 +18,6 @@ use std::sync::{Arc, OnceLock};
 /// This type wraps the actual transaction and caches values that are frequently used by the pool.
 /// For payload building this lazily tracks values that are required during payload building:
 ///  - Estimated compressed size of this transaction
-trait MaybeConditionalTransaction {
-  
-    fn set_conditional(&mut self, conditional: TransactionConditional)
-  }
 #[derive(Debug, Clone, derive_more::Deref)]
 pub struct OpPooledTransaction<
     Cons = OpTransactionSigned,
@@ -37,7 +33,16 @@ pub struct OpPooledTransaction<
     /// Optional conditional attached to this transaction.
     conditional: Option<Box<TransactionConditional>>,
 }
+#[allow(dead_code)]
+trait MaybeConditionalTransaction {
+    fn set_conditional(&mut self, conditional: TransactionConditional);
+}
 
+impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Pooled> {
+    fn set_conditional(&mut self, conditional: TransactionConditional) {
+        self.conditional = Some(Box::new(conditional))
+    }
+}
 impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
     /// Create new instance of [Self].
     pub fn new(transaction: Recovered<Cons>, encoded_length: usize) -> Self {
