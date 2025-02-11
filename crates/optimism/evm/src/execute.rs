@@ -319,7 +319,7 @@ impl OpExecutorProvider {
 mod tests {
     use super::*;
     use crate::OpChainSpec;
-    use alloy_consensus::{Header, TxEip1559};
+    use alloy_consensus::{BlockBody, Header, TxEip1559};
     use alloy_primitives::{
         b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256,
     };
