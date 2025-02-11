@@ -69,9 +69,6 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
-# required for windows target os
-crunchy.workspace = true
-
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true
 

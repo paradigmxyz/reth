@@ -23,7 +23,3 @@ pub use engine::{OpEngineApi, OpEngineApiServer};
 pub use error::{OpEthApiError, OpInvalidTransactionError, SequencerClientError};
 pub use eth::{OpEthApi, OpReceiptBuilder};
 pub use sequencer::SequencerClient;
-
-// required for compilation for windows
-#[allow(unused_imports)]
-use crunchy as _;
