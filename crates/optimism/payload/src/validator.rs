@@ -3,6 +3,7 @@
 use alloc::sync::Arc;
 use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
 use derive_more::Deref;
+use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_optimism_forks::OpHardforks;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, SealedBlock};
@@ -47,9 +48,10 @@ where
     /// Validation according to specs <https://specs.optimism.io/protocol/exec-engine.html#engine-api>.
     pub fn ensure_well_formed_payload<T: SignedTransaction>(
         &self,
-        payload: OpExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
+        payload: OpExecutionData,
     ) -> Result<SealedBlock<Block<T>>, PayloadError> {
+        let OpExecutionData { payload, sidecar } = payload;
+
         let expected_hash = payload.block_hash();
 
         // First parse the block
@@ -80,11 +82,6 @@ where
             return Err(PayloadError::PreCancunBlockWithBlobTransactions)
         }
 
-        if sealed_block.blob_versioned_hashes_iter().count() != 0 {
-            // todo: needs new error type OpPayloadError
-            return Err(PayloadError::PreCancunBlockWithBlobTransactions)
-        }
-
         if self.chain_spec().is_cancun_active_at_timestamp(sealed_block.timestamp) {
             if sealed_block.blob_gas_used.is_none() {
                 // cancun active but blob gas used not present
@@ -94,16 +91,28 @@ where
                 // cancun active but excess blob gas not present
                 return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
             }
-            match sidecar.cancun() {
+            match sidecar.canyon() {
+                None => {
+                    // cancun active but cancun fields not present
+                    return Err(PayloadError::PostCancunWithoutCancunFields)
+                }
                 Some(fields) => {
                     if !fields.versioned_hashes.is_empty() {
                         // todo: needs new error type OpPayloadError
                         return Err(PayloadError::PreCancunBlockWithBlobTransactions)
                     }
                 }
+            }
+            match sealed_block.blob_versioned_hashes() {
                 None => {
-                    // cancun active but cancun fields not present
-                    return Err(PayloadError::PostCancunWithoutCancunFields)
+                    // cancun active but blob versioned hashes not present
+                    return Err(PayloadError::PostCancunBlockWithoutBlobVersionedHashes)
+                }
+                Some(hashes) => {
+                    if !hashes.is_empty() {
+                        // todo: needs new error type OpPayloadError
+                        return Err(PayloadError::PreCancunBlockWithBlobTransactions)
+                    }
                 }
             }
         } else {
@@ -115,7 +124,7 @@ where
                 // cancun not active but excess blob gas present
                 return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
             }
-            if sidecar.cancun().is_some() {
+            if sidecar.canyon().is_some() {
                 // cancun not active but cancun fields present
                 return Err(PayloadError::PreCancunWithCancunFields)
             }

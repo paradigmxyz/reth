@@ -97,11 +97,11 @@ impl<P> OpEngineValidator<P> {
 
 impl PayloadValidator for OpEngineValidator {
     type Block = OpBlock;
-    type ExecutionData = ExecutionData;
+    type ExecutionData = OpExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: ExecutionData,
+        payload: OpExecutionData,
     ) -> Result<SealedBlock<Self::Block>, PayloadError> {
         self.inner.ensure_well_formed_payload(payload)
     }
@@ -109,7 +109,7 @@ impl PayloadValidator for OpEngineValidator {
 
 impl<Types> EngineValidator<Types> for OpEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = ExecutionData>,
+    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = OpExecutionData>,
 {
     fn validate_execution_requests(
         &self,
