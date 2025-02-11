@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -12,8 +13,6 @@ use alloy_rpc_types_trace::geth::{
     GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
     NoopFrame, TraceResult,
 };
-use revm::context_interface::Transaction;
-
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -41,7 +40,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::pool::BlockingTaskGuard;
-use revm::{state::EvmState, DatabaseCommit};
+use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
@@ -371,7 +370,7 @@ where
 
                                 let tx_info = TransactionInfo {
                                     block_number: Some(evm_env.block_env.number),
-                                    base_fee: Some(evm_env.block_env.basefee as u128),
+                                    base_fee: Some(evm_env.block_env.basefee),
                                     hash: None,
                                     block_hash: None,
                                     index: None,
@@ -705,7 +704,7 @@ where
                 .unwrap_or_default(),
             block_hash: transaction_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
             block_number: Some(evm_env.block_env.number),
-            base_fee: Some(evm_env.block_env.basefee as u128),
+            base_fee: Some(evm_env.block_env.basefee),
         };
 
         if let Some(tracer) = tracer {

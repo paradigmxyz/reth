@@ -3,7 +3,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
-use alloy_rpc_types_eth::{BlockId, BlockOverrides};
+use alloy_rpc_types_eth::BlockId;
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, Privacy, RefundConfig, SendBundleRequest, SimBundleLogs,
     SimBundleOverrides, SimBundleResponse, Validity,
@@ -17,7 +17,9 @@ use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::{
+    revm_utils::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
+};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
@@ -226,7 +228,6 @@ where
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
         let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
-        let BlockOverrides { number, coinbase, time, gas_limit, base_fee, .. } = block_overrides;
 
         // Parse and validate bundle
         // Also, flatten the bundle here so that its easier to process
@@ -236,27 +237,6 @@ where
         let (mut evm_env, current_block_id) = self.eth_api().evm_env_at(block_id).await?;
         let current_block = self.eth_api().block_with_senders(current_block_id).await?;
         let current_block = current_block.ok_or(EthApiError::HeaderNotFound(block_id))?;
-
-        // apply overrides
-        if let Some(block_number) = block_number {
-            evm_env.block_env.number = block_number;
-        }
-
-        if let Some(coinbase) = coinbase {
-            evm_env.block_env.beneficiary = coinbase;
-        }
-
-        if let Some(timestamp) = timestamp {
-            evm_env.block_env.timestamp = timestamp;
-        }
-
-        if let Some(gas_limit) = gas_limit {
-            evm_env.block_env.gas_limit = gas_limit;
-        }
-
-        if let Some(base_fee) = base_fee {
-            evm_env.block_env.basefee = base_fee;
-        }
 
         let eth_api = self.inner.eth_api.clone();
 
@@ -268,7 +248,10 @@ where
                 let current_block_number = current_block.as_u64().unwrap();
                 let coinbase = evm_env.block_env.beneficiary;
                 let basefee = evm_env.block_env.basefee;
-                let db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                // apply overrides
+                apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
                     .map_err(EthApiError::from_eth_err)?
