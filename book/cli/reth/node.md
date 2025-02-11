@@ -707,8 +707,8 @@ Engine:
 
           [default: 2]
 
-      --engine.state-root-task
-          Enable state root task
+      --engine.legacy-state-root
+          Enable legacy state root
 
       --engine.caching-and-prewarming
           Enable cross-block caching and parallel prewarming
