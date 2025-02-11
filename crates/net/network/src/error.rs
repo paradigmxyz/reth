@@ -217,6 +217,7 @@ impl SessionError for PendingSessionHandshakeError {
                     ECIESErrorImpl::InvalidHandshake { .. }
             ),
             Self::Timeout => false,
+            Self::UnsupportedCapability(_) => true,
         }
     }
 
@@ -235,6 +236,7 @@ impl SessionError for PendingSessionHandshakeError {
                     ECIESErrorImpl::InvalidHandshake { .. }
             ),
             Self::Timeout => false,
+            Self::UnsupportedCapability(_) => true,
         }
     }
 
@@ -243,6 +245,7 @@ impl SessionError for PendingSessionHandshakeError {
             Self::Eth(eth) => eth.should_backoff(),
             Self::Ecies(_) => Some(BackoffKind::Low),
             Self::Timeout => Some(BackoffKind::Medium),
+            Self::UnsupportedCapability(_) => Some(BackoffKind::High),
         }
     }
 }

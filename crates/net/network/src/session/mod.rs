@@ -26,16 +26,16 @@ use std::{
 use crate::{
     message::PeerMessage,
     metrics::SessionManagerMetrics,
-    protocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols},
+    protocol::{IntoRlpxSubProtocol, OnNotSupported, RlpxSubProtocolHandlers, RlpxSubProtocols},
     session::active::ActiveSession,
 };
 use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    errors::EthStreamError, multiplex::RlpxProtocolMultiplexer, Capabilities, DisconnectReason,
-    EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status, UnauthedEthStream,
-    UnauthedP2PStream,
+    capability::UnsupportedCapabilityError, errors::EthStreamError,
+    multiplex::RlpxProtocolMultiplexer, Capabilities, DisconnectReason, EthVersion,
+    HelloMessageWithProtocols, NetworkPrimitives, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -765,6 +765,9 @@ pub enum PendingSessionHandshakeError {
     /// Thrown when the authentication timed out
     #[error("authentication timed out")]
     Timeout,
+    /// Thrown when the remote lacks the required capability
+    #[error(transparent)]
+    UnsupportedCapability(UnsupportedCapabilityError),
 }
 
 impl PendingSessionHandshakeError {
@@ -1000,6 +1003,26 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
     };
 
+    let shared_capabilities = p2p_stream.shared_capabilities().clone();
+
+    // check if we have sub-protocols that the remote peer must match.
+    for handler in extra_handlers.iter() {
+        let cap = handler.protocol().cap;
+
+        if let Err(err) = shared_capabilities.ensure_matching_capability(&cap) {
+            if handler.on_unsupported_by_peer(&shared_capabilities, direction, their_hello.id) ==
+                OnNotSupported::Disconnect
+            {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::UnsupportedCapability(err)),
+                };
+            }
+        }
+    }
+
     // Ensure we negotiated mandatory eth protocol
     let eth_version = match p2p_stream.shared_capabilities().eth_version() {
         Ok(version) => version,
@@ -1039,6 +1062,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         for handler in extra_handlers.into_iter() {
             let cap = handler.protocol().cap;
             let remote_peer_id = their_hello.id;
+
             multiplex_stream
                 .install_protocol(&cap, move |conn| {
                     handler.into_connection(direction, remote_peer_id, conn)
