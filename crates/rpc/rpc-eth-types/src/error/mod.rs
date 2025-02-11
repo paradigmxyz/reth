@@ -137,7 +137,7 @@ pub enum EthApiError {
     /// This can happen if bytecode provided in an
     /// [`AccountOverride`](alloy_rpc_types_eth::state::AccountOverride) is malformed, e.g. invalid
     /// 7702 bytecode.
-    #[error("Invalide bytecode: {0}")]
+    #[error("Invalid bytecode: {0}")]
     InvalidBytecode(String),
     /// Evm precompile error
     #[error("Revm precompile error: {0}")]
