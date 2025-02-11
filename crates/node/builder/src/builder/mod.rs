@@ -566,8 +566,9 @@ where
             .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
             .with_state_root_task(builder.config.engine.state_root_task_enabled)
             .with_caching_and_prewarming(builder.config.engine.caching_and_prewarming_enabled)
-            .with_always_compare_trie_updates(
-                builder.config.engine.state_root_task_compare_updates,
+            .with_always_compare_trie_updates(builder.config.engine.state_root_task_compare_updates)
+            .with_cross_block_cache_size(
+                builder.config.engine.cross_block_cache_size * 1024 * 1024,
             );
 
         let launcher =

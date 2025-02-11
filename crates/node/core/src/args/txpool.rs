@@ -4,8 +4,10 @@ use crate::cli::config::RethTransactionPoolConfig;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
+use reth_cli_util::parse_duration_from_secs_or_ms;
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
+    maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     validate::DEFAULT_MAX_TX_INPUT_BYTES,
     LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
@@ -13,6 +15,8 @@ use reth_transaction_pool::{
     REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
+use std::time::Duration;
+
 /// Parameters for debugging purposes
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "TxPool")]
@@ -98,6 +102,10 @@ pub struct TxPoolArgs {
     /// iterators.
     #[arg(long = "txpool.max-new-pending-txs-notifications", alias = "txpool.max-new-pending-txs-notifications", default_value_t = MAX_NEW_PENDING_TXS_NOTIFICATIONS)]
     pub max_new_pending_txs_notifications: usize,
+
+    /// Maximum amount of time non-executable transaction are queued.
+    #[arg(long = "txpool.lifetime", value_parser = parse_duration_from_secs_or_ms, default_value = "10800", value_name = "DURATION")]
+    pub max_queued_lifetime: Duration,
 }
 
 impl Default for TxPoolArgs {
@@ -125,6 +133,7 @@ impl Default for TxPoolArgs {
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
+            max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
         }
     }
 }
@@ -164,6 +173,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
+            max_queued_lifetime: self.max_queued_lifetime,
         }
     }
 }
@@ -196,5 +206,25 @@ mod tests {
         ])
         .args;
         assert_eq!(args.locals, vec![Address::ZERO]);
+    }
+
+    #[test]
+    fn txpool_parse_max_tx_lifetime() {
+        // Test with a custom duration
+        let args =
+            CommandParser::<TxPoolArgs>::parse_from(["reth", "--txpool.lifetime", "300"]).args;
+        assert_eq!(args.max_queued_lifetime, Duration::from_secs(300));
+
+        // Test with the default value
+        let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.max_queued_lifetime, Duration::from_secs(3 * 60 * 60)); // Default is 3h
+    }
+
+    #[test]
+    fn txpool_parse_max_tx_lifetime_invalid() {
+        let result =
+            CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.lifetime", "invalid"]);
+
+        assert!(result.is_err(), "Expected an error for invalid duration");
     }
 }
