@@ -232,7 +232,7 @@ https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20
 As you can see, we do not calculate the state root hash of the accounts trie
 (the one that will be the result of the whole task), but instead calculate only the certain hashes.
 
-It is an optimization that comes from the fact that we will likely update the top 2-3 levels of the trie
+This is an optimization that comes from the fact that we will likely update the top 2-3 levels of the trie
 in every transaction, so doing that work every time would be wasteful.
 
 Instead, we calculate hashes for most of the levels of the trie, and do the rest of the work
