@@ -784,18 +784,19 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         highest_block,
                     )?,
                 StaticFileSegment::Transactions => self
-                    .ensure_invariants::<_, tables::Transactions>(
+                    .ensure_invariants::<_, tables::Transactions<N::SignedTx>>(
                         provider,
                         segment,
                         highest_tx,
                         highest_block,
                     )?,
-                StaticFileSegment::Receipts => self.ensure_invariants::<_, tables::Receipts>(
-                    provider,
-                    segment,
-                    highest_tx,
-                    highest_block,
-                )?,
+                StaticFileSegment::Receipts => self
+                    .ensure_invariants::<_, tables::Receipts<N::Receipt>>(
+                        provider,
+                        segment,
+                        highest_tx,
+                        highest_block,
+                    )?,
                 StaticFileSegment::BlockMeta => self
                     .ensure_invariants::<_, tables::BlockBodyIndices>(
                         provider,
