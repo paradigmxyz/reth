@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "alloy-compat")]
+mod alloy_compat;
+
 pub mod bedrock;
 
 pub mod predeploys;
