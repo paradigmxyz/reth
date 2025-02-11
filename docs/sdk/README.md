@@ -29,7 +29,7 @@ Require recovery to determine the sender's address
 
 ## Receipts
 
-Receipts are creating during transaction execution and an outcome of blockexecution.
+Receipts are creating during transaction execution and an outcome of block execution.
 
 ## Operations
 
