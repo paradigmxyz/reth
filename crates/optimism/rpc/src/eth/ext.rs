@@ -68,7 +68,7 @@ where
             OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::FailedToDecodeSignedTransaction)
         })?;
 
-        let pooled_transaction = Transaction::from_pooled(recovered_tx);
+        let tx = Transaction::from_pooled(recovered_tx);
 
         // get current header
         let header_not_found = || {
