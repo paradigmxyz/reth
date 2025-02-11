@@ -2570,7 +2570,7 @@ where
                 }
             } else {
                 let state_root_handle = state_root_handle
-                    .expect("state root handle must exist if use_state_root_task is true");
+                    .expect("state root handle must exist if legacy_state_root is false");
                 let state_root_config = state_root_task_config.expect("task config is present");
 
                 // Handle state root result from task using handle
