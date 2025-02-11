@@ -32,7 +32,7 @@ pub type OpBlock = alloy_consensus::Block<OpTransactionSigned>;
 pub type OpBlockBody = <OpBlock as reth_primitives_traits::Block>::Body;
 
 /// Primitive types for Optimism Node.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct OpPrimitives;
 
 #[cfg(feature = "optimism")]
