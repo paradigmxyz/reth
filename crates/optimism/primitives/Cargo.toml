@@ -71,7 +71,6 @@ reth-codec = [
     "dep:reth-codecs",
     "std",
     "dep:proptest",
-    "dep:arbitrary",
     "reth-primitives-traits/reth-codec",
     "reth-codecs?/op",
     "dep:bytes",
