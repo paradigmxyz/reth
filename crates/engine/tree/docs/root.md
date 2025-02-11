@@ -56,7 +56,7 @@ the `engine_newPayload` response.
 
 ![Alt text](./mermaid/state-root-task.mmd.svg)
 
-State Root Task is a component that's responsible for receiving the state updates from the [Engine](#engine),
+State Root Task is a component responsible for receiving the state updates from the [Engine](#engine),
 issuing requests for generating proofs to the [MultiProof Manager](#multiproof-manager),
 updating the sparse trie using the [Sparse Trie Task](#sparse-trie-task),
 and finally sending the state root back to the [Engine](#engine).
@@ -94,6 +94,9 @@ a message back to the State Root Task. It can be either:
 1. `StateRootMessage::EmptyProof` if the deduplication of proof targets resulted in an empty list.
 2. `StateRootMessage::ProofCalculated(proof, state)` with the MPT proof calculated for the targets,
 along with the state update that the proof was generated for.
+
+On any message, we call the [`MultiProofManager::on_calculation_complete`](#multiproof-manager) method
+to signal that the proof calculation is finished.
 
 Some proofs can arrive earlier than others, even though they were requested later. It depends on the number
 of proof targets, and also some non-determinism in the database caching.
@@ -133,6 +136,30 @@ signaling that no proofs or state updates are coming anymore, and the state root
 ## MultiProof Manager
 
 ![Alt text](./mermaid/multiproof-manager.mmd.svg)
+
+MultiProof manager is a component responsible for generating MPT proofs
+and sending them back to the [State Root Task](#state-root-task).
+
+### Spawning new proof calculations
+
+The entrypoint is the `spawn_or_queue` method
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L355-L357
+
+It has the following responsibilities:
+1. On empty proof targets, immediately send `StateRootMessage::EmptyProof` to the [State Root Task](#state-root-task).
+2. If the number of maximum concurrent proof calculations is reached, push the proof request to the pending queue.
+3. If we can spawn a new proof calculation thread, spawn it using [`ParallelProof`](https://github.com/paradigmxyz/reth/blob/09a6aab9f7dc283e42fd00ce8f179542f8558580/crates/trie/parallel/src/proof.rs#L85),
+and send `StateRootMessage::ProofCalculated` to the [State Root Task](#state-root-task) once it's done.
+
+### Exhausting the pending queue
+
+To exhaust the pending queue from the step 2 of the `spawn_or_queue` described above,
+the [State Root Task](#state-root-task) calls into another method `on_calculation_complete` every time
+a proof is calculated.
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L379-L387
+
+Its main purpose is to spawn a new proof calculation thread and do the same as step 3 of the `spawn_or_queue` method
+described above.
 
 ## Sparse Trie Task
 
