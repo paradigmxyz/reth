@@ -21,7 +21,7 @@ We will look at the following components:
 
 ## Engine
 
-![Alt text](./mermaid/engine.mmd.svg)
+![Engine](./mermaid/engine.mmd.svg)
 
 It all starts with the `engine_newPayload` request coming from the [Consensus Client](https://ethereum.org/en/developers/docs/nodes-and-clients/#consensus-clients).
 
@@ -57,7 +57,7 @@ the `engine_newPayload` response.
 
 ## State Root Task
 
-![Alt text](./mermaid/state-root-task.mmd.svg)
+![State Root Task](./mermaid/state-root-task.mmd.svg)
 
 State Root Task is a component responsible for receiving the state updates from the [Engine](#engine),
 issuing requests for generating proofs to the [MultiProof Manager](#multiproof-manager),
@@ -141,7 +141,7 @@ signaling that no proofs or state updates are coming anymore, and the state root
 
 ## MultiProof Manager
 
-![Alt text](./mermaid/multiproof-manager.mmd.svg)
+![MultiProof Manager](./mermaid/multiproof-manager.mmd.svg)
 
 MultiProof manager is a component responsible for generating MPT proofs
 and sending them back to the [State Root Task](#state-root-task).
@@ -169,7 +169,7 @@ described above.
 
 ## Sparse Trie Task
 
-![Alt text](./mermaid/sparse-trie-task.mmd.svg)
+![Sparse Trie Task](./mermaid/sparse-trie-task.mmd.svg)
 
 Sparse Trie component is the heart of the new state root calculation logic.
 
@@ -185,6 +185,24 @@ we only load the parts that were modified during the block execution (i.e. make 
     requested path.
 - When updating the trie, we first reveal the nodes using the MPT proofs, and then add/update/remove the leaves,
 along with the other nodes that need to be modified in the process of leaf update.
+
+#### Example
+
+![Sparse Trie](./mermaid/sparse-trie.mmd.svg)
+
+1. Empty
+    - Sparse Trie has no revealed nodes, and an empty root
+2. `0x10010` revealed
+    - Child of the root branch node under the nibble `1` is revealed, and it's an extension node placed on the path `0x1`.
+    - Child of the extension node at path `0x1` with the extension key `0010` is revealed, and it's a leaf node placed on the path `0x10010`.
+3. `0x00010` revealed
+    - Child of the root branch node under the nibble `0` is revealed, and it's a branch node placed on the path `0x0`.
+    - Child of the branch node at path `0x0` under the nibble `1` is revealed, and it's a hash node placed on the path `0x01`.
+    - Child of the branch node at path `0x0` under the nibble `0` is revealed, and it's an extension placed on the path `0x00`.
+    - Child of the extension node at path `0x00` with the extension key `01` is revealed, and it's a branch node placed on the path `0x0001`.
+    - Child of the branch node at path `0x0001` under the nibble `1` is revealed, and it's a hash node placed on the path `0x00011`.
+    - Child of the branch node at path `0x0001` under the nibble `0` is revealed, and it's a leaf node placed on the path `0x00010`.
+
 
 For the implementation details, see [crates/trie/sparse/src/trie.rs](https://github.com/paradigmxyz/reth/blob/09a6aab9f7dc283e42fd00ce8f179542f8558580/crates/trie/sparse/src/trie.rs).
 
