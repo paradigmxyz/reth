@@ -79,7 +79,7 @@ impl<Types, DB> Clone for NodeTypesWithDBAdapter<Types, DB> {
 
 impl<Types, DB> NodeTypes for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypes + Clone,
+    Types: NodeTypes,
     DB: Send + Sync + Unpin + 'static,
 {
     type Primitives = Types::Primitives;
@@ -90,7 +90,7 @@ where
 
 impl<Types, DB> NodeTypesWithEngine for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypesWithEngine + Clone,
+    Types: NodeTypesWithEngine,
     DB: Send + Sync + Unpin + 'static,
 {
     type Engine = Types::Engine;
@@ -98,7 +98,7 @@ where
 
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
 where
-    Types: NodeTypes + Clone,
+    Types: NodeTypes,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     type DB = DB;
@@ -148,7 +148,7 @@ impl<P, C, SC, S> AnyNodeTypes<P, C, SC, S> {
 
 impl<P, C, SC, S> NodeTypes for AnyNodeTypes<P, C, SC, S>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static + Clone,
+    P: NodePrimitives + Send + Sync + Unpin + 'static,
     C: EthChainSpec<Header = P::BlockHeader> + 'static + Clone,
     SC: StateCommitment + Clone,
     S: Default + Send + Sync + Unpin + Debug + 'static + Clone,
@@ -208,7 +208,7 @@ impl<P, E, C, SC, S> AnyNodeTypesWithEngine<P, E, C, SC, S> {
 
 impl<P, E, C, SC, S> NodeTypes for AnyNodeTypesWithEngine<P, E, C, SC, S>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static + Clone,
+    P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin + Clone,
     C: EthChainSpec<Header = P::BlockHeader> + 'static + Clone,
     SC: StateCommitment + Clone,
@@ -222,7 +222,7 @@ where
 
 impl<P, E, C, SC, S> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C, SC, S>
 where
-    P: NodePrimitives + Send + Sync + Unpin + 'static + Clone,
+    P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin + Clone,
     C: EthChainSpec<Header = P::BlockHeader> + 'static + Clone,
     SC: StateCommitment + Clone,
