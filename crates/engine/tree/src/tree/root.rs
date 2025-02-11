@@ -1011,11 +1011,10 @@ where
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
 
     let start = Instant::now();
-    let root = trie.root().expect("sparse trie should be revealed");
+    let (root, trie_updates) = trie.root_with_updates().expect("sparse trie should be revealed");
     let elapsed = start.elapsed();
     metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
 
-    let trie_updates = trie.take_trie_updates().expect("retention must be enabled");
     Ok((root, trie_updates, num_iterations))
 }
 
