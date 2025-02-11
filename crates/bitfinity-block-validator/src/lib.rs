@@ -147,18 +147,18 @@ where
         )
     }
 
-    /// Calculates POW hash based on the given trie state.
+    /// Calculates POW hash
     fn calculate_pow_hash(
         &self,
         block: &Block,
     ) -> eyre::Result<did::hash::Hash<alloy_primitives::FixedBytes<32>>> {
         let historical = self.provider_factory.latest().expect("no latest provider");
 
-        let db = StateProviderTraitObjWrapper(&historical);
+        let cache = StateCacheDb::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(
+            &historical,
+        )));
 
-        let cache = StateCacheDb::new(StateProviderDatabase::new(db));
-
-        let mut state = StateBuilder::new().with_database(cache).with_bundle_update().build();
+        let mut state = StateBuilder::new().with_database_ref(&cache).with_bundle_update().build();
 
         let chain_spec = self.provider_factory.chain_spec();
         let evm_config = EthEvmConfig::new(chain_spec);
@@ -168,6 +168,7 @@ where
 
         cfg_env_with_handler_cfg.cfg_env.disable_balance_check = true;
 
+        // Simple transaction
         let tx = TxEnv {
             caller: Address::from_slice(&[1]),
             gas_limit: 21000,
@@ -195,7 +196,7 @@ where
         let post_hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state());
 
-        let state_root = db.state_root(post_hashed_state)?;
+        let state_root = cache.db.state_root(post_hashed_state)?;
 
         Ok(state_root.into())
     }
