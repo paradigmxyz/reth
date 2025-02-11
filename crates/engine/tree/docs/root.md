@@ -169,8 +169,6 @@ described above.
 
 ## Sparse Trie Task
 
-![Sparse Trie Task](./mermaid/sparse-trie-task.mmd.svg)
-
 Sparse Trie component is the heart of the new state root calculation logic.
 
 ### Sparse Trie primer
@@ -207,6 +205,8 @@ along with the other nodes that need to be modified in the process of leaf updat
 For the implementation details, see [crates/trie/sparse/src/trie.rs](https://github.com/paradigmxyz/reth/blob/09a6aab9f7dc283e42fd00ce8f179542f8558580/crates/trie/sparse/src/trie.rs).
 
 ### Sparse Trie updates
+
+![Sparse Trie Task](./mermaid/sparse-trie-task.mmd.svg)
 
 The messages to the sparse trie are sent from the [State Root Task](#state-root-task),
 and consist of the proof that needs to be revealed, and a list of updates that need to be applied.
