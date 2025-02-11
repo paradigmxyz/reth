@@ -22,8 +22,8 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt, OpPrimitives};
-use reth_primitives_traits::{BlockBody, NodePrimitives, RecoveredBlock, SignedTransaction};
-use revm::State;
+use reth_primitives::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use tracing::trace;
 

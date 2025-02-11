@@ -81,9 +81,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvmEnv for OpEvmC
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         let spec = config::revm_spec(self.chain_spec(), header);
 
-        let mut cfg_env = CfgEnv::default();
-        cfg_env.chain_id = self.chain_spec.chain().id();
-        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::default();
+        let cfg_env = CfgEnv::default().with_chain_id(self.chain_spec.chain().id()).with_spec_id(spec);
 
         let block_env = BlockEnv {
             number: U256::from(header.number()),
@@ -99,7 +97,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvmEnv for OpEvmC
             }),
         };
 
-        EvmEnv { cfg_env, block_env, spec }
+        EvmEnv { cfg_env, block_env }
     }
 
     fn next_evm_env(

@@ -8574,6 +8574,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-revm",
  "revm",
+ "revm-optimism",
  "revm-primitives",
  "thiserror 2.0.11",
  "tracing",
@@ -8705,6 +8706,7 @@ dependencies = [
  "reth-codecs",
  "reth-primitives-traits",
  "reth-zstd-compressors",
+ "revm-context",
  "revm-optimism",
  "rstest",
  "secp256k1",
@@ -9861,6 +9863,7 @@ dependencies = [
  "revm-primitives",
  "revm-specification",
  "revm-state",
+ "serde",
 ]
 
 [[package]]
