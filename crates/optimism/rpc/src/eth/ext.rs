@@ -1,4 +1,6 @@
-use super::{OpEthApiInner, OpNodeCore};
+//! Eth API extension.
+
+use super::OpNodeCore;
 use crate::{error::TxConditionalErr, OpEthApiError, SequencerClient};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
@@ -10,7 +12,6 @@ use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::L2EthApiExtServer;
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
-use std::sync::Arc;
 
 /// Maximum execution const for conditional transactions.
 const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
@@ -20,33 +21,44 @@ const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
 /// Separate from [`super::OpEthApi`] to allow to enable it conditionally,
 #[derive(Clone)]
 #[allow(dead_code)]
-pub(crate) struct OpEthApiExt<N: OpNodeCore> {
-    /// Gateway to node's core components.
-    inner: Arc<OpEthApiInner<N>>,
+#[derive(Debug)]
+pub struct OpEthExtApi<N: OpNodeCore> {
+    sequencer_client: Option<SequencerClient>,
+    pool: N::Pool,
+    provider: N::Provider,
 }
 
-impl<N> OpEthApiExt<N>
+impl<N> OpEthExtApi<N>
 where
     N: OpNodeCore<Provider: BlockReaderIdExt + Clone + 'static>,
 {
+    /// Creates a new [`OpExtApi`].
+    pub fn new(
+        sequencer_client: Option<SequencerClient>,
+        pool: N::Pool,
+        provider: N::Provider,
+    ) -> Self {
+        Self { sequencer_client, pool, provider }
+    }
+
     /// Returns the configured sequencer client, if any.
-    pub(crate) fn sequencer_client(&self) -> Option<&SequencerClient> {
-        self.inner.sequencer_client()
+    fn sequencer_client(&self) -> Option<&SequencerClient> {
+        self.sequencer_client.as_ref()
     }
 
     #[inline]
     fn pool(&self) -> &N::Pool {
-        self.inner.eth_api.pool()
+        &self.pool
     }
 
     #[inline]
     fn provider(&self) -> &N::Provider {
-        self.inner.eth_api.provider()
+        &self.provider
     }
 }
 
 #[async_trait::async_trait]
-impl<N> L2EthApiExtServer for OpEthApiExt<N>
+impl<N> L2EthApiExtServer for OpEthExtApi<N>
 where
     N: OpNodeCore + 'static,
     N::Provider: BlockReaderIdExt + StateProviderFactory,

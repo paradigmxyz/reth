@@ -34,11 +34,13 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
+    eth::ext::OpEthExtApi,
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -210,6 +212,7 @@ pub struct OpAddOns<N: FullNodeComponents> {
     >,
     /// Data availability configuration for the OP builder.
     pub da_config: OpDAConfig,
+    pub sequencer_client: Option<SequencerClient>,
 }
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default for OpAddOns<N> {
@@ -244,7 +247,7 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        let Self { rpc_add_ons, da_config } = self;
+        let Self { rpc_add_ons, da_config, sequencer_client } = self;
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
             ctx.node.pool().clone(),
@@ -260,6 +263,11 @@ where
         );
         let miner_ext = OpMinerExtApi::new(da_config);
 
+        let tx_conditional_ext = OpEthExtApi::new(
+            sequencer_client,
+            ctx.node.pool().clone(),
+            ctx.node.provider().clone(),
+        );
         rpc_add_ons
             .launch_add_ons_with(ctx, move |modules, auth_modules| {
                 debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
@@ -276,6 +284,12 @@ where
                     debug!(target: "reth::cli", "Installing miner DA rpc enddpoint");
                     auth_modules.merge_auth_methods(miner_ext.into_rpc())?;
                 }
+
+                // extend the eth namespace if configured in the regular http server
+                modules.merge_if_module_configured(
+                    RethRpcModule::Eth,
+                    tx_conditional_ext.clone().into_rpc(),
+                )?;
 
                 Ok(())
             })
@@ -353,13 +367,17 @@ impl OpAddOnsBuilder {
     {
         let Self { sequencer_client, da_config } = self;
 
+        let sequencer_client_clone = sequencer_client.clone();
         OpAddOns {
             rpc_add_ons: RpcAddOns::new(
-                move |ctx| OpEthApi::<N>::builder().with_sequencer(sequencer_client).build(ctx),
+                move |ctx| {
+                    OpEthApi::<N>::builder().with_sequencer(sequencer_client_clone).build(ctx)
+                },
                 Default::default(),
                 Default::default(),
             ),
             da_config: da_config.unwrap_or_default(),
+            sequencer_client,
         }
     }
 }
