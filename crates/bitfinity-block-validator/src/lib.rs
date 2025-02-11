@@ -1,10 +1,15 @@
 //! Bitfinity block validator.
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use alloy_primitives::{Address, B256, U256};
 use did::BlockConfirmationData;
 use evm_canister_client::{CanisterClient, EvmCanisterClient};
+use eyre::Ok;
 use reth_chain_state::MemoryOverlayStateProvider;
+use reth_evm::env::EvmEnv;
 use reth_evm::execute::{BasicBatchExecutor, BatchExecutor};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_evm_ethereum::{
     execute::{EthExecutionStrategy, EthExecutionStrategyFactory},
     EthEvmConfig,
@@ -15,7 +20,14 @@ use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider as _, ExecutionOutcome,
     HashedPostStateProvider as _, LatestStateProviderRef, ProviderFactory,
 };
+use reth_provider::{BlockNumReader, DatabaseProviderFactory, HeaderProvider, StateRootProvider};
+use reth_revm::db::CacheDB;
+use reth_revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, TxEnv};
 use reth_revm::{batch::BlockBatchRecord, database::StateProviderDatabase};
+use reth_revm::{CacheState, DatabaseCommit, Evm, StateBuilder};
+use reth_rpc_eth_types::cache::db::StateProviderTraitObjWrapper;
+use reth_rpc_eth_types::StateCacheDb;
+use reth_trie::HashedPostState;
 
 /// Block validator for Bitfinity.
 ///
@@ -47,7 +59,7 @@ where
     /// Validate a block.
     pub async fn validate_blocks(&self, blocks: &[Block]) -> eyre::Result<()> {
         if blocks.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let execution_result = self.execute_blocks(blocks)?;
@@ -87,7 +99,7 @@ where
             state_root: block.state_root.into(),
             transactions_root: block.transactions_root.into(),
             receipts_root: block.receipts_root.into(),
-            proof_of_work: self.calculate_pow_hash(updated_state),
+            proof_of_work: self.calculate_pow_hash(&block),
         })
     }
 
@@ -137,8 +149,62 @@ where
     /// Calculates POW hash based on the given trie state.
     fn calculate_pow_hash(
         &self,
-        updated_state: reth_trie::HashedPostState,
-    ) -> did::hash::Hash<alloy_primitives::FixedBytes<32>> {
-        todo!()
+        block: &Block,
+    ) -> eyre::Result<did::hash::Hash<alloy_primitives::FixedBytes<32>>> {
+        let historical = self.provider_factory.latest().expect("no latest provider");
+
+        let db = StateProviderTraitObjWrapper(&historical);
+
+        let cache = StateCacheDb::new(StateProviderDatabase::new(db));
+
+        let mut state = StateBuilder::new().with_database(cache).with_bundle_update().build();
+
+        let chain_spec = self.provider_factory.chain_spec();
+        let evm_config = EthEvmConfig::new(chain_spec);
+
+        let EvmEnv { mut cfg_env_with_handler_cfg, block_env } =
+            evm_config.cfg_and_block_env(&block.header);
+
+        cfg_env_with_handler_cfg.cfg_env.disable_balance_check = true;
+
+        // let tx = TxEnv {
+        //     caller: todo!(),
+        //     gas_limit: todo!(),
+        //     gas_price: todo!(),
+        //     transact_to: todo!(),
+        //     value: todo!(),
+        //     data: todo!(),
+        //     nonce: todo!(),
+        //     chain_id: todo!(),
+        //     access_list: todo!(),
+        //     gas_priority_fee: todo!(),
+        //     blob_hashes: todo!(),
+        //     max_fee_per_blob_gas: todo!(),
+        //     authorization_list: todo!(),
+        // };
+
+        {
+            // Setup EVM
+            let mut evm = evm_config.evm_with_env(
+                &mut state,
+                EnvWithHandlerCfg::new_with_cfg_env(
+                    cfg_env_with_handler_cfg,
+                    block_env,
+                    TxEnv::default(),
+                ),
+            );
+
+            let res = evm.transact()?;
+            evm.db_mut().commit(res.state);
+            assert!(res.result.is_success());
+        }
+
+        let bundle = state.take_bundle();
+
+        let post_hashed_state = db.hashed_post_state(&bundle);
+
+        let state_root = db.state_root(post_hashed_state)?;
+
+        Ok(state_root.into())
     }
 }

@@ -32,6 +32,7 @@ reth-revm.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 tracing.workspace = true
+reth-rpc-eth-types.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true
