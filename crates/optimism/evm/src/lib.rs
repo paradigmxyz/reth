@@ -296,7 +296,7 @@ mod tests {
     };
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
-    use reth_primitives::{Account, Log, RecoveredBlock};
+    use reth_primitives_traits::{Account, Log, RecoveredBlock};
     use revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
