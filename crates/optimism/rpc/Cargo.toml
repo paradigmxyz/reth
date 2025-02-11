@@ -34,7 +34,8 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-payload-builder.workspace = true
-reth-optimism-primitives.workspace = true
+# TODO remove node-builder import
+reth-optimism-primitives = { workspace = true, features = ["reth-codec", "serde-bincode-compat"] }
 reth-optimism-forks.workspace = true
 
 # ethereum

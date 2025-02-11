@@ -5,11 +5,10 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use jsonrpsee_core::RpcResult;
-use op_alloy_network::TransactionResponse;
-use op_alloy_rpc_types::Transaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::L2EthApiExtServer;
-use reth_transaction_pool::{TransactionOrigin, TransactionPool};
+use reth_rpc_eth_types::utils::recover_raw_transaction;
+use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
 /// Maximum execution const for conditional transactions.
@@ -50,7 +49,7 @@ impl<N> L2EthApiExtServer for OpEthApiExt<N>
 where
     N: OpNodeCore + 'static,
     N::Provider: BlockReaderIdExt + StateProviderFactory,
-    N::Pool: TransactionPool<Transaction = Transaction>,
+    N::Pool: TransactionPool,
 {
     async fn send_raw_transaction_conditional(
         &self,
@@ -63,9 +62,11 @@ where
             return Err(TxConditionalErr::ConditionalCostExceeded.into());
         }
 
-        let tx: Transaction = serde_json::from_slice(&bytes).map_err(|_| {
+        let recovered_tx = recover_raw_transaction(&bytes).map_err(|_| {
             OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::FailedToDecodeSignedTransaction)
         })?;
+
+        let tx = <N::Pool as TransactionPool>::Transaction::from_pooled(recovered_tx);
 
         // get current header
         let header_not_found = || {
@@ -94,7 +95,7 @@ where
                 .forward_raw_transaction_conditional(bytes.as_ref(), condition)
                 .await
                 .map_err(OpEthApiError::Sequencer)?;
-            Ok(tx.tx_hash())
+            Ok(*tx.hash())
         } else {
             // otherwise, add to pool
             // TODO: include conditional
