@@ -165,7 +165,6 @@ impl reth_codecs::Compact for CustomHeader {
 mod serde_bincode_compat {
     use alloy_consensus::serde_bincode_compat::Header;
     use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
-    use revm_primitives::U256;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug)]

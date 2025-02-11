@@ -32,9 +32,9 @@ use reth_optimism_node::{
 use reth_optimism_payload_builder::builder::{
     ExecutedPayload, OpBuilder, OpPayloadBuilderCtx, OpPayloadTransactions,
 };
-use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives_traits::{node::AnyNodePrimitives, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
