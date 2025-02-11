@@ -85,8 +85,8 @@ optimism = [
     "reth-db-api/optimism",
     "reth-optimism-primitives/optimism",
     "reth-downloaders/optimism",
-    "reth-optimism-consensus/optimism",
     "reth-provider/optimism",
+    "reth-optimism-consensus/optimism",
 ]
 asm-keccak = [
     "alloy-primitives/asm-keccak",

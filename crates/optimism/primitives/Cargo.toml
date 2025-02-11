@@ -68,6 +68,7 @@ std = [
     "alloy-rlp/std",
     "reth-zstd-compressors?/std",
     "op-alloy-consensus/std",
+    "revm-optimism?/std",
     "alloy-rpc-types-eth?/std",
     "alloy-serde?/std",
     "revm-optimism?/std",
@@ -94,6 +95,7 @@ serde = [
     "op-alloy-consensus/serde",
     "rand?/serde",
     "secp256k1?/serde",
+    "revm-optimism?/serde",
     "alloy-rpc-types-eth?/serde",
     "revm-optimism?/serde",
 ]

@@ -111,15 +111,15 @@ impl ConfigureEvmEnv for EthEvmConfig {
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
+        // configure evm env based on parent block
+        let cfg = CfgEnv::new().with_chain_id(self.chain_spec.chain().id()).with_spec(spec_id);
+
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_and_block_number(
             &self.chain_spec,
             attributes.timestamp,
             parent.number() + 1,
         );
-
-        // configure evm env based on parent block
-        let cfg = CfgEnv::new().with_chain_id(self.chain_spec.chain().id()).with_spec(spec_id);
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
