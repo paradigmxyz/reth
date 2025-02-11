@@ -2887,20 +2887,17 @@ where
                         state_provider.state_root_with_updates(hashed_state.clone())?;
 
                     if regular_root == sealed_block.header().state_root() {
-                        if self.config.always_compare_trie_updates() {
-                            let provider_ro =
-                                state_root_task_config.consistent_view.provider_ro()?;
-                            let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
-                                DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                                &state_root_task_config.nodes_sorted,
-                            );
-                            compare_trie_updates(
-                                in_memory_trie_cursor,
-                                task_trie_updates.clone(),
-                                regular_updates.clone(),
-                            )
-                            .map_err(ProviderError::from)?;
-                        }
+                        let provider_ro = state_root_task_config.consistent_view.provider_ro()?;
+                        let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
+                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                            &state_root_task_config.nodes_sorted,
+                        );
+                        compare_trie_updates(
+                            in_memory_trie_cursor,
+                            task_trie_updates.clone(),
+                            regular_updates.clone(),
+                        )
+                        .map_err(ProviderError::from)?;
                         if task_state_root != sealed_block.header().state_root() {
                             return Ok((regular_root, regular_updates, time_from_last_update));
                         }
