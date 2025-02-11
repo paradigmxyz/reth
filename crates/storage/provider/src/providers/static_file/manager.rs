@@ -662,6 +662,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<Option<PipelineTarget>>
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
+        N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
     {
         // OVM historical import is broken and does not work with this check. It's importing
         // duplicated receipts resulting in having more receipts than the expected transaction
@@ -775,12 +776,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
 
             if let Some(unwind) = match segment {
-                StaticFileSegment::Headers => self.ensure_invariants::<_, tables::Headers<N::BlockHeader>>(
-                    provider,
-                    segment,
-                    highest_block,
-                    highest_block,
-                )?,
+                StaticFileSegment::Headers => self
+                    .ensure_invariants::<_, tables::Headers<N::BlockHeader>>(
+                        provider,
+                        segment,
+                        highest_block,
+                        highest_block,
+                    )?,
                 StaticFileSegment::Transactions => self
                     .ensure_invariants::<_, tables::Transactions>(
                         provider,
