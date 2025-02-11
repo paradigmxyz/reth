@@ -212,6 +212,8 @@ pub struct OpAddOns<N: FullNodeComponents> {
     >,
     /// Data availability configuration for the OP builder.
     pub da_config: OpDAConfig,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
     pub sequencer_client: Option<SequencerClient>,
 }
 
@@ -263,7 +265,7 @@ where
         );
         let miner_ext = OpMinerExtApi::new(da_config);
 
-        let tx_conditional_ext = OpEthExtApi::new(
+        let tx_conditional_ext: OpEthExtApi<N> = OpEthExtApi::new(
             sequencer_client,
             ctx.node.pool().clone(),
             ctx.node.provider().clone(),
@@ -288,7 +290,7 @@ where
                 // extend the eth namespace if configured in the regular http server
                 modules.merge_if_module_configured(
                     RethRpcModule::Eth,
-                    tx_conditional_ext.clone().into_rpc(),
+                    tx_conditional_ext.into_rpc(),
                 )?;
 
                 Ok(())

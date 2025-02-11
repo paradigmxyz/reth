@@ -23,8 +23,12 @@ const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct OpEthExtApi<N: OpNodeCore> {
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
     sequencer_client: Option<SequencerClient>,
+    /// The transaction pool of the node.
     pool: N::Pool,
+    /// The provider type used to interact with the node.
     provider: N::Provider,
 }
 
