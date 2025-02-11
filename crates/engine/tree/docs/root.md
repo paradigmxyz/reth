@@ -176,7 +176,7 @@ Sparse Trie component is the heart of the new state root calculation logic.
 
 ### Sparse Trie primer
 
-- State trie of Etheruem is very big (150GB+), and we cannot realistically fit it into memory.
+- The state trie of Ethereum is very big (150GB+), and we cannot realistically fit it into memory.
 - What if instead of loading the entire trie in memory,
 we only load the parts that were modified during the block execution (i.e. make the trie "sparse")?
     - Such modified parts will have nodes that will be modified,
