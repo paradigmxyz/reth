@@ -8,7 +8,7 @@
 #![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 // The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
+//#![cfg(feature = "optimism")]
 
 pub mod engine;
 pub mod error;
@@ -19,7 +19,7 @@ pub mod witness;
 
 #[cfg(feature = "client")]
 pub use engine::OpEngineApiClient;
-pub use engine::OpEngineApiServer;
+pub use engine::{OpEngineApi, OpEngineApiServer};
 pub use error::{OpEthApiError, OpInvalidTransactionError, SequencerClientError};
 pub use eth::{OpEthApi, OpReceiptBuilder};
 pub use sequencer::SequencerClient;
