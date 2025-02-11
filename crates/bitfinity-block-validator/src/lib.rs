@@ -90,17 +90,13 @@ where
         block: &Block,
         execution_result: ExecutionOutcome,
     ) -> eyre::Result<BlockConfirmationData> {
-        let provider = self.provider_factory.provider()?;
-        let state_provider = LatestStateProviderRef::new(&provider);
-        let updated_state = state_provider.hashed_post_state(execution_result.state());
-
         Ok(BlockConfirmationData {
             block_number: block.number,
             hash: block.hash_slow().into(),
             state_root: block.state_root.into(),
             transactions_root: block.transactions_root.into(),
             receipts_root: block.receipts_root.into(),
-            proof_of_work: self.calculate_pow_hash(&block),
+            proof_of_work: self.calculate_pow_hash(&block, execution_result)?,
         })
     }
 
@@ -151,14 +147,19 @@ where
     fn calculate_pow_hash(
         &self,
         block: &Block,
+        execution_result: ExecutionOutcome,
     ) -> eyre::Result<did::hash::Hash<alloy_primitives::FixedBytes<32>>> {
-        let historical = self.provider_factory.latest().expect("no latest provider");
-
+        let state = execution_result.bundle;
+        let state_provider = self.provider_factory.latest().expect("no latest provider");
         let cache = StateCacheDb::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(
-            &historical,
+            &state_provider,
         )));
 
-        let mut state = StateBuilder::new().with_database_ref(&cache).with_bundle_update().build();
+        let mut state = StateBuilder::new()
+            .with_database_ref(&cache)
+            .with_bundle_prestate(state)
+            .with_bundle_update()
+            .build();
 
         let chain_spec = self.provider_factory.chain_spec();
         let evm_config = EthEvmConfig::new(chain_spec);
