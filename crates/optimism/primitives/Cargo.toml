@@ -22,7 +22,8 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 alloy-eips.workspace = true
-revm-optimism = { workspace = true, optional = true }
+revm-context.workspace = true
+revm-optimism.workspace = true
 secp256k1 = { workspace = true, optional = true }
 
 # op
@@ -68,10 +69,10 @@ std = [
     "alloy-rlp/std",
     "reth-zstd-compressors?/std",
     "op-alloy-consensus/std",
-    "revm-optimism?/std",
+    "revm-optimism/std",
     "alloy-rpc-types-eth?/std",
     "alloy-serde?/std",
-    "revm-optimism?/std",
+    "revm-context/std",
 ]
 alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth"]
 reth-codec = [
@@ -95,9 +96,9 @@ serde = [
     "op-alloy-consensus/serde",
     "rand?/serde",
     "secp256k1?/serde",
-    "revm-optimism?/serde",
+    "revm-optimism/serde",
     "alloy-rpc-types-eth?/serde",
-    "revm-optimism?/serde",
+    "revm-context/serde",
 ]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
@@ -120,6 +121,4 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-serde?/arbitrary",
 ]
-optimism = [
-    "dep:revm-optimism",
-]
+optimism = []

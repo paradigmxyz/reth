@@ -82,6 +82,7 @@ std = [
     "serde_with?/std",
     "serde_json/std",
     "revm-database/std",
+    "revm-state/std",
 ]
 eip1186 = [
     "alloy-rpc-types-eth/serde",
@@ -98,6 +99,7 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-codecs?/serde",
     "revm-database/serde",
+    "revm-state/serde",
 ]
 reth-codec = [
     "dep:reth-codecs",

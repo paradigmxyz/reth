@@ -337,7 +337,7 @@ where
         acc_info.code = Some(Bytecode::new_raw(Bytes::from_static(&CREATE_2_DEPLOYER_BYTECODE)));
 
         // Convert the cache account back into a revm account and mark it as touched.
-        let mut revm_acc: revm::primitives::Account = acc_info.into();
+        let mut revm_acc: revm::state::Account = acc_info.into();
         revm_acc.mark_touch();
 
         // Commit the create2 deployer account to the database.

@@ -18,6 +18,7 @@ use core::{
     hash::{Hash, Hasher},
     mem,
 };
+use revm_context::TxEnv;
 use derive_more::{AsRef, Deref};
 use op_alloy_consensus::{
     DepositTransaction, OpPooledTransaction, OpTxEnvelope, OpTypedTransaction, TxDeposit,
@@ -28,8 +29,9 @@ use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
-    InMemorySize, SignedTransaction,
+    FillTxEnv, InMemorySize, SignedTransaction,
 };
+use revm_optimism::transaction::deposit::DepositTransactionParts;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -210,12 +212,11 @@ impl OpTransaction for OpTransactionSigned {
     }
 }
 
-#[cfg(feature = "optimism")]
-impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut revm_primitives::TxEnv, sender: Address) {
+impl FillTxEnv<revm_optimism::OpTransaction<TxEnv>> for OpTransactionSigned {
+    fn fill_tx_env(&self, tx_env: &mut revm_optimism::OpTransaction<TxEnv>, sender: Address) {
         let envelope = self.encoded_2718();
 
-        let tx_env = match &self.transaction {
+        let base = match &self.transaction {
             OpTypedTransaction::Legacy(tx) => TxEnv {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.gas_price,
@@ -251,7 +252,7 @@ impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
                 authorization_list: Default::default(),
-                tx_type: 0,
+                tx_type: 1,
                 caller: sender,
             },
             OpTypedTransaction::Eip1559(tx) => TxEnv {
@@ -273,7 +274,7 @@ impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
                 authorization_list: Default::default(),
-                tx_type: 0,
+                tx_type: 2,
                 caller: sender,
             },
             OpTypedTransaction::Eip7702(tx) => TxEnv {
@@ -298,45 +299,43 @@ impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
                     .authorization_list
                     .iter()
                     .map(|item| {
-                        let authority = if item.s() > SECP256K1N_HALF {
-                            None
-                        } else {
-                            item.recover_authority().ok()
-                        };
-                        (authority, item.chain_id, item.nonce, item.address)
+                        (item.recover_authority().ok(), item.chain_id, item.nonce, item.address)
                     })
                     .collect(),
-                tx_type: 0,
+                tx_type: 4,
                 caller: sender,
             },
-            OpTypedTransaction::Deposit(tx) => {
-                tx_env.access_list.clear();
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::ZERO;
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = None;
-                tx_env.nonce = None;
-                tx_env.authorization_list = None;
-
-                tx_env.optimism = revm_primitives::OptimismFields {
-                    source_hash: Some(tx.source_hash),
-                    mint: tx.mint,
-                    is_system_transaction: Some(tx.is_system_transaction),
-                    enveloped_tx: Some(envelope.into()),
-                };
-                return
-            }
+            OpTypedTransaction::Deposit(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: 0,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: None,
+                nonce: 0,
+                access_list: Default::default(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                gas_priority_fee: Default::default(),
+                tx_type: 126,
+                caller: sender,
+            },
         };
 
-        tx_env.optimism = revm_primitives::OptimismFields {
-            source_hash: None,
-            mint: None,
-            is_system_transaction: Some(false),
+        *tx_env = revm_optimism::OpTransaction {
+            base,
             enveloped_tx: Some(envelope.into()),
-        }
+            deposit: if let OpTypedTransaction::Deposit(tx) = &self.transaction {
+                DepositTransactionParts {
+                    is_system_transaction: tx.is_system_transaction,
+                    source_hash: tx.source_hash,
+                    mint: tx.mint,
+                }
+            } else {
+                Default::default()
+            },
+        };
     }
 }
 

@@ -38,6 +38,7 @@ reth-optimism-primitives.workspace = true
 # revm
 revm.workspace = true
 revm-primitives.workspace = true
+revm-optimism.workspace = true
 
 # misc
 derive_more.workspace = true
@@ -78,6 +79,7 @@ std = [
     "reth-execution-types/std",
     "alloy-evm/std",
     "alloy-op-evm/std",
+    "revm-optimism/std",
 ]
 optimism = [
     "reth-execution-types/optimism",

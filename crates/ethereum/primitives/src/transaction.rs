@@ -788,7 +788,7 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
                 authorization_list: Default::default(),
-                tx_type: 0,
+                tx_type: 1,
                 caller: sender,
             },
             Transaction::Eip1559(tx) => TxEnv {
@@ -810,7 +810,7 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
                 authorization_list: Default::default(),
-                tx_type: 0,
+                tx_type: 2,
                 caller: sender,
             },
             Transaction::Eip4844(tx) => TxEnv {
@@ -832,7 +832,7 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 blob_hashes: tx.blob_versioned_hashes.clone(),
                 max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
                 authorization_list: Default::default(),
-                tx_type: 0,
+                tx_type: 3,
                 caller: sender,
             },
             Transaction::Eip7702(tx) => TxEnv {
@@ -857,15 +857,10 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                     .authorization_list
                     .iter()
                     .map(|item| {
-                        let authority = if item.s() > SECP256K1N_HALF {
-                            None
-                        } else {
-                            item.recover_authority().ok()
-                        };
-                        (authority, item.chain_id, item.nonce, item.address)
+                        (item.recover_authority().ok(), item.chain_id, item.nonce, item.address)
                     })
                     .collect(),
-                tx_type: 0,
+                tx_type: 4,
                 caller: sender,
             },
         }
