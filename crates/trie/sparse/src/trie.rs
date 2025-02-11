@@ -134,6 +134,12 @@ impl<P> SparseTrie<P> {
         Some(self.as_revealed_mut()?.root())
     }
 
+    /// Returns both the trie root and takes sparse trie updates if the trie has been revealed.
+    pub fn root_with_updates(&mut self) -> Option<(B256, SparseTrieUpdates)> {
+        let revealed = self.as_revealed_mut()?;
+        Some((revealed.root(), revealed.take_updates()))
+    }
+
     /// Calculates the hashes of the nodes below the provided level.
     pub fn calculate_below_level(&mut self, level: usize) {
         self.as_revealed_mut().unwrap().update_rlp_node_level(level);
