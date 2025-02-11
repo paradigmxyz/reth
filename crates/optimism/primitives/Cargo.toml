@@ -27,6 +27,9 @@ secp256k1 = { workspace = true, optional = true }
 
 # op
 op-alloy-consensus.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true }
+alloy-network = { workspace = true, optional = true }
+alloy-serde = { workspace = true, optional = true }
 
 # codec
 bytes = { workspace = true, optional = true }
@@ -67,6 +70,7 @@ std = [
     "reth-zstd-compressors?/std",
     "op-alloy-consensus/std",
 ]
+alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth"]
 reth-codec = [
     "dep:reth-codecs",
     "std",
