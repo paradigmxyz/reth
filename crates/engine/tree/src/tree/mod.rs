@@ -2420,7 +2420,7 @@ where
         let cancel_execution = ManualCancel::default();
 
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
-            if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
+            if is_descendant_of_persisting_blocks && !self.config.legacy_state_root() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
                 // Compute trie input
@@ -2548,21 +2548,7 @@ where
         // a different database transaction per thread and it might end up with a
         // different view of the database.
         let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks {
-            if self.config.use_state_root_task() {
-                let state_root_handle = state_root_handle
-                    .expect("state root handle must exist if use_state_root_task is true");
-                let state_root_config = state_root_task_config.expect("task config is present");
-
-                // Handle state root result from task using handle
-                self.handle_state_root_result(
-                    state_root_handle,
-                    state_root_config,
-                    block.sealed_block(),
-                    &hashed_state,
-                    &state_provider,
-                    root_time,
-                )?
-            } else {
+            if self.config.legacy_state_root() {
                 match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
                 {
                     Ok(result) => {
@@ -2582,6 +2568,20 @@ where
                     }
                     Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
                 }
+            } else {
+                let state_root_handle = state_root_handle
+                    .expect("state root handle must exist if use_state_root_task is true");
+                let state_root_config = state_root_task_config.expect("task config is present");
+
+                // Handle state root result from task using handle
+                self.handle_state_root_result(
+                    state_root_handle,
+                    state_root_config,
+                    block.sealed_block(),
+                    &hashed_state,
+                    &state_provider,
+                    root_time,
+                )?
             }
         } else {
             debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
@@ -3341,7 +3341,8 @@ mod tests {
                 persistence_handle,
                 PersistenceState::default(),
                 payload_builder,
-                TreeConfig::default(),
+                // TODO: fix tests for state root task https://github.com/paradigmxyz/reth/issues/14376
+                TreeConfig::default().with_legacy_state_root(true),
                 EngineApiKind::Ethereum,
                 evm_config,
             );

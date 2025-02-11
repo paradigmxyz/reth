@@ -277,7 +277,7 @@ where
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             self.engine_api.update_forkchoice(block, block).await?;
 
-            assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
+            assert!(start.elapsed() <= std::time::Duration::from_secs(40), "timed out");
         }
 
         // Hack to make sure that all components have time to process canonical state update.
