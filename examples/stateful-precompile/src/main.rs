@@ -88,7 +88,7 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        EthEvm::new(self.create_evm(db, input).with_inspector(inspector))
+        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector))
     }
 }
 
