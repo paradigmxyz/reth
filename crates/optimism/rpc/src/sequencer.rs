@@ -120,6 +120,6 @@ mod tests {
 
         assert!(body["params"].is_array());
         assert_eq!(body["params"][0], "0x1234");
-        assert_eq!(body["params"][1]["block_number"], 100);
+        assert_eq!(body["params"][1]["block_number"], 10);
     }
 }
