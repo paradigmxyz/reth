@@ -8,7 +8,7 @@ at the time of writing this document), it:
 3. Calculates the [MPT](https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/)
 root of the new state.
 4. Compares the root with the one received in the block header.
-5. Considers the block committed.
+5. Considers the block valid.
 
 This document describes the lifecycle of a payload with the focus on state root calculation,
 from the moment the payload is received, to the moment we have a new state root.
