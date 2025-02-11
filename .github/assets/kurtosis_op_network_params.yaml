@@ -2,20 +2,16 @@ ethereum_package:
   participants:
     - el_type: reth
       el_extra_params:
-        - "--rpc.eth-proof-window 100"
-      cl_type: lighthouse
+        - "--rpc.eth-proof-window=100"
+      cl_type: teku
 optimism_package:
   chains:
     - participants:
       - el_type: op-geth
         cl_type: op-node
-        # https://github.com/ethpandaops/optimism-package/issues/157
-        cl_image: "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:a79e8cc06aa354511983fafcb6d71ab04cdfadbc"
       - el_type: op-reth
         el_image: "ghcr.io/paradigmxyz/op-reth:kurtosis-ci"
         cl_type: op-node
-        # https://github.com/ethpandaops/optimism-package/issues/157
-        cl_image: "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:a79e8cc06aa354511983fafcb6d71ab04cdfadbc"
       batcher_params:
         extra_params:
           - "--throttle-interval=0"
