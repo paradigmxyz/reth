@@ -1,8 +1,7 @@
 ethereum_package:
   participants:
     - el_type: reth
-      el_extra_params:
-        - "--rpc.eth-proof-window 100"
+      el_image: "ghcr.io/paradigmxyz/op-reth:kurtosis-ci"
       cl_type: lighthouse
 optimism_package:
   chains:
