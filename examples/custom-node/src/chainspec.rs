@@ -1,6 +1,6 @@
 use crate::primitives::CustomHeader;
 use alloy_genesis::Genesis;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardfork, Hardforks};
 use reth_network_peers::NodeRecord;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -10,6 +10,28 @@ use reth_primitives_traits::SealedHeader;
 pub struct CustomChainSpec {
     inner: OpChainSpec,
     genesis_header: SealedHeader<CustomHeader>,
+}
+
+impl Hardforks for CustomChainSpec {
+    fn fork<H: Hardfork>(&self, fork: H) -> reth_chainspec::ForkCondition {
+        self.inner.fork(fork)
+    }
+
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, reth_chainspec::ForkCondition)> {
+        self.inner.forks_iter()
+    }
+
+    fn fork_id(&self, head: &reth_chainspec::Head) -> reth_chainspec::ForkId {
+        self.inner.fork_id(head)
+    }
+
+    fn latest_fork_id(&self) -> reth_chainspec::ForkId {
+        self.inner.latest_fork_id()
+    }
+
+    fn fork_filter(&self, head: reth_chainspec::Head) -> reth_chainspec::ForkFilter {
+        self.inner.fork_filter(head)
+    }
 }
 
 impl EthChainSpec for CustomChainSpec {
