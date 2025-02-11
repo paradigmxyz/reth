@@ -11,6 +11,7 @@ use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::L2EthApiExtServer;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use std::sync::Arc;
+use reth_rpc_eth_types::utils::recover_raw_transaction;
 
 /// Maximum execution const for conditional transactions.
 const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
@@ -63,7 +64,7 @@ where
             return Err(TxConditionalErr::ConditionalCostExceeded.into());
         }
 
-        let tx: Transaction = serde_json::from_slice(&bytes).map_err(|_| {
+        let tx: Transaction = recover_raw_transaction(&bytes).map_err(|_| {
             OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::FailedToDecodeSignedTransaction)
         })?;
 
