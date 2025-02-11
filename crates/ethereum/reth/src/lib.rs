@@ -91,9 +91,8 @@ pub mod rpc {
     /// Re-exported eth types
     pub mod eth {
         #[doc(inline)]
-        pub use alloy_rpc_types_eth::*;
-
+        pub use alloy_rpc_types_eth as primitives;
         #[doc(inline)]
-        pub use reth_rpc_eth_types as eth;
+        pub use reth_rpc_eth_types::*;
     }
 }

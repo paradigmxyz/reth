@@ -2,12 +2,14 @@ use alloy_primitives::{Address, B256};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     node::EthereumNode,
-    primitives::{transaction::signed::SignedTransaction, SealedBlock, SealedHeader, AlloyBlockHeader},
+    primitives::{
+        transaction::signed::SignedTransaction, AlloyBlockHeader, SealedBlock, SealedHeader,
+    },
     provider::{
         providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
         ReceiptProvider, StateProvider, TransactionsProvider,
     },
-    rpc::eth::{Filter, FilteredParams},
+    rpc::eth::primitives::{Filter, FilteredParams},
     TransactionSigned,
 };
 
