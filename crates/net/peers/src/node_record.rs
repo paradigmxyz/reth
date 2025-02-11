@@ -18,7 +18,7 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 #[cfg(feature = "secp256k1")]
 use enr::Enr;
 
-/// Represents a ENR in discovery.
+/// Represents an ENR in discovery.
 ///
 /// Note: this is only an excerpt of the [`NodeRecord`] data structure.
 #[derive(
