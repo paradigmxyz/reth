@@ -24,9 +24,6 @@ pub enum ProviderError {
     /// RLP error.
     #[error("{_0}")]
     Rlp(alloy_rlp::Error),
-    /// Filesystem path error.
-    #[error("{_0}")]
-    FsPathError(String),
     /// Nippy jar error.
     #[error("nippy jar error: {_0}")]
     NippyJar(String),
