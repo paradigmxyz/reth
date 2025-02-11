@@ -3125,17 +3125,9 @@ dependencies = [
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
- "alloy-consensus",
  "alloy-primitives",
- "alloy-rpc-types-eth",
  "eyre",
- "reth-chainspec",
- "reth-db",
- "reth-node-ethereum",
- "reth-node-types",
- "reth-primitives",
- "reth-primitives-traits",
- "reth-provider",
+ "reth-ethereum",
 ]
 
 [[package]]
@@ -7488,6 +7480,7 @@ dependencies = [
 name = "reth-ethereum"
 version = "1.1.5"
 dependencies = [
+ "alloy-rpc-types-eth",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
