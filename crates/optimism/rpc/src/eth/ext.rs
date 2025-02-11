@@ -36,7 +36,7 @@ impl<N> OpEthExtApi<N>
 where
     N: OpNodeCore<Provider: BlockReaderIdExt + Clone + 'static>,
 {
-    /// Creates a new [`OpExtApi`].
+    /// Creates a new [`OpEthExtApi`].
     pub fn new(
         sequencer_client: Option<SequencerClient>,
         pool: N::Pool,
