@@ -4,7 +4,7 @@
 
 ### Block
 
-A fundamental unit consisting of a header and body.
+A block is a type that consists of a header and body.
 Defined by the `Block` trait which provides core block operations and ecapsulates all block internals.
 Can exist in different states: basic, sealed (with hash), and recovered (with transaction signers)
 Supports operations like sealing (hashing) and transaction signer recovery
