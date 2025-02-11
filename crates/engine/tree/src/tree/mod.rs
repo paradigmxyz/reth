@@ -2877,7 +2877,7 @@ where
                     block = ?sealed_block.num_hash(),
                     ?task_state_root,
                     task_elapsed = ?time_from_last_update,
-                    "Task state root finished"
+                    "State root task finished"
                 );
 
                 if task_state_root != sealed_block.header().state_root() ||
