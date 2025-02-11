@@ -1,7 +1,4 @@
 //! Bitfinity block validator.
-use std::collections::HashSet;
-use std::sync::Arc;
-
 use alloy_primitives::{Address, B256, U256};
 use did::BlockConfirmationData;
 use evm_canister_client::{CanisterClient, EvmCanisterClient};
@@ -27,7 +24,11 @@ use reth_revm::{batch::BlockBatchRecord, database::StateProviderDatabase};
 use reth_revm::{CacheState, DatabaseCommit, Evm, StateBuilder};
 use reth_rpc_eth_types::cache::db::StateProviderTraitObjWrapper;
 use reth_rpc_eth_types::StateCacheDb;
-use reth_trie::HashedPostState;
+use reth_trie::{HashedPostState, KeccakKeyHasher};
+use reth_trie::{KeyHasher, StateRoot};
+use reth_trie_db::DatabaseStateRoot;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 /// Block validator for Bitfinity.
 ///
@@ -167,31 +168,21 @@ where
 
         cfg_env_with_handler_cfg.cfg_env.disable_balance_check = true;
 
-        // let tx = TxEnv {
-        //     caller: todo!(),
-        //     gas_limit: todo!(),
-        //     gas_price: todo!(),
-        //     transact_to: todo!(),
-        //     value: todo!(),
-        //     data: todo!(),
-        //     nonce: todo!(),
-        //     chain_id: todo!(),
-        //     access_list: todo!(),
-        //     gas_priority_fee: todo!(),
-        //     blob_hashes: todo!(),
-        //     max_fee_per_blob_gas: todo!(),
-        //     authorization_list: todo!(),
-        // };
+        let tx = TxEnv {
+            caller: Address::from_slice(&[1]),
+            gas_limit: 21000,
+            gas_price: U256::from(1),
+            transact_to: alloy_primitives::TxKind::Call(Address::from_slice(&[2; 20])),
+            value: U256::from(1),
+            nonce: Some(0),
+            ..Default::default()
+        };
 
         {
             // Setup EVM
             let mut evm = evm_config.evm_with_env(
                 &mut state,
-                EnvWithHandlerCfg::new_with_cfg_env(
-                    cfg_env_with_handler_cfg,
-                    block_env,
-                    TxEnv::default(),
-                ),
+                EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, tx),
             );
 
             let res = evm.transact()?;
@@ -201,7 +192,8 @@ where
 
         let bundle = state.take_bundle();
 
-        let post_hashed_state = db.hashed_post_state(&bundle);
+        let post_hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state());
 
         let state_root = db.state_root(post_hashed_state)?;
 
