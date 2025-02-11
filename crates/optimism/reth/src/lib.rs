@@ -26,7 +26,9 @@ pub mod primitives {
 pub mod consensus {
     #[doc(inline)]
     pub use reth_consensus::*;
+    #[doc(inline)]
     pub use reth_consensus_common::*;
+    #[doc(inline)]
     pub use reth_optimism_consensus::*;
 }
 
