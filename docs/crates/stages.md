@@ -2,48 +2,12 @@
 
 The `stages` lib plays a central role in syncing the node, maintaining state, updating the database and more. The stages involved in the Reth pipeline are the `HeaderStage`, `BodyStage`, `SenderRecoveryStage`, and `ExecutionStage` (note that this list is non-exhaustive, and more pipeline stages will be added in the near future). Each of these stages are queued up and stored within the Reth pipeline.
 
-[File: crates/stages/src/pipeline/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/stages/src/pipeline/mod.rs)
-```rust,ignore
-pub struct Pipeline<DB: Database, U: SyncStateUpdater> {
-    stages: Vec<BoxedStage<DB>>,
-    max_block: Option<BlockNumber>,
-    listeners: PipelineEventListeners,
-    sync_state_updater: Option<U>,
-    progress: PipelineProgress,
-    metrics: Metrics,
-}
-```
-
 
 When the node is first started, a new `Pipeline` is initialized and all of the stages are added into `Pipeline.stages`. Then, the `Pipeline::run` function is called, which starts the pipeline, executing all of the stages continuously in an infinite loop. This process syncs the chain, keeping everything up to date with the chain tip. 
 
 Each stage within the pipeline implements the `Stage` trait which provides function interfaces to get the stage id, execute the stage and unwind the changes to the database if there was an issue during the stage execution.
 
-[File: crates/stages/src/stage.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/stages/src/stage.rs)
-```rust,ignore
-pub trait Stage<DB: Database>: Send + Sync {
-    /// Get the ID of the stage.
-    ///
-    /// Stage IDs must be unique.
-    fn id(&self) -> StageId;
-
-    /// Execute the stage.
-    async fn execute(
-        &mut self,
-        tx: &mut Transaction<'_, DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError>;
-
-    /// Unwind the stage.
-    async fn unwind(
-        &mut self,
-        tx: &mut Transaction<'_, DB>,
-        input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError>;
-}
-```
-
-To get a better idea of what is happening at each part of the pipeline, let's walk through what is going on under the hood within the `execute()` function at each stage, starting with `HeaderStage`.
+To get a better idea of what is happening at each part of the pipeline, let's walk through what is going on under the hood when a stage is executed, starting with `HeaderStage`.
 
 <br>
 
@@ -53,42 +17,10 @@ To get a better idea of what is happening at each part of the pipeline, let's wa
 <!-- TODO: Cross-link to eth/65 chapter when it's written -->
 The `HeaderStage` is responsible for syncing the block headers, validating the header integrity and writing the headers to the database. When the `execute()` function is called, the local head of the chain is updated to the most recent block height previously executed by the stage. At this point, the node status is also updated with that block's height, hash and total difficulty. These values are used during any new eth/65 handshakes. After updating the head, a stream is established with other peers in the network to sync the missing chain headers between the most recent state stored in the database and the chain tip. The `HeaderStage` contains a `downloader` attribute, which is a type that implements the `HeaderDownloader` trait. A `HeaderDownloader` is a `Stream` that returns batches of headers.
 
-[File: crates/interfaces/src/p2p/headers/downloader.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/interfaces/src/p2p/headers/downloader.rs)
-```rust,ignore
-pub trait HeaderDownloader: Send + Sync + Stream<Item = Vec<SealedHeader>> + Unpin {
-    /// Updates the gap to sync which ranges from local head to the sync target
-    ///
-    /// See also [HeaderDownloader::update_sync_target] and [HeaderDownloader::update_local_head]
-    fn update_sync_gap(&mut self, head: SealedHeader, target: SyncTarget) {
-        self.update_local_head(head);
-        self.update_sync_target(target);
-    }
-
-    /// Updates the block number of the local database
-    fn update_local_head(&mut self, head: SealedHeader);
-
-    /// Updates the target we want to sync to
-    fn update_sync_target(&mut self, target: SyncTarget);
-
-    /// Sets the headers batch size that the Stream should return.
-    fn set_batch_size(&mut self, limit: usize);
-}
-```
-
-The `HeaderStage` relies on the downloader stream to return the headers in descending order starting from the chain tip down to the latest block in the database. While other stages in the `Pipeline` start from the most recent block in the database up to the chain tip, the `HeaderStage` works in reverse to avoid [long-range attacks](https://messari.io/report/long-range-attack). When a node downloads headers in ascending order, it will not know if it is being subjected to a long-range attack until it reaches the most recent blocks. To combat this, the `HeaderStage` starts by getting the chain tip from the Consensus Layer, verifies the tip, and then walks backwards by the parent hash. Each value yielded from the stream is a `SealedHeader`. 
-
-[File: crates/primitives/src/header.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/primitives/src/header.rs)
-```rust,ignore
-pub struct SealedHeader {
-    /// Locked Header fields.
-    header: Header,
-    /// Locked Header hash.
-    hash: BlockHash,
-}
-```
+The `HeaderStage` relies on the downloader stream to return the headers in descending order starting from the chain tip down to the latest block in the database. While other stages in the `Pipeline` start from the most recent block in the database up to the chain tip, the `HeaderStage` works in reverse to avoid [long-range attacks](https://messari.io/report/long-range-attack). When a node downloads headers in ascending order, it will not know if it is being subjected to a long-range attack until it reaches the most recent blocks. To combat this, the `HeaderStage` starts by getting the chain tip from the Consensus Layer, verifies the tip, and then walks backwards by the parent hash.
 
 <!-- Not sure about this, how is it validated? -->
-Each `SealedHeader` is then validated to ensure that it has the proper parent. Note that this is only a basic response validation, and the `HeaderDownloader` uses the `validate` method during the `stream`, so that each header is validated according to the consensus specification before the header is yielded from the stream. After this, each header is then written to the database. If a header is not valid or the stream encounters any other error, the error is propagated up through the stage execution, the changes to the database are unwound and the stage is resumed from the most recent valid state.
+Each header is then validated to ensure that it has the proper parent. Note that this is only a basic response validation, and the `HeaderDownloader` uses the `validate` method during the `stream`, so that each header is validated according to the consensus specification before the header is yielded from the stream. After this, each header is then written to the database. If a header is not valid or the stream encounters any other error, the error is propagated up through the stage execution, the changes to the database are unwound and the stage is resumed from the most recent valid state.
 
 This process continues until all of the headers have been downloaded and written to the database. Finally, the total difficulty of the chain's head is updated and the function returns `Ok(ExecOutput { stage_progress, done: true })`, signaling that the header sync has been completed successfully. 
 
@@ -106,18 +38,6 @@ When the `BodyStage` is looking at the headers to determine which block to downl
 
 Once the `BodyStage` determines which block bodies to fetch, a new `bodies_stream` is created which downloads all of the bodies from the `starting_block`, up until the `target_block` specified. Each time the `bodies_stream` yields a value, a `SealedBlock` is created using the block header, the ommers hash and the newly downloaded block body.
 
-[File: crates/primitives/src/block.rs](https://github.com/paradigmxyz/reth/blob/main/crates/primitives/src/block.rs)
-```rust,ignore
-pub struct SealedBlock {
-    /// Locked block header.
-    pub header: SealedHeader,
-    /// Transactions with signatures.
-    pub body: Vec<TransactionSigned>,
-    /// Ommer/uncle headers
-    pub ommers: Vec<SealedHeader>,
-}
-```
-
 The new block is then pre-validated, checking that the ommers hash and transactions root in the block header are the same in the block body. Following a successful pre-validation, the `BodyStage` loops through each transaction in the `block.body`, adding the transaction to the database. This process is repeated for every downloaded block body, with the `BodyStage` returning `Ok(ExecOutput { stage_progress, done: true })` signaling it successfully completed. 
 
 <br>
@@ -125,21 +45,6 @@ The new block is then pre-validated, checking that the ommers hash and transacti
 ## SenderRecoveryStage
 
 Following a successful `BodyStage`, the `SenderRecoveryStage` starts to execute. The `SenderRecoveryStage` is responsible for recovering the transaction sender for each of the newly added transactions to the database. At the beginning of the execution function, all of the transactions are first retrieved from the database. Then the `SenderRecoveryStage` goes through each transaction and recovers the signer from the transaction signature and hash. The transaction hash is derived by taking the Keccak 256-bit hash of the RLP encoded transaction bytes. This hash is then passed into the `recover_signer` function.
-
-[File: crates/primitives/src/transaction/signature.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/primitives/src/transaction/signature.rs)
-```rust,ignore
-pub(crate) fn recover_signer(&self, hash: B256) -> Option<Address> {
-    let mut sig: [u8; 65] = [0; 65];
-
-    sig[0..32].copy_from_slice(&self.r.to_be_bytes::<32>());
-    sig[32..64].copy_from_slice(&self.s.to_be_bytes::<32>());
-    sig[64] = self.odd_y_parity as u8;
-
-    // NOTE: we are removing error from underlying crypto library as it will restrain primitive
-    // errors and we care only if recovery is passing or not.
-    secp256k1::recover(&sig, hash.as_fixed_bytes()).ok()
-}
-```
 
 In an [ECDSA (Elliptic Curve Digital Signature Algorithm) signature](https://wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm), the "r", "s", and "v" values are three pieces of data that are used to mathematically verify the authenticity of a digital signature. ECDSA is a widely used algorithm for generating and verifying digital signatures, and it is often used in cryptocurrencies like Ethereum.
 
@@ -151,18 +56,7 @@ Once the transaction signer has been recovered, the signer is then added to the 
 
 ## ExecutionStage
 
-Finally, after all headers, bodies and senders are added to the database, the `ExecutionStage` starts to execute. This stage is responsible for executing all of the transactions and updating the state stored in the database. For every new block header added to the database, the corresponding transactions have their signers attached to them and `reth_blockchain_tree::executor::execute_and_verify_receipt()` is called, pushing the state changes resulting from the execution to a `Vec`.
-
-[File: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/stages/src/stages/execution.rs)
-```rust,ignore
-pub fn execute_and_verify_receipt<DB: StateProvider>(
-    block: &Block,
-    total_difficulty: U256,
-    senders: Option<Vec<Address>>,
-    chain_spec: &ChainSpec,
-    db: &mut SubState<DB>,
-) -> Result<ExecutionResult, Error>
-```
+Finally, after all headers, bodies and senders are added to the database, the `ExecutionStage` starts to execute. This stage is responsible for executing all of the transactions and updating the state stored in the database.
 
 After all headers and their corresponding transactions have been executed, all of the resulting state changes are applied to the database, updating account balances, account bytecode and other state changes. After applying all of the execution state changes, if there was a block reward, it is applied to the validator's account. 
 
@@ -171,37 +65,52 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 <br>
 
 ## MerkleUnwindStage
-* TODO: explain stage
+
+The `MerkleUnwindStage` is responsible for unwinding the Merkle Patricia trie state when a reorg occurs or when there's a need to rollback state changes. This stage ensures that the state trie remains consistent with the chain's canonical history by reverting any state changes that need to be undone. It works closely with the `MerkleExecuteStage` to maintain state integrity.
+
 <br>
 
 ## AccountHashingStage
-* TODO: explain stage
+
+The `AccountHashingStage` handles the computation of account state hashes. It processes all accounts in the state and computes their cryptographic hashes, which are essential for building the state trie. This stage is crucial for maintaining the integrity of the state and enabling efficient state proof verification.
+
 <br>
 
 ## StorageHashingStage
-* TODO: explain stage
+
+The `StorageHashingStage` is responsible for computing hashes of contract storage. Similar to the `AccountHashingStage`, it processes storage slots of smart contracts and generates cryptographic hashes that are used in the state trie. This stage ensures that contract storage can be efficiently verified and proven.
+
 <br>
 
 ## MerkleExecuteStage
-* TODO: explain stage
+
+The `MerkleExecuteStage` handles the construction and updates of the Merkle Patricia trie, which is Ethereum's core data structure for storing state. This stage processes state changes from executed transactions and builds the corresponding branches in the state trie. It's responsible for maintaining the state root that's included in block headers.
+
 <br>
 
 ## TransactionLookupStage
-* TODO: explain stage
+
+The `TransactionLookupStage` builds and maintains transaction lookup indices. These indices enable efficient querying of transactions by hash or block position. This stage is crucial for RPC functionality, allowing users to quickly retrieve transaction information without scanning the entire blockchain.
+
 <br>
 
 ## IndexStorageHistoryStage
-* TODO: explain stage
+
+The `IndexStorageHistoryStage` creates indices for historical contract storage states. It tracks how contract storage values change over time, enabling historical state queries. This is essential for features like state debugging, transaction tracing, and historical state access.
+
 <br>
 
 ## IndexAccountHistoryStage
-* TODO: explain stage
+
+The `IndexAccountHistoryStage` builds indices for account history, tracking how account states (balance, nonce, code) change over time. Similar to the storage history stage, this enables historical queries of account states at any block height, which is crucial for debugging and analysis tools.
+
 <br>
 
 ## FinishStage
-* TODO: explain stage
-<br>
 
+The `FinishStage` is the final stage in the pipeline that performs cleanup and verification tasks. It ensures that all previous stages have completed successfully and that the node's state is consistent. This stage may also update various metrics and status indicators to reflect the completion of a sync cycle.
+
+<br>
 
 # Next Chapter
 
