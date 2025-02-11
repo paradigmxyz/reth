@@ -9702,6 +9702,7 @@ dependencies = [
  "reth-codecs",
  "reth-primitives-traits",
  "revm-database",
+ "revm-state",
  "serde",
  "serde_json",
  "serde_with",

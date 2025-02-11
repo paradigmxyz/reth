@@ -707,7 +707,6 @@ mod tests {
     use alloy_consensus::TxType;
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
-    use reth_primitives::Receipts;
     use revm::{primitives::HashMap, state::AccountInfo};
 
     #[test]
