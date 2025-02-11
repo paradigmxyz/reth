@@ -88,16 +88,7 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        let new_cache = self.precompile_cache.clone();
-
-        let evm = Context::mainnet()
-            .with_db(db)
-            .with_cfg(input.cfg_env)
-            .with_block(input.block_env)
-            .build_mainnet_with_inspector(inspector)
-            .with_precompiles(WrappedPrecompile::new(EthPrecompiles::default(), new_cache));
-
-        EthEvm::new(evm)
+        EthEvm::new(self.create_evm(db, input).with_inspector(inspector))
     }
 }
 
@@ -159,7 +150,7 @@ impl<P: PrecompileProvider<Output = InterpreterResult>> PrecompileProvider
         // get the result if it exists
         if let Some(precompiles) = cache.cache.get_mut(address) {
             if let Some(result) = precompiles.get(&key) {
-                return result.clone().map(|i| Some(i))
+                return result.clone().map(|i| Some(i));
             }
         }
 
