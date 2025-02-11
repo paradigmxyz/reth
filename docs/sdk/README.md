@@ -65,7 +65,7 @@ In Ethereum and Optimism the `engine API` advances the chain.
 
 Reth tries to reuse as many types as possible from the [alloy](#alloy) ecosystem, such as transaction types, EIP types,
 RPC types and various traits. Alloy is meant as the foundation that provides all primitive building blocks.
-Where needed Reth extends alloy's primitive traits (e.g. Transaction) with reth specific requirements, for example
+Where needed, Reth extends alloy's primitive traits (e.g. Transaction) with reth specific requirements, for example
 encoding.
 
 
