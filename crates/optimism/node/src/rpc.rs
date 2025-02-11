@@ -8,7 +8,7 @@ use reth_node_api::{
 };
 use reth_node_builder::rpc::{BasicEngineApiBuilder, EngineApiBuilder, EngineValidatorBuilder};
 
-/// Builder for basic [`EngineApi`] implementation.
+/// Builder for basic [`OpEngineApi`] implementation.
 #[derive(Debug, Default)]
 pub struct OpEngineApiBuilder<EV> {
     inner: BasicEngineApiBuilder<EV>,
