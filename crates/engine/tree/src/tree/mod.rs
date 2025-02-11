@@ -2899,9 +2899,12 @@ where
                         compare_trie_updates(
                             in_memory_trie_cursor,
                             task_trie_updates.clone(),
-                            regular_updates,
+                            regular_updates.clone(),
                         )
                         .map_err(ProviderError::from)?;
+                        if task_state_root != sealed_block.header().state_root() {
+                            return Ok((regular_root, regular_updates, time_from_last_update));
+                        }
                     } else {
                         debug!(target: "engine::tree", "Regular state root does not match block state root");
                     }
