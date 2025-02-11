@@ -5,6 +5,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use jsonrpsee_core::RpcResult;
+use reth_optimism_txpool::conditional::MaybeConditionalTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::L2EthApiExtServer;
 use reth_rpc_eth_types::utils::recover_raw_transaction;
@@ -49,7 +50,7 @@ impl<N> L2EthApiExtServer for OpEthApiExt<N>
 where
     N: OpNodeCore + 'static,
     N::Provider: BlockReaderIdExt + StateProviderFactory,
-    N::Pool: TransactionPool,
+    N::Pool: TransactionPool<Transaction: MaybeConditionalTransaction>,
 {
     async fn send_raw_transaction_conditional(
         &self,
@@ -66,7 +67,7 @@ where
             OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::FailedToDecodeSignedTransaction)
         })?;
 
-        let tx = <N::Pool as TransactionPool>::Transaction::from_pooled(recovered_tx);
+        let mut tx = <N::Pool as TransactionPool>::Transaction::from_pooled(recovered_tx);
 
         // get current header
         let header_not_found = || {
@@ -97,8 +98,8 @@ where
                 .map_err(OpEthApiError::Sequencer)?;
             Ok(*tx.hash())
         } else {
-            // otherwise, add to pool
-            // TODO: include conditional
+            // otherwise, add to pool with the appended conditional
+            tx.set_conditional(condition);
             let hash = self.pool().add_transaction(TransactionOrigin::External, tx).await.map_err(
                 |e| OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into())),
             )?;
