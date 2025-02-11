@@ -66,7 +66,7 @@ fn main() {
                                     BlockNumberOrTag::Latest.into(),
                                     EvmOverrides::default(),
                                     move |db, evm_env, tx_env| {
-                                        let EvmEnv { cfg_env, block_env, spec } = evm_env;
+                                        let EvmEnv { cfg_env, block_env } = evm_env;
                                         let env = EnvWithHandlerCfg {
                                             handler_cfg: HandlerCfg::new(spec),
                                             env: Env::boxed(cfg_env, block_env, tx_env),
