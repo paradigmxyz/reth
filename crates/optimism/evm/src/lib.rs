@@ -19,13 +19,13 @@ use alloy_primitives::{Address, U256};
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::FillTxEnv;
-use reth_revm::primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv};
+use revm::primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -38,91 +38,7 @@ pub use receipts::*;
 
 mod error;
 pub use error::OpBlockExecutionError;
-use revm_primitives::{
-    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, EVMError, HaltReason, HandlerCfg,
-    OptimismFields, ResultAndState, SpecId, TxKind,
-};
-
-/// OP EVM implementation.
-#[derive(derive_more::Debug, derive_more::Deref, derive_more::DerefMut, derive_more::From)]
-#[debug(bound(DB::Error: Debug))]
-pub struct OpEvm<'a, EXT, DB: Database>(revm::Evm<'a, EXT, DB>);
-
-impl<EXT, DB: Database> Evm for OpEvm<'_, EXT, DB> {
-    type DB = DB;
-    type Tx = TxEnv;
-    type Error = EVMError<DB::Error>;
-    type HaltReason = HaltReason;
-
-    fn block(&self) -> &BlockEnv {
-        self.0.block()
-    }
-
-    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
-        *self.tx_mut() = tx;
-        self.0.transact()
-    }
-
-    fn transact_system_call(
-        &mut self,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) -> Result<ResultAndState, Self::Error> {
-        #[allow(clippy::needless_update)] // side-effect of optimism fields
-        let tx_env = TxEnv {
-            caller,
-            transact_to: TxKind::Call(contract),
-            // Explicitly set nonce to None so revm does not do any nonce checks
-            nonce: None,
-            gas_limit: 30_000_000,
-            value: U256::ZERO,
-            data,
-            // Setting the gas price to zero enforces that no value is transferred as part of the
-            // call, and that the call will not count against the block's gas limit
-            gas_price: U256::ZERO,
-            // The chain ID check is not relevant here and is disabled if set to None
-            chain_id: None,
-            // Setting the gas priority fee to None ensures the effective gas price is derived from
-            // the `gas_price` field, which we need to be zero
-            gas_priority_fee: None,
-            access_list: Vec::new(),
-            // blob fields can be None for this tx
-            blob_hashes: Vec::new(),
-            max_fee_per_blob_gas: None,
-            authorization_list: None,
-            optimism: OptimismFields {
-                source_hash: None,
-                mint: None,
-                is_system_transaction: Some(false),
-                // The L1 fee is not charged for the EIP-4788 transaction, submit zero bytes for the
-                // enveloped tx size.
-                enveloped_tx: Some(Bytes::default()),
-            },
-        };
-
-        *self.tx_mut() = tx_env;
-
-        let prev_block_env = self.block().clone();
-
-        // ensure the block gas limit is >= the tx
-        self.block_mut().gas_limit = U256::from(self.tx().gas_limit);
-
-        // disable the base fee check for this call by setting the base fee to zero
-        self.block_mut().basefee = U256::ZERO;
-
-        let res = self.0.transact();
-
-        // re-set the block env
-        *self.block_mut() = prev_block_env;
-
-        res
-    }
-
-    fn db_mut(&mut self) -> &mut Self::DB {
-        &mut self.context.evm.db
-    }
-}
+use revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, HandlerCfg, SpecId};
 
 /// Optimism-related EVM configuration.
 #[derive(Debug)]
