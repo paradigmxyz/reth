@@ -127,7 +127,7 @@ calculating and were sent to the [Sparse Trie Task](#sparse-trie-task)?
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L935-L944
 
 When all conditions are met, we close the [State Root Task](#state-root-task) receiver channel,
-signaling that the state root calculation should be finished.
+signaling that no proofs or state updates are coming anymore, and the state root calculation should be finished.
 
 
 ## MultiProof Manager
