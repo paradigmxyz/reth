@@ -19,7 +19,6 @@ reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-consensus.workspace = true
-revm.workspace = true
 
 # Ethereum
 reth-primitives-traits.workspace = true
@@ -57,6 +56,5 @@ std = [
     "reth-primitives-traits/std",
     "reth-chainspec/std",
     "alloy-evm/std",
-    "revm/std",
     "reth-execution-types/std",
 ]

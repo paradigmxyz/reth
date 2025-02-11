@@ -33,7 +33,7 @@ use reth_provider::{
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
+use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop, database::StateProviderDatabase};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,

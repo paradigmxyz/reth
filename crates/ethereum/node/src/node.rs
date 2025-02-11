@@ -34,7 +34,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-use revm::primitives::TxEnv;
+use revm::context::TxEnv;
 use std::sync::Arc;
 
 /// Type configuration for a regular Ethereum node.
