@@ -31,7 +31,7 @@ pub enum Subcommands<C: ChainSpecParser> {
     /// assuming that all the data can be held in memory. It is not recommended
     /// to run a stage for really large block ranges if your computer does not have
     /// a lot of memory to store all the data.
-    Run(run::Command<C>),
+    Run(Box<run::Command<C>>),
     /// Drop a stage's tables from the database.
     Drop(drop::Command<C>),
     /// Dumps a stage from a range into a new database.

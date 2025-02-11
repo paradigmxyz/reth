@@ -1,70 +1,54 @@
-use reth_payload_builder::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
-use reth_payload_primitives::{
-    BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError, PayloadKind,
+use core::fmt::Debug;
+use reth_basic_payload_builder::{
+    BuildArguments, BuildOutcome, HeaderForPayload, PayloadBuilder, PayloadConfig,
 };
-use std::{
-    fmt::Debug,
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use reth_payload_primitives::PayloadBuilderError;
+use reth_payload_util::{BestPayloadTransactions, PayloadTransactions};
+use reth_scroll_engine_primitives::{ScrollBuiltPayload, ScrollPayloadBuilderAttributes};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 
-/// A [`PayloadJobGenerator`] that doesn't produce any useful payload.
-#[derive(Debug, Default)]
+/// A type that implements [`PayloadBuilder`] by building empty payloads.
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct NoopPayloadJobGenerator<PA, BP> {
-    _types: std::marker::PhantomData<(PA, BP)>,
-}
+pub struct ScrollEmptyPayloadBuilder;
 
-impl<PA, BP> PayloadJobGenerator for NoopPayloadJobGenerator<PA, BP>
-where
-    PA: PayloadBuilderAttributes + Default + Debug + Send + Sync,
-    BP: BuiltPayload + Default + Clone + Debug + Send + Sync + 'static,
-{
-    type Job = NoopPayloadJob<PA, BP>;
+impl PayloadBuilder for ScrollEmptyPayloadBuilder {
+    type Attributes = ScrollPayloadBuilderAttributes;
+    type BuiltPayload = ScrollBuiltPayload;
 
-    fn new_payload_job(&self, _attr: PA) -> Result<Self::Job, PayloadBuilderError> {
-        Ok(NoopPayloadJob::<PA, BP>::default())
+    fn try_build(
+        &self,
+        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        // we can't currently actually build a payload, so we mark the outcome as cancelled.
+        Ok(BuildOutcome::Cancelled)
+    }
+
+    fn build_empty_payload(
+        &self,
+        _config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
+        Ok(ScrollBuiltPayload::default())
     }
 }
 
-/// A [`PayloadJobGenerator`] that doesn't produce any payload.
-#[derive(Debug, Default)]
-pub struct NoopPayloadJob<PA, BP> {
-    _types: std::marker::PhantomData<(PA, BP)>,
+/// A type that returns the [`PayloadTransactions`] that should be included in the pool.
+pub trait ScrollPayloadTransactions<Transaction>: Clone + Send + Sync + Unpin + 'static {
+    /// Returns an iterator that yields the transaction in the order they should get included in the
+    /// new payload.
+    fn best_transactions<Pool: TransactionPool<Transaction = Transaction>>(
+        &self,
+        pool: Pool,
+        attr: BestTransactionsAttributes,
+    ) -> impl PayloadTransactions<Transaction = Transaction>;
 }
 
-impl<PA, BP> Future for NoopPayloadJob<PA, BP> {
-    type Output = Result<(), PayloadBuilderError>;
-
-    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Pending
-    }
-}
-
-impl<PA, BP> PayloadJob for NoopPayloadJob<PA, BP>
-where
-    PA: PayloadBuilderAttributes + Default + Debug,
-    BP: BuiltPayload + Default + Clone + Debug + 'static,
-{
-    type PayloadAttributes = PA;
-    type ResolvePayloadFuture =
-        futures_util::future::Ready<Result<Self::BuiltPayload, PayloadBuilderError>>;
-    type BuiltPayload = BP;
-
-    fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        Ok(Self::BuiltPayload::default())
-    }
-
-    fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
-        Ok(Self::PayloadAttributes::default())
-    }
-
-    fn resolve_kind(
-        &mut self,
-        _kind: PayloadKind,
-    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
-        let fut = futures_util::future::ready(self.best_payload());
-        (fut, KeepPayloadJobAlive::No)
+impl<T: PoolTransaction> ScrollPayloadTransactions<T> for () {
+    fn best_transactions<Pool: TransactionPool<Transaction = T>>(
+        &self,
+        pool: Pool,
+        attr: BestTransactionsAttributes,
+    ) -> impl PayloadTransactions<Transaction = T> {
+        BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
 }

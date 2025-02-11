@@ -58,7 +58,7 @@ pub fn validate_payload_timestamp(
     timestamp: u64,
 ) -> Result<(), EngineObjectValidationError> {
     let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
-    if version == EngineApiMessageVersion::V2 && is_cancun {
+    if version.is_v2() && is_cancun {
         // From the Engine API spec:
         //
         // ### Update the methods of previous forks
@@ -79,7 +79,7 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
-    if version == EngineApiMessageVersion::V3 && !is_cancun {
+    if version.is_v3() && !is_cancun {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
         //
@@ -102,7 +102,7 @@ pub fn validate_payload_timestamp(
     }
 
     let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
-    if version == EngineApiMessageVersion::V4 && !is_prague {
+    if version.is_v4() && !is_prague {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#specification-1>
         //
@@ -345,6 +345,28 @@ pub enum EngineApiMessageVersion {
     ///
     /// Added in the Prague hardfork.
     V4 = 4,
+}
+
+impl EngineApiMessageVersion {
+    /// Returns true if the version is V1.
+    pub const fn is_v1(&self) -> bool {
+        matches!(self, Self::V1)
+    }
+
+    /// Returns true if the version is V2.
+    pub const fn is_v2(&self) -> bool {
+        matches!(self, Self::V2)
+    }
+
+    /// Returns true if the version is V3.
+    pub const fn is_v3(&self) -> bool {
+        matches!(self, Self::V3)
+    }
+
+    /// Returns true if the version is V4.
+    pub const fn is_v4(&self) -> bool {
+        matches!(self, Self::V4)
+    }
 }
 
 /// Determines how we should choose the payload to return.

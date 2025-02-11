@@ -43,7 +43,7 @@ reth-rpc-builder.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-scroll-engine-primitives.workspace = true
 reth-scroll-node.workspace = true
-reth-scroll-payload.workspace = true
+reth-scroll-payload = { workspace = true, features = ["test-utils"] }
 reth-scroll-chainspec.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
@@ -62,6 +62,7 @@ std = [
     "reth-engine-primitives/std",
     "reth-primitives/std",
     "reth-primitives-traits/std",
+    "reth-scroll-payload/std",
 ]
 scroll = [
     "reth-scroll-node/scroll",
@@ -70,4 +71,5 @@ scroll = [
 optimism = [
     "reth-scroll-engine-primitives/optimism",
     "reth-scroll-node/optimism",
+    "reth-scroll-payload/optimism",
 ]

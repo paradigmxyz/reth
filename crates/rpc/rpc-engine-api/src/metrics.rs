@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::EngineApiError;
 use alloy_rpc_types_engine::{ForkchoiceUpdated, PayloadStatus, PayloadStatusEnum};
-use metrics::{Counter, Histogram};
+use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
 
 /// All beacon consensus engine metrics
@@ -100,6 +100,8 @@ pub(crate) struct NewPayloadStatusResponseMetrics {
     pub(crate) new_payload_total_gas: Histogram,
     /// The gas per second of valid new payload messages received.
     pub(crate) new_payload_gas_per_second: Histogram,
+    /// Latency for the last `engine_newPayloadV*` call
+    pub(crate) new_payload_last: Gauge,
 }
 
 impl NewPayloadStatusResponseMetrics {
@@ -110,6 +112,7 @@ impl NewPayloadStatusResponseMetrics {
         gas_used: u64,
         time: Duration,
     ) {
+        self.new_payload_last.set(time);
         match result {
             Ok(status) => match status.status {
                 PayloadStatusEnum::Valid => {

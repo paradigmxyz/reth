@@ -64,8 +64,10 @@ exclude_crates=(
   reth-stages-api # reth-provider, reth-prune
   reth-static-file # tokio
   reth-transaction-pool # c-kzg
+  reth-payload-util # reth-transaction-pool
   reth-trie-parallel # tokio
   reth-testing-utils
+  reth-optimism-txpool # reth-transaction-pool
   reth-scroll-cli # tokio
   reth-scroll-node # tokio
   reth-scroll # tokio
@@ -74,6 +76,7 @@ exclude_crates=(
   reth-scroll-evm # tokio
   reth-scroll-rpc #tokio
   reth-scroll-engine-primitives # proptest
+  reth-scroll-payload # c-kzg
 )
 
 # Array to hold the results

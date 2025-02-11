@@ -4,8 +4,8 @@ use tracing::trace;
 
 const DEFAULT_SIZE_BROADCAST_CHANNEL: usize = 2000;
 
-/// A bounded broadcast channel for a task.
-#[derive(Debug, Clone)]
+/// A bounded multi-producer, multi-consumer broadcast channel.
+#[derive(Debug)]
 pub struct EventSender<T> {
     /// The sender part of the broadcast channel
     sender: Sender<T>,
@@ -17,6 +17,12 @@ where
 {
     fn default() -> Self {
         Self::new(DEFAULT_SIZE_BROADCAST_CHANNEL)
+    }
+}
+
+impl<T> Clone for EventSender<T> {
+    fn clone(&self) -> Self {
+        Self { sender: self.sender.clone() }
     }
 }
 

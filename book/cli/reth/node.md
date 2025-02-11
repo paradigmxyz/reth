@@ -381,7 +381,7 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-envs <MAX_HEADERS>
+      --rpc-cache.max-headers <MAX_HEADERS>
           Max number of headers in cache
 
           [default: 1000]
@@ -440,6 +440,16 @@ TxPool:
 
       --txpool.queued-max-size <QUEUED_MAX_SIZE>
           Max size of the queued sub-pool in megabytes
+
+          [default: 20]
+
+      --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
+          Max number of transaction in the blobpool
+
+          [default: 10000]
+
+      --txpool.blobpool-max-size <BLOBPOOL_MAX_SIZE>
+          Max size of the blobpool in megabytes
 
           [default: 20]
 

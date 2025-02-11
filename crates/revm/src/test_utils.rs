@@ -4,7 +4,7 @@ use alloy_primitives::{
     map::{B256HashMap, HashMap},
     Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
-use reth_primitives::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
     StateRootProvider, StorageRootProvider,

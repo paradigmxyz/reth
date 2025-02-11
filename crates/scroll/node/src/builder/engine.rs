@@ -1,9 +1,9 @@
 use alloy_primitives::U256;
-use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
+use alloy_rpc_types_engine::PayloadError;
 use reth_node_api::PayloadValidator;
 use reth_node_builder::{
     rpc::EngineValidatorBuilder, AddOnsContext, EngineApiMessageVersion,
-    EngineObjectValidationError, EngineTypes, EngineValidator, FullNodeComponents,
+    EngineObjectValidationError, EngineTypes, EngineValidator, ExecutionData, FullNodeComponents,
     PayloadOrAttributes,
 };
 use reth_node_types::NodeTypesWithEngine;
@@ -56,7 +56,7 @@ impl ScrollEngineValidator {
 
 impl<Types> EngineValidator<Types> for ScrollEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = ScrollPayloadAttributes>,
+    Types: EngineTypes<PayloadAttributes = ScrollPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_version_specific_fields(
         &self,
@@ -77,16 +77,16 @@ where
 
 impl PayloadValidator for ScrollEngineValidator {
     type Block = ScrollBlock;
+    type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
+        payload: ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, PayloadError> {
-        let expected_hash = payload.block_hash();
+        let expected_hash = payload.payload.block_hash();
 
         // First parse the block
-        let mut block = try_into_block(payload, &sidecar, self.chainspec.clone())?;
+        let mut block = try_into_block(payload, self.chainspec.clone())?;
 
         // Seal the block with the in-turn difficulty and return if hashes match
         block.header.difficulty = CLIQUE_IN_TURN_DIFFICULTY;

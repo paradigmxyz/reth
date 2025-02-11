@@ -13,8 +13,33 @@ workspace = true
 
 [dependencies]
 # reth
-reth-payload-builder.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-payload-builder = { workspace = true, optional = true }
 reth-payload-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-transaction-pool.workspace = true
+reth-payload-util.workspace = true
 
-# misc
-futures-util.workspace = true
+# scroll
+reth-scroll-engine-primitives.workspace = true
+futures-util = { workspace = true, optional = true }
+
+[features]
+std = [
+    "futures-util/std",
+    "reth-payload-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-scroll-engine-primitives/std",
+]
+scroll = [
+    "reth-primitives-traits/scroll",
+    "reth-scroll-engine-primitives/scroll",
+]
+optimism = ["reth-scroll-engine-primitives/optimism"]
+test-utils = [
+    "dep:futures-util",
+    "dep:reth-payload-builder",
+    "reth-payload-builder/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-transaction-pool/test-utils",
+]

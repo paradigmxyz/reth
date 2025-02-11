@@ -34,3 +34,17 @@ alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 auto_impl.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-chainspec/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "revm/std",
+    "reth-stages-types/std",
+]
