@@ -44,6 +44,7 @@ std = [
     "reth-primitives-traits/std",
     "reth-consensus?/std",
     "reth-consensus-common?/std",
+    "alloy-rpc-types-eth?/std",
 ]
 arbitrary = [
     "std",
@@ -51,6 +52,7 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-db?/arbitrary",
+    "alloy-rpc-types-eth?/arbitrary",
 ]
 
 test-utils = [
