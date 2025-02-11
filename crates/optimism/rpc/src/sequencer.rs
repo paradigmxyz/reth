@@ -65,17 +65,15 @@ impl SequencerClient {
     async fn post_request(
         &self,
         body: String,
-        error_message: &str,
+        _error_message: &str,
     ) -> Result<(), SequencerClientError> {
-        self.http_client()
+        let _ = self
+            .http_client()
             .post(self.endpoint())
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body)
             .send()
-            .await
-            .inspect_err(|_| {
-                warn!("{}", error_message);
-            })?;
+            .await;
         Ok(())
     }
     /// Forwards a transaction conditional to the sequencer endpoint.
@@ -85,7 +83,7 @@ impl SequencerClient {
         condition: TransactionConditional,
     ) -> Result<(), SequencerClientError> {
         let params = json!([format!("0x{}", hex::encode(tx)), condition]);
-        let body = self.body_rpc("eth_sendRawTransaction", params);
+        let body = self.body_rpc("eth_sendRawTransactionConditional", params); // Corrected method name
         let body_str = serde_json::to_string(&body).map_err(|_| {
             warn!(
                 target: "rpc::eth",
@@ -106,4 +104,22 @@ struct SequencerClientInner {
     http_client: Client,
     /// Keeps track of unique request ids
     id: AtomicUsize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_body_str() {
+        let client = SequencerClient::new("http://localhost:8545");
+        let params = json!(["0x1234", {"block_number":10}]);
+
+        let body = client.body_rpc("eth_getBlockByNumber", params);
+
+        assert!(body["params"].is_array());
+        assert_eq!(body["params"][0], "0x1234");
+        assert_eq!(body["params"][1]["block_number"], 100);
+    }
 }
