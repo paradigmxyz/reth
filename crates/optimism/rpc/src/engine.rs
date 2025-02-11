@@ -6,12 +6,14 @@ use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
+use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
-use jsonrpsee_core::RpcResult;
+use jsonrpsee_core::{server::RpcModule, RpcResult};
 use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, EngineValidator, ExecutionData};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
+use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::{EngineApi, EngineApiServer};
 use reth_transaction_pool::TransactionPool;
 
@@ -194,7 +196,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
-#[derive(Debug)]
+#[derive(Debug, Constructor)]
 pub struct OpEngineApi<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
     inner: EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
 }
@@ -310,5 +312,16 @@ where
 
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
         EngineApiServer::exchange_capabilities(&self.inner, _capabilities).await
+    }
+}
+
+impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
+    for OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    EngineT: EngineTypes,
+    Self: OpEngineApiServer<EngineT>,
+{
+    fn into_rpc_module(self) -> RpcModule<()> {
+        self.into_rpc().remove_context()
     }
 }
