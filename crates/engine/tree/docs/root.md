@@ -64,6 +64,9 @@ and finally sending the state root back to the [Engine](#engine).
 At its core, it's a state machine that receives messages from other components, and handles them accordingly.
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L726
 
+When the State Root Task is spawned, it also spawns the [Sparse Trie Task](#sparse-trie-task) in a separate thread.
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L542-L544
+
 ### Generating proof targets
 
 State root calculation in the [Sparse Trie Task](#sparse-trie-task) relies on:
@@ -165,3 +168,56 @@ described above.
 
 ![Alt text](./mermaid/sparse-trie-task.mmd.svg)
 
+Sparse Trie component is the heart of the new state root calculation logic.
+
+### Sparse Trie primer
+
+- State trie of Etheruem is very big (150GB+), and we cannot realistically fit it into memory.
+- What if instead of loading the entire trie in memory,
+we only load the parts that were modified during the block execution (i.e. make the trie "sparse")?
+    - Such modified parts will have nodes that will be modified,
+    and nodes that are needed only for calculating the hashes.
+    - Essentially, this is the same idea as [MPT proofs](https://docs.chainstack.com/docs/deep-dive-into-merkle-proofs-and-eth-getproof-ethereum-rpc-method)
+    that have only partial information about the sibling nodes, if these nodes aren't part of the
+    requested path.
+- When updating the trie, we first reveal the nodes using the MPT proofs, and then add/update/remove the leaves,
+along with the other nodes that need to be modified in the process of leaf update.
+
+For the implementation details, see [crates/trie/sparse/src/trie.rs](https://github.com/paradigmxyz/reth/blob/09a6aab9f7dc283e42fd00ce8f179542f8558580/crates/trie/sparse/src/trie.rs).
+
+### Sparse Trie updates
+
+The messages to the sparse trie are sent from the [State Root Task](#state-root-task),
+and consist of the proof that needs to be revealed, and a list of updates that need to be applied.
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L66-L74
+
+We do not reveal the proofs and apply the updates immediately,
+but instead accumulate them until the messages channel is empty, and then reveal and apply in bulk.
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L991-L994
+
+When messages are accumulated, we update the Sparse Trie:
+1. Reveal the proof
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1090-L1091
+2. For each modified storage trie in parallel, apply updates and calculate the roots
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1093
+3. Update accounts trie
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1133
+4. Calculate keccak hashes of the nodes below the certain level
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1139
+
+As you can see, we do not calculate the state root hash of the accounts trie
+(the one that will be the result of the whole task), but instead calculate only the certain hashes.
+
+It is an optimization that comes from the fact that we will likely update the top 2-3 levels of the trie
+in every transaction, so doing that work every time would be wasteful.
+
+Instead, we calculate hashes for most of the levels of the trie, and do the rest of the work
+only when we're finishing the calculation.
+
+### Finishing the calculation
+
+Once the messages channel is closed by the [State Root Task](#state-root-task),
+we exhaust it, reveal proofs and apply updates, and then calculate the full state root hash
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1014
+
+This state root is eventually sent as `StateRootMessage::RootCalculated` to the [Engine](#engine).
