@@ -5,7 +5,6 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use jsonrpsee_core::RpcResult;
-use op_alloy_rpc_types::Transaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::L2EthApiExtServer;
 use reth_rpc_eth_types::utils::recover_raw_transaction;
@@ -50,7 +49,7 @@ impl<N> L2EthApiExtServer for OpEthApiExt<N>
 where
     N: OpNodeCore + 'static,
     N::Provider: BlockReaderIdExt + StateProviderFactory,
-    N::Pool: TransactionPool<Transaction = Transaction>,
+    N::Pool: TransactionPool,
 {
     async fn send_raw_transaction_conditional(
         &self,
@@ -96,7 +95,7 @@ where
                 .forward_raw_transaction_conditional(bytes.as_ref(), condition)
                 .await
                 .map_err(OpEthApiError::Sequencer)?;
-            Ok(tx.tx_hash())
+            Ok(*tx.hash())
         } else {
             // otherwise, add to pool
             // TODO: include conditional
