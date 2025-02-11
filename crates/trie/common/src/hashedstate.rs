@@ -381,7 +381,6 @@ mod tests {
     use super::*;
     use crate::KeccakKeyHasher;
     use alloy_primitives::Bytes;
-    use reth_trie_common::KeccakKeyHasher;
     use revm_database::{states::StorageSlot, StorageWithOriginalValues};
     use revm_state::{AccountInfo, Bytecode};
 

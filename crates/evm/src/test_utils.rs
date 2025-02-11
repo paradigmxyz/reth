@@ -12,7 +12,7 @@ use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredBlock};
+use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, RecoveredBlock};
 use revm_database::State;
 use std::sync::Arc;
 
