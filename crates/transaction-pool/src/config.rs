@@ -1,11 +1,12 @@
 use crate::{
+    maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     PoolSize, TransactionOrigin,
 };
 use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
-use std::{collections::HashSet, ops::Mul};
+use std::{collections::HashSet, ops::Mul, time::Duration};
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
@@ -58,6 +59,8 @@ pub struct PoolConfig {
     pub new_tx_listener_buffer_size: usize,
     /// How many new pending transactions to buffer and send iterators in progress.
     pub max_new_pending_txs_notifications: usize,
+    /// Maximum lifetime for transactions in the pool
+    pub max_queued_lifetime: Duration,
 }
 
 impl PoolConfig {
@@ -86,6 +89,7 @@ impl Default for PoolConfig {
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
+            max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
         }
     }
 }
