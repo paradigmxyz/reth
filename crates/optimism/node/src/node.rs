@@ -13,7 +13,8 @@ use reth_evm::{
 };
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, BlockTy, BodyTy, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives, PrimitivesTy, ReceiptTy, TxTy
+    AddOnsContext, BlockTy, BodyTy, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
+    PrimitivesTy, ReceiptTy, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -43,7 +44,8 @@ use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolPooledTx,
+    PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::TxEnv;
@@ -224,8 +226,9 @@ impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
-            ChainSpec: OpHardforks,
+            ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
+            Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
         Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
@@ -654,11 +657,8 @@ impl<N: NetworkPrimitives> OpNetworkBuilder<N> {
 impl<Node, Pool, N> NetworkBuilder<Node, Pool> for OpNetworkBuilder<N>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
-    Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<Node::Types>,
-            >,
-        > + Unpin
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
         + 'static,
     N: NetworkPrimitives<
         Block = BlockTy<Node::Types>,
