@@ -23,13 +23,14 @@ We will look at the following components:
 It all starts with the `engine_newPayload` request coming from the [Consensus Client](https://ethereum.org/en/developers/docs/nodes-and-clients/#consensus-clients).
 
 We extract the block from the payload, and eventually pass it to the `EngineApiTreeHandler::insert_block_inner`
-method https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2359-L2362
+method, https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2359-L2362
 
 First, we spawn the [State Root Task](#state-root-task) thread, which will receive the updates from
-execution and calculate the state root https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2449-L2458
+execution and calculate the state root. https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2449-L2458
 
 Then, we do two things with the block:
-1. Start prewarming each transaction in a separate thread ("Prewarming thread" on the above diagram) https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2490-L2507
+1. Start prewarming each transaction in a separate thread ("Prewarming thread" on the above diagram).
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2490-L2507
     - Each transaction is optimistically executed in parallel with each other on top of the previous block,
     but the results are not committed to the database.
     - All accounts and storage slots that were accessed are cached in memory, so that the actual execution
@@ -37,7 +38,8 @@ Then, we do two things with the block:
     - All modified accounts and storage slots are sent as `StateRootMessage::PrefetchProofs`
     to the [State Root Task](#state-root-task).
     - Some transactions will fail, because they require the previous transactions to be executed first.
-2. Execute transactions sequentially https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2523
+2. Execute transactions sequentially.
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2523
     - Transactions are executed one after another, and use the accounts and storage slots cache
     from the prewarming step, if it's available.
     - All modified accounts and storage slots are sent as `StateRootMessage::StateUpdate`
@@ -59,7 +61,7 @@ issuing requests for generating proofs to the [MultiProof Manager](#multiproof-m
 updating the sparse trie using the [Sparse Trie Task](#sparse-trie-task),
 and finally sending the state root back to the [Engine](#engine).
 
-At its core, it's a state machine that receives messages from other components, and handles them accordingly
+At its core, it's a state machine that receives messages from other components, and handles them accordingly.
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L726
 
 ### Generating proof targets
@@ -73,10 +75,12 @@ and `StateRootMessage::PrefetchProofs`. They are sent from the previous [Engine]
 and first used to form the proofs targets.
 
 Proof targets are a list of accounts and storage slots that we send to
-the [MultiProof Manager](#multiproof-manager) to generate the MPT proofs https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/trie/common/src/proofs.rs#L20-L21
+the [MultiProof Manager](#multiproof-manager) to generate the MPT proofs.
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/trie/common/src/proofs.rs#L20-L21
 
 Before sending them, we first deduplicate the list of targets according to a list of proof targets
-that were already fetched https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1022-L1028 
+that were already fetched.
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1022-L1028 
 
 This deduplication step is important, because if two transactions modify the same account or storage slot,
 we only need to fetch the MPT proof once.
@@ -97,6 +101,7 @@ of proof targets, and also some non-determinism in the database caching.
 The issue with this is that we need to ensure that the proofs are sent
 to the [Sparse Trie Task](#sparse-trie-task) in the order that they were requested. Because of this,
 we introduced a `ProofSequencer` that we add new proofs to.
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L666-L672
 
 `ProofSequencer` acts in the following way:
 1. Each proof has an associated "sequence number" that determines the original order of state updates.
@@ -118,6 +123,8 @@ the following conditions:
 2. Is `ProofSequencer` empty? (no proofs are pending for sequencing)
 3. Are all proofs that were sent to the [`MultiProofManager::spawn_or_queue`](#multiproof-manager) finished
 calculating and were sent to the [Sparse Trie Task](#sparse-trie-task)?
+
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L935-L944
 
 When all conditions are met, we close the [State Root Task](#state-root-task) receiver channel,
 signaling that the state root calculation should be finished.
