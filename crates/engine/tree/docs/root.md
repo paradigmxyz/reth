@@ -26,7 +26,10 @@ We will look at the following components:
 It all starts with the `engine_newPayload` request coming from the [Consensus Client](https://ethereum.org/en/developers/docs/nodes-and-clients/#consensus-clients).
 
 We extract the block from the payload, and eventually pass it to the `EngineApiTreeHandler::insert_block_inner`
-method, https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2359-L2362
+method which executes the block and calculates the state root. 
+https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2359-L2362
+
+Let's walk through the steps involved in the process.
 
 First, we spawn the [State Root Task](#state-root-task) thread, which will receive the updates from
 execution and calculate the state root. https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2449-L2458
@@ -37,23 +40,23 @@ https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20
     - Each transaction is optimistically executed in parallel with each other on top of the previous block,
     but the results are not committed to the database.
     - All accounts and storage slots that were accessed are cached in memory, so that the actual execution
-    can use them instead of going to the disk.
+    can use them instead of going to the database.
     - All modified accounts and storage slots are sent as `StateRootMessage::PrefetchProofs`
     to the [State Root Task](#state-root-task).
     - Some transactions will fail, because they require the previous transactions to be executed first.
+    It doesn't matter, because we only care about optimistically prewarming the accounts and storage slots
+    that are accessed, and transactions will be executed in the correct order later anyway.
 2. Execute transactions sequentially.
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/mod.rs#L2523
-    - Transactions are executed one after another, and use the accounts and storage slots cache
-    from the prewarming step, if it's available.
+    - Transactions are executed one after another. Accounts and storage slots accessed during the execution
+    are looked up in the cache from the previous prewarming step. 
     - All modified accounts and storage slots are sent as `StateRootMessage::StateUpdate`
     to the [State Root Task](#state-root-task).
     - When all transactions are executed, the `StateRootMessage::FinishedStateUpdates` is sent
     to the [State Root Task](#state-root-task).
 
 Eventually, the Engine will receive the `StateRootMessage::RootCalculated` message from
-the [State Root Task](#state-root-task) thread, and will use the new state root to decide
-the `engine_newPayload` response.
-
+the [State Root Task](#state-root-task) thread, and send the `engine_newPayload` response.
 
 ## State Root Task
 
