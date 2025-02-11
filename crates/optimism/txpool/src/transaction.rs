@@ -1,3 +1,4 @@
+use crate::conditional::MaybeConditionalTransaction;
 use alloy_consensus::{
     transaction::Recovered, BlobTransactionSidecar, BlobTransactionValidationError, Typed2718,
 };
@@ -33,16 +34,7 @@ pub struct OpPooledTransaction<
     /// Optional conditional attached to this transaction.
     conditional: Option<Box<TransactionConditional>>,
 }
-#[allow(dead_code)]
-trait MaybeConditionalTransaction {
-    fn set_conditional(&mut self, conditional: TransactionConditional);
-}
 
-impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Pooled> {
-    fn set_conditional(&mut self, conditional: TransactionConditional) {
-        self.conditional = Some(Box::new(conditional))
-    }
-}
 impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
     /// Create new instance of [Self].
     pub fn new(transaction: Recovered<Cons>, encoded_length: usize) -> Self {
@@ -72,6 +64,12 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
     /// Conditional getter.
     pub fn conditional(&self) -> Option<&TransactionConditional> {
         self.conditional.as_deref()
+    }
+}
+
+impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Pooled> {
+    fn set_conditional(&mut self, conditional: TransactionConditional) {
+        self.conditional = Some(Box::new(conditional))
     }
 }
 
