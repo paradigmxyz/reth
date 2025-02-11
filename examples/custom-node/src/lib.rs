@@ -13,28 +13,20 @@ use chainspec::CustomChainSpec;
 use engine::{CustomEngineTypes, CustomPayloadBuilder};
 use evm::CustomEvmConfig;
 use op_alloy_consensus::OpPooledTransaction;
-use reth_optimism_node::{BasicOpReceiptBuilder, OpNetworkPrimitives};
 use primitives::{Block, BlockBody, CustomHeader, CustomNodePrimitives};
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_eth_wire_types::NetworkPrimitives;
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine, PrimitivesTy, TxTy};
+use reth_evm::execute::BasicBlockExecutorProvider;
+use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine, PrimitivesTy};
 use reth_node_builder::{
-    components::{ComponentsBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder},
+    components::{ComponentsBuilder, ExecutorBuilder, PayloadServiceBuilder},
     Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_node::{
-    engine::OpPayloadTypes,
-    node::{
-        OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder,
-        OpPoolBuilder,
-    },
-    OpEngineTypes, OpEvmConfig, OpExecutionStrategyFactory, OpNode,
+    node::{OpAddOns, OpConsensusBuilder, OpNetworkBuilder, OpPoolBuilder},
+    BasicOpReceiptBuilder, OpExecutionStrategyFactory, OpNode,
 };
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_storage_api::EthStorage;
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use reth_trie_db::MerklePatriciaTrie;
 use txpool::CustomTxPool;
 
 pub mod chainspec;
@@ -68,8 +60,7 @@ impl<N: FullNodeTypes<Types = Self>> Node<N> for CustomNode {
     >;
 
     type AddOns =
-        OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as
-NodeComponentsBuilder<N>>::Components>>;
+        OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         todo!()
