@@ -12,7 +12,6 @@ use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
-
 /// Maximum execution const for conditional transactions.
 const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
 
@@ -68,7 +67,7 @@ where
             OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::FailedToDecodeSignedTransaction)
         })?;
 
-        let tx = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered_tx);
+        let tx = <N::Pool as TransactionPool>::Transaction::from_pooled(recovered_tx);
 
         // get current header
         let header_not_found = || {
