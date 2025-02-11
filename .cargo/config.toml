@@ -14,3 +14,11 @@ rustflags = [
     # in line with Linux (whereas default for Windows is 1MB)
     "-Clink-arg=/STACK:10000000",
 ]
+
+
+[patch."https://github.com/bitfinity-network/bitfinity-evm-sdk"]
+did = { path = "../bitfinity-evm-sdk/src/did" }
+eth-signer = { path = "../bitfinity-evm-sdk/src/eth-signer" }
+ethereum-json-rpc-client = { path = "../bitfinity-evm-sdk/src/ethereum-json-rpc-client" }
+evm-canister-client = { path = "../bitfinity-evm-sdk/src/evm-canister-client" }
+signature-verification-canister-client = { path = "../bitfinity-evm-sdk/src/signature-verification-canister-client" }

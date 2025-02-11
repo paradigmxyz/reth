@@ -1,10 +1,8 @@
 //! Bitfinity block validator.
 use std::collections::HashSet;
 
-use alloy_primitives::B256;
 use did::BlockConfirmationData;
 use evm_canister_client::{CanisterClient, EvmCanisterClient};
-use itertools::Itertools;
 use reth_chain_state::MemoryOverlayStateProvider;
 use reth_evm::execute::{BasicBatchExecutor, BatchExecutor};
 use reth_evm_ethereum::{

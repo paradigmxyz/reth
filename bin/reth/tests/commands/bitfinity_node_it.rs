@@ -1,12 +1,10 @@
 //!
 //! Integration tests for the bitfinity node command.
-//!
 
 use super::utils::*;
 use did::keccak;
 use eth_server::{EthImpl, EthServer};
-use ethereum_json_rpc_client::CertifiedResult;
-use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
+use ethereum_json_rpc_client::{reqwest::ReqwestClient, CertifiedResult, EthJsonRpcClient};
 use jsonrpsee::{
     server::{Server, ServerHandle},
     Methods, RpcModule,
@@ -17,24 +15,22 @@ use reth::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_consensus::FullConsensus;
-use reth_db::DatabaseEnv;
-use reth_db::{init_db, test_utils::tempdir_path};
+use reth_db::{init_db, test_utils::tempdir_path, DatabaseEnv};
 use reth_network::NetworkHandle;
 use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
-use reth_node_builder::components::Components;
-use reth_node_builder::rpc::RpcAddOns;
-use reth_node_builder::{NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_ethereum::node::EthereumEngineValidatorBuilder;
+use reth_node_builder::{
+    components::Components, rpc::RpcAddOns, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle,
+};
 use reth_node_ethereum::{
-    BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory, EthereumNode,
+    node::EthereumEngineValidatorBuilder, BasicBlockExecutorProvider, EthEvmConfig,
+    EthExecutionStrategyFactory, EthereumNode,
 };
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
-use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool,
-    TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
+    EthTransactionValidator, Pool, TransactionValidationTaskExecutor,
 };
 use revm_primitives::{hex, Address, U256};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
@@ -362,7 +358,7 @@ pub async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle
 /// Eth server mock for local testing
 pub mod eth_server {
 
-    use std::sync::Arc;
+    use std::sync::{atomic::Ordering, Arc};
 
     use alloy_consensus::constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS};
     use alloy_rlp::Bytes;
@@ -401,7 +397,7 @@ pub mod eth_server {
         async fn get_block_by_number(
             &self,
             number: BlockNumber,
-        ) -> RpcResult<did::Block<did::H256>>;
+        ) -> RpcResult<Option<did::Block<did::H256>>>;
 
         /// Returns the chain ID
         #[method(name = "chainId")]
@@ -447,7 +443,8 @@ pub mod eth_server {
                 let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
                 loop {
                     interval.tick().await;
-                    block_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let block = block_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tracing::info!("Minted block {}", block + 1);
                 }
             }));
 
@@ -497,17 +494,22 @@ pub mod eth_server {
         async fn get_block_by_number(
             &self,
             number: BlockNumber,
-        ) -> RpcResult<did::Block<did::H256>> {
+        ) -> RpcResult<Option<did::Block<did::H256>>> {
+            tracing::info!("Requested block {:?}", number);
+
+            let current_block = self.current_block.load(Ordering::Relaxed);
             let block_num = match number {
-                BlockNumber::Latest | BlockNumber::Finalized | BlockNumber::Safe => {
-                    self.current_block.load(std::sync::atomic::Ordering::Relaxed)
-                }
+                BlockNumber::Latest | BlockNumber::Finalized | BlockNumber::Safe => current_block,
                 BlockNumber::Earliest => 0,
                 BlockNumber::Pending => {
                     self.current_block.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                 }
                 BlockNumber::Number(num) => num.as_u64(),
             };
+
+            if block_num > current_block {
+                return Ok(None);
+            }
 
             let mut block = did::Block {
                 number: block_num.into(),
@@ -522,13 +524,14 @@ pub mod eth_server {
                 } else {
                     self.get_block_by_number(BlockNumber::Number(U64::from(block_num - 1)))
                         .await?
+                        .unwrap()
                         .hash
                 },
                 ..Default::default()
             };
 
             block.hash = keccak::keccak_hash(&block.header_rlp_encoded());
-            Ok(block)
+            Ok(Some(block))
         }
 
         async fn chain_id(&self) -> RpcResult<U256> {

@@ -41,7 +41,7 @@ async fn bitfinity_test_should_import_data_from_evm() {
         let evm_rpc_client =
             EthJsonRpcClient::new(ReqwestClient::new(evm_datasource_url.to_string()));
 
-        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
+        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap().unwrap();
         let local_block = provider.block_by_number(end_block).unwrap().unwrap();
 
         assert_eq!(remote_block.hash.0, local_block.header.hash_slow().0);
@@ -73,7 +73,7 @@ async fn bitfinity_test_should_import_with_small_batch_size() {
         let evm_rpc_client =
             EthJsonRpcClient::new(ReqwestClient::new(evm_datasource_url.to_string()));
 
-        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
+        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap().unwrap();
         let local_block = provider.block_by_number(end_block).unwrap().unwrap();
 
         assert_eq!(remote_block.hash.0, local_block.header.hash_slow().0);
@@ -135,7 +135,7 @@ async fn bitfinity_test_should_import_data_from_evm_with_backup_rpc_url() {
         // create evm client
         let evm_rpc_client = EthJsonRpcClient::new(ReqwestClient::new(backup_rpc_url.to_string()));
 
-        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
+        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap().unwrap();
         let local_block = provider.block_by_number(end_block).unwrap().unwrap();
 
         assert_eq!(remote_block.hash.0, local_block.header.hash_slow().0);
@@ -196,6 +196,10 @@ async fn bitfinity_test_should_import_blocks_when_evm_is_enabled_and_check_evm_s
 
     let (_temp_dir, mut import_data) =
         bitfinity_import_config_data(&evm_datasource_url, None, None).await.unwrap();
+    //
+    // Wait for enough blocks to be minted
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     import_data.bitfinity_args.end_block = Some(10);
     import_data.bitfinity_args.batch_size = 5;
     import_data.bitfinity_args.max_fetch_blocks = 10;
@@ -237,6 +241,9 @@ async fn bitfinity_test_should_import_block_when_evm_is_enabled_and_check_evm_st
 
     let (_temp_dir, mut import_data) =
         bitfinity_import_config_data(&evm_datasource_url, None, None).await.unwrap();
+
+    // Wait for enough blocks to be minted
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     import_data.bitfinity_args.end_block = Some(10);
     import_data.bitfinity_args.batch_size = 5;

@@ -37,7 +37,7 @@ use reth_stages::{
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::watch;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Clone)]
@@ -170,7 +170,7 @@ impl BitfinityImportCommand {
         let safe_block = if let Some(safe_block) = remote_client.safe_block() {
             safe_block
         } else {
-            debug!(target: "reth::cli - BitfinityImportCommand", "No safe block found, skipping import");
+            error!(target: "reth::cli - BitfinityImportCommand", "No safe block found, skipping import");
             return Ok(());
         };
 

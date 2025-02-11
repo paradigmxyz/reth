@@ -2,10 +2,9 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_genesis::{ChainConfig, Genesis, GenesisAccount};
 use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use candid::Principal;
-use did::{certified::CertifiedResult, Transaction};
+use did::certified::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
-use eyre::Result;
-use futures::future::Remote;
+use eyre::{OptionExt, Result};
 use ic_cbor::{CertificateToCbor, HashTreeToCbor};
 use ic_certificate_verification::VerifyCertificate;
 use ic_certification::{Certificate, HashTree, LookupResult};
@@ -28,7 +27,7 @@ use reth_network_peers::PeerId;
 use reth_primitives::{Block, BlockBody, ForkCondition, Header, TransactionSigned};
 use serde_json::json;
 
-use std::{self, cmp::min, collections::HashMap, sync::OnceLock, time::Duration};
+use std::{self, collections::HashMap, sync::OnceLock, time::Duration};
 use thiserror::Error;
 
 use backon::{ExponentialBuilder, Retryable};
@@ -147,24 +146,33 @@ impl BitfinityEvmClient {
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
 
-        let safe_block_number: BlockNumber = provider
+        let safe_block_number: u64 = provider
             .get_block_by_number(did::BlockNumber::Safe)
             .await
             .map_err(|e| {
                 RemoteClientError::ProviderError(format!("error getting safe block: {e}"))
             })?
+            .ok_or_else(|| RemoteClientError::ProviderError("block not found".to_string()))?
             .number
             .into();
 
         info!(target: "downloaders::bitfinity_evm_client", "Latest remote block: {latest_remote_block}");
+        info!(target: "downloaders::bitfinity_evm_client", "Safe remote block number: {safe_block_number}");
 
-        let mut end_block =
-            min(end_block.unwrap_or(latest_remote_block), start_block + max_blocks - 1);
+        let end_block = [
+            end_block.unwrap_or(u64::MAX),
+            latest_remote_block,
+            start_block + max_blocks - 1,
+            block_checker.as_ref().map(|v| v.get_block_number()).unwrap_or(u64::MAX),
+        ]
+        .into_iter()
+        .min()
+        .unwrap_or(latest_remote_block);
 
-        if let Some(block_checker) = &block_checker {
-            end_block = min(end_block, block_checker.get_block_number());
-        }
+        let safe_block_number =
+            if safe_block_number > end_block { end_block } else { safe_block_number };
 
+        info!(target: "downloaders::bitfinity_evm_client", "Using safe block number: {safe_block_number}");
         info!(target: "downloaders::bitfinity_evm_client", "Start fetching blocks from {} to {}", start_block, end_block);
 
         for begin_block in (start_block..=end_block).step_by(batch_size) {
@@ -251,7 +259,8 @@ impl BitfinityEvmClient {
         let mut blocks = vec![];
         while let Some(header) = self.headers.get(&next_block_number) {
             let block_hash = header.hash_slow();
-            let body = self.bodies.get(&block_hash).ok_or_else(|| eyre::eyre!("Block body not found"))?;
+            let body =
+                self.bodies.get(&block_hash).ok_or_else(|| eyre::eyre!("Block body not found"))?;
             blocks.push(body.clone().into_block(header.clone()));
 
             if block_hash == *tip {
@@ -343,7 +352,8 @@ impl BitfinityEvmClient {
         let genesis_block = client
             .get_block_by_number(0.into())
             .await
-            .map_err(|e| eyre::eyre!("error getting genesis block: {}", e))?;
+            .map_err(|e| eyre::eyre!("error getting genesis block: {}", e))?
+            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
         let genesis_accounts =
             client.get_genesis_balances().await.map_err(|e| eyre::eyre!(e))?.into_iter().map(
@@ -440,7 +450,8 @@ impl BitfinityEvmClient {
         let last_block = client
             .get_block_by_number(did::BlockNumber::Latest)
             .await
-            .map_err(|e| eyre::eyre!("error getting block number: {}", e))?;
+            .map_err(|e| eyre::eyre!("error getting block number: {}", e))?
+            .ok_or_eyre("latest block not found")?;
 
         let block_ts = last_block.timestamp.0.to::<u64>();
 
