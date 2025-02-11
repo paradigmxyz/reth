@@ -19,8 +19,8 @@ reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-revm.workspace = true
 reth-storage-errors.workspace = true
 
 revm.workspace = true
@@ -50,13 +50,13 @@ std = [
     "reth-consensus/std",
     "reth-primitives/std",
     "reth-primitives-traits/std",
-    "reth-revm/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "revm-primitives/std",
     "revm/std",
     "reth-ethereum-forks/std",
+    "reth-ethereum-primitives/std",
     "reth-chainspec/std",
     "reth-consensus-common/std",
 ]
@@ -64,8 +64,8 @@ test-utils = [
     "dep:parking_lot",
     "reth-chainspec/test-utils",
     "reth-consensus/test-utils",
+    "reth-ethereum-primitives/test-utils",
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
-    "reth-revm/test-utils",
     "revm/test-utils",
 ]

@@ -33,24 +33,21 @@ where
     ///    - invalid extra data
     ///    - invalid transactions
     ///    - incorrect hash
-    ///    - the block does not contain blob transactions or blob versioned hashes
+    ///    - block contains blob transactions or blob versioned hashes
+    ///    - block contains l1 withdrawals
     ///
     /// The checks are done in the order that conforms with the engine-API specification.
     ///
     /// This is intended to be invoked after receiving the payload from the CLI.
-    /// The additional [`MaybeCancunPayloadFields`] are not part of the payload, but are additional fields in the `engine_newPayloadV3` RPC call, See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
+    /// The additional fields, starting with [`MaybeCancunPayloadFields`](alloy_rpc_types::engine::MaybeCancunPayloadFields), are not part of the payload, but are additional fields starting in the `engine_newPayloadV3` RPC call, See also <https://specs.optimism.io/protocol/exec-engine.html#engine_newpayloadv3>
     ///
     /// If the cancun fields are provided this also validates that the versioned hashes in the block
-    /// match the versioned hashes passed in the
-    /// [`CancunPayloadFields`](alloy_rpc_types::engine::CancunPayloadFields), if the cancun payload
-    /// fields are provided. If the payload fields are not provided, but versioned hashes exist
-    /// in the block, this is considered an error: [`PayloadError::InvalidVersionedHashes`].
+    /// are empty as well as those passed in the sidecar. If the payload fields are not provided.
     ///
-    /// This validates versioned hashes according to the Engine API Cancun spec:
-    /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>
+    /// Validation according to specs <https://specs.optimism.io/protocol/exec-engine.html#engine-api>.
     pub fn ensure_well_formed_payload<T: SignedTransaction>(
         &self,
-        payload: ExecutionPayload,
+        payload: OpExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
     ) -> Result<SealedBlock<Block<T>>, PayloadError> {
         let expected_hash = payload.block_hash();
@@ -60,9 +57,9 @@ where
 
         // update withdrawals root to l2 withdrawals root if isthmus active
         if self.chain_spec().is_isthmus_active_at_timestamp(block.timestamp) {
-            // contains l2 withdrawals root since isthmus, which is storage root of predeploy
-            // `L2ToL1MessagePasser.sol`
-            match sidecar.withdrawals_root() {
+            // overwrite l1 withdrawals root with l2 withdrawals root, ie with storage root of
+            // predeploy `L2ToL1MessagePasser.sol` at `0x42..16`
+            match payload.withdrawals_root() {
                 Some(l2_withdrawals_root) => block.withdrawals_root = l2_withdrawals_root,
                 None => return Err(PayloadError::PreCancunBlockWithBlobTransactions), /* todo: return op specific error */
             }

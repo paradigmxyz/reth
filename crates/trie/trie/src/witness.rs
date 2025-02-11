@@ -3,8 +3,9 @@ use crate::{
     prefix_set::TriePrefixSetsMut,
     proof::{Proof, ProofBlindedProviderFactory},
     trie_cursor::TrieCursorFactory,
-    HashedPostState,
 };
+use reth_trie_common::HashedPostState;
+
 use alloy_primitives::{
     keccak256,
     map::{B256HashMap, B256HashSet, Entry, HashMap},
@@ -118,7 +119,7 @@ where
         );
         let mut sparse_trie =
             SparseStateTrie::new(WitnessBlindedProviderFactory::new(proof_provider_factory, tx));
-        sparse_trie.reveal_multiproof(proof_targets.clone(), multiproof)?;
+        sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
         for (hashed_address, hashed_slots) in

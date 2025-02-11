@@ -21,11 +21,11 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{Address, U256};
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;
-use reth_revm::{inspector_handle_register, EvmBuilder};
+use revm::{inspector_handle_register, EvmBuilder};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, EVMError,
     HaltReason, HandlerCfg, ResultAndState, SpecId, TxEnv, TxKind,
@@ -47,7 +47,7 @@ pub mod eip6110;
 /// Ethereum EVM implementation.
 #[derive(derive_more::Debug, derive_more::Deref, derive_more::DerefMut, derive_more::From)]
 #[debug(bound(DB::Error: Debug))]
-pub struct EthEvm<'a, EXT, DB: Database>(reth_revm::Evm<'a, EXT, DB>);
+pub struct EthEvm<'a, EXT, DB: Database>(revm::Evm<'a, EXT, DB>);
 
 impl<EXT, DB: Database> Evm for EthEvm<'_, EXT, DB> {
     type DB = DB;
@@ -128,6 +128,11 @@ impl EthEvmConfig {
     /// Creates a new Ethereum EVM configuration with the given chain spec.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
+    }
+
+    /// Creates a new Ethereum EVM configuration for the ethereum mainnet.
+    pub fn mainnet() -> Self {
+        Self::new(MAINNET.clone())
     }
 
     /// Returns the chain spec associated with this configuration.
@@ -262,7 +267,7 @@ impl ConfigureEvm for EthEvmConfig {
     ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
-        I: reth_revm::GetInspector<DB>,
+        I: revm::GetInspector<DB>,
     {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
             cfg_env: evm_env.cfg_env,
@@ -288,7 +293,7 @@ mod tests {
     use alloy_primitives::U256;
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::{env::EvmEnv, execute::ProviderError};
-    use reth_revm::{
+    use revm::{
         db::{CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
         primitives::{BlockEnv, CfgEnv, SpecId},

@@ -37,6 +37,7 @@ members = [
     "crates/ethereum/node",
     "crates/ethereum/payload/",
     "crates/ethereum/primitives/",
+    "crates/ethereum/reth/",
     "crates/etl/",
     "crates/evm/",
     "crates/evm/execution-errors",
@@ -74,8 +75,10 @@ members = [
     "crates/optimism/node/",
     "crates/optimism/payload/",
     "crates/optimism/primitives/",
+    "crates/optimism/reth/",
     "crates/optimism/rpc/",
     "crates/optimism/storage",
+    "crates/optimism/txpool/",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/builder-primitives/",
@@ -340,6 +343,7 @@ reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", 
 reth-ethereum-forks = { path = "crates/ethereum-forks", default-features = false }
 reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
+reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
@@ -371,6 +375,7 @@ reth-node-events = { path = "crates/node/events" }
 reth-node-metrics = { path = "crates/node/metrics" }
 reth-optimism-node = { path = "crates/optimism/node" }
 reth-node-types = { path = "crates/node/types" }
+reth-op = { path = "crates/optimism/reth" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
@@ -379,6 +384,7 @@ reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-optimism-primitives = { path = "crates/optimism/primitives" }
 reth-optimism-rpc = { path = "crates/optimism/rpc" }
 reth-optimism-storage = { path = "crates/optimism/storage" }
+reth-optimism-txpool = { path = "crates/optimism/txpool" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
@@ -402,7 +408,7 @@ reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
-reth-stages-types = { path = "crates/stages/types" }
+reth-stages-types = { path = "crates/stages/types", default-features = false }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types" }
 reth-storage-api = { path = "crates/storage/storage-api" }
@@ -420,9 +426,9 @@ reth-trie-sparse = { path = "crates/trie/sparse" }
 reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
 
 # revm
-revm = { version = "19.4.0", default-features = false }
-revm-primitives = { version = "15.1.0", default-features = false }
-revm-interpreter = { version = "15.0.0", default-features = false }
+revm = { version = "19.5.0", default-features = false }
+revm-primitives = { version = "15.2.0", default-features = false }
+revm-interpreter = { version = "15.2.0", default-features = false }
 revm-inspectors = "0.15.0"
 
 # eth
@@ -464,12 +470,12 @@ alloy-transport-ipc = { version = "0.11.0", default-features = false }
 alloy-transport-ws = { version = "0.11.0", default-features = false }
 
 # op
-op-alloy-rpc-types = { version = "0.10.0", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.10.0", default-features = false }
-op-alloy-network = { version = "0.10.0", default-features = false }
-op-alloy-consensus = { version = "0.10.0", default-features = false }
-op-alloy-flz = { version = "0.10.0", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.10.0", default-features = false }
+op-alloy-rpc-types = { version = "0.10.3", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.10.3", default-features = false }
+op-alloy-network = { version = "0.10.3", default-features = false }
+op-alloy-consensus = { version = "0.10.3", default-features = false }
+op-alloy-flz = { version = "0.10.3", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.10.3", default-features = false }
 
 # misc
 aquamarine = "0.6"
@@ -516,7 +522,7 @@ tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
-moka = "0.12"
+mini-moka = "0.10"
 
 # metrics
 metrics = "0.24.0"

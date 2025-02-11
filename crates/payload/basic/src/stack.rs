@@ -1,6 +1,6 @@
 use crate::{
-    BuildArguments, BuildOutcome, PayloadBuilder, PayloadBuilderAttributes, PayloadBuilderError,
-    PayloadConfig,
+    BuildArguments, BuildOutcome, HeaderForPayload, PayloadBuilder, PayloadBuilderAttributes,
+    PayloadBuilderError, PayloadConfig,
 };
 
 use alloy_eips::eip4895::Withdrawals;
@@ -177,54 +177,45 @@ where
     }
 }
 
-impl<L, R, Pool, Client> PayloadBuilder<Pool, Client> for PayloadBuilderStack<L, R>
+impl<L, R> PayloadBuilder for PayloadBuilderStack<L, R>
 where
-    L: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    R: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    Client: Clone,
-    Pool: Clone,
+    L: PayloadBuilder + Unpin + 'static,
+    R: PayloadBuilder + Unpin + 'static,
     L::Attributes: Unpin + Clone,
     R::Attributes: Unpin + Clone,
     L::BuiltPayload: Unpin + Clone,
     R::BuiltPayload:
         BuiltPayload<Primitives = <L::BuiltPayload as BuiltPayload>::Primitives> + Unpin + Clone,
-    <<L as PayloadBuilder<Pool, Client>>::Attributes as PayloadBuilderAttributes>::Error: 'static,
-    <<R as PayloadBuilder<Pool, Client>>::Attributes as PayloadBuilderAttributes>::Error: 'static,
 {
     type Attributes = Either<L::Attributes, R::Attributes>;
     type BuiltPayload = Either<L::BuiltPayload, R::BuiltPayload>;
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         match args.config.attributes {
             Either::Left(ref left_attr) => {
-                let left_args: BuildArguments<Pool, Client, L::Attributes, L::BuiltPayload> =
-                    BuildArguments {
-                        client: args.client.clone(),
-                        pool: args.pool.clone(),
-                        cached_reads: args.cached_reads.clone(),
-                        config: PayloadConfig {
-                            parent_header: args.config.parent_header.clone(),
-                            attributes: left_attr.clone(),
-                        },
-                        cancel: args.cancel.clone(),
-                        best_payload: args.best_payload.clone().and_then(|payload| {
-                            if let Either::Left(p) = payload {
-                                Some(p)
-                            } else {
-                                None
-                            }
-                        }),
-                    };
+                let left_args: BuildArguments<L::Attributes, L::BuiltPayload> = BuildArguments {
+                    cached_reads: args.cached_reads.clone(),
+                    config: PayloadConfig {
+                        parent_header: args.config.parent_header.clone(),
+                        attributes: left_attr.clone(),
+                    },
+                    cancel: args.cancel.clone(),
+                    best_payload: args.best_payload.clone().and_then(|payload| {
+                        if let Either::Left(p) = payload {
+                            Some(p)
+                        } else {
+                            None
+                        }
+                    }),
+                };
 
                 self.left.try_build(left_args).map(|out| out.map_payload(Either::Left))
             }
             Either::Right(ref right_attr) => {
                 let right_args = BuildArguments {
-                    client: args.client.clone(),
-                    pool: args.pool.clone(),
                     cached_reads: args.cached_reads.clone(),
                     config: PayloadConfig {
                         parent_header: args.config.parent_header.clone(),
@@ -247,8 +238,7 @@ where
 
     fn build_empty_payload(
         &self,
-        client: &Client,
-        config: PayloadConfig<Self::Attributes>,
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         match config.attributes {
             Either::Left(left_attr) => {
@@ -256,14 +246,14 @@ where
                     parent_header: config.parent_header.clone(),
                     attributes: left_attr,
                 };
-                self.left.build_empty_payload(client, left_config).map(Either::Left)
+                self.left.build_empty_payload(left_config).map(Either::Left)
             }
             Either::Right(right_attr) => {
                 let right_config = PayloadConfig {
                     parent_header: config.parent_header.clone(),
                     attributes: right_attr,
                 };
-                self.right.build_empty_payload(client, right_config).map(Either::Right)
+                self.right.build_empty_payload(right_config).map(Either::Right)
             }
         }
     }

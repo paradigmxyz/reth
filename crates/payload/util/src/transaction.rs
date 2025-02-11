@@ -1,7 +1,7 @@
 use crate::PayloadTransactions;
 use alloy_consensus::Transaction;
 use alloy_primitives::Address;
-use reth_primitives::Recovered;
+use reth_transaction_pool::PoolTransaction;
 
 /// An implementation of [`crate::traits::PayloadTransactions`] that yields
 /// a pre-defined set of transactions.
@@ -26,10 +26,10 @@ impl<T> PayloadTransactionsFixed<T> {
     }
 }
 
-impl<T: Clone> PayloadTransactions for PayloadTransactionsFixed<Recovered<T>> {
+impl<T: Clone> PayloadTransactions for PayloadTransactionsFixed<T> {
     type Transaction = T;
 
-    fn next(&mut self, _ctx: ()) -> Option<Recovered<T>> {
+    fn next(&mut self, _ctx: ()) -> Option<T> {
         (self.index < self.transactions.len()).then(|| {
             let tx = self.transactions[self.index].clone();
             self.index += 1;
@@ -91,20 +91,20 @@ impl<B: PayloadTransactions, A: PayloadTransactions> PayloadTransactionsChain<B,
 
 impl<A, B> PayloadTransactions for PayloadTransactionsChain<A, B>
 where
-    A: PayloadTransactions<Transaction: Transaction>,
+    A: PayloadTransactions<Transaction: PoolTransaction>,
     B: PayloadTransactions<Transaction = A::Transaction>,
 {
     type Transaction = A::Transaction;
 
-    fn next(&mut self, ctx: ()) -> Option<Recovered<Self::Transaction>> {
+    fn next(&mut self, ctx: ()) -> Option<Self::Transaction> {
         while let Some(tx) = self.before.next(ctx) {
             if let Some(before_max_gas) = self.before_max_gas {
-                if self.before_gas + tx.tx().gas_limit() <= before_max_gas {
-                    self.before_gas += tx.tx().gas_limit();
+                if self.before_gas + tx.gas_limit() <= before_max_gas {
+                    self.before_gas += tx.gas_limit();
                     return Some(tx);
                 }
-                self.before.mark_invalid(tx.signer(), tx.tx().nonce());
-                self.after.mark_invalid(tx.signer(), tx.tx().nonce());
+                self.before.mark_invalid(tx.sender(), tx.nonce());
+                self.after.mark_invalid(tx.sender(), tx.nonce());
             } else {
                 return Some(tx);
             }
@@ -112,11 +112,11 @@ where
 
         while let Some(tx) = self.after.next(ctx) {
             if let Some(after_max_gas) = self.after_max_gas {
-                if self.after_gas + tx.tx().gas_limit() <= after_max_gas {
-                    self.after_gas += tx.tx().gas_limit();
+                if self.after_gas + tx.gas_limit() <= after_max_gas {
+                    self.after_gas += tx.gas_limit();
                     return Some(tx);
                 }
-                self.after.mark_invalid(tx.signer(), tx.tx().nonce());
+                self.after.mark_invalid(tx.sender(), tx.nonce());
             } else {
                 return Some(tx);
             }

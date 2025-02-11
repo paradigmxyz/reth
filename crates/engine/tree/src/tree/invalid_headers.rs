@@ -16,7 +16,7 @@ const INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
 
 /// Keeps track of invalid headers.
 #[derive(Debug)]
-pub(super) struct InvalidHeaderCache {
+pub struct InvalidHeaderCache {
     /// This maps a header hash to a reference to its invalid ancestor.
     headers: LruMap<B256, HeaderEntry>,
     /// Metrics for the cache.
@@ -25,7 +25,7 @@ pub(super) struct InvalidHeaderCache {
 
 impl InvalidHeaderCache {
     /// Invalid header cache constructor.
-    pub(super) fn new(max_length: u32) -> Self {
+    pub fn new(max_length: u32) -> Self {
         Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
     }
 
@@ -37,7 +37,7 @@ impl InvalidHeaderCache {
     ///
     /// If this is called, the hit count for the entry is incremented.
     /// If the hit count exceeds the threshold, the entry is evicted and `None` is returned.
-    pub(super) fn get(&mut self, hash: &B256) -> Option<BlockWithParent> {
+    pub fn get(&mut self, hash: &B256) -> Option<BlockWithParent> {
         {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
@@ -52,7 +52,7 @@ impl InvalidHeaderCache {
     }
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    pub(super) fn insert_with_invalid_ancestor(
+    pub fn insert_with_invalid_ancestor(
         &mut self,
         header_hash: B256,
         invalid_ancestor: BlockWithParent,
@@ -68,7 +68,7 @@ impl InvalidHeaderCache {
     }
 
     /// Inserts an invalid ancestor into the map.
-    pub(super) fn insert(&mut self, invalid_ancestor: BlockWithParent) {
+    pub fn insert(&mut self, invalid_ancestor: BlockWithParent) {
         if self.get(&invalid_ancestor.block.hash).is_none() {
             warn!(target: "consensus::engine", ?invalid_ancestor, "Bad block with hash");
             self.insert_entry(invalid_ancestor.block.hash, invalid_ancestor);

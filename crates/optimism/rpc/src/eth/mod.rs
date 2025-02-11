@@ -5,20 +5,19 @@ pub mod transaction;
 
 mod block;
 mod call;
+mod ext;
 mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
-use reth_node_api::NodePrimitives;
-use reth_optimism_primitives::OpPrimitives;
-
-use std::{fmt, sync::Arc};
 
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
+use reth_node_api::NodePrimitives;
 use reth_node_builder::EthApiBuilderCtx;
+use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
@@ -38,6 +37,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
+use std::{fmt, sync::Arc};
 
 use crate::{OpEthApiError, SequencerClient};
 

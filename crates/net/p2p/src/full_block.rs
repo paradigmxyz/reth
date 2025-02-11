@@ -10,7 +10,7 @@ use alloy_primitives::{Sealable, B256};
 use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
-use reth_primitives::{SealedBlock, SealedHeader};
+use reth_primitives_traits::{SealedBlock, SealedHeader};
 use std::{
     cmp::Reverse,
     collections::{HashMap, VecDeque},
@@ -644,7 +644,7 @@ enum RangeResponseResult<H, B> {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::BlockBody;
+    use reth_ethereum_primitives::BlockBody;
 
     use super::*;
     use crate::test_utils::TestFullBlockClient;

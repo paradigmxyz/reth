@@ -10,16 +10,15 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::{BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{
-    eip4844::MAX_DATA_GAS_PER_BLOCK, eip6110, eip7685::Requests, merge::BEACON_NONCE,
-};
+use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip6110, eip7685::Requests, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
+use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
+use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
 use reth_evm::{
     env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, EvmError, InvalidTxError,
     NextBlockEnvAttributes,
@@ -29,9 +28,6 @@ use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives::{
-    Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, TransactionSigned,
-};
 use reth_primitives_traits::{
     proofs::{self},
     Block as _, SignedTransaction,
@@ -39,8 +35,8 @@ use reth_primitives_traits::{
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, noop::NoopTransactionPool, BestTransactions,
-    BestTransactionsAttributes, PoolTransaction, TransactionPool, ValidPoolTransaction,
+    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
+    PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -52,6 +48,8 @@ use tracing::{debug, trace, warn};
 
 mod config;
 pub use config::*;
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
+use reth_transaction_pool::error::Eip4844PoolTransactionError;
 
 type BestTransactionsIter<Pool> = Box<
     dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
@@ -59,21 +57,30 @@ type BestTransactionsIter<Pool> = Box<
 
 /// Ethereum payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
+pub struct EthereumPayloadBuilder<Pool, Client, EvmConfig = EthEvmConfig> {
+    /// Client providing access to node state.
+    client: Client,
+    /// Transaction pool.
+    pool: Pool,
     /// The type responsible for creating the evm.
     evm_config: EvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
 }
 
-impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
+impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
     /// `EthereumPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig, builder_config: EthereumBuilderConfig) -> Self {
-        Self { evm_config, builder_config }
+    pub const fn new(
+        client: Client,
+        pool: Pool,
+        evm_config: EvmConfig,
+        builder_config: EthereumBuilderConfig,
+    ) -> Self {
+        Self { client, pool, evm_config, builder_config }
     }
 }
 
-impl<EvmConfig> EthereumPayloadBuilder<EvmConfig>
+impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -95,10 +102,10 @@ where
 }
 
 // Default implementation of [PayloadBuilder] for unit type
-impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
+impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadBuilderAttributes;
@@ -106,49 +113,41 @@ where
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+        args: BuildArguments<EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let evm_env = self
             .evm_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
-        let pool = args.pool.clone();
         default_ethereum_payload(
             self.evm_config.clone(),
+            self.client.clone(),
+            self.pool.clone(),
             self.builder_config.clone(),
             args,
             evm_env,
-            |attributes| pool.best_transactions_with_attributes(attributes),
+            |attributes| self.pool.best_transactions_with_attributes(attributes),
         )
     }
 
     fn build_empty_payload(
         &self,
-        client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments::new(
-            client,
-            // we use defaults here because for the empty payload we don't need to execute anything
-            NoopTransactionPool::default(),
-            Default::default(),
-            config,
-            Default::default(),
-            None,
-        );
+        let args = BuildArguments::new(Default::default(), config, Default::default(), None);
 
         let evm_env = self
             .evm_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
-        let pool = args.pool.clone();
-
         default_ethereum_payload(
             self.evm_config.clone(),
+            self.client.clone(),
+            self.pool.clone(),
             self.builder_config.clone(),
             args,
             evm_env,
-            |attributes| pool.best_transactions_with_attributes(attributes),
+            |attributes| self.pool.best_transactions_with_attributes(attributes),
         )?
         .into_payload()
         .ok_or_else(|| PayloadBuilderError::MissingPayload)
@@ -161,10 +160,12 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload<EvmConfig, Pool, Client, F>(
+pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     evm_config: EvmConfig,
+    client: Client,
+    pool: Pool,
     builder_config: EthereumBuilderConfig,
-    args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+    args: BuildArguments<EthPayloadBuilderAttributes, EthBuiltPayload>,
     evm_env: EvmEnv<EvmConfig::Spec>,
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
@@ -174,7 +175,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
+    let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
 
     let chain_spec = client.chain_spec();
     let state_provider = client.state_by_block_hash(config.parent_header.hash())?;
@@ -185,7 +186,6 @@ where
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let mut sum_blob_gas_used = 0;
     let block_gas_limit: u64 = evm_env.block_env.gas_limit.to::<u64>();
     let base_fee = evm_env.block_env.basefee.to::<u64>();
 
@@ -228,6 +228,11 @@ where
     let mut evm = evm_config.evm_with_env(&mut db, evm_env);
 
     let mut receipts = Vec::new();
+    let mut block_blob_count = 0;
+    let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
+    let max_blob_count =
+        blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
+
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -252,18 +257,21 @@ where
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
         if let Some(blob_tx) = tx.as_eip4844() {
-            let tx_blob_gas = blob_tx.blob_gas();
-            if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
+            let tx_blob_count = blob_tx.blob_versioned_hashes.len() as u64;
+
+            if block_blob_count + tx_blob_count > max_blob_count {
                 // we can't fit this _blob_ transaction into the block, so we mark it as
                 // invalid, which removes its dependent transactions from
                 // the iterator. This is similar to the gas limit condition
                 // for regular transactions above.
-                trace!(target: "payload_builder", tx=?tx.hash(), ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
+                trace!(target: "payload_builder", tx=?tx.hash(), ?block_blob_count, "skipping blob transaction because it would exceed the max blob count per block");
                 best_txs.mark_invalid(
                     &pool_tx,
-                    InvalidPoolTransactionError::ExceedsGasLimit(
-                        tx_blob_gas,
-                        MAX_DATA_GAS_PER_BLOCK,
+                    InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::TooManyEip4844Blobs {
+                            have: block_blob_count + tx_blob_count,
+                            permitted: max_blob_count,
+                        },
                     ),
                 );
                 continue
@@ -303,11 +311,10 @@ where
 
         // add to the total blob gas used if the transaction successfully executed
         if let Some(blob_tx) = tx.as_eip4844() {
-            let tx_blob_gas = blob_tx.blob_gas();
-            sum_blob_gas_used += tx_blob_gas;
+            block_blob_count += blob_tx.blob_versioned_hashes.len() as u64;
 
-            // if we've reached the max data gas per block, we can skip blob txs entirely
-            if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+            // if we've reached the max blob count, we can skip blob txs entirely
+            if block_blob_count == max_blob_count {
                 best_txs.skip_blobs();
             }
         }
@@ -418,16 +425,14 @@ where
             .map_err(PayloadBuilderError::other)?;
 
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
-            parent_header.maybe_next_block_excess_blob_gas(
-                chain_spec.blob_params_at_timestamp(attributes.timestamp),
-            )
+            parent_header.maybe_next_block_excess_blob_gas(blob_params)
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
             Some(alloy_eips::eip7840::BlobParams::cancun().next_block_excess_blob_gas(0, 0))
         };
 
-        blob_gas_used = Some(sum_blob_gas_used);
+        blob_gas_used = Some(block_blob_count * DATA_GAS_PER_BLOB);
     }
 
     let header = Header {

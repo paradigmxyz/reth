@@ -135,3 +135,46 @@ async fn test_long_reorg() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_reorg_through_backfill() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let seed: [u8; 32] = rand::thread_rng().gen();
+    let mut rng = StdRng::from_seed(seed);
+    println!("Seed: {:?}", seed);
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .prague_activated()
+            .build(),
+    );
+
+    let (mut nodes, _tasks, _) =
+        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
+
+    let mut first_node = nodes.pop().unwrap();
+    let mut second_node = nodes.pop().unwrap();
+
+    let first_provider = ProviderBuilder::new().on_http(first_node.rpc_url());
+
+    // Advance first node 100 blocks and finalize the chain.
+    advance_with_random_transactions(&mut first_node, 100, &mut rng, true).await?;
+
+    // Sync second node to 20th block.
+    let head = first_provider.get_block_by_number(20.into(), false.into()).await?.unwrap();
+    second_node.sync_to(head.header.hash).await?;
+
+    // Produce an unfinalized fork chain with 5 blocks
+    second_node.payload.timestamp = head.header.timestamp;
+    advance_with_random_transactions(&mut second_node, 5, &mut rng, false).await?;
+
+    // Now reorg second node to the finalized canonical head
+    let head = first_provider.get_block_by_number(100.into(), false.into()).await?.unwrap();
+    second_node.sync_to(head.header.hash).await?;
+
+    Ok(())
+}
