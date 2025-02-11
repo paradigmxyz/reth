@@ -609,7 +609,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 if self.handle.mode().is_stake() {
                     // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
                     warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
-                    return
+                    return;
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
                 self.swarm.state_mut().announce_new_block(msg);
@@ -811,13 +811,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     self.disconnect_metrics.increment(reason);
                 }
                 self.metrics.backed_off_peers.set(
-                        self.swarm
-                            .state()
-                            .peers()
-                            .num_backed_off_peers()
-                            .saturating_sub(1)
-                            as f64,
-                    );
+                    self.swarm
+                        .state()
+                        .peers()
+                        .num_backed_off_peers()
+                        .saturating_sub(1) as f64,
+                );
                 self.event_sender
                     .notify(NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }));
             }
@@ -849,13 +848,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     .incoming_connections
                     .set(self.swarm.state().peers().num_inbound_connections() as f64);
                 self.metrics.backed_off_peers.set(
-                        self.swarm
-                            .state()
-                            .peers()
-                            .num_backed_off_peers()
-                            .saturating_sub(1)
-                            as f64,
-                    );
+                    self.swarm
+                        .state()
+                        .peers()
+                        .num_backed_off_peers()
+                        .saturating_sub(1) as f64,
+                );
             }
             SwarmEvent::OutgoingPendingSessionClosed { remote_addr, peer_id, error } => {
                 trace!(
@@ -886,13 +884,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 self.update_pending_connection_metrics();
 
                 self.metrics.backed_off_peers.set(
-                        self.swarm
-                            .state()
-                            .peers()
-                            .num_backed_off_peers()
-                            .saturating_sub(1)
-                            as f64,
-                    );
+                    self.swarm
+                        .state()
+                        .peers()
+                        .num_backed_off_peers()
+                        .saturating_sub(1) as f64,
+                );
             }
             SwarmEvent::OutgoingConnectionError { remote_addr, peer_id, error } => {
                 trace!(
@@ -910,13 +907,12 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 );
 
                 self.metrics.backed_off_peers.set(
-                        self.swarm
-                            .state()
-                            .peers()
-                            .num_backed_off_peers()
-                            .saturating_sub(1)
-                            as f64,
-                    );
+                    self.swarm
+                        .state()
+                        .peers()
+                        .num_backed_off_peers()
+                        .saturating_sub(1) as f64,
+                );
                 self.update_pending_connection_metrics();
             }
             SwarmEvent::BadMessage { peer_id } => {
@@ -1095,7 +1091,7 @@ impl<N: NetworkPrimitives> Future for NetworkManager<N> {
         if maybe_more_handle_messages || maybe_more_swarm_events {
             // make sure we're woken up again
             cx.waker().wake_by_ref();
-            return Poll::Pending
+            return Poll::Pending;
         }
 
         this.update_poll_metrics(start, poll_durations);
