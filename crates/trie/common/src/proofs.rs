@@ -36,6 +36,14 @@ pub struct MultiProof {
 }
 
 impl MultiProof {
+    /// Returns true if the multiproof is empty.
+    pub fn is_empty(&self) -> bool {
+        self.account_subtree.is_empty() &&
+            self.branch_node_hash_masks.is_empty() &&
+            self.branch_node_tree_masks.is_empty() &&
+            self.storages.is_empty()
+    }
+
     /// Return the account proof nodes for the given account path.
     pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, Bytes)> {
         self.account_subtree.matching_nodes_sorted(path)
