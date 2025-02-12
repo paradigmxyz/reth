@@ -2,8 +2,8 @@
 
 use crate::{
     execute::{
-        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionOutput,
-        BlockExecutionStrategy, BlockExecutorProvider, Executor,
+        BasicBlockExecutor, BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider,
+        Executor,
     },
     system_calls::OnStateHook,
     Database,
@@ -34,16 +34,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
 
     type Executor<DB: Database> = Self;
 
-    type BatchExecutor<DB: Database> = Self;
-
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
-    where
-        DB: Database,
-    {
-        self.clone()
-    }
-
-    fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database,
     {
@@ -132,24 +123,6 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
     }
 }
 
-impl<DB> BatchExecutor<DB> for MockExecutorProvider {
-    type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
-    type Output = ExecutionOutcome;
-    type Error = BlockExecutionError;
-
-    fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn finalize(self) -> Self::Output {
-        self.exec_results.lock().pop().unwrap()
-    }
-
-    fn size_hint(&self) -> Option<usize> {
-        None
-    }
-}
-
 impl<S> BasicBlockExecutor<S>
 where
     S: BlockExecutionStrategy,
@@ -168,31 +141,5 @@ where
         F: FnOnce(&mut State<S::DB>) -> R,
     {
         f(self.strategy.state_mut())
-    }
-}
-
-impl<S> BasicBatchExecutor<S>
-where
-    S: BlockExecutionStrategy,
-{
-    /// Provides safe read access to the state
-    pub fn with_state<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&State<S::DB>) -> R,
-    {
-        f(self.strategy.state_ref())
-    }
-
-    /// Provides safe write access to the state
-    pub fn with_state_mut<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&mut State<S::DB>) -> R,
-    {
-        f(self.strategy.state_mut())
-    }
-
-    /// Accessor for batch executor receipts.
-    pub const fn receipts(&self) -> &Vec<Vec<<S::Primitives as NodePrimitives>::Receipt>> {
-        self.batch_record.receipts()
     }
 }

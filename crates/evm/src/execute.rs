@@ -9,7 +9,7 @@ use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use crate::{batch::BlockBatchRecord, system_calls::OnStateHook, Database};
+use crate::{system_calls::OnStateHook, Database};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
@@ -21,10 +21,8 @@ use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
 use revm::db::{states::bundle_state::BundleRetention, State};
 use revm_primitives::{Account, AccountStatus, EvmState};
 
-/// A general purpose executor trait that executes an input (e.g. block) and produces an output
-/// (e.g. state changes and receipts).
-///
-/// This executor does not validate the output, see [`BatchExecutor`] for that.
+/// A type that knows how to execute a block. It is assumed to operate on a
+/// [`crate::Evm`] internally and use [`State`] as database.
 pub trait Executor<DB: Database>: Sized {
     /// The primitive types used by the executor.
     type Primitives: NodePrimitives;
@@ -50,8 +48,7 @@ pub trait Executor<DB: Database>: Sized {
     /// Consumes the type and executes the block.
     ///
     /// # Note
-    /// Execution happens without any validation of the output. To validate the output, use the
-    /// [`BatchExecutor`].
+    /// Execution happens without any validation of the output.
     ///
     /// # Returns
     /// The output of the block execution.
@@ -130,56 +127,6 @@ pub trait Executor<DB: Database>: Sized {
     fn size_hint(&self) -> usize;
 }
 
-/// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
-/// and keep track of the state over the entire batch.
-pub trait BatchExecutor<DB> {
-    /// The input type for the executor.
-    type Input<'a>;
-    /// The output type for the executor.
-    type Output;
-    /// The error type returned by the executor.
-    type Error;
-
-    /// Executes the next block in the batch, verifies the output and updates the state internally.
-    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
-
-    /// Executes multiple inputs in the batch, verifies the output, and updates the state
-    /// internally.
-    ///
-    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_one`]
-    /// for each input.
-    fn execute_and_verify_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Self::Input<'a>>,
-    {
-        for input in inputs {
-            self.execute_and_verify_one(input)?;
-        }
-        Ok(())
-    }
-
-    /// Executes the entire batch, verifies the output, and returns the final state.
-    ///
-    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_many`]
-    /// and [`BatchExecutor::finalize`].
-    fn execute_and_verify_batch<'a, I>(mut self, batch: I) -> Result<Self::Output, Self::Error>
-    where
-        I: IntoIterator<Item = Self::Input<'a>>,
-        Self: Sized,
-    {
-        self.execute_and_verify_many(batch)?;
-        Ok(self.finalize())
-    }
-
-    /// Finishes the batch and return the final state.
-    fn finalize(self) -> Self::Output;
-
-    /// The size hint of the batch's tracked state size.
-    ///
-    /// This is used to optimize DB commits depending on the size of the state.
-    fn size_hint(&self) -> Option<usize>;
-}
-
 /// A type that can create a new executor for block execution.
 pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// Receipt type.
@@ -202,26 +149,10 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         Error = BlockExecutionError,
     >;
 
-    /// An executor that can execute a batch of blocks given a database.
-    type BatchExecutor<DB: Database>: for<'a> BatchExecutor<
-        DB,
-        Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        Output = ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>,
-        Error = BlockExecutionError,
-    >;
-
     /// Creates a new executor for single block execution.
     ///
     /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
-    where
-        DB: Database;
-
-    /// Creates a new batch executor with the given database and pruning modes.
-    ///
-    /// Batch executor is used to execute multiple blocks in sequence and keep track of the state
-    /// during historical sync which involves executing multiple blocks in sequence.
-    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database;
 }
@@ -336,23 +267,12 @@ where
 
     type Executor<DB: Database> = BasicBlockExecutor<F::Strategy<DB>>;
 
-    type BatchExecutor<DB: Database> = BasicBatchExecutor<F::Strategy<DB>>;
-
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database,
     {
         let strategy = self.strategy_factory.create_strategy(db);
         BasicBlockExecutor::new(strategy)
-    }
-
-    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
-    where
-        DB: Database,
-    {
-        let strategy = self.strategy_factory.create_strategy(db);
-        let batch_record = BlockBatchRecord::default();
-        BasicBatchExecutor::new(strategy, batch_record)
     }
 }
 
@@ -416,77 +336,6 @@ where
     }
 }
 
-/// A generic batch executor that uses a [`BlockExecutionStrategy`] to
-/// execute batches.
-#[allow(missing_debug_implementations)]
-pub struct BasicBatchExecutor<S>
-where
-    S: BlockExecutionStrategy,
-{
-    /// Batch execution strategy.
-    pub(crate) strategy: S,
-    /// Keeps track of batch execution receipts and requests.
-    pub(crate) batch_record: BlockBatchRecord<<S::Primitives as NodePrimitives>::Receipt>,
-}
-
-impl<S> BasicBatchExecutor<S>
-where
-    S: BlockExecutionStrategy,
-{
-    /// Creates a new `BasicBatchExecutor` with the given strategy.
-    pub const fn new(
-        strategy: S,
-        batch_record: BlockBatchRecord<<S::Primitives as NodePrimitives>::Receipt>,
-    ) -> Self {
-        Self { strategy, batch_record }
-    }
-}
-
-impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S>
-where
-    S: BlockExecutionStrategy<DB = DB, Error = BlockExecutionError>,
-    DB: Database,
-{
-    type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
-    type Output = ExecutionOutcome<<S::Primitives as NodePrimitives>::Receipt>;
-    type Error = BlockExecutionError;
-
-    fn execute_and_verify_one(&mut self, block: Self::Input<'_>) -> Result<(), Self::Error> {
-        if self.batch_record.first_block().is_none() {
-            self.batch_record.set_first_block(block.header().number());
-        }
-
-        self.strategy.apply_pre_execution_changes(block)?;
-        let ExecuteOutput { receipts, .. } = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
-
-        self.strategy.validate_block_post_execution(block, &receipts, &requests)?;
-
-        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
-
-        // store receipts in the set
-        self.batch_record.save_receipts(receipts);
-
-        // store requests in the set
-        self.batch_record.save_requests(requests);
-
-        Ok(())
-    }
-
-    fn finalize(mut self) -> Self::Output {
-        ExecutionOutcome::new(
-            self.strategy.state_mut().take_bundle(),
-            self.batch_record.take_receipts(),
-            self.batch_record.first_block().unwrap_or_default(),
-            self.batch_record.take_requests(),
-        )
-    }
-
-    fn size_hint(&self) -> Option<usize> {
-        Some(self.strategy.state_ref().bundle_state.size_hint())
-    }
-}
-
 /// Creates an `EvmState` from a map of balance increments and the current state
 /// to load accounts from. No balance increment is done in the function.
 /// Zero balance increments are ignored and won't create state entries.
@@ -540,16 +389,8 @@ mod tests {
     impl BlockExecutorProvider for TestExecutorProvider {
         type Primitives = EthPrimitives;
         type Executor<DB: Database> = TestExecutor<DB>;
-        type BatchExecutor<DB: Database> = TestExecutor<DB>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
-        where
-            DB: Database,
-        {
-            TestExecutor(PhantomData)
-        }
-
-        fn batch_executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
         where
             DB: Database,
         {
@@ -588,24 +429,6 @@ mod tests {
 
         fn size_hint(&self) -> usize {
             0
-        }
-    }
-
-    impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
-        type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
-        type Output = ExecutionOutcome;
-        type Error = BlockExecutionError;
-
-        fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn finalize(self) -> Self::Output {
-            todo!()
-        }
-
-        fn size_hint(&self) -> Option<usize> {
-            None
         }
     }
 

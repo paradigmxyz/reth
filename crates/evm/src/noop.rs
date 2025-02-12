@@ -1,11 +1,11 @@
 //! A no operation block executor implementation.
 
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
+use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 
 use crate::{
-    execute::{BatchExecutor, BlockExecutorProvider, Executor},
+    execute::{BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
     Database,
 };
@@ -22,16 +22,7 @@ impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
 
     type Executor<DB: Database> = Self;
 
-    type BatchExecutor<DB: Database> = Self;
-
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
-    where
-        DB: Database,
-    {
-        Self::default()
-    }
-
-    fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database,
     {
@@ -68,23 +59,5 @@ impl<DB: Database, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider
 
     fn size_hint(&self) -> usize {
         0
-    }
-}
-
-impl<DB, P: NodePrimitives> BatchExecutor<DB> for NoopBlockExecutorProvider<P> {
-    type Input<'a> = &'a RecoveredBlock<P::Block>;
-    type Output = ExecutionOutcome<P::Receipt>;
-    type Error = BlockExecutionError;
-
-    fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
-        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
-    }
-
-    fn finalize(self) -> Self::Output {
-        unreachable!()
-    }
-
-    fn size_hint(&self) -> Option<usize> {
-        None
     }
 }
