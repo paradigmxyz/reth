@@ -241,6 +241,10 @@ where
         &mut self.state
     }
 
+    fn into_state(self) -> State<Self::DB> {
+        self.state
+    }
+
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
     }
