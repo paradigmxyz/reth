@@ -2,7 +2,6 @@
 
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
 use alloy_rpc_types::engine::ClientVersionV1;
-use core::marker::PhantomData;
 use futures::TryFutureExt;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
@@ -14,11 +13,7 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadStore;
-use reth_provider::ChainSpecProvider;
-use reth_rpc::{
-    eth::{EthApiTypes, FullEthApiServer},
-    EthApi,
-};
+use reth_rpc::eth::{EthApiTypes, FullEthApiServer};
 use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
@@ -347,19 +342,28 @@ where
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
-pub struct RpcAddOns<Node: FullNodeComponents, EthApi, EV, EB = BasicEngineApiBuilder<EV>> {
+pub struct RpcAddOns<
+    Node: FullNodeComponents,
+    EthB: EthApiBuilder<Node>,
+    EV,
+    EB = BasicEngineApiBuilder<EV>,
+> {
     /// Additional RPC add-ons.
-    pub hooks: RpcHooks<Node, EthApi>,
+    pub hooks: RpcHooks<Node, EthB::EthApi>,
     /// Builder for `EthApi`
-    eth_api_builder: PhantomData<EthApi>,
+    eth_api_builder: EthB,
     /// Engine validator
     engine_validator_builder: EV,
     /// Builder for `EngineApi`
     engine_api_builder: EB,
 }
 
-impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV: Debug, EB: Debug> Debug
-    for RpcAddOns<Node, EthApi, EV, EB>
+impl<Node, EthB, EV, EB> Debug for RpcAddOns<Node, EthB, EV, EB>
+where
+    Node: FullNodeComponents,
+    EthB: EthApiBuilder<Node>,
+    EV: Debug,
+    EB: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RpcAddOns")
@@ -371,12 +375,20 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV: Debug, EB: Debug> Debug
     }
 }
 
-impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV, EB> RpcAddOns<Node, EthApi, EV, EB> {
+impl<Node, EthB, EV, EB> RpcAddOns<Node, EthB, EV, EB>
+where
+    Node: FullNodeComponents,
+    EthB: EthApiBuilder<Node>,
+{
     /// Creates a new instance of the RPC add-ons.
-    pub fn new(engine_validator_builder: EV, engine_api_builder: EB) -> Self {
+    pub fn new(
+        eth_api_builder: EthB,
+        engine_validator_builder: EV,
+        engine_api_builder: EB,
+    ) -> Self {
         Self {
             hooks: RpcHooks::default(),
-            eth_api_builder: PhantomData,
+            eth_api_builder,
             engine_validator_builder,
             engine_api_builder,
         }
@@ -385,7 +397,7 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV, EB> RpcAddOns<Node, EthA
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(RpcContext<'_, Node, EthApi>, RethRpcServerHandles) -> eyre::Result<()>
+        F: FnOnce(RpcContext<'_, Node, EthB::EthApi>, RethRpcServerHandles) -> eyre::Result<()>
             + Send
             + 'static,
     {
@@ -396,34 +408,29 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV, EB> RpcAddOns<Node, EthA
     /// Sets the hook that is run to configure the rpc modules.
     pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()> + Send + 'static,
+        F: FnOnce(RpcContext<'_, Node, EthB::EthApi>) -> eyre::Result<()> + Send + 'static,
     {
         self.hooks.set_extend_rpc_modules(hook);
         self
     }
 }
 
-impl<Node, EthApi, EV, EB> Default for RpcAddOns<Node, EthApi, EV, EB>
+impl<Node, EthB, EV, EB> Default for RpcAddOns<Node, EthB, EV, EB>
 where
     Node: FullNodeComponents,
-    EthApi: EthApiTypes + EthApiBuilder<Node>,
+    EthB: EthApiBuilder<Node>,
     EV: Default,
     EB: Default,
 {
     fn default() -> Self {
-        Self::new(EV::default(), EB::default())
+        Self::new(EthB::default(), EV::default(), EB::default())
     }
 }
 
-impl<N, EthApi, EV, EB> RpcAddOns<N, EthApi, EV, EB>
+impl<N, EthB, EV, EB> RpcAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents,
-    EthApi: EthApiTypes
-        + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
-        + AddDevSigners
-        + EthApiBuilder<N>
-        + Unpin
-        + 'static,
+    EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
 {
@@ -433,11 +440,11 @@ where
         self,
         ctx: AddOnsContext<'_, N>,
         ext: F,
-    ) -> eyre::Result<RpcHandle<N, EthApi>>
+    ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
     where
         F: FnOnce(&mut TransportRpcModules, &mut AuthRpcModule) -> eyre::Result<()>,
     {
-        let Self { engine_api_builder, hooks, .. } = self;
+        let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
         let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
@@ -456,7 +463,11 @@ where
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, Box::new(EthApi::build));
+            .build_with_auth_server::<EthB::EthApi>(
+                module_config,
+                engine_api,
+                Box::new(eth_api_builder),
+            );
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -526,19 +537,14 @@ where
     }
 }
 
-impl<N, EthApi, EV, EB> NodeAddOns<N> for RpcAddOns<N, EthApi, EV, EB>
+impl<N, EthB, EV, EB> NodeAddOns<N> for RpcAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents,
-    EthApi: EthApiTypes
-        + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
-        + EthApiBuilder<N>
-        + AddDevSigners
-        + Unpin
-        + 'static,
+    EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
 {
-    type Handle = RpcHandle<N, EthApi>;
+    type Handle = RpcHandle<N, EthB::EthApi>;
 
     async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
         self.launch_add_ons_with(ctx, |_, _| Ok(())).await
@@ -557,29 +563,36 @@ pub trait RethRpcAddOns<N: FullNodeComponents>:
     fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi>;
 }
 
-impl<N: FullNodeComponents, EthApi: EthApiTypes, EV, EB> RethRpcAddOns<N>
-    for RpcAddOns<N, EthApi, EV, EB>
+impl<N: FullNodeComponents, EthB, EV, EB> RethRpcAddOns<N> for RpcAddOns<N, EthB, EV, EB>
 where
-    Self: NodeAddOns<N, Handle = RpcHandle<N, EthApi>>,
+    Self: NodeAddOns<N, Handle = RpcHandle<N, EthB::EthApi>>,
+    EthB: EthApiBuilder<N>,
 {
-    type EthApi = EthApi;
+    type EthApi = EthB::EthApi;
 
     fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi> {
         &mut self.hooks
     }
 }
 
-/// A `EthApi` that knows how to build itself from [`EthApiBuilderCtx`].
-pub trait EthApiBuilder<N: FullNodeComponents>: 'static {
+/// A `EthApi` that knows how to build `eth` namespace API from [`EthApiBuilderCtx`].
+pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
+    type EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static;
+
     /// Builds the `EthApi` from the given context.
-    fn build(ctx: &EthApiBuilderCtx<N>) -> Self;
+    fn build(self, ctx: &EthApiBuilderCtx<N>) -> Self::EthApi;
 }
 
-impl<N: FullNodeComponents<Provider: ChainSpecProvider>> EthApiBuilder<N>
-    for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
+impl<N, F, EthApi> EthApiBuilder<N> for F
+where
+    N: FullNodeComponents,
+    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    F: FnOnce(&EthApiBuilderCtx<N>) -> EthApi + Default + Send + 'static,
 {
-    fn build(ctx: &EthApiBuilderCtx<N>) -> Self {
-        Self::with_spawner(ctx)
+    type EthApi = EthApi;
+
+    fn build(self, ctx: &EthApiBuilderCtx<N>) -> Self::EthApi {
+        self(ctx)
     }
 }
 
@@ -596,10 +609,10 @@ pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Validator>>;
 }
 
-impl<N, EthApi, EV, EB> EngineValidatorAddOn<N> for RpcAddOns<N, EthApi, EV, EB>
+impl<N, EthB, EV, EB> EngineValidatorAddOn<N> for RpcAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents,
-    EthApi: EthApiTypes,
+    EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
 {

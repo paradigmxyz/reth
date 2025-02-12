@@ -15,8 +15,8 @@ use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::NodePrimitives;
-use reth_node_builder::EthApiBuilderCtx;
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodePrimitives};
+use reth_node_builder::{rpc::EthApiBuilder, EthApiBuilderCtx};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
@@ -316,11 +316,11 @@ impl OpEthApiBuilder {
     }
 }
 
-impl OpEthApiBuilder {
+impl<N: FullNodeComponents> EthApiBuilder<N> for OpEthApiBuilder {
     /// Builds an instance of [`OpEthApi`]
-    pub fn build<N>(self, ctx: &EthApiBuilderCtx<N>) -> OpEthApi<N>
+    fn build(self, ctx: &EthApiBuilderCtx<N>) -> OpEthApi<N>
     where
-        N: OpNodeCore<
+        N: FullNodeTypes<
             Provider: BlockReaderIdExt<
                 Block = <<N::Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::Block,
                 Receipt = <<N::Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::Receipt,
