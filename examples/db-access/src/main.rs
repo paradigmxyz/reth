@@ -1,13 +1,16 @@
-use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_eth::{Filter, FilteredParams};
-use reth_chainspec::ChainSpecBuilder;
-use reth_node_ethereum::EthereumNode;
-use reth_primitives::{SealedBlock, SealedHeader, TransactionSigned};
-use reth_primitives_traits::transaction::signed::SignedTransaction;
-use reth_provider::{
-    providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StateProvider, TransactionsProvider,
+use reth_ethereum::{
+    chainspec::ChainSpecBuilder,
+    node::EthereumNode,
+    primitives::{
+        transaction::signed::SignedTransaction, AlloyBlockHeader, SealedBlock, SealedHeader,
+    },
+    provider::{
+        providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
+        ReceiptProvider, StateProvider, TransactionsProvider,
+    },
+    rpc::eth::primitives::{Filter, FilteredParams},
+    TransactionSigned,
 };
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
@@ -112,7 +115,7 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 }
 
 /// The `BlockReader` allows querying the headers-related tables.
-fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
+fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     provider: T,
     number: u64,
 ) -> eyre::Result<()> {
@@ -159,7 +162,7 @@ fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
 
 /// The `ReceiptProvider` allows querying the receipts tables.
 fn receipts_provider_example<
-    T: ReceiptProvider<Receipt = reth_primitives::Receipt>
+    T: ReceiptProvider<Receipt = reth_ethereum::Receipt>
         + TransactionsProvider<Transaction = TransactionSigned>
         + HeaderProvider,
 >(

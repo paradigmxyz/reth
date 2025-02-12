@@ -87,6 +87,12 @@ pub mod rpc {
     pub use reth_rpc_api as api;
     #[doc(inline)]
     pub use reth_rpc_builder as builder;
-    #[doc(inline)]
-    pub use reth_rpc_eth_types as eth;
+
+    /// Re-exported eth types
+    pub mod eth {
+        #[doc(inline)]
+        pub use alloy_rpc_types_eth as primitives;
+        #[doc(inline)]
+        pub use reth_rpc_eth_types::*;
+    }
 }
