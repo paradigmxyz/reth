@@ -34,10 +34,8 @@ use reth::rpc::builder::{
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth::tasks::TokioTaskExecutor;
-use reth_node_ethereum::{
-    node::EthereumEngineValidator, EthEvmConfig, EthExecutorProvider, EthereumNode,
-};
-use reth_provider::{test_utils::TestCanonStateSubscriptions, ChainSpecProvider};
+use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
+use reth_provider::ChainSpecProvider;
 
 // Custom rpc extension
 pub mod myrpc_ext;
@@ -70,17 +68,12 @@ async fn main() -> eyre::Result<()> {
         .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
         .with_evm_config(EthEvmConfig::new(spec.clone()))
-        .with_events(TestCanonStateSubscriptions::default())
         .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()))
         .with_consensus(EthBeaconConsensus::new(spec.clone()));
 
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
-    let mut server = rpc_builder.build(
-        config,
-        Box::new(EthApi::with_spawner),
-        Arc::new(EthereumEngineValidator::new(spec)),
-    );
+    let mut server = rpc_builder.build(config, Box::new(EthApi::with_spawner));
 
     // Add a custom rpc namespace
     let custom_rpc = MyRpcExt { provider };

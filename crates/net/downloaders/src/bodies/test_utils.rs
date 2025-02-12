@@ -7,13 +7,14 @@ use alloy_primitives::B256;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, transaction::DbTxMut};
 use reth_network_p2p::bodies::response::BlockResponse;
-use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader};
+use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
+use reth_primitives_traits::Block;
 use std::collections::HashMap;
 
-pub(crate) fn zip_blocks<'a, H: Clone + BlockHeader + 'a, B>(
-    headers: impl Iterator<Item = &'a SealedHeader<H>>,
-    bodies: &mut HashMap<B256, B>,
-) -> Vec<BlockResponse<H, B>> {
+pub(crate) fn zip_blocks<'a, B: Block>(
+    headers: impl Iterator<Item = &'a SealedHeader<B::Header>>,
+    bodies: &mut HashMap<B256, B::Body>,
+) -> Vec<BlockResponse<B>> {
     headers
         .into_iter()
         .map(|header| {
@@ -21,7 +22,7 @@ pub(crate) fn zip_blocks<'a, H: Clone + BlockHeader + 'a, B>(
             if header.is_empty() {
                 BlockResponse::Empty(header.clone())
             } else {
-                BlockResponse::Full(SealedBlock::new(header.clone(), body))
+                BlockResponse::Full(SealedBlock::from_sealed_parts(header.clone(), body))
             }
         })
         .collect()
@@ -30,7 +31,7 @@ pub(crate) fn zip_blocks<'a, H: Clone + BlockHeader + 'a, B>(
 pub(crate) fn create_raw_bodies(
     headers: impl IntoIterator<Item = SealedHeader>,
     bodies: &mut HashMap<B256, BlockBody>,
-) -> Vec<Block> {
+) -> Vec<reth_primitives::Block> {
     headers
         .into_iter()
         .map(|header| {
@@ -45,7 +46,7 @@ pub(crate) fn insert_headers(db: &DatabaseEnv, headers: &[SealedHeader]) {
     db.update(|tx| {
         for header in headers {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash()).unwrap();
-            tx.put::<tables::Headers>(header.number, header.clone().unseal()).unwrap();
+            tx.put::<tables::Headers>(header.number, header.clone_header()).unwrap();
         }
     })
     .expect("failed to commit")

@@ -2,7 +2,7 @@
 
 use crate::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-    FillTxEnv, InMemorySize, MaybeCompact, MaybeSerde,
+    FillTxEnv, InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat,
 };
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::{
@@ -14,9 +14,15 @@ use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHa
 use core::hash::Hash;
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullSignedTx: SignedTransaction + FillTxEnv + MaybeCompact {}
+pub trait FullSignedTx:
+    SignedTransaction + FillTxEnv + MaybeCompact + MaybeSerdeBincodeCompat
+{
+}
 
-impl<T> FullSignedTx for T where T: SignedTransaction + FillTxEnv + MaybeCompact {}
+impl<T> FullSignedTx for T where
+    T: SignedTransaction + FillTxEnv + MaybeCompact + MaybeSerdeBincodeCompat
+{
+}
 
 /// A signed transaction.
 #[auto_impl::auto_impl(&, Arc)]
@@ -62,20 +68,38 @@ pub trait SignedTransaction:
     /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
     /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that
     /// the signature has a low `s` value.
-    fn recover_signer(&self) -> Option<Address>;
+    fn recover_signer(&self) -> Result<Address, RecoveryError>;
+
+    /// Recover signer from signature and hash.
+    ///
+    /// Returns an error if the transaction's signature is invalid.
+    fn try_recover(&self) -> Result<Address, RecoveryError> {
+        self.recover_signer().map_err(|_| RecoveryError)
+    }
 
     /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
     /// value_.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// `reth_primitives::transaction::recover_signer_unchecked`.
-    fn recover_signer_unchecked(&self) -> Option<Address> {
-        self.recover_signer_unchecked_with_buf(&mut Vec::new())
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
+        self.recover_signer_unchecked_with_buf(&mut Vec::new()).map_err(|_| RecoveryError)
+    }
+
+    /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
+    /// value_.
+    ///
+    /// Returns an error if the transaction's signature is invalid.
+    fn try_recover_unchecked(&self) -> Result<Address, RecoveryError> {
+        self.recover_signer_unchecked()
     }
 
     /// Same as [`Self::recover_signer_unchecked`] but receives a buffer to operate on. This is used
     /// during batch recovery to avoid allocating a new buffer for each transaction.
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address>;
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError>;
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
@@ -105,12 +129,15 @@ impl SignedTransaction for PooledTransaction {
         }
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         let signature_hash = self.signature_hash();
         recover_signer(self.signature(), signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         match self {
             Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
             Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
@@ -143,12 +170,15 @@ impl SignedTransaction for op_alloy_consensus::OpPooledTransaction {
         }
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         let signature_hash = self.signature_hash();
         recover_signer(self.signature(), signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         match self {
             Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
             Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
@@ -163,19 +193,18 @@ impl SignedTransaction for op_alloy_consensus::OpPooledTransaction {
 /// Extension trait for [`SignedTransaction`] to convert it into [`Recovered`].
 pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     /// Tries to recover signer and return [`Recovered`] by cloning the type.
-    fn try_ecrecovered(&self) -> Option<Recovered<Self>> {
-        let signer = self.recover_signer()?;
-        Some(Recovered::new_unchecked(self.clone(), signer))
+    fn try_clone_into_recovered(&self) -> Result<Recovered<Self>, RecoveryError> {
+        self.recover_signer().map(|signer| Recovered::new_unchecked(self.clone(), signer))
     }
 
     /// Tries to recover signer and return [`Recovered`].
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
     /// [`SignedTransaction::recover_signer`].
-    fn try_into_ecrecovered(self) -> Result<Recovered<Self>, Self> {
+    fn try_into_recovered(self) -> Result<Recovered<Self>, Self> {
         match self.recover_signer() {
-            None => Err(self),
-            Some(signer) => Ok(Recovered::new_unchecked(self, signer)),
+            Ok(signer) => Ok(Recovered::new_unchecked(self, signer)),
+            Err(_) => Err(self),
         }
     }
 
@@ -183,15 +212,21 @@ pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `None` if the transaction's signature is invalid.
-    fn into_ecrecovered_unchecked(self) -> Option<Recovered<Self>> {
-        let signer = self.recover_signer_unchecked()?;
-        Some(Recovered::new_unchecked(self, signer))
+    fn into_recovered_unchecked(self) -> Result<Recovered<Self>, RecoveryError> {
+        self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self, signer))
     }
 
     /// Returns the [`Recovered`] transaction with the given sender.
+    ///
+    /// Note: assumes the given signer is the signer of this transaction.
     fn with_signer(self, signer: Address) -> Recovered<Self> {
         Recovered::new_unchecked(self, signer)
     }
 }
 
 impl<T> SignedTransactionIntoRecoveredExt for T where T: SignedTransaction {}
+
+/// Opaque error type for sender recovery.
+#[derive(Debug, Default, thiserror::Error)]
+#[error("Failed to recover the signer")]
+pub struct RecoveryError;

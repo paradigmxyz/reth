@@ -8,6 +8,8 @@ crates_to_check=(
     reth-network-peers
     reth-trie-common
     reth-chainspec
+    reth-consensus
+    reth-consensus-common
 
     ## ethereum
     reth-ethereum-forks
@@ -16,6 +18,7 @@ crates_to_check=(
     ## optimism
     reth-optimism-chainspec
     reth-optimism-forks
+    reth-optimism-primitives
 )
 
 # Array to hold the results

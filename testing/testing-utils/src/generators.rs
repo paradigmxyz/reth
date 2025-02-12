@@ -1,6 +1,6 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-use alloy_consensus::{Header, Transaction as _, TxLegacy};
+use alloy_consensus::{Block, Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
     eip1898::BlockWithParent,
     eip4895::{Withdrawal, Withdrawals},
@@ -12,11 +12,11 @@ use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
+    Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
     TransactionSigned,
 };
 
-use reth_primitives_traits::crypto::secp256k1::sign_message;
+use reth_primitives_traits::{crypto::secp256k1::sign_message, proofs, Block as _};
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
@@ -125,7 +125,7 @@ pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> 
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    SealedHeader::seal(header)
+    SealedHeader::seal_slow(header)
 }
 
 /// Generates a random legacy [Transaction].
@@ -196,7 +196,7 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     let tx_count = block_params.tx_count.unwrap_or_else(|| rng.gen::<u8>());
     let transactions: Vec<TransactionSigned> =
         (0..tx_count).map(|_| random_signed_tx(rng)).collect();
-    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
+    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction().gas_limit());
 
     // Generate ommers
     let ommers_count = block_params.ommers_count.unwrap_or_else(|| rng.gen_range(0..2));
@@ -234,10 +234,11 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         ..Default::default()
     };
 
-    SealedBlock::new(
-        SealedHeader::seal(header),
-        BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
-    )
+    Block {
+        header,
+        body: BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
+    }
+    .seal_slow()
 }
 
 /// Generate a range of random blocks.

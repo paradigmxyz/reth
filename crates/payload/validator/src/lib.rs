@@ -8,12 +8,11 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadSidecar, MaybeCancunPayloadFields, PayloadError,
-};
+use alloy_rpc_types::engine::{MaybeCancunPayloadFields, PayloadError};
 use reth_chainspec::EthereumHardforks;
-use reth_primitives::{BlockBody, BlockExt, Header, SealedBlock};
-use reth_primitives_traits::SignedTransaction;
+use reth_engine_primitives::ExecutionData;
+use reth_primitives::SealedBlock;
+use reth_primitives_traits::{Block, SignedTransaction};
 use std::sync::Arc;
 
 /// Execution payload validator.
@@ -59,9 +58,9 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     ///
     /// Ensures that the number of blob versioned hashes matches the number hashes included in the
     /// _separate_ `block_versioned_hashes` of the cancun payload fields.
-    fn ensure_matching_blob_versioned_hashes<T: SignedTransaction>(
+    fn ensure_matching_blob_versioned_hashes<B: Block>(
         &self,
-        sealed_block: &SealedBlock<Header, BlockBody<T>>,
+        sealed_block: &SealedBlock<B>,
         cancun_fields: &MaybeCancunPayloadFields,
     ) -> Result<(), PayloadError> {
         let num_blob_versioned_hashes = sealed_block.blob_versioned_hashes_iter().count();
@@ -114,9 +113,10 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>
     pub fn ensure_well_formed_payload<T: SignedTransaction>(
         &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlock<Header, BlockBody<T>>, PayloadError> {
+        payload: ExecutionData,
+    ) -> Result<SealedBlock<reth_primitives::Block<T>>, PayloadError> {
+        let ExecutionData { payload, sidecar } = payload;
+
         let expected_hash = payload.block_hash();
 
         // First parse the block

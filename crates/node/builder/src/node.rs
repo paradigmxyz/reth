@@ -1,5 +1,6 @@
 // re-export the node api types
 pub use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
+use reth_payload_builder::PayloadBuilderHandle;
 
 use std::{
     marker::PhantomData,
@@ -7,14 +8,12 @@ use std::{
     sync::Arc,
 };
 
-use reth_network::NetworkPrimitives;
-use reth_node_api::{BlockBody, EngineTypes, FullNodeComponents};
+use reth_node_api::{EngineTypes, FullNodeComponents};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
-use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::{BlockReader, ChainSpecProvider};
+use reth_provider::ChainSpecProvider;
 use reth_rpc_api::EngineApiClient;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
@@ -118,8 +117,10 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     pub network: Node::Network,
     /// Provider to interact with the node's database
     pub provider: Node::Provider,
+    /// Node's configured payload builder.
+    pub payload_builder: Node::PayloadBuilder,
     /// Handle to the node's payload builder service.
-    pub payload_builder: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
+    pub payload_builder_handle: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
     /// Task executor for the node.
     pub task_executor: TaskExecutor,
     /// The initial node config.
@@ -139,6 +140,7 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node
             network: self.network.clone(),
             provider: self.provider.clone(),
             payload_builder: self.payload_builder.clone(),
+            payload_builder_handle: self.payload_builder_handle.clone(),
             task_executor: self.task_executor.clone(),
             config: self.config.clone(),
             data_dir: self.data_dir.clone(),
@@ -210,28 +212,4 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> DerefMut for FullNode<N
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.add_ons_handle
     }
-}
-
-/// This is a type alias to make type bounds simpler, when we have a [`NetworkPrimitives`] and need
-/// a [`BlockReader`] whose associated types match the [`NetworkPrimitives`] associated types.
-pub trait BlockReaderFor<N: NetworkPrimitives>:
-    BlockReader<
-    Block = N::Block,
-    Header = N::BlockHeader,
-    Transaction = <N::BlockBody as BlockBody>::Transaction,
-    Receipt = N::Receipt,
->
-{
-}
-
-impl<N, T> BlockReaderFor<N> for T
-where
-    N: NetworkPrimitives,
-    T: BlockReader<
-        Block = N::Block,
-        Header = N::BlockHeader,
-        Transaction = <N::BlockBody as BlockBody>::Transaction,
-        Receipt = N::Receipt,
-    >,
-{
 }

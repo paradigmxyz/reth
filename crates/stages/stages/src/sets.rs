@@ -47,6 +47,7 @@ use reth_config::config::StageConfig;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
+use reth_primitives_traits::Block;
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
@@ -102,7 +103,7 @@ where
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         header_downloader: H,
         body_downloader: B,
         executor_factory: E,
@@ -185,7 +186,7 @@ where
     /// The tip for the headers stage.
     tip: watch::Receiver<B256>,
     /// The consensus engine used to validate incoming data.
-    consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
     /// The block header downloader
     header_downloader: H,
     /// The block body downloader
@@ -203,7 +204,7 @@ where
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
@@ -215,7 +216,7 @@ where
 impl<P, H, B> OnlineStages<P, H, B>
 where
     P: HeaderSyncGapProvider + 'static,
-    H: HeaderDownloader + 'static,
+    H: HeaderDownloader<Header = <B::Block as Block>::Header> + 'static,
     B: BodyDownloader + 'static,
 {
     /// Create a new builder using the given headers stage.
@@ -236,7 +237,7 @@ where
         provider: P,
         tip: watch::Receiver<B256>,
         header_downloader: H,
-        consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         stages_config: StageConfig,
     ) -> StageSetBuilder<Provider>
     where
@@ -258,7 +259,7 @@ where
 impl<Provider, P, H, B> StageSet<Provider> for OnlineStages<P, H, B>
 where
     P: HeaderSyncGapProvider + 'static,
-    H: HeaderDownloader + 'static,
+    H: HeaderDownloader<Header = <B::Block as Block>::Header> + 'static,
     B: BodyDownloader + 'static,
     HeaderStage<P, H>: Stage<Provider>,
     BodyStage<B>: Stage<Provider>,
@@ -317,27 +318,23 @@ where
     PruneStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        ExecutionStages::new(
-            self.executor_factory,
-            self.stages_config.clone(),
-            self.prune_modes.clone(),
-        )
-        .builder()
-        // If sender recovery prune mode is set, add the prune sender recovery stage.
-        .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
-            PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
-        }))
-        .add_set(HashingStages { stages_config: self.stages_config.clone() })
-        .add_set(HistoryIndexingStages {
-            stages_config: self.stages_config.clone(),
-            prune_modes: self.prune_modes.clone(),
-        })
-        // If any prune modes are set, add the prune stage.
-        .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
-            // Prune stage should be added after all hashing stages, because otherwise it will
-            // delete
-            PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
-        }))
+        ExecutionStages::new(self.executor_factory, self.stages_config.clone())
+            .builder()
+            // If sender recovery prune mode is set, add the prune sender recovery stage.
+            .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
+                PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
+            }))
+            .add_set(HashingStages { stages_config: self.stages_config.clone() })
+            .add_set(HistoryIndexingStages {
+                stages_config: self.stages_config.clone(),
+                prune_modes: self.prune_modes.clone(),
+            })
+            // If any prune modes are set, add the prune stage.
+            .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
+                // Prune stage should be added after all hashing stages, because otherwise it will
+                // delete
+                PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
+            }))
     }
 }
 
@@ -349,18 +346,12 @@ pub struct ExecutionStages<E> {
     executor_factory: E,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
-    /// Prune configuration for every segment that can be pruned
-    prune_modes: PruneModes,
 }
 
 impl<E> ExecutionStages<E> {
     /// Create a new set of execution stages with default values.
-    pub const fn new(
-        executor_factory: E,
-        stages_config: StageConfig,
-        prune_modes: PruneModes,
-    ) -> Self {
-        Self { executor_factory, stages_config, prune_modes }
+    pub const fn new(executor_factory: E, stages_config: StageConfig) -> Self {
+        Self { executor_factory, stages_config }
     }
 }
 
@@ -377,7 +368,6 @@ where
                 self.executor_factory,
                 self.stages_config.execution,
                 self.stages_config.execution_external_clean_threshold(),
-                self.prune_modes,
             ))
     }
 }

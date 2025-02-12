@@ -12,14 +12,14 @@ use crate::{
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
 use alloy_primitives::B256;
-use alloy_provider::Provider;
-use alloy_rpc_types_engine::ForkchoiceState;
+use alloy_provider::{network::AnyRpcBlock, Provider};
+use alloy_rpc_types_engine::{ExecutionPayload, ForkchoiceState};
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::SealedBlock;
-use reth_rpc_types_compat::engine::payload::block_to_payload;
+use reth_primitives_traits::SealedHeader;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -46,7 +46,7 @@ impl Command {
                 let block_res =
                     block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
-                let block: SealedBlock = block.try_into().unwrap();
+                let block = from_any_rpc_block(block);
                 let head_block_hash = block.hash();
                 let safe_block_hash = block_provider
                     .get_block_by_number(block.number.saturating_sub(32).into(), false.into());
@@ -80,9 +80,10 @@ impl Command {
             let versioned_hashes: Vec<B256> =
                 block.body().blob_versioned_hashes_iter().copied().collect();
             let parent_beacon_block_root = block.parent_beacon_block_root;
-            let payload = block_to_payload(block).0;
+            let (payload, _) =
+                ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
 
-            debug!(?block_number, "Sending payload",);
+            debug!(target: "reth-bench", ?block_number, "Sending payload",);
 
             // construct fcu to call
             let forkchoice_state = ForkchoiceState {
@@ -160,4 +161,20 @@ impl Command {
 
         Ok(())
     }
+}
+
+// TODO(mattsse): integrate in alloy
+pub(crate) fn from_any_rpc_block(block: AnyRpcBlock) -> SealedBlock {
+    let block = block.inner;
+    let block_hash = block.header.hash;
+    let block = block.try_map_transactions(|tx| tx.try_into()).unwrap();
+
+    SealedBlock::from_sealed_parts(
+        SealedHeader::new(block.header.inner.into_header_with_defaults(), block_hash),
+        reth_primitives::BlockBody {
+            transactions: block.transactions.into_transactions().collect(),
+            ommers: Default::default(),
+            withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
+        },
+    )
 }

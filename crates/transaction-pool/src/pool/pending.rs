@@ -6,7 +6,7 @@ use crate::{
     },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, BTreeMap},
@@ -43,7 +43,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     independent_transactions: FxHashMap<SenderId, PendingTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
-    /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
+    /// See also [`reth_primitives_traits::InMemorySize::size`].
     size_of: SizeTracker,
     /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
     /// `static_files` of this pool.
@@ -98,7 +98,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
-    pub(crate) fn best(&self) -> BestTransactions<T> {
+    pub fn best(&self) -> BestTransactions<T> {
         BestTransactions {
             all: self.by_id.clone(),
             independent: self.independent_transactions.values().cloned().collect(),
@@ -379,9 +379,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
         // can be removed.
         let mut non_local_senders = self.highest_nonces.len();
 
-        // keep track of unique senders from previous iterations, to understand how many unique
+        // keeps track of unique senders from previous iterations, to understand how many unique
         // senders were removed in the last iteration
         let mut unique_senders = self.highest_nonces.len();
+
+        // keeps track of which senders we've marked as local
+        let mut local_senders = FxHashSet::default();
 
         // keep track of transactions to remove and how many have been removed so far
         let original_length = self.len();
@@ -424,7 +427,10 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 }
 
                 if !remove_locals && tx.transaction.is_local() {
-                    non_local_senders -= 1;
+                    let sender_id = tx.transaction.sender_id();
+                    if local_senders.insert(sender_id) {
+                        non_local_senders -= 1;
+                    }
                     continue
                 }
 
@@ -607,6 +613,7 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
+    use alloy_consensus::Transaction;
     use alloy_primitives::address;
     use reth_primitives::TxType;
     use std::collections::HashSet;
@@ -971,5 +978,46 @@ mod tests {
         // Verify that only tx2 remains in the pool
         assert!(pool.contains(tx2.id()));
         assert!(!pool.contains(tx1.id()));
+    }
+
+    #[test]
+    fn local_senders_tracking() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Addresses for simulated senders A, B, C
+        let a = address!("000000000000000000000000000000000000000a");
+        let b = address!("000000000000000000000000000000000000000b");
+        let c = address!("000000000000000000000000000000000000000c");
+
+        // sender A (local) - 11+ transactions (large enough to keep limit exceeded)
+        // sender B (external) - 2 transactions
+        // sender C (external) - 2 transactions
+
+        // Create transaction chains for senders A, B, C
+        let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 11, TxType::Eip1559);
+        let b_txs = MockTransactionSet::sequential_transactions_by_sender(b, 2, TxType::Eip1559);
+        let c_txs = MockTransactionSet::sequential_transactions_by_sender(c, 2, TxType::Eip1559);
+
+        // create local txs for sender A
+        for tx in a_txs.into_vec() {
+            let final_tx = Arc::new(f.validated_with_origin(crate::TransactionOrigin::Local, tx));
+
+            pool.add_transaction(final_tx, 0);
+        }
+
+        // create external txs for senders B and C
+        let remaining_txs = [b_txs.into_vec(), c_txs.into_vec()].concat();
+        for tx in remaining_txs {
+            let final_tx = f.validated_arc(tx);
+
+            pool.add_transaction(final_tx, 0);
+        }
+
+        // Sanity check, ensuring everything is consistent.
+        pool.assert_invariants();
+
+        let pool_limit = SubPoolLimit { max_txs: 10, max_size: usize::MAX };
+        pool.truncate_pool(pool_limit);
     }
 }

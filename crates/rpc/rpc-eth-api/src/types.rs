@@ -1,25 +1,29 @@
 //! Trait for specifying `eth` network dependent API types.
 
-use std::{
-    error::Error,
-    fmt::{self},
-};
-
+use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_network::Network;
 use alloy_rpc_types_eth::Block;
 use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-
-use crate::{AsEthApiError, FromEthApiError, FromEvmError, RpcNodeCore};
+use std::{
+    error::Error,
+    fmt::{self},
+};
 
 /// Network specific `eth` API types.
+///
+/// This trait defines the network specific rpc types and helpers required for the `eth_` and
+/// adjacent endpoints. `NetworkTypes` is [`Network`] as defined by the alloy crate, see also
+/// [`alloy_network::Ethereum`].
+///
+/// This type is stateful so that it can provide additional context if necessary, e.g. populating
+/// receipts with additional data.
 pub trait EthApiTypes: Send + Sync + Clone {
     /// Extension of [`FromEthApiError`], with network specific errors.
     type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
         + FromEthApiError
         + AsEthApiError
-        + FromEvmError
         + Error
         + Send
         + Sync;

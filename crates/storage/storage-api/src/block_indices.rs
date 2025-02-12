@@ -1,3 +1,6 @@
+use alloc::vec::Vec;
+use alloy_primitives::BlockNumber;
+use core::ops::RangeInclusive;
 use reth_db_models::StoredBlockBodyIndices;
 use reth_storage_errors::provider::ProviderResult;
 
@@ -8,4 +11,10 @@ pub trait BlockBodyIndicesProvider: Send + Sync {
     ///
     /// Returns `None` if block is not found.
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>>;
+
+    /// Returns the block body indices within the requested range matching number from storage.
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>>;
 }

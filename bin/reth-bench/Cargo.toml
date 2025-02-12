@@ -18,16 +18,12 @@ reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
 reth-node-core.workspace = true
 reth-node-api.workspace = true
-reth-rpc-types-compat.workspace = true
 reth-primitives = { workspace = true, features = ["alloy-compat"] }
 reth-primitives-traits.workspace = true
 reth-tracing.workspace = true
 
 # alloy
-alloy-provider = { workspace = true, features = [
-    "engine-api",
-    "reqwest-rustls-tls",
-], default-features = false }
+alloy-provider = { workspace = true, features = ["engine-api", "reqwest-rustls-tls"], default-features = false }
 alloy-rpc-types-engine.workspace = true
 alloy-transport.workspace = true
 alloy-transport-http.workspace = true
@@ -40,9 +36,7 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 # reqwest
-reqwest = { workspace = true, default-features = false, features = [
-    "rustls-tls-native-roots",
-] }
+reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots"] }
 
 # tower
 tower.workspace = true
@@ -54,12 +48,7 @@ tracing.workspace = true
 serde.workspace = true
 
 # async
-tokio = { workspace = true, features = [
-    "sync",
-    "macros",
-    "time",
-    "rt-multi-thread",
-] }
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures.workspace = true
 async-trait.workspace = true
 
@@ -78,14 +67,14 @@ reth-tracing.workspace = true
 default = ["jemalloc"]
 
 asm-keccak = [
-	"reth-primitives/asm-keccak",
-	"reth-node-core/asm-keccak",
-	"alloy-primitives/asm-keccak"
+    "reth-primitives/asm-keccak",
+    "reth-node-core/asm-keccak",
+    "alloy-primitives/asm-keccak",
 ]
 
 jemalloc = [
-	"reth-cli-util/jemalloc",
-	"reth-node-core/jemalloc"
+    "reth-cli-util/jemalloc",
+    "reth-node-core/jemalloc",
 ]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
@@ -96,7 +85,7 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
-optimism = ["reth-primitives/optimism", "reth-node-core/optimism"]
+optimism = ["reth-node-core/optimism"]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []

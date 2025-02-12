@@ -11,7 +11,7 @@ use eyre::Ok;
 use futures_util::Future;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::{Block, BlockTy, EngineTypes, FullNodeComponents};
+use reth_node_api::{Block, BlockBody, BlockTy, EngineTypes, FullNodeComponents, PrimitivesTy};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes, NodeTypesWithEngine};
 use reth_node_core::primitives::SignedTransaction;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
@@ -41,7 +41,7 @@ where
     pub engine_api: EngineApiTestContext<
         <Node::Types as NodeTypesWithEngine>::Engine,
         <Node::Types as NodeTypes>::ChainSpec,
-        <Node::Types as NodeTypes>::Primitives,
+        PrimitivesTy<Node::Types>,
     >,
     /// Context for testing RPC features.
     pub rpc: RpcTestContext<Node, AddOns::EthApi>,
@@ -60,11 +60,13 @@ where
         node: FullNode<Node, AddOns>,
         attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + 'static,
     ) -> eyre::Result<Self> {
-        let builder = node.payload_builder.clone();
-
         Ok(Self {
             inner: node.clone(),
-            payload: PayloadTestContext::new(builder, attributes_generator).await?,
+            payload: PayloadTestContext::new(
+                node.payload_builder_handle.clone(),
+                attributes_generator,
+            )
+            .await?,
             network: NetworkTestContext::new(node.network.clone()),
             engine_api: EngineApiTestContext {
                 chain_spec: node.chain_spec(),
@@ -232,7 +234,7 @@ where
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
         let head = self.engine_api.canonical_stream.next().await.unwrap();
-        let tx = head.tip().transactions().first();
+        let tx = head.tip().body().transactions().first();
         assert_eq!(tx.unwrap().tx_hash().as_slice(), tip_tx_hash.as_slice());
 
         loop {
@@ -264,8 +266,6 @@ where
 
     /// Sends FCU and waits for the node to sync to the given block.
     pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
-        self.engine_api.update_forkchoice(block, block).await?;
-
         let start = std::time::Instant::now();
 
         while self
@@ -275,8 +275,9 @@ where
             .is_none_or(|h| h.hash() != block)
         {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            self.engine_api.update_forkchoice(block, block).await?;
 
-            assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
+            assert!(start.elapsed() <= std::time::Duration::from_secs(40), "timed out");
         }
 
         // Hack to make sure that all components have time to process canonical state update.

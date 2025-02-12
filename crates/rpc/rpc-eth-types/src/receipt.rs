@@ -1,7 +1,8 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
-use super::{EthApiError, EthResult};
+use super::EthResult;
 use alloy_consensus::{transaction::TransactionMeta, ReceiptEnvelope, TxReceipt};
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
 use reth_primitives::{Receipt, TransactionSigned, TxType};
@@ -13,6 +14,7 @@ pub fn build_receipt<R, T, E>(
     meta: TransactionMeta,
     receipt: &R,
     all_receipts: &[R],
+    blob_params: Option<BlobParams>,
     build_envelope: impl FnOnce(ReceiptWithBloom<alloy_consensus::Receipt<Log>>) -> E,
 ) -> EthResult<TransactionReceipt<E>>
 where
@@ -21,8 +23,7 @@ where
 {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block)
     // and we don't need to check for pre EIP-2
-    let from =
-        transaction.recover_signer_unchecked().ok_or(EthApiError::InvalidTransactionSignature)?;
+    let from = transaction.recover_signer_unchecked()?;
 
     // get the previous transaction cumulative gas used
     let gas_used = if meta.index == 0 {
@@ -37,8 +38,9 @@ where
 
     let blob_gas_used = transaction.blob_gas_used();
     // Blob gas price should only be present if the transaction is a blob transaction
-    let blob_gas_price = blob_gas_used
-        .and_then(|_| meta.excess_blob_gas.map(alloy_eips::eip4844::calc_blob_gasprice));
+    let blob_gas_price =
+        blob_gas_used.and_then(|_| Some(blob_params?.calc_blob_fee(meta.excess_blob_gas?)));
+
     let logs_bloom = receipt.bloom();
 
     // get number of logs in the block
@@ -88,7 +90,6 @@ where
         // EIP-4844 fields
         blob_gas_price,
         blob_gas_used,
-        authorization_list: transaction.authorization_list().map(|l| l.to_vec()),
     })
 }
 
@@ -109,9 +110,15 @@ impl EthReceiptBuilder {
         meta: TransactionMeta,
         receipt: &Receipt,
         all_receipts: &[Receipt],
+        blob_params: Option<BlobParams>,
     ) -> EthResult<Self> {
-        let base = build_receipt(transaction, meta, receipt, all_receipts, |receipt_with_bloom| {
-            match receipt.tx_type {
+        let base = build_receipt(
+            transaction,
+            meta,
+            receipt,
+            all_receipts,
+            blob_params,
+            |receipt_with_bloom| match receipt.tx_type {
                 TxType::Legacy => ReceiptEnvelope::Legacy(receipt_with_bloom),
                 TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt_with_bloom),
                 TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt_with_bloom),
@@ -119,8 +126,8 @@ impl EthReceiptBuilder {
                 TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt_with_bloom),
                 #[allow(unreachable_patterns)]
                 _ => unreachable!(),
-            }
-        })?;
+            },
+        )?;
 
         Ok(Self { base })
     }

@@ -15,10 +15,10 @@ use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
-use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives::{
-    BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
+use reth_node_types::{
+    BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
+use reth_primitives::{RecoveredBlock, SealedBlock, SealedHeader, StaticFileSegment};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -42,6 +42,9 @@ pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 
 use super::ProviderNodeTypes;
 
+mod builder;
+pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
+
 mod metrics;
 
 mod chain;
@@ -51,7 +54,7 @@ pub use chain::*;
 ///
 /// This provider implements most provider or provider factory traits.
 pub struct ProviderFactory<N: NodeTypesWithDB> {
-    /// Database
+    /// Database instance
     db: N::DB,
     /// Chain spec
     chain_spec: Arc<N::ChainSpec>,
@@ -63,19 +66,10 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage: Arc<N::Storage>,
 }
 
-impl<N> fmt::Debug for ProviderFactory<N>
-where
-    N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { db, chain_spec, static_file_provider, prune_modes, storage } = self;
-        f.debug_struct("ProviderFactory")
-            .field("db", &db)
-            .field("chain_spec", &chain_spec)
-            .field("static_file_provider", &static_file_provider)
-            .field("prune_modes", &prune_modes)
-            .field("storage", &storage)
-            .finish()
+impl<N: NodeTypes> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
+    /// Instantiates the builder for this type
+    pub fn builder() -> ProviderFactoryBuilder<N> {
+        ProviderFactoryBuilder::default()
     }
 }
 
@@ -382,19 +376,17 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
         self.provider()?.pending_block()
     }
 
-    fn pending_block_with_senders(
-        &self,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.provider()?.pending_block_with_senders()
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
         self.provider()?.pending_block_and_receipts()
     }
 
@@ -402,7 +394,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.provider()?.block_with_senders(id, transaction_kind)
     }
 
@@ -410,7 +402,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.provider()?.sealed_block_with_senders(id, transaction_kind)
     }
 
@@ -421,14 +413,14 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         self.provider()?.block_with_senders_range(range)
     }
 
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         self.provider()?.sealed_block_with_senders_range(range)
     }
 }
@@ -566,7 +558,29 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ProviderFactory<N> {
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.provider()?.block_body_indices(number)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            number,
+            |static_file| static_file.block_body_indices(number),
+            || self.provider()?.block_body_indices(number),
+        )
+    }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            *range.start()..*range.end() + 1,
+            |static_file, range, _| {
+                static_file.block_body_indices_range(range.start..=range.end.saturating_sub(1))
+            },
+            |range, _| {
+                self.provider()?.block_body_indices_range(range.start..=range.end.saturating_sub(1))
+            },
+            |_| true,
+        )
     }
 }
 
@@ -609,6 +623,22 @@ impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
         HashedPostState::from_bundle_state::<<N::StateCommitment as StateCommitment>::KeyHasher>(
             bundle_state.state(),
         )
+    }
+}
+
+impl<N> fmt::Debug for ProviderFactory<N>
+where
+    N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { db, chain_spec, static_file_provider, prune_modes, storage } = self;
+        f.debug_struct("ProviderFactory")
+            .field("db", &db)
+            .field("chain_spec", &chain_spec)
+            .field("static_file_provider", &static_file_provider)
+            .field("prune_modes", &prune_modes)
+            .field("storage", &storage)
+            .finish()
     }
 }
 
@@ -703,10 +733,8 @@ mod tests {
         {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(
-                provider.insert_block(
-                    block.clone().try_seal_with_senders().unwrap(),
-                    StorageLocation::Database
-                ),
+                provider
+                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
                 Ok(_)
             );
             assert_matches!(
@@ -714,7 +742,7 @@ mod tests {
                 if sender == block.body().transactions[0].recover_signer().unwrap()
             );
             assert_matches!(
-                provider.transaction_id(block.body().transactions[0].hash()),
+                provider.transaction_id(*block.body().transactions[0].tx_hash()),
                 Ok(Some(0))
             );
         }
@@ -727,14 +755,15 @@ mod tests {
             };
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
             assert_matches!(
-                provider.insert_block(
-                    block.clone().try_seal_with_senders().unwrap(),
-                    StorageLocation::Database
-                ),
+                provider
+                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body().transactions[0].hash()), Ok(None));
+            assert_matches!(
+                provider.transaction_id(*block.body().transactions[0].tx_hash()),
+                Ok(None)
+            );
         }
     }
 
@@ -751,10 +780,8 @@ mod tests {
             let provider = factory.provider_rw().unwrap();
 
             assert_matches!(
-                provider.insert_block(
-                    block.clone().try_seal_with_senders().unwrap(),
-                    StorageLocation::Database
-                ),
+                provider
+                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
                 Ok(_)
             );
 

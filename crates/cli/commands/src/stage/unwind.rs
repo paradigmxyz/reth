@@ -12,12 +12,10 @@ use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_core::args::NetworkArgs;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainStateBlockReader,
     ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory, StorageLocation,
 };
-use reth_prune::PruneModes;
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
     stages::ExecutionStage,
@@ -33,9 +31,6 @@ use tracing::info;
 pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
-
-    #[command(flatten)]
-    network: NetworkArgs,
 
     #[command(subcommand)]
     command: Subcommands,
@@ -120,7 +115,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let builder = if self.offline {
             Pipeline::<N>::builder().add_stages(
-                OfflineStages::new(executor, config.stages, PruneModes::default())
+                OfflineStages::new(executor, config.stages, prune_modes.clone())
                     .builder()
                     .disable(reth_stages::StageId::SenderRecovery),
             )
@@ -145,7 +140,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                         max_duration: None,
                     },
                     stage_conf.execution_external_clean_threshold(),
-                    prune_modes,
                     ExExManagerHandle::empty(),
                 )),
             )
@@ -153,7 +147,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let pipeline = builder.build(
             provider_factory.clone(),
-            StaticFileProducer::new(provider_factory, PruneModes::default()),
+            StaticFileProducer::new(provider_factory, prune_modes),
         );
         Ok(pipeline)
     }

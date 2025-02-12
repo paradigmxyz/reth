@@ -20,7 +20,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_api::{BlockTy, BodyTy, HeaderTy};
+use reth_node_api::BlockTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_provider::{
@@ -87,7 +87,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         let mut total_decoded_blocks = 0;
         let mut total_decoded_txns = 0;
 
-        while let Some(file_client) = reader.next_chunk::<FileClient<_>>().await? {
+        let mut sealed_header = provider_factory
+            .sealed_header(provider_factory.last_block_number()?)?
+            .expect("should have genesis");
+
+        while let Some(file_client) =
+            reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
+        {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
@@ -125,6 +131,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
                 res = pipeline.run() => res?,
                 _ = tokio::signal::ctrl_c() => {},
             }
+
+            sealed_header = provider_factory
+                .sealed_header(provider_factory.last_block_number()?)?
+                .expect("should have genesis");
         }
 
         let provider = provider_factory.provider()?;
@@ -169,7 +179,7 @@ pub fn build_import_pipeline<N, C, E>(
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent<N::Primitives>>)>
 where
     N: ProviderNodeTypes + CliNodeTypes,
-    C: Consensus<HeaderTy<N>, BodyTy<N>, Error = ConsensusError> + 'static,
+    C: Consensus<BlockTy<N>, Error = ConsensusError> + 'static,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     if !file_client.has_canonical_blocks() {

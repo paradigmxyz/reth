@@ -3,27 +3,28 @@
 use std::{
     fmt::{self, Debug},
     future::Future,
-    marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
+use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
+use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineValidator, FullNodeComponents, NodeAddOns, NodeTypes,
-    NodeTypesWithEngine,
+    AddOnsContext, BlockTy, EngineTypes, EngineValidator, ExecutionData, FullNodeComponents,
+    NodeAddOns, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadStore;
-use reth_primitives::EthPrimitives;
+use reth_provider::ChainSpecProvider;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
     EthApi,
 };
-use reth_rpc_api::eth::helpers::AddDevSigners;
+use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -31,10 +32,8 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
+use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
-use std::sync::Arc;
-
-use crate::EthApiBuilderCtx;
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -197,7 +196,6 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         Node::Pool,
         Node::Network,
         TaskExecutor,
-        Node::Provider,
         EthApi,
         Node::Executor,
         Node::Consensus,
@@ -214,7 +212,6 @@ where
         Node::Pool,
         Node::Network,
         TaskExecutor,
-        Node::Provider,
         EthApi,
         Node::Executor,
         Node::Consensus,
@@ -302,12 +299,31 @@ where
 }
 
 /// Handle to the launched RPC servers.
-#[derive(Clone)]
 pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// Handles to launched servers.
     pub rpc_server_handles: RethRpcServerHandles,
     /// Configured RPC modules.
     pub rpc_registry: RpcRegistry<Node, EthApi>,
+    /// Notification channel for engine API events
+    ///
+    /// Caution: This is a multi-producer, multi-consumer broadcast and allows grants access to
+    /// dispatch events
+    pub engine_events:
+        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
+    /// Handle to the beacon consensus engine.
+    pub beacon_engine_handle:
+        BeaconConsensusEngineHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, EthApi> {
+    fn clone(&self) -> Self {
+        Self {
+            rpc_server_handles: self.rpc_server_handles.clone(),
+            rpc_registry: self.rpc_registry.clone(),
+            engine_events: self.engine_events.clone(),
+            beacon_engine_handle: self.beacon_engine_handle.clone(),
+        }
+    }
 }
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes> Deref for RpcHandle<Node, EthApi> {
@@ -331,40 +347,43 @@ where
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
-#[allow(clippy::type_complexity)]
-pub struct RpcAddOns<Node: FullNodeComponents, EthApi: EthApiTypes, EV> {
+#[expect(clippy::type_complexity)]
+pub struct RpcAddOns<Node: FullNodeComponents, EthApi, EV, EB = BasicEngineApiBuilder<EV>> {
     /// Additional RPC add-ons.
     pub hooks: RpcHooks<Node, EthApi>,
     /// Builder for `EthApi`
     eth_api_builder: Box<dyn FnOnce(&EthApiBuilderCtx<Node>) -> EthApi + Send + Sync>,
     /// Engine validator
     engine_validator_builder: EV,
-    _pd: PhantomData<(Node, EthApi)>,
+    /// Builder for `EngineApi`
+    engine_api_builder: EB,
 }
 
-impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV: Debug> Debug
-    for RpcAddOns<Node, EthApi, EV>
+impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV: Debug, EB: Debug> Debug
+    for RpcAddOns<Node, EthApi, EV, EB>
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RpcAddOns")
             .field("hooks", &self.hooks)
             .field("eth_api_builder", &"...")
             .field("engine_validator_builder", &self.engine_validator_builder)
+            .field("engine_api_builder", &self.engine_api_builder)
             .finish()
     }
 }
 
-impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV> RpcAddOns<Node, EthApi, EV> {
+impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV, EB> RpcAddOns<Node, EthApi, EV, EB> {
     /// Creates a new instance of the RPC add-ons.
     pub fn new(
         eth_api_builder: impl FnOnce(&EthApiBuilderCtx<Node>) -> EthApi + Send + Sync + 'static,
         engine_validator_builder: EV,
+        engine_api_builder: EB,
     ) -> Self {
         Self {
             hooks: RpcHooks::default(),
             eth_api_builder: Box::new(eth_api_builder),
             engine_validator_builder,
-            _pd: PhantomData,
+            engine_api_builder,
         }
     }
 
@@ -389,18 +408,19 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV> RpcAddOns<Node, EthApi, 
     }
 }
 
-impl<Node, EthApi, EV> Default for RpcAddOns<Node, EthApi, EV>
+impl<Node, EthApi, EV, EB> Default for RpcAddOns<Node, EthApi, EV, EB>
 where
     Node: FullNodeComponents,
     EthApi: EthApiTypes + EthApiBuilder<Node>,
     EV: Default,
+    EB: Default,
 {
     fn default() -> Self {
-        Self::new(EthApi::build, EV::default())
+        Self::new(EthApi::build, EV::default(), EB::default())
     }
 }
 
-impl<N, EthApi, EV> RpcAddOns<N, EthApi, EV>
+impl<N, EthApi, EV, EB> RpcAddOns<N, EthApi, EV, EB>
 where
     N: FullNodeComponents,
     EthApi: EthApiTypes
@@ -409,6 +429,7 @@ where
         + Unpin
         + 'static,
     EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
 {
     /// Launches the RPC servers with the given context and an additional hook for extending
     /// modules.
@@ -420,29 +441,11 @@ where
     where
         F: FnOnce(&mut TransportRpcModules, &mut AuthRpcModule) -> eyre::Result<()>,
     {
-        let Self { eth_api_builder, engine_validator_builder, hooks, _pd: _ } = self;
+        let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
-        let engine_validator = engine_validator_builder.build(&ctx).await?;
-        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret } = ctx;
+        let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
+        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
 
-        let client = ClientVersionV1 {
-            code: CLIENT_CODE,
-            name: NAME_CLIENT.to_string(),
-            version: CARGO_PKG_VERSION.to_string(),
-            commit: VERGEN_GIT_SHA.to_string(),
-        };
-
-        let engine_api = EngineApi::new(
-            node.provider().clone(),
-            config.chain.clone(),
-            beacon_engine_handle,
-            PayloadStore::new(node.payload_builder().clone()),
-            node.pool().clone(),
-            Box::new(node.task_executor().clone()),
-            client,
-            EngineCapabilities::default(),
-            engine_validator.clone(),
-        );
         info!(target: "reth::cli", "Engine API handler initialized");
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -453,17 +456,11 @@ where
             .with_provider(node.provider().clone())
             .with_pool(node.pool().clone())
             .with_network(node.network().clone())
-            .with_events(node.provider().clone())
             .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(
-                module_config,
-                engine_api,
-                eth_api_builder,
-                Arc::new(engine_validator),
-            );
+            .build_with_auth_server(module_config, engine_api, eth_api_builder);
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -524,11 +521,16 @@ where
 
         on_rpc_started.on_rpc_started(ctx, handles.clone())?;
 
-        Ok(RpcHandle { rpc_server_handles: handles, rpc_registry: registry })
+        Ok(RpcHandle {
+            rpc_server_handles: handles,
+            rpc_registry: registry,
+            engine_events,
+            beacon_engine_handle,
+        })
     }
 }
 
-impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
+impl<N, EthApi, EV, EB> NodeAddOns<N> for RpcAddOns<N, EthApi, EV, EB>
 where
     N: FullNodeComponents,
     EthApi: EthApiTypes
@@ -537,6 +539,7 @@ where
         + Unpin
         + 'static,
     EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
 {
     type Handle = RpcHandle<N, EthApi>;
 
@@ -557,7 +560,8 @@ pub trait RethRpcAddOns<N: FullNodeComponents>:
     fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi>;
 }
 
-impl<N: FullNodeComponents, EthApi: EthApiTypes, EV> RethRpcAddOns<N> for RpcAddOns<N, EthApi, EV>
+impl<N: FullNodeComponents, EthApi: EthApiTypes, EV, EB> RethRpcAddOns<N>
+    for RpcAddOns<N, EthApi, EV, EB>
 where
     Self: NodeAddOns<N, Handle = RpcHandle<N, EthApi>>,
 {
@@ -574,7 +578,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: 'static {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self;
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> EthApiBuilder<N>
+impl<N: FullNodeComponents<Provider: ChainSpecProvider>> EthApiBuilder<N>
     for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self {
@@ -595,11 +599,12 @@ pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Validator>>;
 }
 
-impl<N, EthApi, EV> EngineValidatorAddOn<N> for RpcAddOns<N, EthApi, EV>
+impl<N, EthApi, EV, EB> EngineValidatorAddOn<N> for RpcAddOns<N, EthApi, EV, EB>
 where
     N: FullNodeComponents,
     EthApi: EthApiTypes,
     EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
 {
     type Validator = EV::Validator;
 
@@ -638,5 +643,65 @@ where
         ctx: &AddOnsContext<'_, Node>,
     ) -> impl Future<Output = eyre::Result<Self::Validator>> {
         self(ctx)
+    }
+}
+
+/// Builder for engine API RPC module.
+pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
+    /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee`] module.
+    type EngineApi: IntoEngineApiRpcModule + Send + Sync;
+
+    /// Builds the engine API.
+    fn build_engine_api(
+        self,
+        ctx: &AddOnsContext<'_, Node>,
+    ) -> impl Future<Output = eyre::Result<Self::EngineApi>> + Send;
+}
+
+/// Builder for basic [`EngineApi`] implementation.
+#[derive(Debug, Default)]
+pub struct BasicEngineApiBuilder<EV> {
+    engine_validator_builder: EV,
+}
+
+impl<N, EV> EngineApiBuilder<N> for BasicEngineApiBuilder<EV>
+where
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec: EthereumHardforks,
+            Engine: EngineTypes<ExecutionData = ExecutionData>,
+        >,
+    >,
+    EV: EngineValidatorBuilder<N>,
+{
+    type EngineApi = EngineApi<
+        N::Provider,
+        <N::Types as NodeTypesWithEngine>::Engine,
+        N::Pool,
+        EV::Validator,
+        <N::Types as NodeTypes>::ChainSpec,
+    >;
+
+    async fn build_engine_api(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
+        let Self { engine_validator_builder } = self;
+
+        let engine_validator = engine_validator_builder.build(ctx).await?;
+        let client = ClientVersionV1 {
+            code: CLIENT_CODE,
+            name: NAME_CLIENT.to_string(),
+            version: CARGO_PKG_VERSION.to_string(),
+            commit: VERGEN_GIT_SHA.to_string(),
+        };
+        Ok(EngineApi::new(
+            ctx.node.provider().clone(),
+            ctx.config.chain.clone(),
+            ctx.beacon_engine_handle.clone(),
+            PayloadStore::new(ctx.node.payload_builder_handle().clone()),
+            ctx.node.pool().clone(),
+            Box::new(ctx.node.task_executor().clone()),
+            client,
+            EngineCapabilities::default(),
+            engine_validator,
+        ))
     }
 }

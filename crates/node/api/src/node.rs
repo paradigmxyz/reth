@@ -1,20 +1,19 @@
 //! Traits for configuring a node.
 
-use crate::ConfigureEvm;
+use crate::PayloadTypes;
 use alloy_rpc_types_engine::JwtSecret;
+use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_db_api::{
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-    Database,
-};
-use reth_engine_primitives::BeaconConsensusEngineHandle;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_db_api::{database_metrics::DatabaseMetrics, Database};
+use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{HeaderTy, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
-use reth_payload_builder_primitives::PayloadBuilder;
+use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
+use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
 
@@ -26,7 +25,7 @@ pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
     /// Node's types with the database.
     type Types: NodeTypesWithEngine;
     /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
+    type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
     type Provider: FullProvider<NodeTypesWithDBAdapter<Self::Types, Self::DB>>;
 }
@@ -38,12 +37,29 @@ pub struct FullNodeTypesAdapter<Types, DB, Provider>(PhantomData<(Types, DB, Pro
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
     Types: NodeTypesWithEngine,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     Provider: FullProvider<NodeTypesWithDBAdapter<Types, DB>>,
 {
     type Types = Types;
     type DB = DB;
     type Provider = Provider;
+}
+
+/// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
+pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
+    PayloadBuilder<
+    Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+    BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+>
+{
+}
+
+impl<T, N: NodeTypesWithEngine> PayloadBuilderFor<N> for T where
+    T: PayloadBuilder<
+        Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+    >
+{
 }
 
 /// Encapsulates all types and components of the node.
@@ -52,7 +68,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm<Header = HeaderTy<Self::Types>, Transaction = TxTy<Self::Types>>;
+    type Evm: ConfigureEvmFor<<Self::Types as NodeTypes>::Primitives>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;
@@ -67,8 +83,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Network: FullNetwork;
 
     /// Builds new blocks.
-    type PayloadBuilder: PayloadBuilder<PayloadType = <Self::Types as NodeTypesWithEngine>::Engine>
-        + Clone;
+    type PayloadBuilder: PayloadBuilderFor<Self::Types>;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
@@ -85,8 +100,14 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns the handle to the network
     fn network(&self) -> &Self::Network;
 
-    /// Returns the handle to the payload builder service.
+    /// Returns the configured payload builder.
     fn payload_builder(&self) -> &Self::PayloadBuilder;
+
+    /// Returns the handle to the payload builder service handling payload building requests from
+    /// the engine.
+    fn payload_builder_handle(
+        &self,
+    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
@@ -105,6 +126,8 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle:
         BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
+    /// Notification channel for engine API events
+    pub engine_events: EventSender<BeaconConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
 }

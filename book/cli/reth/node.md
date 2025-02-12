@@ -381,7 +381,7 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-envs <MAX_HEADERS>
+      --rpc-cache.max-headers <MAX_HEADERS>
           Max number of headers in cache
 
           [default: 1000]
@@ -440,6 +440,16 @@ TxPool:
 
       --txpool.queued-max-size <QUEUED_MAX_SIZE>
           Max size of the queued sub-pool in megabytes
+
+          [default: 20]
+
+      --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
+          Max number of transaction in the blobpool
+
+          [default: 10000]
+
+      --txpool.blobpool-max-size <BLOBPOOL_MAX_SIZE>
+          Max size of the blobpool in megabytes
 
           [default: 20]
 
@@ -506,6 +516,11 @@ TxPool:
           How many new pending transactions to buffer and send to in progress pending transaction iterators
 
           [default: 200]
+
+      --txpool.lifetime <DURATION>
+          Maximum amount of time non-executable transaction are queued
+
+          [default: 10800]
 
 Builder:
       --builder.extradata <EXTRA_DATA>
@@ -692,8 +707,16 @@ Engine:
 
           [default: 2]
 
-      --engine.state-root-task
-          Enable state root task
+      --engine.legacy-state-root
+          Enable legacy state root
+
+      --engine.caching-and-prewarming
+          Enable cross-block caching and parallel prewarming
+
+      --engine.cross-block-cache-size <CROSS_BLOCK_CACHE_SIZE>
+          Configure the size of cross-block cache in megabytes
+
+          [default: 4096]
 
       --engine.state-root-task-compare-updates
           Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation

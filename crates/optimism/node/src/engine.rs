@@ -1,6 +1,5 @@
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    PayloadError,
+    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
 };
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
@@ -12,16 +11,15 @@ use reth_node_api::{
         EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
         VersionSpecificValidationError,
     },
-    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
-    PayloadValidator,
+    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, ExecutionData,
+    NodePrimitives, PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::OpBlock;
+use reth_optimism_primitives::{OpBlock, OpPrimitives};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::SealedBlockFor;
-use reth_rpc_types_compat::engine::payload::block_to_payload;
+use reth_primitives::SealedBlock;
 use std::sync::Arc;
 
 /// The types used in the optimism beacon consensus engine.
@@ -49,25 +47,28 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
+    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
-        block: SealedBlockFor<
+        block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        block_to_payload(block)
+    ) -> ExecutionData {
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        ExecutionData { payload, sidecar }
     }
 }
 
 /// A default payload type for [`OpEngineTypes`]
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OpPayloadTypes;
+pub struct OpPayloadTypes<N: NodePrimitives = OpPrimitives>(core::marker::PhantomData<N>);
 
-impl PayloadTypes for OpPayloadTypes {
-    type BuiltPayload = OpBuiltPayload;
+impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N> {
+    type BuiltPayload = OpBuiltPayload<N>;
     type PayloadAttributes = OpPayloadAttributes;
-    type PayloadBuilderAttributes = OpPayloadBuilderAttributes;
+    type PayloadBuilderAttributes = OpPayloadBuilderAttributes<N::SignedTx>;
 }
 
 /// Validator for Optimism engine API.
@@ -91,20 +92,33 @@ impl OpEngineValidator {
 
 impl PayloadValidator for OpEngineValidator {
     type Block = OpBlock;
+    type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload, sidecar)
+        payload: ExecutionData,
+    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
+        self.inner.ensure_well_formed_payload(payload)
     }
 }
 
 impl<Types> EngineValidator<Types> for OpEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
+    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = ExecutionData>,
 {
+    fn validate_execution_requests(
+        &self,
+        requests: &alloy_eips::eip7685::Requests,
+    ) -> Result<(), EngineObjectValidationError> {
+        // according to op spec, execution requests must be empty
+        if !requests.is_empty() {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "NonEmptyExecutionRequests".to_string().into(),
+            ))
+        }
+        Ok(())
+    }
+
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
@@ -204,13 +218,13 @@ pub fn validate_withdrawals_presence(
 
 #[cfg(test)]
 mod test {
+    use super::*;
 
     use crate::engine;
     use alloy_primitives::{b64, Address, B256, B64};
     use alloy_rpc_types_engine::PayloadAttributes;
+    use reth_node_builder::EngineValidator;
     use reth_optimism_chainspec::BASE_SEPOLIA;
-
-    use super::*;
 
     fn get_chainspec() -> Arc<OpChainSpec> {
         let hardforks = OpHardfork::base_sepolia();
@@ -251,7 +265,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(None, 1732633199);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -264,7 +278,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(None, 1732633200);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -277,7 +291,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(Some(b64!("0000000000000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -290,7 +304,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(Some(b64!("0000000800000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -303,7 +317,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(Some(b64!("0000000000000000")), 1732633200);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
