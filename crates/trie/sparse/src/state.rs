@@ -489,19 +489,22 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ) -> SparseStateTrieResult<&mut RevealedSparseTrie<F::AccountNodeProvider>> {
         match self.state {
             SparseTrie::Blind => {
-                let root_node = self
+                let (root_node, hash_mask, tree_mask) = self
                     .provider_factory
                     .account_node_provider()
                     .blinded_node(&Nibbles::default())?
-                    .map(|node| TrieNode::decode(&mut &node.node[..]))
+                    .map(|node| {
+                        TrieNode::decode(&mut &node.node[..])
+                            .map(|decoded| (decoded, node.hash_mask, node.tree_mask))
+                    })
                     .transpose()?
-                    .unwrap_or(TrieNode::EmptyRoot);
+                    .unwrap_or((TrieNode::EmptyRoot, None, None));
                 self.state
                     .reveal_root_with_provider(
                         self.provider_factory.account_node_provider(),
                         root_node,
-                        None,
-                        None,
+                        hash_mask,
+                        tree_mask,
                         self.retain_updates,
                     )
                     .map_err(Into::into)
