@@ -8,7 +8,7 @@ at the time of writing this document), it:
 3. Calculates the [MPT](https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/)
 root of the new state.
 4. Compares the root with the one received in the block header.
-5. Considers the block committed.
+5. Considers the block valid.
 
 This document describes the lifecycle of a payload with the focus on state root calculation,
 from the moment the payload is received, to the moment we have a new state root.
@@ -176,7 +176,7 @@ Sparse Trie component is the heart of the new state root calculation logic.
 
 ### Sparse Trie primer
 
-- State trie of Etheruem is very big (150GB+), and we cannot realistically fit it into memory.
+- The state trie of Ethereum is very big (150GB+), and we cannot realistically fit it into memory.
 - What if instead of loading the entire trie in memory,
 we only load the parts that were modified during the block execution (i.e. make the trie "sparse")?
     - Such modified parts will have nodes that will be modified,
@@ -222,7 +222,7 @@ https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20
 When messages are accumulated, we update the Sparse Trie:
 1. Reveal the proof
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1090-L1091
-2. For each modified storage trie in parallel, apply updates and calculate the roots
+2. For each modified storage trie, apply updates and calculate the roots in parallel
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1093
 3. Update accounts trie
 https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20a/crates/engine/tree/src/tree/root.rs#L1133
@@ -232,7 +232,7 @@ https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20
 As you can see, we do not calculate the state root hash of the accounts trie
 (the one that will be the result of the whole task), but instead calculate only the certain hashes.
 
-It is an optimization that comes from the fact that we will likely update the top 2-3 levels of the trie
+This is an optimization that comes from the fact that we will likely update the top 2-3 levels of the trie
 in every transaction, so doing that work every time would be wasteful.
 
 Instead, we calculate hashes for most of the levels of the trie, and do the rest of the work
