@@ -1,0 +1,28 @@
+[package]
+name = "op-chain-registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+# io
+dirs-next = "2.0.0"
+
+# misc
+serde_json = { workspace = true, features = ["std"] }
+zstd.workspace = true
+
+# tokio
+tokio = { workspace = true, features = ["fs", "test-util", "macros"] }
+
+# async
+reqwest = { workspace = true, features = ["native-tls"] }
+
+anyhow = "1.0"
+
+[lints]
+workspace = true
