@@ -1,20 +1,18 @@
 //! Optimism consensus errors
 
 use alloy_primitives::B256;
-use derive_more::{Display, From};
 use reth_consensus::ConsensusError;
 use reth_storage_errors::provider::ProviderError;
 
 /// Optimism consensus error.
-#[derive(Debug, Clone, Display, thiserror::Error, From)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum OpConsensusError {
     /// Block body has non-empty withdrawals list (l1 withdrawals).
     #[error("non-empty block body withdrawals list")]
     WithdrawalsNonEmpty,
     /// Failed to compute L2 withdrawals storage root.
     #[error("compute L2 withdrawals root failed: {_0}")]
-    #[from]
-    L2WithdrawalsRootCalculationFail(ProviderError),
+    L2WithdrawalsRootCalculationFail(#[from] ProviderError),
     /// L2 withdrawals root missing in block header.
     #[error("L2 withdrawals root missing from block header")]
     L2WithdrawalsRootMissing,
@@ -28,6 +26,5 @@ pub enum OpConsensusError {
     },
     /// L1 [`ConsensusError`], that also occurs on L2.
     #[error(transparent)]
-    #[from]
-    Eth(ConsensusError),
+    Eth(#[from] ConsensusError),
 }
