@@ -403,6 +403,8 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         let instance = self.get_instance();
         self.rpc.adjust_instance_ports(instance);
         self.network.adjust_instance_ports(instance);
+        self.rpc.ipcpath =
+            RpcServerArgs::append_instance_to_ipc_path(&self.rpc.ipcpath, Some(instance));
     }
 
     /// Sets networking and RPC ports to zero, causing the OS to choose random unused ports when

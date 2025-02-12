@@ -225,10 +225,10 @@ impl RpcServerArgs {
     }
 
     /// Appends the instance number to the IPC path if the instance is greater than 1.
-    fn append_instance_to_ipc_path(base_path: &str, instance: Option<u16>) -> String {
+    pub fn append_instance_to_ipc_path(base_path: &str, instance: Option<u16>) -> String {
         match instance {
-            Some(num) if num > 1 => format!("{}-{}", base_path, num),
-            _ => base_path.to_string(),
+            Some(num) => format!("{}-{}", base_path, num),
+            None => base_path.to_string(),
         }
     }
 
@@ -254,9 +254,6 @@ impl RpcServerArgs {
         self.http_port -= instance - 1;
         // ws port is scaled by a factor of instance * 2
         self.ws_port += instance * 2 - 2;
-
-        // if multiple instances are being run, append the instance number to the ipc path
-        self.ipcpath = Self::append_instance_to_ipc_path(&self.ipcpath, Some(instance));
     }
 
     /// Set the http port to zero, to allow the OS to assign a random unused port when the rpc
