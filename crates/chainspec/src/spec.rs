@@ -1941,10 +1941,8 @@ Post-merge hard forks (timestamp based):
 
         assert_eq!(chainspec.genesis_header().withdrawals_root, Some(EMPTY_ROOT_HASH));
 
-        let expected_hash: B256 =
-            hex!("1fc027d65f820d3eef441ebeec139ebe09e471cf98516dce7b5643ccb27f418c").into();
         let hash = chainspec.genesis_hash();
-        assert_eq!(hash, expected_hash);
+        assert_eq!(hash, DEV_GENESIS_HASH);
     }
 
     #[test]
