@@ -165,6 +165,10 @@ where
     fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
     }
+
+    fn into_state(self) -> reth::revm::db::State<Self::DB> {
+        self.state
+    }
 }
 
 sol!(

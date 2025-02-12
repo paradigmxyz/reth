@@ -5,6 +5,7 @@ use alloy_consensus::BlockHeader;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
+use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
@@ -17,23 +18,34 @@ use alloy_primitives::{
 };
 use reth_consensus::ConsensusError;
 use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
-use revm::{
-    db::{states::bundle_state::BundleRetention, BundleState},
-    State,
-};
+use revm::db::{states::bundle_state::BundleRetention, State};
 use revm_primitives::{Account, AccountStatus, EvmState};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
 ///
 /// This executor does not validate the output, see [`BatchExecutor`] for that.
-pub trait Executor<DB> {
-    /// The input type for the executor.
-    type Input<'a>;
-    /// The output type for the executor.
-    type Output;
+pub trait Executor<DB: Database>: Sized {
+    /// The primitive types used by the executor.
+    type Primitives: NodePrimitives;
     /// The error type returned by the executor.
     type Error;
+
+    /// Executes a single block and returns [`BlockExecutionResult`], without the state changes.
+    fn execute_one(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
+
+    /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
+    /// the EVM state after execution.
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: OnStateHook + 'static;
 
     /// Consumes the type and executes the block.
     ///
@@ -43,27 +55,55 @@ pub trait Executor<DB> {
     ///
     /// # Returns
     /// The output of the block execution.
-    fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
+    fn execute(
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        let BlockExecutionResult { receipts, requests, gas_used } = self.execute_one(block)?;
+        let mut state = self.into_state();
+        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+    }
 
     /// Executes the EVM with the given input and accepts a state closure that is invoked with
     /// the EVM state after execution.
     fn execute_with_state_closure<F>(
-        self,
-        input: Self::Input<'_>,
-        state: F,
-    ) -> Result<Self::Output, Self::Error>
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        mut f: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&State<DB>);
+        F: FnMut(&State<DB>),
+    {
+        let BlockExecutionResult { receipts, requests, gas_used } = self.execute_one(block)?;
+        let mut state = self.into_state();
+        f(&state);
+        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+    }
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
     fn execute_with_state_hook<F>(
-        self,
-        input: Self::Input<'_>,
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state_hook: F,
-    ) -> Result<Self::Output, Self::Error>
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: OnStateHook + 'static;
+        F: OnStateHook + 'static,
+    {
+        let BlockExecutionResult { receipts, requests, gas_used } =
+            self.execute_one_with_state_hook(block, state_hook)?;
+        let mut state = self.into_state();
+        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+    }
+
+    /// Consumes the executor and returns the [`State`] containing all state changes.
+    fn into_state(self) -> State<DB>;
+
+    /// The size hint of the batch's tracked state size.
+    ///
+    /// This is used to optimize DB commits depending on the size of the state.
+    fn size_hint(&self) -> usize;
 }
 
 /// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
@@ -132,10 +172,9 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// It is not expected to validate the state trie root, this must be done by the caller using
     /// the returned state.
-    type Executor<DB: Database>: for<'a> Executor<
+    type Executor<DB: Database>: Executor<
         DB,
-        Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        Output = BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>,
+        Primitives = Self::Primitives,
         Error = BlockExecutionError,
     >;
 
@@ -208,14 +247,11 @@ pub trait BlockExecutionStrategy {
     /// Returns a mutable reference to the current state.
     fn state_mut(&mut self) -> &mut State<Self::DB>;
 
+    /// Consumes the strategy and returns inner [`State`].
+    fn into_state(self) -> State<Self::DB>;
+
     /// Sets a hook to be called after each state change during execution.
     fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
-
-    /// Returns the final bundle state.
-    fn finish(&mut self) -> BundleState {
-        self.state_mut().merge_transitions(BundleRetention::Reverts);
-        self.state_mut().take_bundle()
-    }
 
     /// Validate a block with regard to execution results.
     fn validate_block_post_execution(
@@ -316,55 +352,46 @@ where
     S: BlockExecutionStrategy<DB = DB>,
     DB: Database,
 {
-    type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
-    type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
+    type Primitives = S::Primitives;
     type Error = S::Error;
 
-    fn execute(mut self, block: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        self.strategy.apply_pre_execution_changes(block)?;
-        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
-        let state = self.strategy.finish();
-
-        Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
-    }
-
-    fn execute_with_state_closure<F>(
-        mut self,
-        block: Self::Input<'_>,
-        mut state: F,
-    ) -> Result<Self::Output, Self::Error>
-    where
-        F: FnMut(&State<DB>),
+    fn execute_one(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         self.strategy.apply_pre_execution_changes(block)?;
         let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
         let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
+        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
 
-        state(self.strategy.state_ref());
-
-        let state = self.strategy.finish();
-
-        Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
+        Ok(BlockExecutionResult { receipts, requests, gas_used })
     }
 
-    fn execute_with_state_hook<H>(
-        mut self,
-        block: Self::Input<'_>,
-        state_hook: H,
-    ) -> Result<Self::Output, Self::Error>
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        H: OnStateHook + 'static,
+        F: OnStateHook + 'static,
     {
         self.strategy.with_state_hook(Some(Box::new(state_hook)));
 
         self.strategy.apply_pre_execution_changes(block)?;
         let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
         let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
+        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
 
-        let state = self.strategy.finish();
+        Ok(BlockExecutionResult { receipts, requests, gas_used })
+    }
 
-        Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
+    fn into_state(self) -> State<DB> {
+        self.strategy.into_state()
+    }
+
+    fn size_hint(&self) -> usize {
+        self.strategy.state_ref().bundle_state.size_hint()
     }
 }
 
@@ -511,35 +538,35 @@ mod tests {
 
     struct TestExecutor<DB>(PhantomData<DB>);
 
-    impl<DB> Executor<DB> for TestExecutor<DB> {
-        type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
-        type Output = BlockExecutionOutput<Receipt>;
+    impl<DB: Database> Executor<DB> for TestExecutor<DB> {
+        type Primitives = EthPrimitives;
         type Error = BlockExecutionError;
 
-        fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-            Err(BlockExecutionError::msg("execution unavailable for tests"))
-        }
-
-        fn execute_with_state_closure<F>(
-            self,
-            _: Self::Input<'_>,
-            _: F,
-        ) -> Result<Self::Output, Self::Error>
-        where
-            F: FnMut(&State<DB>),
+        fn execute_one(
+            &mut self,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
 
-        fn execute_with_state_hook<F>(
-            self,
-            _: Self::Input<'_>,
-            _: F,
-        ) -> Result<Self::Output, Self::Error>
+        fn execute_one_with_state_hook<F>(
+            &mut self,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+            _state_hook: F,
+        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         where
-            F: OnStateHook,
+            F: OnStateHook + 'static,
         {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
+        }
+
+        fn into_state(self) -> State<DB> {
+            unreachable!()
+        }
+
+        fn size_hint(&self) -> usize {
+            0
         }
     }
 
@@ -569,14 +596,12 @@ mod tests {
         state: State<DB>,
         execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
-        finish_result: BundleState,
     }
 
     #[derive(Clone)]
     struct TestExecutorStrategyFactory {
         execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
-        finish_result: BundleState,
     }
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
@@ -600,7 +625,6 @@ mod tests {
                 apply_post_execution_changes_result: self
                     .apply_post_execution_changes_result
                     .clone(),
-                finish_result: self.finish_result.clone(),
                 state,
             }
         }
@@ -644,8 +668,8 @@ mod tests {
             &mut self.state
         }
 
-        fn finish(&mut self) -> BundleState {
-            self.finish_result.clone()
+        fn into_state(self) -> State<Self::DB> {
+            self.state
         }
     }
 
@@ -669,13 +693,11 @@ mod tests {
             gas_used: expected_gas_used,
         };
         let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
-        let expected_finish_result = BundleState::default();
 
         let strategy_factory = TestExecutorStrategyFactory {
             execute_transactions_result: expected_execute_transactions_result,
             apply_post_execution_changes_result: expected_apply_post_execution_changes_result
                 .clone(),
-            finish_result: expected_finish_result.clone(),
         };
         let provider = BasicBlockExecutorProvider::new(strategy_factory);
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
@@ -687,7 +709,6 @@ mod tests {
         assert_eq!(block_execution_output.gas_used, expected_gas_used);
         assert_eq!(block_execution_output.receipts, expected_receipts);
         assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
-        assert_eq!(block_execution_output.state, expected_finish_result);
     }
 
     fn setup_state_with_account(
