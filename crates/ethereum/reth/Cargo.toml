@@ -33,6 +33,9 @@ reth-ethereum-consensus = { workspace = true, optional = true }
 reth-evm-ethereum = { workspace = true, optional = true }
 reth-node-ethereum = { workspace = true, optional = true }
 
+# alloy
+alloy-rpc-types-eth = { workspace = true, optional = true }
+
 [features]
 default = ["std"]
 std = [
@@ -41,6 +44,7 @@ std = [
     "reth-primitives-traits/std",
     "reth-consensus?/std",
     "reth-consensus-common?/std",
+    "alloy-rpc-types-eth?/std",
 ]
 arbitrary = [
     "std",
@@ -48,6 +52,7 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-db?/arbitrary",
+    "alloy-rpc-types-eth?/arbitrary",
 ]
 
 test-utils = [
@@ -69,7 +74,7 @@ consensus = ["dep:reth-consensus", "dep:reth-consensus-common", "dep:reth-ethere
 evm = ["dep:reth-evm", "dep:reth-evm-ethereum"]
 node-api = ["dep:reth-node-api"]
 node = ["provider", "consensus", "evm", "node-api", "dep:reth-node-ethereum", "rpc"]
-rpc = ["dep:reth-rpc", "dep:reth-rpc-builder", "dep:reth-rpc-api", "dep:reth-rpc-eth-types"]
+rpc = ["dep:reth-rpc", "dep:reth-rpc-builder", "dep:reth-rpc-api", "dep:reth-rpc-eth-types", "dep:alloy-rpc-types-eth"]
 js-tracer = ["rpc", "reth-rpc/js-tracer"]
 network = ["dep:reth-network"]
 provider = ["storage-api", "dep:reth-provider", "dep:reth-db"]
