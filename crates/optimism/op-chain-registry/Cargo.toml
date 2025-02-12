@@ -15,14 +15,16 @@ dirs-next = "2.0.0"
 # misc
 serde_json = { workspace = true, features = ["std"] }
 zstd.workspace = true
+eyre.workspace = true
+
+# tracing
+tracing.workspace = true
 
 # tokio
 tokio = { workspace = true, features = ["fs", "test-util", "macros"] }
 
 # async
-reqwest = { workspace = true, features = ["native-tls"] }
-
-anyhow = "1.0"
+reqwest = { workspace = true, features = ["blocking", "native-tls"] }
 
 [lints]
 workspace = true

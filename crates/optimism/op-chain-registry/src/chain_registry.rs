@@ -1,22 +1,20 @@
 //! Directory Manager downloads and manages files from the op-superchain-registry
 
-use anyhow::{Context, Result};
+use eyre::{Context, Result};
 use serde_json::Value;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
-use tokio::fs as tokio_fs;
+use tracing::{info, trace};
 use zstd::{dict::DecoderDictionary, stream::read::Decoder};
 
 /// Directory manager that handles caching and downloading of genesis files
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct DirectoryManager {
     base_path: PathBuf,
 }
 
-#[allow(dead_code)]
 impl DirectoryManager {
     const DICT_URL: &'static str = "https://raw.githubusercontent.com/ethereum-optimism/superchain-registry/main/superchain/extra/dictionary";
     const GENESIS_BASE_URL: &'static str = "https://raw.githubusercontent.com/ethereum-optimism/superchain-registry/main/superchain/extra/genesis";
@@ -38,66 +36,66 @@ impl DirectoryManager {
     }
 
     /// Check if a file exists at the given path
-    async fn file_exists(&self, path: &Path) -> bool {
+    fn file_exists(&self, path: &Path) -> bool {
         path.exists()
     }
 
     /// Read file from the given path
-    async fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
-        tokio_fs::read(path).await.context("Failed to read file")
+    fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
+        fs::read(path).context("Failed to read file")
     }
 
     /// Save data to the given path
-    async fn save_file(&self, path: &Path, data: &[u8]) -> Result<()> {
+    fn save_file(&self, path: &Path, data: &[u8]) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        tokio_fs::write(path, data).await.context("Failed to write file")
+        fs::write(path, data).context("Failed to write file")
     }
 
     /// Download a file from the given URL
-    async fn download_file(&self, url: &str, path: &Path) -> Result<Vec<u8>> {
-        if self.file_exists(path).await {
-            println!("Reading from cache: {}", path.display());
-            return self.read_file(path).await;
+    fn download_file(&self, url: &str, path: &Path) -> Result<Vec<u8>> {
+        if self.file_exists(path) {
+            info!(target: "reth::cli", path = ?path.display() ,"Reading from cache");
+            return self.read_file(path);
         }
 
-        println!("Downloading from URL: {}", url);
-        let response = reqwest::get(url).await.context("Failed to download file")?;
+        trace!(target: "reth::cli", url = ?url ,"Downloading from URL");
+        let response = reqwest::blocking::get(url).context("Failed to download file")?;
 
         if !response.status().is_success() {
-            anyhow::bail!("Failed to download: Status {}", response.status());
+            eyre::bail!("Failed to download: Status {}", response.status());
         }
 
-        let bytes = response.bytes().await?.to_vec();
-        self.save_file(path, &bytes).await?;
+        let bytes = response.bytes()?.to_vec();
+        self.save_file(path, &bytes)?;
 
         Ok(bytes)
     }
 
     /// Download and update the dictionary
-    async fn update_dictionary(&self) -> Result<Vec<u8>> {
+    fn update_dictionary(&self) -> Result<Vec<u8>> {
         let path = self.dictionary_path();
-        self.download_file(Self::DICT_URL, &path).await
+        self.download_file(Self::DICT_URL, &path)
     }
 
     /// Get genesis data for a network, downloading it if necessary
-    pub(crate) async fn get_genesis(&self, network_type: &str, network: &str) -> Result<Value> {
-        let dict_bytes = self.update_dictionary().await?;
-        println!("Got dictionary: {} bytes", dict_bytes.len());
+    pub(crate) fn get_genesis(&self, network_type: &str, network: &str) -> Result<Value> {
+        let dict_bytes = self.update_dictionary()?;
+        trace!(target: "reth::cli", bytes = ?dict_bytes.len(),"Got dictionary");
 
         let dictionary = DecoderDictionary::copy(&dict_bytes);
 
         let url = format!("{}/{}/{}.json.zst", Self::GENESIS_BASE_URL, network_type, network);
         let path = self.genesis_path(network_type, network);
 
-        let compressed_bytes = self.download_file(&url, &path).await?;
-        println!("Got genesis file: {} bytes", compressed_bytes.len());
+        let compressed_bytes = self.download_file(&url, &path)?;
+        trace!(target: "reth::cli", bytes = ?compressed_bytes.len(),"Got genesis file");
 
         let decoder = Decoder::with_prepared_dictionary(&compressed_bytes[..], &dictionary)
             .context("Failed to create decoder with dictionary")?;
 
-        println!("Parsing JSON...");
+        info!("Parsing JSON...");
         let json: Value = serde_json::from_reader(decoder).context("Failed to parse JSON")?;
 
         Ok(json)
@@ -107,20 +105,20 @@ impl DirectoryManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Result;
+    use eyre::Result;
 
-    #[tokio::test]
-    async fn test_directory_manager() -> Result<()> {
+    #[test]
+    fn test_directory_manager() -> Result<()> {
         // Create a temporary directory for testing
         let test_dir = PathBuf::from("test-registry");
         let manager = DirectoryManager::new(test_dir)?;
 
         // Test downloading genesis data
-        let json_data = manager.get_genesis("mainnet", "base").await?;
+        let json_data = manager.get_genesis("mainnet", "base")?;
         assert!(json_data.is_object(), "Parsed JSON should be an object");
 
         // Test using cached data
-        let cached_json_data = manager.get_genesis("mainnet", "base").await?;
+        let cached_json_data = manager.get_genesis("mainnet", "base")?;
         assert!(cached_json_data.is_object(), "Cached JSON should be an object");
 
         Ok(())

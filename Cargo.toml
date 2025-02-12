@@ -73,6 +73,7 @@ members = [
     "crates/optimism/evm/",
     "crates/optimism/hardforks/",
     "crates/optimism/node/",
+    "crates/optimism/op-chain-registry/",
     "crates/optimism/payload/",
     "crates/optimism/primitives/",
     "crates/optimism/reth/",
