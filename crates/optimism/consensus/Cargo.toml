@@ -75,6 +75,7 @@ std = [
     "reth-revm/std",
     "revm/std",
     "tracing/std",
+    "thiserror/std",
 ]
 optimism = [
     "reth-optimism-primitives/optimism",
