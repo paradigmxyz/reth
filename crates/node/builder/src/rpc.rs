@@ -1,13 +1,8 @@
 //! Builder support for rpc components.
 
-use std::{
-    fmt::{self, Debug},
-    future::Future,
-    ops::{Deref, DerefMut},
-};
-
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
 use alloy_rpc_types::engine::ClientVersionV1;
+use core::marker::PhantomData;
 use futures::TryFutureExt;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
@@ -34,6 +29,11 @@ use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
+use std::{
+    fmt::{self, Debug},
+    future::Future,
+    ops::{Deref, DerefMut},
+};
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -347,12 +347,11 @@ where
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
-#[expect(clippy::type_complexity)]
 pub struct RpcAddOns<Node: FullNodeComponents, EthApi, EV, EB = BasicEngineApiBuilder<EV>> {
     /// Additional RPC add-ons.
     pub hooks: RpcHooks<Node, EthApi>,
     /// Builder for `EthApi`
-    eth_api_builder: Box<dyn FnOnce(&EthApiBuilderCtx<Node>) -> EthApi + Send + Sync>,
+    eth_api_builder: PhantomData<EthApi>,
     /// Engine validator
     engine_validator_builder: EV,
     /// Builder for `EngineApi`
@@ -374,14 +373,10 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV: Debug, EB: Debug> Debug
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes, EV, EB> RpcAddOns<Node, EthApi, EV, EB> {
     /// Creates a new instance of the RPC add-ons.
-    pub fn new(
-        eth_api_builder: impl FnOnce(&EthApiBuilderCtx<Node>) -> EthApi + Send + Sync + 'static,
-        engine_validator_builder: EV,
-        engine_api_builder: EB,
-    ) -> Self {
+    pub fn new(engine_validator_builder: EV, engine_api_builder: EB) -> Self {
         Self {
             hooks: RpcHooks::default(),
-            eth_api_builder: Box::new(eth_api_builder),
+            eth_api_builder: PhantomData,
             engine_validator_builder,
             engine_api_builder,
         }
@@ -416,7 +411,7 @@ where
     EB: Default,
 {
     fn default() -> Self {
-        Self::new(EthApi::build, EV::default(), EB::default())
+        Self::new(EV::default(), EB::default())
     }
 }
 
@@ -426,6 +421,7 @@ where
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
         + AddDevSigners
+        + EthApiBuilder<N>
         + Unpin
         + 'static,
     EV: EngineValidatorBuilder<N>,
@@ -441,7 +437,7 @@ where
     where
         F: FnOnce(&mut TransportRpcModules, &mut AuthRpcModule) -> eyre::Result<()>,
     {
-        let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
+        let Self { engine_api_builder, hooks, .. } = self;
 
         let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
         let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
@@ -460,7 +456,7 @@ where
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, eth_api_builder);
+            .build_with_auth_server(module_config, engine_api, Box::new(EthApi::build));
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -535,6 +531,7 @@ where
     N: FullNodeComponents,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
+        + EthApiBuilder<N>
         + AddDevSigners
         + Unpin
         + 'static,
