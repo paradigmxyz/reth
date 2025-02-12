@@ -1,5 +1,5 @@
 use crate::{
-    blinded::{BlindedProviderFactory, DefaultBlindedProviderFactory},
+    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
     RevealedSparseTrie, SparseTrie,
 };
 use alloy_primitives::{
@@ -468,8 +468,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Calculates the hashes of the nodes below the provided level.
-    pub fn calculate_below_level(&mut self, level: usize) {
-        self.state.calculate_below_level(level);
+    pub fn calculate_below_level(&mut self, level: usize) -> SparseStateTrieResult<()> {
+        self.revealed_trie_mut()?.update_rlp_node_level(level);
+        Ok(())
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
@@ -477,22 +478,52 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         self.storages.get_mut(&account).and_then(|trie| trie.root())
     }
 
+    /// Returns mutable reference to the revealed sparse trie.
+    ///
+    /// If the trie is not revealed yet, its root will be revealed using the blinded node provider.
+    fn revealed_trie_mut(
+        &mut self,
+    ) -> SparseStateTrieResult<&mut RevealedSparseTrie<F::AccountNodeProvider>> {
+        match self.state {
+            SparseTrie::Blind => {
+                let root_node = self
+                    .provider_factory
+                    .account_node_provider()
+                    .blinded_node(&Nibbles::default())?
+                    .map(|node| TrieNode::decode(&mut &node.node[..]))
+                    .transpose()?
+                    .unwrap_or(TrieNode::EmptyRoot);
+                self.state
+                    .reveal_root_with_provider(
+                        self.provider_factory.account_node_provider(),
+                        root_node,
+                        None,
+                        None,
+                        self.retain_updates,
+                    )
+                    .map_err(Into::into)
+            }
+            SparseTrie::Revealed(ref mut trie) => Ok(trie),
+        }
+    }
+
     /// Returns sparse trie root if the trie has been revealed.
-    pub fn root(&mut self) -> Option<B256> {
-        self.state.root()
+    pub fn root(&mut self) -> SparseStateTrieResult<B256> {
+        Ok(self.revealed_trie_mut()?.root())
     }
 
     /// Returns sparse trie root and trie updates if the trie has been revealed.
-    pub fn root_with_updates(&mut self) -> Option<(B256, TrieUpdates)> {
+    pub fn root_with_updates(&mut self) -> SparseStateTrieResult<(B256, TrieUpdates)> {
         let storage_tries = self.storage_trie_updates();
-        self.state.root_with_updates().map(|(root, updates)| {
-            let updates = TrieUpdates {
-                account_nodes: updates.updated_nodes,
-                removed_nodes: updates.removed_nodes,
-                storage_tries,
-            };
-            (root, updates)
-        })
+        let revealed = self.revealed_trie_mut()?;
+
+        let (root, updates) = (revealed.root(), revealed.take_updates());
+        let updates = TrieUpdates {
+            account_nodes: updates.updated_nodes,
+            removed_nodes: updates.removed_nodes,
+            storage_tries,
+        };
+        Ok((root, updates))
     }
 
     /// Returns storage trie updates for tries that have been revealed.
@@ -923,7 +954,7 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(sparse.root(), Some(root));
+        assert_eq!(sparse.root().unwrap(), root);
 
         let address_3 = b256!("2000000000000000000000000000000000000000000000000000000000000000");
         let address_path_3 = Nibbles::unpack(address_3);
@@ -940,7 +971,7 @@ mod tests {
         trie_account_2.storage_root = sparse.storage_root(address_2).unwrap();
         sparse.update_account_leaf(address_path_2, alloy_rlp::encode(trie_account_2)).unwrap();
 
-        sparse.root();
+        sparse.root().unwrap();
 
         let sparse_updates = sparse.take_trie_updates().unwrap();
         // TODO(alexey): assert against real state root calculation updates
