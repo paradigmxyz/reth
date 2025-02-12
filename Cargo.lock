@@ -7691,7 +7691,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "nybbles",
- "reth-consensus",
  "reth-storage-errors",
  "thiserror 2.0.11",
 ]
