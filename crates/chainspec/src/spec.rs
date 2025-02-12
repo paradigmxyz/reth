@@ -1033,6 +1033,9 @@ pub fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
 mod tests {
     use super::*;
     use alloy_chains::Chain;
+    use alloy_consensus::constants::{
+        DEV_GENESIS_HASH, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+    };
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
@@ -2412,5 +2415,25 @@ Post-merge hard forks (timestamp based):
             .zip(hardforks.iter())
             .all(|(expected, actual)| &**expected == *actual));
         assert_eq!(expected_hardforks.len(), hardforks.len());
+    }
+
+    #[test]
+    fn mainnet_genesis_hash() {
+        assert_eq!(MAINNET.genesis_hash(), MAINNET_GENESIS_HASH)
+    }
+
+    #[test]
+    fn holesky_genesis_hash() {
+        assert_eq!(HOLESKY.genesis_hash(), HOLESKY_GENESIS_HASH)
+    }
+
+    #[test]
+    fn sepolia_genesis_hash() {
+        assert_eq!(SEPOLIA.genesis_hash(), SEPOLIA_GENESIS_HASH)
+    }
+
+    #[test]
+    fn dev_genesis_hash() {
+        assert_eq!(DEV.genesis_hash(), DEV_GENESIS_HASH)
     }
 }
