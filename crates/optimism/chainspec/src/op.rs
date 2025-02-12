@@ -3,10 +3,15 @@
 use crate::{LazyLock, OpChainSpec};
 use alloc::{sync::Arc, vec};
 use alloy_chains::Chain;
-use alloy_primitives::U256;
+use alloy_primitives::{b256, B256, U256};
 use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OpHardfork;
+
+/// For OP mainnet genesis header can't be properly computed from the genesis json file due to OVM
+/// history.
+pub const OP_MAINNET_GENESIS_HASH: B256 =
+    b256!("7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b");
 
 /// The Optimism Mainnet spec
 pub static OP_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {

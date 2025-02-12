@@ -290,10 +290,13 @@ impl ChainSpec {
 
     /// Get the header for the genesis block.
     pub fn genesis_header(&self) -> &Header {
-        self.genesis_header.get_or_init(|| self.make_genesis_header())
+        self.genesis_header
+            .get_or_init(|| SealedHeader::seal_slow(self.make_genesis_header()))
+            .header()
     }
 
-    fn make_genesis_header(&self) -> SealedHeader {
+    /// Assembles genesis header from genesis file.
+    pub fn make_genesis_header(&self) -> Header {
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
         let base_fee_per_gas = self.initial_base_fee();
 
@@ -322,7 +325,7 @@ impl ChainSpec {
             .is_prague_active_at_timestamp(self.genesis.timestamp)
             .then_some(EMPTY_REQUESTS_HASH);
 
-        let header = Header {
+        Header {
             gas_limit: self.genesis.gas_limit,
             difficulty: self.genesis.difficulty,
             nonce: self.genesis.nonce.into(),
@@ -338,14 +341,14 @@ impl ChainSpec {
             excess_blob_gas,
             requests_hash,
             ..Default::default()
-        };
-
-        SealedHeader::seal_slow(header)
+        }
     }
 
     /// Get the sealed header for the genesis block.
     pub fn sealed_genesis_header(&self) -> SealedHeader {
-        SealedHeader::new(self.genesis_header().clone(), self.genesis_hash())
+        self.genesis_header
+            .get_or_init(|| SealedHeader::seal_slow(self.make_genesis_header()))
+            .clone()
     }
 
     /// Get the initial base fee of the genesis block.
@@ -398,7 +401,9 @@ impl ChainSpec {
 
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
-        self.genesis_header.get_or_init(|| self.make_genesis_header()).hash()
+        self.genesis_header
+            .get_or_init(|| SealedHeader::seal_slow(self.make_genesis_header()))
+            .hash()
     }
 
     /// Get the timestamp of the genesis block.

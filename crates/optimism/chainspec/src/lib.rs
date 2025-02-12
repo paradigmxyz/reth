@@ -27,7 +27,7 @@ pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
 pub use dev::OP_DEV;
-pub use op::OP_MAINNET;
+pub use op::{OP_MAINNET, OP_MAINNET_GENESIS_HASH};
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
@@ -36,7 +36,7 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_primitives_traits::sync::LazyLock;
+use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -194,6 +194,19 @@ impl OpChainSpec {
     pub fn from_genesis(genesis: Genesis) -> Self {
         genesis.into()
     }
+
+    fn get_or_init_sealed_genesis_header(&self) -> &SealedHeader {
+        self.inner.genesis_header.get_or_init(|| {
+            let header = self.inner.make_genesis_header();
+            if self.is_optimism_mainnet() {
+                // for OP mainnet we have to do this because the genesis header can't be
+                // properly computed from the genesis.json file due to OVM history
+                SealedHeader::new(header, OP_MAINNET_GENESIS_HASH)
+            } else {
+                SealedHeader::seal_slow(header)
+            }
+        })
+    }
 }
 
 impl EthChainSpec for OpChainSpec {
@@ -220,7 +233,7 @@ impl EthChainSpec for OpChainSpec {
     }
 
     fn genesis_hash(&self) -> B256 {
-        self.inner.genesis_hash()
+        self.get_or_init_sealed_genesis_header().hash()
     }
 
     fn prune_delete_limit(&self) -> usize {
@@ -232,7 +245,7 @@ impl EthChainSpec for OpChainSpec {
     }
 
     fn genesis_header(&self) -> &Self::Header {
-        self.inner.genesis_header()
+        self.get_or_init_sealed_genesis_header().header()
     }
 
     fn genesis(&self) -> &Genesis {
