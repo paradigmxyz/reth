@@ -4,10 +4,10 @@ use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::{ConsensusError, FullConsensus, PostExecutionInput};
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{
-    execute::{BatchExecutor, BlockExecutorProvider},
+    execute::{BlockExecutorProvider, Executor},
     metrics::ExecutorMetrics,
 };
 use reth_execution_types::Chain;
@@ -16,9 +16,9 @@ use reth_primitives::StaticFileSegment;
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, StateCommitmentProvider, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateCommitmentProvider,
+    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -67,7 +67,6 @@ use super::missing_static_data_error;
 ///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
 #[derive(Debug)]
-#[expect(dead_code)]
 pub struct ExecutionStage<E>
 where
     E: BlockExecutorProvider,
@@ -296,7 +295,7 @@ where
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
-        let mut executor = self.executor_provider.batch_executor(db);
+        let mut executor = self.executor_provider.executor(db);
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -323,6 +322,7 @@ where
         let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
+        let mut results = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -342,8 +342,8 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            self.metrics.metered_one(&block, |input| {
-                executor.execute_and_verify_one(input).map_err(|error| {
+            let result = self.metrics.metered_one(&block, |input| {
+                executor.execute_one(input).map_err(|error| {
                     let header = block.header();
                     StageError::Block {
                         block: Box::new(BlockWithParent::new(
@@ -354,6 +354,20 @@ where
                     }
                 })
             })?;
+
+            if let Err(err) = self.consensus.validate_block_post_execution(
+                &block,
+                PostExecutionInput::new(&result.receipts, &result.requests),
+            ) {
+                return Err(StageError::Block {
+                    block: Box::new(BlockWithParent::new(
+                        block.header().parent_hash(),
+                        NumHash::new(block.header().number(), block.hash_slow()),
+                    )),
+                    error: BlockErrorKind::Validation(err),
+                })
+            }
+            results.push(result);
 
             execution_duration += execute_start.elapsed();
 
@@ -382,10 +396,9 @@ where
             }
 
             // Check if we should commit now
-            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
-                bundle_size_hint,
+                executor.size_hint() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -395,7 +408,11 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = executor.finalize();
+        let mut state = ExecutionOutcome::from_blocks(
+            start_block,
+            executor.into_state().take_bundle(),
+            results,
+        );
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
