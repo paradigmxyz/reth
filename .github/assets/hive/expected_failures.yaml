@@ -1,5 +1,4 @@
-# https://github.com/paradigmxyz/reth/issues/7015
-# https://github.com/paradigmxyz/reth/issues/6332
+# https://github.com/paradigmxyz/reth/issues/13879
 rpc-compat:
   - debug_getRawBlock/get-invalid-number (reth)
   - debug_getRawHeader/get-invalid-number (reth)
