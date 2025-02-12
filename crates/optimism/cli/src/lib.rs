@@ -51,6 +51,7 @@ use reth_node_core::{
     args::LogArgs,
     version::{LONG_VERSION, SHORT_VERSION},
 };
+use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::OpExecutorProvider;
 use reth_optimism_node::{OpNetworkPrimitives, OpNode};
 use reth_tracing::FileWorkerGuard;
@@ -169,8 +170,9 @@ where
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command
-                    .execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, OpExecutorProvider::optimism)
+                command.execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, |spec| {
+                    (OpExecutorProvider::optimism(spec.clone()), OpBeaconConsensus::new(spec))
+                })
             }),
             Commands::P2P(command) => {
                 runner.run_until_ctrl_c(command.execute::<OpNetworkPrimitives>())

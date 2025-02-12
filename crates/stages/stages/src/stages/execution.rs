@@ -4,9 +4,10 @@ use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
+use reth_consensus::{ConsensusError, FullConsensus, PostExecutionInput};
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{
-    execute::{BatchExecutor, BlockExecutorProvider},
+    execute::{BlockExecutorProvider, Executor},
     metrics::ExecutorMetrics,
 };
 use reth_execution_types::Chain;
@@ -15,9 +16,9 @@ use reth_primitives::StaticFileSegment;
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, StateCommitmentProvider, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateCommitmentProvider,
+    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -72,6 +73,9 @@ where
 {
     /// The stage's internal block executor
     executor_provider: E,
+    /// The consensus instance for validating blocks.
+    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    /// The consensu
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -100,6 +104,7 @@ where
     /// Create new execution stage with specified config.
     pub fn new(
         executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         exex_manager_handle: ExExManagerHandle<E::Primitives>,
@@ -107,6 +112,7 @@ where
         Self {
             external_clean_threshold,
             executor_provider,
+            consensus,
             thresholds,
             post_execute_commit_input: None,
             post_unwind_commit_input: None,
@@ -118,9 +124,13 @@ where
     /// Create an execution stage with the provided executor.
     ///
     /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD`].
-    pub fn new_with_executor(executor_provider: E) -> Self {
+    pub fn new_with_executor(
+        executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    ) -> Self {
         Self::new(
             executor_provider,
+            consensus,
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             ExExManagerHandle::empty(),
@@ -130,11 +140,13 @@ where
     /// Create new instance of [`ExecutionStage`] from configuration.
     pub fn from_config(
         executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         config: ExecutionConfig,
         external_clean_threshold: u64,
     ) -> Self {
         Self::new(
             executor_provider,
+            consensus,
             config.into(),
             external_clean_threshold,
             ExExManagerHandle::empty(),
@@ -283,7 +295,7 @@ where
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
-        let mut executor = self.executor_provider.batch_executor(db);
+        let mut executor = self.executor_provider.executor(db);
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -310,6 +322,7 @@ where
         let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
+        let mut results = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -329,8 +342,8 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            self.metrics.metered_one(&block, |input| {
-                executor.execute_and_verify_one(input).map_err(|error| {
+            let result = self.metrics.metered_one(&block, |input| {
+                executor.execute_one(input).map_err(|error| {
                     let header = block.header();
                     StageError::Block {
                         block: Box::new(BlockWithParent::new(
@@ -341,6 +354,20 @@ where
                     }
                 })
             })?;
+
+            if let Err(err) = self.consensus.validate_block_post_execution(
+                &block,
+                PostExecutionInput::new(&result.receipts, &result.requests),
+            ) {
+                return Err(StageError::Block {
+                    block: Box::new(BlockWithParent::new(
+                        block.header().parent_hash(),
+                        NumHash::new(block.header().number(), block.hash_slow()),
+                    )),
+                    error: BlockErrorKind::Validation(err),
+                })
+            }
+            results.push(result);
 
             execution_duration += execute_start.elapsed();
 
@@ -369,10 +396,9 @@ where
             }
 
             // Check if we should commit now
-            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
-                bundle_size_hint,
+                executor.size_hint() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -382,7 +408,11 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = executor.finalize();
+        let mut state = ExecutionOutcome::from_blocks(
+            start_block,
+            executor.into_state().take_bundle(),
+            results,
+        );
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -649,6 +679,7 @@ mod tests {
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::transaction::DbTx;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_evm::execute::BasicBlockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
     use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
@@ -666,8 +697,12 @@ mod tests {
             ChainSpecBuilder::mainnet().berlin_activated().build(),
         ));
         let executor_provider = BasicBlockExecutorProvider::new(strategy_factory);
+        let consensus = Arc::new(EthBeaconConsensus::new(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        )));
         ExecutionStage::new(
             executor_provider,
+            consensus,
             ExecutionStageThresholds {
                 max_blocks: Some(100),
                 max_changes: None,
