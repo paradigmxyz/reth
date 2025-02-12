@@ -117,7 +117,7 @@ https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20
 
 `ProofSequencer` acts in the following way:
 1. Each proof has an associated "sequence number" that determines the original order of state updates.
-2. When the proof is calculatd, it's added to the `ProofSequencer` with the sequence number
+2. When the proof is calculated, it's added to the `ProofSequencer` with the sequence number
 and state update associated with it.
 3. If the `ProofSequencer` has a consecutive sequence of proofs without gaps in sequence numbers, it returns this sequence.
 
