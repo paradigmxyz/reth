@@ -413,3 +413,53 @@ async fn bitfinity_test_should_validate_and_import_unsafe_blocks() {
     let last_imported_block = provider.last_block_number().unwrap();
     assert_eq!(last_imported_block, MAX_BLOCKS);
 }
+
+#[tokio::test]
+async fn bitfinity_test_should_import_until_last_confirmed() {
+    // Arrange
+    let _log = init_logs();
+
+    const UNSAFE_BLOCKS: u64 = 3;
+    const MAX_BLOCKS: u64 = 10;
+    const CONFIRM_UNTIL: u64 = 8;
+
+    let mut eth_server = EthImpl::new_with_max_block(MAX_BLOCKS);
+    let mut bf_evm_server = eth_server.bf_impl(UNSAFE_BLOCKS);
+    bf_evm_server.confirm_until = CONFIRM_UNTIL;
+
+    let (_server, eth_server_address) = mock_multi_server_start([
+        EthServer::into_rpc(eth_server).into(),
+        BfEvmServer::into_rpc(bf_evm_server).into(),
+    ])
+    .await;
+    let evm_datasource_url = format!("http://{}", eth_server_address);
+
+    // Wait for blocks to be minted
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // Act
+    let (_temp_dir, mut import_data) =
+        bitfinity_import_config_data(&evm_datasource_url, None, None).await.unwrap();
+
+    import_data.bitfinity_args.max_fetch_blocks = 100;
+    import_data.bitfinity_args.validate_unsafe_blocks = true;
+
+    let import = BitfinityImportCommand::new(
+        None,
+        import_data.data_dir,
+        import_data.chain,
+        import_data.bitfinity_args,
+        import_data.provider_factory.clone(),
+        import_data.blockchain_db,
+    );
+    let (job_executor, _import_handle) = import.schedule_execution().await.unwrap();
+
+    // Allow some time for potential imports
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    job_executor.stop(true).await.unwrap();
+
+    // Assert
+    let provider = import_data.provider_factory.provider().unwrap();
+    let last_imported_block = provider.last_block_number().unwrap();
+    assert_eq!(last_imported_block, CONFIRM_UNTIL);
+}

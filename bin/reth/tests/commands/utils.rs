@@ -14,7 +14,7 @@ use alloy_primitives::BlockNumber;
 use lightspeed_scheduler::JobExecutor;
 use parking_lot::Mutex;
 use reth::{
-    args::{BitfinityImportArgs, IC_MAINNET_KEY, IC_MAINNET_URL},
+    args::{BitfinityImportArgs, IC_MAINNET_KEY},
     commands::bitfinity_import::BitfinityImportCommand,
     dirs::{ChainPath, DataDirPath, PlatformPath},
 };

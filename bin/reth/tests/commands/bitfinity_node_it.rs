@@ -370,7 +370,7 @@ pub mod eth_server {
 
     use alloy_consensus::constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS};
     use alloy_rlp::Bytes;
-    use did::{error::EvmError, keccak, BlockConfirmationData, BlockConfirmationResult, BlockNumber, H256, U64};
+    use did::{keccak, BlockConfirmationData, BlockConfirmationResult, BlockNumber, H256, U64};
     use ethereum_json_rpc_client::CertifiedResult;
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
     use reth_trie::EMPTY_ROOT_HASH;
