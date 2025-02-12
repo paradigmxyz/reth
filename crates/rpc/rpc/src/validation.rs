@@ -139,20 +139,29 @@ where
         let latest_header =
             self.provider.latest_header()?.ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
 
-        let parent_header = self
-            .provider
-            .header(&block.parent_hash())?
-            .ok_or_else(|| ValidationApiError::MissingParentBlock)?;
+        let parent_header = if block.parent_hash() == latest_header.hash() {
+            latest_header
+        } else {
+            // parent is not the latest header so we need to fetch it and ensure it's not too old
+            let parent_header = self
+                .provider
+                .sealed_header_by_hash(block.parent_hash())?
+                .ok_or_else(|| ValidationApiError::MissingParentBlock)?;
 
-        if latest_header.number().saturating_sub(parent_header.number()) > self.validation_window {
-            return Err(ValidationApiError::BlockTooOld)
-        }
-        self.consensus.validate_header_against_parent(block.sealed_header(), &latest_header)?;
-        self.validate_gas_limit(registered_gas_limit, &latest_header, block.sealed_header())?;
-        let latest_header_hash = latest_header.hash();
-        let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
+            if latest_header.number().saturating_sub(parent_header.number()) >
+                self.validation_window
+            {
+                return Err(ValidationApiError::BlockTooOld)
+            }
+            parent_header
+        };
 
-        let mut request_cache = self.cached_reads(latest_header_hash).await;
+        self.consensus.validate_header_against_parent(block.sealed_header(), &parent_header)?;
+        self.validate_gas_limit(registered_gas_limit, &parent_header, block.sealed_header())?;
+        let parent_header_hash = parent_header.hash();
+        let state_provider = self.provider.state_by_block_hash(parent_header_hash)?;
+
+        let mut request_cache = self.cached_reads(parent_header_hash).await;
 
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
         let executor = self.executor_provider.executor(cached_db);
@@ -169,7 +178,7 @@ where
         })?;
 
         // update the cached reads
-        self.update_cached_reads(latest_header_hash, request_cache).await;
+        self.update_cached_reads(parent_header_hash, request_cache).await;
 
         if let Some(account) = accessed_blacklisted {
             return Err(ValidationApiError::Blacklist(account))

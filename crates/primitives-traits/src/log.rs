@@ -26,7 +26,7 @@ mod tests {
     struct Log {
         /// Contract that emitted this log.
         address: Address,
-        /// Topics of the log. The number of logs depend on what `LOG` opcode is used.
+        /// Topics of the log. The number of logs depends on what `LOG` opcode is used.
         topics: Vec<B256>,
         /// Arbitrary length data.
         data: Bytes,

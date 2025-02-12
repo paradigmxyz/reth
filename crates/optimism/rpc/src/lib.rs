@@ -10,12 +10,16 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+pub mod engine;
 pub mod error;
 pub mod eth;
 pub mod miner;
 pub mod sequencer;
 pub mod witness;
 
+#[cfg(feature = "client")]
+pub use engine::OpEngineApiClient;
+pub use engine::{OpEngineApi, OpEngineApiServer};
 pub use error::{OpEthApiError, OpInvalidTransactionError, SequencerClientError};
 pub use eth::{OpEthApi, OpReceiptBuilder};
 pub use sequencer::SequencerClient;

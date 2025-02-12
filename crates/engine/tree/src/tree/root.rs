@@ -36,7 +36,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, trace_span};
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
@@ -69,8 +69,6 @@ pub struct StateRootComputeOutcome {
 pub struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
     state: HashedPostState,
-    /// The proof targets
-    targets: MultiProofTargets,
     /// The calculated multiproof
     multiproof: MultiProof,
 }
@@ -84,7 +82,6 @@ impl SparseTrieUpdate {
     /// Extend update with contents of the other.
     pub fn extend(&mut self, other: Self) {
         self.state.extend(other.state);
-        extend_multi_proof_targets(&mut self.targets, other.targets);
         self.multiproof.extend(other.multiproof);
     }
 }
@@ -179,6 +176,10 @@ pub struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
+    /// Total number of account targets
+    account_targets: usize,
+    /// Total number of storage slot targets
+    storage_targets: usize,
     /// The time taken to calculate the proof.
     elapsed: Duration,
 }
@@ -397,19 +398,26 @@ where
         let thread_pool = self.thread_pool.clone();
 
         self.thread_pool.spawn(move || {
+            let account_targets = proof_targets.len();
+            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum();
+
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
                 ?proof_targets,
+                ?account_targets,
+                ?storage_targets,
                 "Starting multiproof calculation",
             );
             let start = Instant::now();
-            let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
+            let result = calculate_multiproof(thread_pool, config, proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
                 ?elapsed,
+                ?account_targets,
+                ?storage_targets,
                 "Multiproof calculated",
             );
 
@@ -420,9 +428,10 @@ where
                             sequence_number: proof_sequence_number,
                             update: SparseTrieUpdate {
                                 state: hashed_state_update,
-                                targets: proof_targets,
                                 multiproof: proof,
                             },
+                            account_targets,
+                            storage_targets,
                             elapsed,
                         }),
                     ));
@@ -562,13 +571,15 @@ where
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
             debug!(target: "engine::tree", "Starting sparse trie task");
-            let result = match run_sparse_trie(config, metrics, rx) {
-                Ok((state_root, trie_updates, iterations)) => {
-                    StateRootMessage::RootCalculated { state_root, trie_updates, iterations }
-                }
-                Err(error) => StateRootMessage::RootCalculationError(error),
-            };
-            let _ = task_tx.send(result);
+            // We clone the task sender here so that it can be used in case the sparse trie task
+            // succeeds, without blocking due to any `Drop` implementation.
+            //
+            // It's more important to make sure we capture any errors, than to make sure we send an
+            // error result without blocking, which is why we wait for `run_sparse_trie` to return
+            // before sending errors.
+            if let Err(err) = run_sparse_trie(config, metrics, rx, task_tx.clone()) {
+                let _ = task_tx.send(StateRootMessage::RootCalculationError(err));
+            }
         });
         tx
     }
@@ -787,11 +798,7 @@ where
 
                         if let Some(combined_update) = self.on_proof(
                             sequence_number,
-                            SparseTrieUpdate {
-                                state,
-                                targets: MultiProofTargets::default(),
-                                multiproof: MultiProof::default(),
-                            },
+                            SparseTrieUpdate { state, multiproof: MultiProof::default() },
                         ) {
                             let _ = sparse_trie_tx
                                 .as_ref()
@@ -825,15 +832,10 @@ where
                             .record(proof_calculated.elapsed);
                         self.metrics
                             .proof_calculation_account_targets_histogram
-                            .record(proof_calculated.update.targets.len() as f64);
-                        self.metrics.proof_calculation_storage_targets_histogram.record(
-                            proof_calculated
-                                .update
-                                .targets
-                                .values()
-                                .map(|targets| targets.len() as f64)
-                                .sum::<f64>(),
-                        );
+                            .record(proof_calculated.account_targets as f64);
+                        self.metrics
+                            .proof_calculation_storage_targets_histogram
+                            .record(proof_calculated.storage_targets as f64);
 
                         debug!(
                             target: "engine::root",
@@ -958,13 +960,17 @@ fn check_end_condition(
 
 /// Listen to incoming sparse trie updates and update the sparse trie.
 ///
-/// Once the updates receiver channel is dropped, returns final state root, trie updates and the
-/// number of update iterations.
+/// Once the updates receiver channel is dropped, this sends the final state root, trie updates and
+/// the number of update iterations to the `task_tx`.
+///
+/// This takes `task_tx` as an argument so that the state root result can be sent without blocking
+/// on any of the `Drop` implementations run at the end of this method.
 fn run_sparse_trie<Factory>(
     config: StateRootConfig<Factory>,
     metrics: StateRootTaskMetrics,
     update_rx: mpsc::Receiver<SparseTrieUpdate>,
-) -> Result<(B256, TrieUpdates, u64), ParallelStateRootError>
+    task_tx: Sender<StateRootMessage>,
+) -> Result<(), ParallelStateRootError>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
 {
@@ -1011,12 +1017,17 @@ where
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
 
     let start = Instant::now();
-    let root = trie.root().expect("sparse trie should be revealed");
+    let (state_root, trie_updates) =
+        trie.root_with_updates().expect("sparse trie should be revealed");
     let elapsed = start.elapsed();
     metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
 
-    let trie_updates = trie.take_trie_updates().expect("retention must be enabled");
-    Ok((root, trie_updates, num_iterations))
+    let _ = task_tx.send(StateRootMessage::RootCalculated {
+        state_root,
+        trie_updates,
+        iterations: num_iterations,
+    });
+    Ok(())
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
@@ -1077,7 +1088,7 @@ where
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
-    SparseTrieUpdate { state, targets, multiproof }: SparseTrieUpdate,
+    SparseTrieUpdate { state, multiproof }: SparseTrieUpdate,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,
@@ -1088,7 +1099,7 @@ where
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
-    trie.reveal_multiproof(targets, multiproof)?;
+    trie.reveal_multiproof(multiproof)?;
 
     // Update storage slots with new values and calculate storage roots.
     let (tx, rx) = mpsc::channel();
@@ -1098,20 +1109,22 @@ where
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
-            trace!(target: "engine::root::sparse", ?address, "Updating storage");
+            let span = trace_span!(target: "engine::root::sparse", "Storage trie", ?address);
+            let _enter = span.enter();
+            trace!(target: "engine::root::sparse", "Updating storage");
             let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
 
             if storage.wiped {
-                trace!(target: "engine::root::sparse", ?address, "Wiping storage");
+                trace!(target: "engine::root::sparse", "Wiping storage");
                 storage_trie.wipe()?;
             }
             for (slot, value) in storage.storage {
                 let slot_nibbles = Nibbles::unpack(slot);
                 if value.is_zero() {
-                    trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
+                    trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
                     storage_trie.remove_leaf(&slot_nibbles)?;
                 } else {
-                    trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
+                    trace!(target: "engine::root::sparse", ?slot, "Updating storage slot");
                     storage_trie
                         .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
                 }
@@ -1121,9 +1134,7 @@ where
 
             SparseStateTrieResult::Ok((address, storage_trie))
         })
-        .for_each_init(|| tx.clone(), |tx, result| {
-            tx.send(result).unwrap()
-        });
+        .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
     drop(tx);
     for result in rx {
         let (address, storage_trie) = result?;
@@ -1140,12 +1151,6 @@ where
     let elapsed = started_at.elapsed();
 
     Ok(elapsed)
-}
-
-fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProofTargets) {
-    for (address, slots) in other {
-        targets.entry(address).or_default().extend(slots);
-    }
 }
 
 fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {

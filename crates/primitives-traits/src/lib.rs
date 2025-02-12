@@ -99,7 +99,7 @@ pub use transaction::{
 pub mod block;
 pub use block::{
     body::{BlockBody, FullBlockBody},
-    header::{BlockHeader, FullBlockHeader},
+    header::{AlloyBlockHeader, BlockHeader, FullBlockHeader},
     Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 

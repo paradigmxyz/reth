@@ -97,8 +97,7 @@ impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
         &self,
         input: reth_trie::TrieInput,
         target: reth_trie::HashedPostState,
-    ) -> reth_errors::ProviderResult<alloy_primitives::map::B256HashMap<alloy_primitives::Bytes>>
-    {
+    ) -> reth_errors::ProviderResult<alloy_primitives::map::B256Map<alloy_primitives::Bytes>> {
         self.0.witness(input, target)
     }
 }

@@ -2,12 +2,12 @@
 //!
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use crate::{execute::Executor, system_calls::OnStateHook};
+use crate::{execute::Executor, system_calls::OnStateHook, Database};
 use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives::RecoveredBlock;
+use reth_primitives::{NodePrimitives, RecoveredBlock};
 use revm_primitives::EvmState;
 use std::time::Instant;
 
@@ -94,20 +94,15 @@ impl ExecutorMetrics {
     /// of accounts, storage slots and bytecodes loaded and updated.
     /// Execute the given block using the provided [`Executor`] and update metrics for the
     /// execution.
-    pub fn execute_metered<'a, E, DB, O, Error, B>(
+    pub fn execute_metered<E, DB>(
         &self,
         executor: E,
-        input: &'a RecoveredBlock<B>,
+        input: &RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         state_hook: Box<dyn OnStateHook>,
-    ) -> Result<BlockExecutionOutput<O>, Error>
+    ) -> Result<BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>, E::Error>
     where
-        E: Executor<
-            DB,
-            Input<'a> = &'a RecoveredBlock<B>,
-            Output = BlockExecutionOutput<O>,
-            Error = Error,
-        >,
-        B: reth_primitives_traits::Block,
+        DB: Database,
+        E: Executor<DB>,
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are gloally registered so that the data recorded in the hook will
@@ -145,7 +140,9 @@ mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-    use revm::db::BundleState;
+    use reth_execution_types::BlockExecutionResult;
+    use reth_primitives::EthPrimitives;
+    use revm::db::{EmptyDB, State};
     use revm_primitives::{
         Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot, B256, U256,
     };
@@ -156,54 +153,46 @@ mod tests {
         state: EvmState,
     }
 
-    impl Executor<()> for MockExecutor {
-        type Input<'a>
-            = &'a RecoveredBlock<reth_primitives::Block>
-        where
-            Self: 'a;
-        type Output = BlockExecutionOutput<()>;
+    impl<DB: Database + Default> Executor<DB> for MockExecutor {
+        type Primitives = EthPrimitives;
         type Error = std::convert::Infallible;
 
-        fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-            Ok(BlockExecutionOutput {
-                state: BundleState::default(),
-                receipts: vec![],
-                requests: Requests::default(),
-                gas_used: 0,
-            })
-        }
-        fn execute_with_state_closure<F>(
-            self,
-            _input: Self::Input<'_>,
-            _state: F,
-        ) -> Result<Self::Output, Self::Error>
-        where
-            F: FnMut(&revm::State<()>),
+        fn execute_one(
+            &mut self,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         {
-            Ok(BlockExecutionOutput {
-                state: BundleState::default(),
+            Ok(BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),
                 gas_used: 0,
             })
         }
-        fn execute_with_state_hook<F>(
-            self,
-            _input: Self::Input<'_>,
+
+        fn execute_one_with_state_hook<F>(
+            &mut self,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
             mut hook: F,
-        ) -> Result<Self::Output, Self::Error>
+        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         where
             F: OnStateHook + 'static,
         {
             // Call hook with our mock state
             hook.on_state(&self.state);
 
-            Ok(BlockExecutionOutput {
-                state: BundleState::default(),
+            Ok(BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),
                 gas_used: 0,
             })
+        }
+
+        fn into_state(self) -> revm::db::State<DB> {
+            State::builder().with_database(Default::default()).build()
+        }
+
+        fn size_hint(&self) -> usize {
+            0
         }
     }
 
@@ -255,7 +244,7 @@ mod tests {
             state
         };
         let executor = MockExecutor { state };
-        let _result = metrics.execute_metered(executor, &input, state_hook).unwrap();
+        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
 
         let snapshot = snapshotter.snapshot().into_vec();
 
@@ -287,7 +276,7 @@ mod tests {
         let state = EvmState::default();
 
         let executor = MockExecutor { state };
-        let _result = metrics.execute_metered(executor, &input, state_hook).unwrap();
+        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);

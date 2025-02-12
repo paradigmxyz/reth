@@ -21,7 +21,7 @@ use reth_evm::{
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_revm::db::State;
+use revm::db::State;
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 
 /// Factory for [`EthExecutionStrategy`].
@@ -239,6 +239,10 @@ where
 
     fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
+    }
+
+    fn into_state(self) -> State<Self::DB> {
+        self.state
     }
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {

@@ -134,6 +134,12 @@ impl<P> SparseTrie<P> {
         Some(self.as_revealed_mut()?.root())
     }
 
+    /// Returns both the trie root and takes sparse trie updates if the trie has been revealed.
+    pub fn root_with_updates(&mut self) -> Option<(B256, SparseTrieUpdates)> {
+        let revealed = self.as_revealed_mut()?;
+        Some((revealed.root(), revealed.take_updates()))
+    }
+
     /// Calculates the hashes of the nodes below the provided level.
     pub fn calculate_below_level(&mut self, level: usize) {
         self.as_revealed_mut().unwrap().update_rlp_node_level(level);
@@ -1501,7 +1507,7 @@ impl SparseTrieUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::B256HashSet, U256};
+    use alloy_primitives::{map::B256Set, U256};
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use itertools::Itertools;
@@ -1547,7 +1553,7 @@ mod tests {
     fn run_hash_builder(
         state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
         trie_cursor: impl TrieCursor,
-        destroyed_accounts: B256HashSet,
+        destroyed_accounts: B256Set,
         proof_targets: impl IntoIterator<Item = Nibbles>,
     ) -> (B256, TrieUpdates, ProofNodes, HashMap<Nibbles, TrieMask>, HashMap<Nibbles, TrieMask>)
     {

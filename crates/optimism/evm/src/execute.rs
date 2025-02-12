@@ -22,9 +22,8 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt, OpPrimitives};
-use reth_primitives::{NodePrimitives, RecoveredBlock};
-use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_revm::State;
+use reth_primitives_traits::{BlockBody, NodePrimitives, RecoveredBlock, SignedTransaction};
+use revm::State;
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use tracing::trace;
 
@@ -289,6 +288,10 @@ where
         &mut self.state
     }
 
+    fn into_state(self) -> revm::db::State<Self::DB> {
+        self.state
+    }
+
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
     }
@@ -320,7 +323,7 @@ impl OpExecutorProvider {
 mod tests {
     use super::*;
     use crate::OpChainSpec;
-    use alloy_consensus::{Header, TxEip1559};
+    use alloy_consensus::{Block, BlockBody, Header, TxEip1559};
     use alloy_primitives::{
         b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256,
     };
@@ -329,7 +332,7 @@ mod tests {
     use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-    use reth_primitives::{Account, Block, BlockBody};
+    use reth_primitives_traits::Account;
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
@@ -447,7 +450,7 @@ mod tests {
 
     #[test]
     fn op_deposit_fields_post_canyon() {
-        // ensure_create2_deployer will fail if timestamp is set to less then 2
+        // ensure_create2_deployer will fail if timestamp is set to less than 2
         let header = Header {
             timestamp: 2,
             number: 1,

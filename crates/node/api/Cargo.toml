@@ -26,6 +26,7 @@ reth-tasks.workspace = true
 reth-network-api.workspace = true
 reth-node-types.workspace = true
 reth-node-core.workspace = true
+reth-tokio-util.workspace = true
 
 alloy-rpc-types-engine.workspace = true
 
