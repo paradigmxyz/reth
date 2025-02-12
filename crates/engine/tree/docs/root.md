@@ -77,6 +77,8 @@ https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20
 
 State root calculation in the [Sparse Trie Task](#sparse-trie-task) relies on:
 1. Revealing nodes in the trie according to [MPT (Merkle Patricia Trie) proofs](https://docs.chainstack.com/docs/deep-dive-into-merkle-proofs-and-eth-getproof-ethereum-rpc-method).
+    - Revealing means adding the nodes from the proof to the Sparse Trie structure.
+    See [example](#revealing-example) for a diagram.
 2. Updating the trie according to the state updates received from executing the transactions.
 
 Let's look at the first two messages on the diagram: `StateRootMessage::StateUpdate`
@@ -187,7 +189,7 @@ we only load the parts that were modified during the block execution (i.e. make 
 - When updating the trie, we first reveal the nodes using the MPT proofs, and then add/update/remove the leaves,
 along with the other nodes that need to be modified in the process of leaf update.
 
-#### Example
+#### Revealing Example
 
 ![Sparse Trie](./mermaid/sparse-trie.mmd.png)
 
