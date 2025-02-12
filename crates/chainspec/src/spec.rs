@@ -212,8 +212,8 @@ pub struct ChainSpec {
 
     /// The header corresponding to the genesis block.
     ///
-    /// This is either stored at construction time if it is known using [`once_cell_set`], or
-    /// computed once on the first access.
+    /// This is either stored at construction time if it is known, or computed once on the first
+    /// access.
     pub genesis_header: OnceLock<SealedHeader>,
 
     /// The block at which [`EthereumHardfork::Paris`] was activated and the final difficulty at
