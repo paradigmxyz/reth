@@ -139,11 +139,6 @@ impl<P> SparseTrie<P> {
         let revealed = self.as_revealed_mut()?;
         Some((revealed.root(), revealed.take_updates()))
     }
-
-    /// Calculates the hashes of the nodes below the provided level.
-    pub fn calculate_below_level(&mut self, level: usize) {
-        self.as_revealed_mut().unwrap().update_rlp_node_level(level);
-    }
 }
 
 impl<P: BlindedProvider> SparseTrie<P> {

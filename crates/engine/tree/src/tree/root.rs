@@ -74,6 +74,11 @@ pub struct SparseTrieUpdate {
 }
 
 impl SparseTrieUpdate {
+    /// Returns true if the update is empty.
+    pub fn is_empty(&self) -> bool {
+        self.state.is_empty() && self.multiproof.is_empty()
+    }
+
     /// Construct update from multiproof.
     pub fn from_multiproof(multiproof: MultiProof) -> Self {
         Self { multiproof, ..Default::default() }
@@ -673,15 +678,15 @@ where
     ) -> Option<SparseTrieUpdate> {
         let ready_proofs = self.proof_sequencer.add_proof(sequence_number, update);
 
-        if ready_proofs.is_empty() {
-            None
-        } else {
+        ready_proofs
+            .into_iter()
             // Merge all ready proofs and state updates
-            ready_proofs.into_iter().reduce(|mut acc_update, update| {
+            .reduce(|mut acc_update, update| {
                 acc_update.extend(update);
                 acc_update
             })
-        }
+            // Return None if the resulting proof is empty
+            .filter(|proof| !proof.is_empty())
     }
 
     /// Starts the main loop that handles all incoming messages, fetches proofs, applies them to the
@@ -1017,8 +1022,9 @@ where
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
 
     let start = Instant::now();
-    let (state_root, trie_updates) =
-        trie.root_with_updates().expect("sparse trie should be revealed");
+    let (state_root, trie_updates) = trie.root_with_updates().map_err(|e| {
+        ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+    })?;
     let elapsed = start.elapsed();
     metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
 
