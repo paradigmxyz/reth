@@ -97,7 +97,7 @@ pub trait Executor<DB: Database>: Sized {
         Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
     }
 
-    /// Consumes the executor and returns the [`BundleState`] containing all state changes.
+    /// Consumes the executor and returns the [`State`] containing all state changes.
     fn into_state(self) -> State<DB>;
 
     /// The size hint of the batch's tracked state size.
