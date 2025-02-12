@@ -74,15 +74,6 @@ pub struct BitfinityImportArgs {
     /// If validation is disabled, unsafe blocks will be ignored.
     #[arg(long)]
     pub validate_unsafe_blocks: bool,
-
-    /// Network url
-    ///
-    /// This is the URL of the IC network. If not set, IC mainnet connection will be used.
-    /// E.g.
-    /// - <https://ic0.app>
-    /// - <http://127.0.0.1:3333>
-    #[arg(long, default_value=IC_MAINNET_URL)]
-    pub evm_network: String,
 }
 
 /// Bitfinity Related Args

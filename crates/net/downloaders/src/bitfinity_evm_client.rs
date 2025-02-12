@@ -4,7 +4,7 @@ use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use candid::Principal;
 use did::certified::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
-use eyre::{OptionExt, Result};
+use eyre::Result;
 use ic_cbor::{CertificateToCbor, HashTreeToCbor};
 use ic_certificate_verification::VerifyCertificate;
 use ic_certification::{Certificate, HashTree, LookupResult};
@@ -152,7 +152,6 @@ impl BitfinityEvmClient {
             .map_err(|e| {
                 RemoteClientError::ProviderError(format!("error getting safe block: {e}"))
             })?
-            .ok_or_else(|| RemoteClientError::ProviderError("block not found".to_string()))?
             .number
             .into();
 
@@ -273,6 +272,11 @@ impl BitfinityEvmClient {
         Err(eyre::eyre!("Block {tip} not found"))
     }
 
+    /// Returns the number of the given block
+    pub fn get_block_number(&self, block_hash: &B256) -> Option<u64> {
+        self.hash_to_number.get(block_hash).copied()
+    }
+
     /// Returns the hash of the first block after the latest safe block. If the tip of the chain is
     /// safe, returns `None`.
     pub fn unsafe_block(&self) -> Option<B256> {
@@ -352,8 +356,7 @@ impl BitfinityEvmClient {
         let genesis_block = client
             .get_block_by_number(0.into())
             .await
-            .map_err(|e| eyre::eyre!("error getting genesis block: {}", e))?
-            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+            .map_err(|e| eyre::eyre!("error getting genesis block: {}", e))?;
 
         let genesis_accounts =
             client.get_genesis_balances().await.map_err(|e| eyre::eyre!(e))?.into_iter().map(
@@ -450,8 +453,7 @@ impl BitfinityEvmClient {
         let last_block = client
             .get_block_by_number(did::BlockNumber::Latest)
             .await
-            .map_err(|e| eyre::eyre!("error getting block number: {}", e))?
-            .ok_or_eyre("latest block not found")?;
+            .map_err(|e| eyre::eyre!("error getting block number: {}", e))?;
 
         let block_ts = last_block.timestamp.0.to::<u64>();
 

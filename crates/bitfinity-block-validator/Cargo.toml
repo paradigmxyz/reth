@@ -16,6 +16,7 @@ alloy-primitives.workspace = true
 async-trait.workspace = true
 did.workspace = true
 evm-canister-client.workspace = true
+ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
 eyre.workspace = true
 itertools.workspace = true
 reth-chain-state.workspace = true
@@ -40,7 +41,6 @@ alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 async-trait.workspace = true
 candid.workspace = true
-ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
 reth-db-common.workspace = true
 tokio.workspace = true
 serde.workspace = true

@@ -2,8 +2,6 @@
 
 use crate::{dirs::DataDirPath, version::SHORT_VERSION};
 use bitfinity_block_validator::BitfinityBlockValidator;
-use candid::Principal;
-use evm_canister_client::{ic_agent::{identity::AnonymousIdentity, Agent}, EvmCanisterClient, IcAgentClient};
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -20,7 +18,7 @@ use reth_downloaders::{
 };
 use reth_exex::ExExManagerHandle;
 use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_core::{args::{BitfinityImportArgs, IC_MAINNET_KEY, IC_MAINNET_URL}, dirs::ChainPath};
+use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
@@ -131,6 +129,16 @@ impl BitfinityImportCommand {
         Ok((job_executor, job_handle))
     }
 
+    fn rpc_config(&self) -> RpcClientConfig {
+        RpcClientConfig {
+            primary_url: self.bitfinity.rpc_url.clone(),
+            backup_url: self.bitfinity.backup_rpc_url.clone(),
+            max_retries: self.bitfinity.max_retries,
+            retry_delay: Duration::from_secs(self.bitfinity.retry_delay_secs),
+            max_block_age_secs: Duration::from_secs(self.bitfinity.max_block_age_secs),
+        }
+    }
+
     /// Execute the import job.
     async fn single_execution(&self) -> eyre::Result<()> {
         let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
@@ -142,17 +150,9 @@ impl BitfinityImportCommand {
 
         debug!(target: "reth::cli - BitfinityImportCommand", "Starting block: {}", start_block);
 
-        let rpc_config = RpcClientConfig {
-            primary_url: self.bitfinity.rpc_url.clone(),
-            backup_url: self.bitfinity.backup_rpc_url.clone(),
-            max_retries: self.bitfinity.max_retries,
-            retry_delay: Duration::from_secs(self.bitfinity.retry_delay_secs),
-            max_block_age_secs: Duration::from_secs(self.bitfinity.max_block_age_secs),
-        };
-
         let remote_client = Arc::new(
             BitfinityEvmClient::from_rpc_url(
-                rpc_config,
+                self.rpc_config(),
                 start_block,
                 self.bitfinity.end_block,
                 self.bitfinity.batch_size,
@@ -189,7 +189,10 @@ impl BitfinityImportCommand {
             };
 
             while tip != safe_block {
-                match self.validate_block(&tip, remote_client.clone(), provider_factory.clone()).await {
+                match self
+                    .validate_block(&tip, remote_client.clone(), provider_factory.clone())
+                    .await
+                {
                     Ok(_) => {
                         self.import_to_block(tip, remote_client, provider_factory, consensus)
                             .await?;
@@ -220,19 +223,12 @@ impl BitfinityImportCommand {
         remote_client: Arc<BitfinityEvmClient>,
         provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
-        let agent = Agent::builder().with_identity(AnonymousIdentity).with_url(self.bitfinity.evm_network.clone()).build()?;
-        if self.bitfinity.evm_network == IC_MAINNET_URL {
-            let key = hex::decode(IC_MAINNET_KEY)?;
-            agent.set_root_key(key);
-        } else {
-            agent.fetch_root_key().await?;
-        }
+        debug!(target: "reth::cli - BitfinityImportCommand", "Validating block {block}");
 
-        let evm_principal = Principal::from_text(&self.bitfinity.evmc_principal)?;
-        let agent_client = IcAgentClient::with_agent(evm_principal, agent);
-        let canister_client = EvmCanisterClient::new(agent_client);
+        let config = self.rpc_config();
+        let client = BitfinityEvmClient::client(config).await?;
 
-        let validator = BitfinityBlockValidator::new(canister_client, provider_factory);
+        let validator = BitfinityBlockValidator::new(client, provider_factory);
         let blocks = remote_client.unsafe_blocks(block)?;
 
         validator.validate_blocks(&blocks).await
@@ -248,12 +244,17 @@ impl BitfinityImportCommand {
     ) -> eyre::Result<()> {
         info!(target: "reth::cli - BitfinityImportCommand", "Chain blocks imported");
 
+        let block_index = remote_client
+            .get_block_number(&new_tip)
+            .ok_or_else(|| eyre::eyre!("block not found"))?;
+
         let (mut pipeline, _events) = self.build_import_pipeline(
             &self.config,
             provider_factory.clone(),
             &consensus,
             remote_client,
             StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            block_index,
         )?;
 
         // override the tip
@@ -263,6 +264,8 @@ impl BitfinityImportCommand {
         // Run pipeline
         debug!(target: "reth::cli - BitfinityImportCommand", "Starting sync pipeline");
         pipeline.run().await?;
+
+        debug!(target: "reth::cli - BitfinityImportCommand", "Sync process complete");
 
         Ok(())
     }
@@ -295,6 +298,7 @@ impl BitfinityImportCommand {
         static_file_producer: StaticFileProducer<
             ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
         >,
+        max_block: u64,
     ) -> eyre::Result<(TypedPipeline, impl Stream<Item = NodeEvent<EthPrimitives>>)>
     where
         C: Consensus + 'static,
@@ -314,7 +318,6 @@ impl BitfinityImportCommand {
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
-        let max_block = remote_client.max_block().unwrap_or(0);
         let pipeline =
             Pipeline::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::builder()
                 .with_tip_sender(tip_tx)

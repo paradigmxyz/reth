@@ -1,8 +1,9 @@
 //! Bitfinity block validator.
 use std::collections::HashSet;
 
-use did::BlockConfirmationData;
-use evm_canister_client::{CanisterClient, EvmCanisterClient};
+use did::{BlockConfirmationData, BlockConfirmationResult};
+use ethereum_json_rpc_client::{Client, EthJsonRpcClient};
+use eyre::eyre;
 use reth_chain_state::MemoryOverlayStateProvider;
 use reth_evm::execute::{BasicBatchExecutor, BatchExecutor};
 use reth_evm_ethereum::{
@@ -21,24 +22,25 @@ use reth_revm::{batch::BlockBatchRecord, database::StateProviderDatabase};
 ///
 /// The validator validates the block by executing it and then
 /// confirming it on the EVM.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct BitfinityBlockValidator<C, DB>
 where
-    C: CanisterClient,
+    C: Client,
     DB: NodeTypesWithDB + Clone,
 {
-    evm_client: EvmCanisterClient<C>,
+    evm_client: EthJsonRpcClient<C>,
     provider_factory: ProviderFactory<DB>,
 }
 
 impl<C, DB> BitfinityBlockValidator<C, DB>
 where
-    C: CanisterClient,
+    C: Client,
     DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
 {
     /// Create a new [`BitfinityBlockValidator`].
     pub const fn new(
-        evm_client: EvmCanisterClient<C>,
+        evm_client: EthJsonRpcClient<C>,
         provider_factory: ProviderFactory<DB>,
     ) -> Self {
         Self { evm_client, provider_factory }
@@ -65,9 +67,9 @@ where
         &self,
         confirmation_data: BlockConfirmationData,
     ) -> eyre::Result<()> {
-        match self.evm_client.confirm_block(confirmation_data).await? {
-            Ok(_) => Ok(()),
-            Err(err) => Err(eyre::eyre!("{err}")),
+        match self.evm_client.send_confirm_block(confirmation_data).await.map_err(|e| eyre!("{e}"))? {
+            BlockConfirmationResult::NotConfirmed => Err(eyre!("confirmation request rejected")),
+            _ => Ok(()),
         }
     }
 
@@ -137,8 +139,9 @@ where
     /// Calculates POW hash based on the given trie state.
     fn calculate_pow_hash(
         &self,
-        updated_state: reth_trie::HashedPostState,
+        _updated_state: reth_trie::HashedPostState,
     ) -> did::hash::Hash<alloy_primitives::FixedBytes<32>> {
-        todo!()
+        // TODO: calculate hash here
+        Default::default()
     }
 }
