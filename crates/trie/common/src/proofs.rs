@@ -23,7 +23,8 @@ pub type MultiProofTargets = B256Map<B256Set>;
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
 /// in the paths of target accounts.
-#[derive(Clone, Default, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(Default))]
 pub struct MultiProof {
     /// State trie multiproof for requested accounts.
     pub account_subtree: ProofNodes,
@@ -36,6 +37,19 @@ pub struct MultiProof {
 }
 
 impl MultiProof {
+    /// Create new multiproof for empty trie.
+    pub fn empty() -> Self {
+        Self {
+            account_subtree: ProofNodes::from_iter([(
+                Nibbles::default(),
+                Bytes::from([EMPTY_STRING_CODE]),
+            )]),
+            branch_node_hash_masks: HashMap::default(),
+            branch_node_tree_masks: HashMap::default(),
+            storages: B256Map::default(),
+        }
+    }
+
     /// Return the account proof nodes for the given account path.
     pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, Bytes)> {
         self.account_subtree.matching_nodes_sorted(path)

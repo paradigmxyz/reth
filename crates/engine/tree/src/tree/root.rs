@@ -798,7 +798,7 @@ where
 
                         if let Some(combined_update) = self.on_proof(
                             sequence_number,
-                            SparseTrieUpdate { state, multiproof: MultiProof::default() },
+                            SparseTrieUpdate { state, multiproof: MultiProof::empty() },
                         ) {
                             let _ = sparse_trie_tx
                                 .as_ref()

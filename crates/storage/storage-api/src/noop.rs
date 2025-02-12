@@ -432,7 +432,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
         _input: TrieInput,
         _targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        Ok(MultiProof::default())
+        Ok(MultiProof::empty())
     }
 
     fn witness(
