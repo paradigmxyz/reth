@@ -159,6 +159,8 @@ https://github.com/paradigmxyz/reth/blob/2ba54bf1c1f38c7173838f37027315a09287c20
 It has the following responsibilities:
 1. On empty proof targets, immediately send `StateRootMessage::EmptyProof` to the [State Root Task](#state-root-task).
 2. If the number of maximum concurrent proof calculations is reached, push the proof request to the pending queue.
+    - Maximum concurrency is determined as `NUM_THREADS / 2 - 2`.
+    - For a system with 64 threads, the maximum number of concurrent proof calculations will be `64 / 2 - 2 = 30`.
 3. If we can spawn a new proof calculation thread, spawn it using [`ParallelProof`](https://github.com/paradigmxyz/reth/blob/09a6aab9f7dc283e42fd00ce8f179542f8558580/crates/trie/parallel/src/proof.rs#L85),
 and send `StateRootMessage::ProofCalculated` to the [State Root Task](#state-root-task) once it's done.
 
