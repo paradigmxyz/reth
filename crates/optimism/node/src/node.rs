@@ -34,11 +34,14 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
+    eth::ext::OpEthExtApi,
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
 };
+use reth_optimism_txpool::conditional::MaybeConditionalTransaction;
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -182,6 +185,7 @@ where
         Self::AddOns::builder()
             .with_sequencer(self.args.sequencer_http.clone())
             .with_da_config(self.da_config.clone())
+            .with_enable_tx_conditional(self.args.enable_tx_conditional)
             .build()
     }
 }
@@ -210,6 +214,11 @@ pub struct OpAddOns<N: FullNodeComponents> {
     >,
     /// Data availability configuration for the OP builder.
     pub da_config: OpDAConfig,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    pub sequencer_client: Option<SequencerClient>,
+    /// Enable transaction conditionals.
+    enable_tx_conditional: bool,
 }
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default for OpAddOns<N> {
@@ -237,6 +246,7 @@ where
         Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
+    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -244,7 +254,7 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        let Self { rpc_add_ons, da_config } = self;
+        let Self { rpc_add_ons, da_config, sequencer_client, enable_tx_conditional } = self;
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
             ctx.node.pool().clone(),
@@ -260,6 +270,11 @@ where
         );
         let miner_ext = OpMinerExtApi::new(da_config);
 
+        let tx_conditional_ext: OpEthExtApi<N::Pool, N::Provider> = OpEthExtApi::new(
+            sequencer_client,
+            ctx.node.pool().clone(),
+            ctx.node.provider().clone(),
+        );
         rpc_add_ons
             .launch_add_ons_with(ctx, move |modules, auth_modules| {
                 debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
@@ -275,6 +290,14 @@ where
                 if modules.module_config().contains_any(&RethRpcModule::Miner) {
                     debug!(target: "reth::cli", "Installing miner DA rpc enddpoint");
                     auth_modules.merge_auth_methods(miner_ext.into_rpc())?;
+                }
+
+                if enable_tx_conditional {
+                    // extend the eth namespace if configured in the regular http server
+                    modules.merge_if_module_configured(
+                        RethRpcModule::Eth,
+                        tx_conditional_ext.into_rpc(),
+                    )?;
                 }
 
                 Ok(())
@@ -295,6 +318,7 @@ where
         Evm: ConfigureEvm<TxEnv = TxEnv>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
+    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
 {
     type EthApi = OpEthApi<N>;
 
@@ -329,6 +353,8 @@ pub struct OpAddOnsBuilder {
     sequencer_client: Option<SequencerClient>,
     /// Data availability configuration for the OP builder.
     da_config: Option<OpDAConfig>,
+    /// Enable transaction conditionals.
+    enable_tx_conditional: bool,
 }
 
 impl OpAddOnsBuilder {
@@ -343,6 +369,12 @@ impl OpAddOnsBuilder {
         self.da_config = Some(da_config);
         self
     }
+
+    /// Configure if transaction conditional should be enabled.
+    pub fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+        self.enable_tx_conditional = enable_tx_conditional;
+        self
+    }
 }
 
 impl OpAddOnsBuilder {
@@ -351,15 +383,20 @@ impl OpAddOnsBuilder {
     where
         N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
     {
-        let Self { sequencer_client, da_config } = self;
+        let Self { sequencer_client, da_config, enable_tx_conditional } = self;
 
+        let sequencer_client_clone = sequencer_client.clone();
         OpAddOns {
             rpc_add_ons: RpcAddOns::new(
-                move |ctx| OpEthApi::<N>::builder().with_sequencer(sequencer_client).build(ctx),
+                move |ctx| {
+                    OpEthApi::<N>::builder().with_sequencer(sequencer_client_clone).build(ctx)
+                },
                 Default::default(),
                 Default::default(),
             ),
             da_config: da_config.unwrap_or_default(),
+            sequencer_client,
+            enable_tx_conditional,
         }
     }
 }
