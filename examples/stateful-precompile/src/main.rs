@@ -150,7 +150,7 @@ impl<P: PrecompileProvider<Output = InterpreterResult>> PrecompileProvider
         // get the result if it exists
         if let Some(precompiles) = cache.cache.get_mut(address) {
             if let Some(result) = precompiles.get(&key) {
-                return result.clone().map(|i| Some(i));
+                return result.clone().map(Some)
             }
         }
 
@@ -161,7 +161,7 @@ impl<P: PrecompileProvider<Output = InterpreterResult>> PrecompileProvider
             // insert the result into the cache
             cache
                 .cache
-                .entry(address.clone())
+                .entry(*address)
                 .or_insert(PrecompileLRUCache::new(ByLength::new(1024)))
                 .insert(key, output);
         }
