@@ -272,8 +272,8 @@ where
 
         let tx_conditional_ext: OpEthExtApi<N::Pool, N::Provider> = OpEthExtApi::new(
             sequencer_client,
-            Arc::new(ctx.node.pool().clone()),
-            Arc::new(ctx.node.provider().clone()),
+            ctx.node.pool().clone(),
+            ctx.node.provider().clone(),
         );
         rpc_add_ons
             .launch_add_ons_with(ctx, move |modules, auth_modules| {

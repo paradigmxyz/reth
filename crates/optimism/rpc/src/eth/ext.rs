@@ -16,38 +16,17 @@ use std::sync::Arc;
 /// Maximum execution const for conditional transactions.
 const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
 
-/// OP-Reth `Eth` API extensions implementation.
-///
-/// Separate from [`super::OpEthApi`] to allow to enable it conditionally,
-#[derive(Clone)]
-#[allow(dead_code)]
 #[derive(Debug)]
-pub struct OpEthExtApi<Pool, Provider> {
-    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
-    /// network.
-    sequencer_client: Option<SequencerClient>,
+struct OpEthExtApiInner<Pool, Provider> {
     /// The transaction pool of the node.
-    pool: Arc<Pool>,
+    pool: Pool,
     /// The provider type used to interact with the node.
-    provider: Arc<Provider>,
+    provider: Provider,
 }
 
-impl<Pool, Provider> OpEthExtApi<Pool, Provider>
-where
-    Provider: BlockReaderIdExt + Clone + 'static,
-{
-    /// Creates a new [`OpEthExtApi`].
-    pub fn new(
-        sequencer_client: Option<SequencerClient>,
-        pool: Arc<Pool>,
-        provider: Arc<Provider>,
-    ) -> Self {
-        Self { sequencer_client, pool, provider }
-    }
-
-    /// Returns the configured sequencer client, if any.
-    fn sequencer_client(&self) -> Option<&SequencerClient> {
-        self.sequencer_client.as_ref()
+impl<Pool, Provider> OpEthExtApiInner<Pool, Provider> {
+    fn new(pool: Pool, provider: Provider) -> Self {
+        Self { pool, provider }
     }
 
     #[inline]
@@ -58,6 +37,44 @@ where
     #[inline]
     fn provider(&self) -> &Provider {
         &self.provider
+    }
+}
+
+/// OP-Reth `Eth` API extensions implementation.
+///
+/// Separate from [`super::OpEthApi`] to allow to enable it conditionally,
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct OpEthExtApi<Pool, Provider> {
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: Option<SequencerClient>,
+    inner: Arc<OpEthExtApiInner<Pool, Provider>>,
+}
+
+impl<Pool, Provider> OpEthExtApi<Pool, Provider>
+where
+    Provider: BlockReaderIdExt + Clone + 'static,
+{
+    /// Creates a new [`OpEthExtApi`].
+    pub fn new(sequencer_client: Option<SequencerClient>, pool: Pool, provider: Provider) -> Self {
+        let inner = Arc::new(OpEthExtApiInner::new(pool, provider));
+        Self { sequencer_client, inner }
+    }
+
+    /// Returns the configured sequencer client, if any.
+    fn sequencer_client(&self) -> Option<&SequencerClient> {
+        self.sequencer_client.as_ref()
+    }
+
+    #[inline]
+    fn pool(&self) -> &Pool {
+        self.inner.pool()
+    }
+
+    #[inline]
+    fn provider(&self) -> &Provider {
+        self.inner.provider()
     }
 }
 
