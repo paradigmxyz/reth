@@ -61,3 +61,6 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "reth-codecs?/arbitrary",
 ]
+reth-codec = [
+    "dep:reth-codecs",
+]
