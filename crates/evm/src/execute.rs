@@ -377,13 +377,10 @@ where
         F: OnStateHook + 'static,
     {
         self.strategy.with_state_hook(Some(Box::new(state_hook)));
+        let result = self.execute_one(block);
+        self.strategy.with_state_hook(None);
 
-        self.strategy.apply_pre_execution_changes(block)?;
-        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
-        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
-
-        Ok(BlockExecutionResult { receipts, requests, gas_used })
+        result
     }
 
     fn into_state(self) -> State<DB> {

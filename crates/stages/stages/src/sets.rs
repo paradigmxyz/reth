@@ -21,15 +21,17 @@
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
 //! # use reth_primitives::EthPrimitives;
+//! # use std::sync::Arc;
+//! # use reth_consensus::{FullConsensus, ConsensusError};
 //!
-//! # fn create(exec: impl BlockExecutorProvider<Primitives = EthPrimitives>) {
+//! # fn create(exec: impl BlockExecutorProvider<Primitives = EthPrimitives>, consensus: impl FullConsensus<EthPrimitives, Error = ConsensusError> + 'static) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =
 //!     StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 //! // Build a pipeline with all offline stages.
 //! let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
-//!     .add_stages(OfflineStages::new(exec, StageConfig::default(), PruneModes::default()))
+//!     .add_stages(OfflineStages::new(exec, Arc::new(consensus), StageConfig::default(), PruneModes::default()))
 //!     .build(provider_factory, static_file_producer);
 //!
 //! # }
