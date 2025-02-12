@@ -130,6 +130,7 @@ where
             }
         }
 
+        let first_block_number = blocks.first().expect("blocks should not be empty").number();
         let last_block_number = blocks.last().expect("blocks should not be empty").number();
         debug!(
             target: "exex::backfill",
@@ -142,7 +143,7 @@ where
         self.range = last_block_number + 1..=*self.range.end();
 
         let outcome = ExecutionOutcome::from_blocks(
-            *self.range.start(),
+            first_block_number,
             executor.into_state().take_bundle(),
             results,
         );
