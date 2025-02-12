@@ -21,7 +21,7 @@ We will look at the following components:
 
 ## Engine
 
-![Engine](./mermaid/engine.mmd.svg)
+![Engine](./mermaid/engine.mmd.png)
 
 It all starts with the `engine_newPayload` request coming from the [Consensus Client](https://ethereum.org/en/developers/docs/nodes-and-clients/#consensus-clients).
 
@@ -60,7 +60,7 @@ the [State Root Task](#state-root-task) thread, and send the `engine_newPayload`
 
 ## State Root Task
 
-![State Root Task](./mermaid/state-root-task.mmd.svg)
+![State Root Task](./mermaid/state-root-task.mmd.png)
 
 State Root Task is a component responsible for receiving the state updates from the [Engine](#engine),
 issuing requests for generating proofs to the [MultiProof Manager](#multiproof-manager),
@@ -144,7 +144,7 @@ signaling that no proofs or state updates are coming anymore, and the state root
 
 ## MultiProof Manager
 
-![MultiProof Manager](./mermaid/multiproof-manager.mmd.svg)
+![MultiProof Manager](./mermaid/multiproof-manager.mmd.png)
 
 MultiProof manager is a component responsible for generating MPT proofs
 and sending them back to the [State Root Task](#state-root-task).
@@ -189,7 +189,7 @@ along with the other nodes that need to be modified in the process of leaf updat
 
 #### Example
 
-![Sparse Trie](./mermaid/sparse-trie.mmd.svg)
+![Sparse Trie](./mermaid/sparse-trie.mmd.png)
 
 1. Empty
     - Sparse Trie has no revealed nodes, and an empty root
@@ -209,7 +209,7 @@ For the implementation details, see [crates/trie/sparse/src/trie.rs](https://git
 
 ### Sparse Trie updates
 
-![Sparse Trie Task](./mermaid/sparse-trie-task.mmd.svg)
+![Sparse Trie Task](./mermaid/sparse-trie-task.mmd.png)
 
 The messages to the sparse trie are sent from the [State Root Task](#state-root-task),
 and consist of the proof that needs to be revealed, and a list of updates that need to be applied.
