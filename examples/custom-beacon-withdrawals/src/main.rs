@@ -12,6 +12,7 @@ use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
     revm::{
+        db::State,
         primitives::{address, Address},
         DatabaseCommit,
     },
