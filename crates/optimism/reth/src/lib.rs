@@ -27,7 +27,6 @@ pub mod primitives {
 pub mod consensus {
     #[doc(inline)]
     pub use reth_consensus::*;
-    #[doc(inline)]
     pub mod validation {
         #[doc(inline)]
         pub use reth_consensus_common::validation::*;
