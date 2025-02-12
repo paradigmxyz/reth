@@ -65,6 +65,30 @@ pub trait Executor<DB: Database>: Sized {
         Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
     }
 
+    /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
+    fn execute_batch<'a, I>(
+        mut self,
+        blocks: I,
+    ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+    {
+        let mut results = Vec::new();
+        let mut first_block = None;
+        for block in blocks {
+            if first_block.is_none() {
+                first_block = Some(block.header().number());
+            }
+            results.push(self.execute_one(block)?);
+        }
+
+        Ok(ExecutionOutcome::from_blocks(
+            first_block.unwrap_or_default(),
+            self.into_state().take_bundle(),
+            results,
+        ))
+    }
+
     /// Executes the EVM with the given input and accepts a state closure that is invoked with
     /// the EVM state after execution.
     fn execute_with_state_closure<F>(
@@ -377,13 +401,10 @@ where
         F: OnStateHook + 'static,
     {
         self.strategy.with_state_hook(Some(Box::new(state_hook)));
+        let result = self.execute_one(block);
+        self.strategy.with_state_hook(None);
 
-        self.strategy.apply_pre_execution_changes(block)?;
-        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
-        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
-
-        Ok(BlockExecutionResult { receipts, requests, gas_used })
+        result
     }
 
     fn into_state(self) -> State<DB> {

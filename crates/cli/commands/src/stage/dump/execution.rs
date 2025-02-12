@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::setup;
+use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, transaction::DbTx,
@@ -16,17 +17,19 @@ use reth_provider::{
 use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
-pub(crate) async fn dump_execution_stage<N, E>(
+pub(crate) async fn dump_execution_stage<N, E, C>(
     db_tool: &DbTool<N>,
     from: u64,
     to: u64,
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
     executor: E,
+    consensus: C,
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
+    C: FullConsensus<E::Primitives, Error = ConsensusError> + 'static,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -44,6 +47,7 @@ where
             to,
             from,
             executor,
+            consensus,
         )?;
     }
 
@@ -139,8 +143,10 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
-    let mut exec_stage =
-        ExecutionStage::new_with_executor(NoopBlockExecutorProvider::<N::Primitives>::default());
+    let mut exec_stage = ExecutionStage::new_with_executor(
+        NoopBlockExecutorProvider::<N::Primitives>::default(),
+        NoopConsensus::arc(),
+    );
 
     exec_stage.unwind(
         &provider,
@@ -162,19 +168,21 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 }
 
 /// Try to re-execute the stage without committing
-fn dry_run<N, E>(
+fn dry_run<N, E, C>(
     output_provider_factory: ProviderFactory<N>,
     to: u64,
     from: u64,
     executor: E,
+    consensus: C,
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
+    C: FullConsensus<E::Primitives, Error = ConsensusError> + 'static,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-    let mut exec_stage = ExecutionStage::new_with_executor(executor);
+    let mut exec_stage = ExecutionStage::new_with_executor(executor, Arc::new(consensus));
 
     let input =
         reth_stages::ExecInput { target: Some(to), checkpoint: Some(StageCheckpoint::new(from)) };

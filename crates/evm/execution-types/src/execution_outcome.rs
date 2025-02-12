@@ -1,4 +1,4 @@
-use crate::BlockExecutionOutput;
+use crate::{BlockExecutionOutput, BlockExecutionResult};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
@@ -126,6 +126,30 @@ impl<T> ExecutionOutcome<T> {
         );
 
         Self { bundle, receipts, first_block, requests }
+    }
+
+    /// Creates a new `ExecutionOutcome` from a single block execution result.
+    pub fn single(block_number: u64, result: BlockExecutionOutput<T>) -> Self {
+        Self {
+            bundle: result.state,
+            receipts: vec![result.receipts],
+            first_block: block_number,
+            requests: vec![result.requests],
+        }
+    }
+
+    /// Creates a new `ExecutionOutcome` from multiple [`BlockExecutionResult`]s.
+    pub fn from_blocks(
+        first_block: u64,
+        bundle: BundleState,
+        results: Vec<BlockExecutionResult<T>>,
+    ) -> Self {
+        let mut value = Self { bundle, first_block, receipts: Vec::new(), requests: Vec::new() };
+        for result in results {
+            value.receipts.push(result.receipts);
+            value.requests.push(result.requests);
+        }
+        value
     }
 
     /// Return revm bundle state.
