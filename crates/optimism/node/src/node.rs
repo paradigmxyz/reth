@@ -39,6 +39,7 @@ use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
 };
+use reth_optimism_txpool::conditional::MaybeConditionalTransaction;
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
@@ -242,6 +243,7 @@ where
         Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
+    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -311,6 +313,7 @@ where
         Evm: ConfigureEvm<TxEnv = TxEnv>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
+    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
 {
     type EthApi = OpEthApi<N>;
 
