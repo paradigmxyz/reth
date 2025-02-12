@@ -571,7 +571,15 @@ where
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
             debug!(target: "engine::tree", "Starting sparse trie task");
-            let _ = run_sparse_trie(config, metrics, rx, task_tx);
+            // We clone the task sender here so that it can be used in case the sparse trie task
+            // succeeds, without blocking due to any `Drop` implementation.
+            //
+            // It's more important to make sure we capture any errors, than to make sure we send an
+            // error result without blocking, which is why we wait for `run_sparse_trie` to return
+            // before sending errors.
+            if let Err(err) = run_sparse_trie(config, metrics, rx, task_tx.clone()) {
+                let _ = task_tx.send(StateRootMessage::RootCalculationError(err));
+            }
         });
         tx
     }
@@ -952,8 +960,11 @@ fn check_end_condition(
 
 /// Listen to incoming sparse trie updates and update the sparse trie.
 ///
-/// Once the updates receiver channel is dropped, returns final state root, trie updates and the
-/// number of update iterations.
+/// Once the updates receiver channel is dropped, this sends the final state root, trie updates and
+/// the number of update iterations to the `task_tx`.
+///
+/// This takes `task_tx` as an argument so that the state root result can be sent without blocking
+/// on any of the `Drop` implementations run at the end of this method.
 fn run_sparse_trie<Factory>(
     config: StateRootConfig<Factory>,
     metrics: StateRootTaskMetrics,
