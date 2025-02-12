@@ -1,21 +1,15 @@
-use alloy_primitives::{b256, B256};
 use reth_chainspec::{
-    once_cell_set, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork,
-    ForkCondition, Hardfork,
+    BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition, Hardfork,
 };
 use reth_network_peers::NodeRecord;
-
 use std::sync::Arc;
 
 pub const SHANGHAI_TIME: u64 = 1705996800;
 
 pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
-    const GENESIS: B256 = b256!("0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b");
-
-    ChainSpec {
+    let chain_spec = ChainSpec {
         chain: Chain::from_id(56),
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
-        genesis_hash: once_cell_set(GENESIS),
         genesis_header: Default::default(),
         paris_block_and_final_difficulty: None,
         hardforks: ChainHardforks::new(vec![(
@@ -26,8 +20,10 @@ pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
         base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 0,
         blob_params: Default::default(),
-    }
-    .into()
+    };
+    let _ = chain_spec.genesis_header();
+
+    Arc::new(chain_spec)
 }
 
 /// BSC mainnet bootnodes <https://github.com/bnb-chain/bsc/blob/master/params/bootnodes.go#L23>

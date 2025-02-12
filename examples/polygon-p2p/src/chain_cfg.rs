@@ -1,23 +1,17 @@
-use alloy_primitives::{b256, B256};
 use reth_chainspec::{
-    once_cell_set, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork,
-    ForkCondition, Hardfork,
+    BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition, Hardfork,
 };
 use reth_discv4::NodeRecord;
 use reth_primitives::Head;
-
 use std::sync::Arc;
 
 const SHANGAI_BLOCK: u64 = 50523000;
 
 pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
-    const GENESIS: B256 = b256!("a9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b");
-
-    ChainSpec {
+    let chain_spec = ChainSpec {
         chain: Chain::from_id(137),
         // <https://github.com/maticnetwork/bor/blob/d521b8e266b97efe9c8fdce8167e9dd77b04637d/builder/files/genesis-mainnet-v1.json>
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
-        genesis_hash: once_cell_set(GENESIS),
         genesis_header: Default::default(),
         paris_block_and_final_difficulty: None,
         hardforks: ChainHardforks::new(vec![
@@ -32,8 +26,10 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
         base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 0,
         blob_params: Default::default(),
-    }
-    .into()
+    };
+    let _ = chain_spec.genesis_header();
+
+    Arc::new(chain_spec)
 }
 
 /// Polygon mainnet boot nodes <https://github.com/maticnetwork/bor/blob/master/params/bootnodes.go#L79>
