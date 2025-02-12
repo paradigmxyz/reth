@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{
     hex,
-    map::{B256HashMap, HashSet},
+    map::{B256Map, HashSet},
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -25,11 +25,11 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Sparse account trie.
     state: SparseTrie<F::AccountNodeProvider>,
     /// Sparse storage tries.
-    storages: B256HashMap<SparseTrie<F::StorageNodeProvider>>,
+    storages: B256Map<SparseTrie<F::StorageNodeProvider>>,
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// Collection of revealed storage trie paths, per account.
-    revealed_storage_paths: B256HashMap<HashSet<Nibbles>>,
+    revealed_storage_paths: B256Map<HashSet<Nibbles>>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
@@ -331,7 +331,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn reveal_witness(
         &mut self,
         state_root: B256,
-        witness: &B256HashMap<Bytes>,
+        witness: &B256Map<Bytes>,
     ) -> SparseStateTrieResult<()> {
         // Create a `(hash, path, maybe_account)` queue for traversing witness trie nodes
         // starting from the root node.
@@ -498,7 +498,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns storage trie updates for tries that have been revealed.
     ///
     /// Panics if any of the storage tries are not revealed.
-    pub fn storage_trie_updates(&mut self) -> B256HashMap<StorageTrieUpdates> {
+    pub fn storage_trie_updates(&mut self) -> B256Map<StorageTrieUpdates> {
         self.storages
             .iter_mut()
             .map(|(address, trie)| {
