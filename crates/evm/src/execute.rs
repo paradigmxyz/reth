@@ -65,6 +65,30 @@ pub trait Executor<DB: Database>: Sized {
         Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
     }
 
+    /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
+    fn execute_batch<'a, I>(
+        mut self,
+        blocks: I,
+    ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+    {
+        let mut results = Vec::new();
+        let mut first_block = None;
+        for block in blocks {
+            if first_block.is_none() {
+                first_block = Some(block.header().number());
+            }
+            results.push(self.execute_one(block)?);
+        }
+
+        Ok(ExecutionOutcome::from_blocks(
+            first_block.unwrap_or_default(),
+            self.into_state().take_bundle(),
+            results,
+        ))
+    }
+
     /// Executes the EVM with the given input and accepts a state closure that is invoked with
     /// the EVM state after execution.
     fn execute_with_state_closure<F>(
