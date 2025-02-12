@@ -67,6 +67,7 @@ use super::missing_static_data_error;
 ///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
 #[derive(Debug)]
+#[expect(dead_code)]
 pub struct ExecutionStage<E>
 where
     E: BlockExecutorProvider,
@@ -661,6 +662,7 @@ mod tests {
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::transaction::DbTx;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_evm::execute::BasicBlockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
     use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
@@ -678,8 +680,12 @@ mod tests {
             ChainSpecBuilder::mainnet().berlin_activated().build(),
         ));
         let executor_provider = BasicBlockExecutorProvider::new(strategy_factory);
+        let consensus = Arc::new(EthBeaconConsensus::new(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        )));
         ExecutionStage::new(
             executor_provider,
+            consensus,
             ExecutionStageThresholds {
                 max_blocks: Some(100),
                 max_changes: None,
