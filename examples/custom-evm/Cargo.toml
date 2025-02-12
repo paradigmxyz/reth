@@ -21,5 +21,8 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
+# static precompile sets.
+once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
+
 eyre.workspace = true
 tokio.workspace = true
