@@ -45,7 +45,7 @@ impl CustomRlpxProtoMessage {
             message: CustomRlpxProtoMessageKind::PingMessage(msg.into()),
         }
     }
-    /// Creates a ping message
+    /// Creates a pong message
     pub fn pong_message(msg: impl Into<String>) -> Self {
         Self {
             message_type: CustomRlpxProtoMessageId::PongMessage,

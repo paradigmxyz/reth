@@ -5,24 +5,23 @@ pub mod transaction;
 
 mod block;
 mod call;
+mod ext;
 mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
-use reth_node_api::NodePrimitives;
-use reth_optimism_primitives::OpPrimitives;
-
-use std::{fmt, sync::Arc};
 
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
+use reth_node_api::NodePrimitives;
 use reth_node_builder::EthApiBuilderCtx;
+use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    EvmEnvProvider, NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
-    ProviderTx, StageCheckpointReader, StateProviderFactory,
+    NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -30,7 +29,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes, RpcNodeCore, RpcNodeCoreExt,
+    EthApiTypes, FromEvmError, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
@@ -38,6 +37,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
+use std::{fmt, sync::Arc};
 
 use crate::{OpEthApiError, SequencerClient};
 
@@ -79,6 +79,16 @@ where
                       + 'static,
     >,
 {
+    /// Returns a reference to the [`EthApiNodeBackend`].
+    pub fn eth_api(&self) -> &EthApiNodeBackend<N> {
+        self.inner.eth_api()
+    }
+
+    /// Returns the configured sequencer client, if any.
+    pub fn sequencer_client(&self) -> Option<&SequencerClient> {
+        self.inner.sequencer_client()
+    }
+
     /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
     pub const fn builder() -> OpEthApiBuilder {
         OpEthApiBuilder::new()
@@ -193,7 +203,6 @@ where
     Self: LoadBlock<Provider = N::Provider>,
     N: OpNodeCore<
         Provider: BlockReaderIdExt
-                      + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
     >,
@@ -243,6 +252,7 @@ where
                 Header = ProviderHeader<Self::Provider>,
                 Transaction = ProviderTx<Self::Provider>,
             >,
+            Error: FromEvmError<Self::Evm>,
         >,
     N: OpNodeCore,
 {
@@ -271,6 +281,18 @@ struct OpEthApiInner<N: OpNodeCore> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
+}
+
+impl<N: OpNodeCore> OpEthApiInner<N> {
+    /// Returns a reference to the [`EthApiNodeBackend`].
+    const fn eth_api(&self) -> &EthApiNodeBackend<N> {
+        &self.eth_api
+    }
+
+    /// Returns the configured sequencer client, if any.
+    const fn sequencer_client(&self) -> Option<&SequencerClient> {
+        self.sequencer_client.as_ref()
+    }
 }
 
 /// A type that knows how to build a [`OpEthApi`].
@@ -323,7 +345,7 @@ impl OpEthApiBuilder {
             blocking_task_pool,
             ctx.new_fee_history_cache(),
             ctx.evm_config.clone(),
-            ctx.executor.clone(),
+            Box::new(ctx.executor.clone()),
             ctx.config.proof_permits,
         );
 

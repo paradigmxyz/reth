@@ -55,7 +55,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
+    use super::*;
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{hex_literal::hex, Bytes};
     use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
@@ -71,8 +72,6 @@ mod tests {
     use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
-    use super::*;
-
     #[tokio::test]
     async fn send_raw_transaction() {
         let noop_provider = NoopProvider::default();
@@ -81,15 +80,15 @@ mod tests {
         let pool = testing_pool();
 
         let evm_config = EthEvmConfig::new(noop_provider.chain_spec());
-        let cache = EthStateCache::spawn(noop_provider, Default::default());
+        let cache = EthStateCache::spawn(noop_provider.clone(), Default::default());
         let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(
-            noop_provider,
+            noop_provider.clone(),
             pool.clone(),
             noop_network_provider,
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
-            ETHEREUM_BLOCK_GAS_LIMIT,
+            ETHEREUM_BLOCK_GAS_LIMIT_30M,
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),

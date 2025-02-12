@@ -1,9 +1,7 @@
 //! Contains RPC handler implementations for fee history.
 
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
-};
+use reth_provider::{BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_rpc_eth_api::helpers::{EthFees, LoadBlock, LoadFee};
 use reth_rpc_eth_types::{FeeHistoryCache, GasPriceOracle};
 
@@ -20,7 +18,6 @@ impl<Provider, Pool, Network, EvmConfig> LoadFee for EthApi<Provider, Pool, Netw
 where
     Self: LoadBlock<Provider = Provider>,
     Provider: BlockReaderIdExt
-        + EvmEnvProvider
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
         + StateProviderFactory,
 {

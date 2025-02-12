@@ -18,10 +18,6 @@ use structs::*;
 use crate::ZstdConfig;
 
 // Helper Alias type
-type IsCompact = bool;
-// Helper Alias type
-type FieldName = String;
-// Helper Alias type
 type FieldType = String;
 /// `Compact` has alternative functions that can be used as a workaround for type
 /// specialization of fixed sized types.
@@ -30,7 +26,14 @@ type FieldType = String;
 /// require the len of the element, while the latter one does.
 type UseAlternative = bool;
 // Helper Alias type
-type StructFieldDescriptor = (FieldName, FieldType, IsCompact, UseAlternative);
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StructFieldDescriptor {
+    name: String,
+    ftype: String,
+    is_compact: bool,
+    use_alt_impl: bool,
+    is_reference: bool,
+}
 // Helper Alias type
 type FieldList = Vec<FieldTypes>;
 
@@ -150,12 +153,13 @@ fn load_field_from_segments(
                     attr.path().segments.iter().any(|path| path.ident == "maybe_zero")
                 });
 
-            fields.push(FieldTypes::StructField((
-                field.ident.as_ref().map(|i| i.to_string()).unwrap_or_default(),
+            fields.push(FieldTypes::StructField(StructFieldDescriptor {
+                name: field.ident.as_ref().map(|i| i.to_string()).unwrap_or_default(),
                 ftype,
-                should_compact,
+                is_compact: should_compact,
                 use_alt_impl,
-            )));
+                is_reference: matches!(field.ty, syn::Type::Reference(_)),
+            }));
         }
     }
 }
@@ -196,7 +200,7 @@ fn should_use_alt_impl(ftype: &str, segment: &syn::PathSegment) -> bool {
 pub fn get_bit_size(ftype: &str) -> u8 {
     match ftype {
         "TransactionKind" | "TxKind" | "bool" | "Option" | "Signature" => 1,
-        "TxType" => 2,
+        "TxType" | "OpTxType" => 2,
         "u64" | "BlockNumber" | "TxNumber" | "ChainId" | "NumTransactions" => 4,
         "u128" => 5,
         "U256" => 6,

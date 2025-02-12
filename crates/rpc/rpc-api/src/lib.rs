@@ -39,7 +39,7 @@ pub mod servers {
     pub use crate::{
         admin::AdminApiServer,
         debug::{DebugApiServer, DebugExecutionWitnessApiServer},
-        engine::{EngineApiServer, EngineEthApiServer},
+        engine::{EngineApiServer, EngineEthApiServer, IntoEngineApiRpcModule},
         mev::{MevFullApiServer, MevSimApiServer},
         miner::MinerApiServer,
         net::NetApiServer,
@@ -53,7 +53,7 @@ pub mod servers {
     };
     pub use reth_rpc_eth_api::{
         self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthFilterApiServer,
-        EthPubSubApiServer,
+        EthPubSubApiServer, L2EthApiExtServer,
     };
 }
 
@@ -84,5 +84,6 @@ pub mod clients {
     };
     pub use reth_rpc_eth_api::{
         EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthFilterApiClient,
+        L2EthApiExtServer,
     };
 }

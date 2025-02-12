@@ -986,7 +986,7 @@ mod tests {
             let db = tx.open_db(None).unwrap();
             for i in 1_000usize..1_000_000 {
                 match tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
-                    Ok(_) => continue,
+                    Ok(_) => {}
                     Err(Error::MapFull) => break,
                     result @ Err(_) => result.unwrap(),
                 }

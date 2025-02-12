@@ -7,7 +7,6 @@ use reth_db_api::{
 };
 use reth_db_common::DbTool;
 use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
-use reth_node_api::NodePrimitives;
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
@@ -26,14 +25,7 @@ pub(crate) async fn dump_execution_stage<N, E>(
     executor: E,
 ) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes<
-        DB = Arc<DatabaseEnv>,
-        Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            BlockHeader = reth_primitives::Header,
-        >,
-    >,
+    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
@@ -139,9 +131,7 @@ fn import_tables_with_range<N: NodeTypesWithDB>(
 /// Dry-run an unwind to FROM block, so we can get the `PlainStorageState` and
 /// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
-fn unwind_and_copy<
-    N: ProviderNodeTypes<Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>>,
->(
+fn unwind_and_copy<N: ProviderNodeTypes>(
     db_tool: &DbTool<N>,
     from: u64,
     tip_block_number: u64,
@@ -179,13 +169,7 @@ fn dry_run<N, E>(
     executor: E,
 ) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes<
-        Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            BlockHeader = reth_primitives::Header,
-        >,
-    >,
+    N: ProviderNodeTypes,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");

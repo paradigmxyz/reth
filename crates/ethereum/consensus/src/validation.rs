@@ -3,7 +3,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
-use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt};
+use reth_primitives::{gas_spent_by_transactions, GotExpected, Receipt, RecoveredBlock};
 use reth_primitives_traits::Block;
 
 /// Validate a block with regard to execution results:
@@ -11,7 +11,7 @@ use reth_primitives_traits::Block;
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
 pub fn validate_block_post_execution<B, ChainSpec>(
-    block: &BlockWithSenders<B>,
+    block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
     receipts: &[Receipt],
     requests: &Requests,

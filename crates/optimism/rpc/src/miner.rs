@@ -24,9 +24,9 @@ impl OpMinerExtApi {
 #[async_trait]
 impl MinerApiExtServer for OpMinerExtApi {
     /// Handler for `miner_setMaxDASize` RPC method.
-    async fn set_max_da_size(&self, max_tx_size: U64, max_block_size: U64) -> RpcResult<()> {
+    async fn set_max_da_size(&self, max_tx_size: U64, max_block_size: U64) -> RpcResult<bool> {
         debug!(target: "rpc", "Setting max DA size: tx={}, block={}", max_tx_size, max_block_size);
         self.da_config.set_max_da_size(max_tx_size.to(), max_block_size.to());
-        Ok(())
+        Ok(true)
     }
 }

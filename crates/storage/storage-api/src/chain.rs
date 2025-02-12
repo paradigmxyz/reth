@@ -1,5 +1,8 @@
-use crate::{DBProvider, StorageLocation};
+use crate::{DBProvider, OmmersProvider, StorageLocation};
+use alloc::vec::Vec;
+use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
+use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -8,7 +11,10 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives};
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::{
+    Block, BlockBody, FullBlockHeader, FullNodePrimitives, SignedTransaction,
+};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Trait that implements how block bodies are written to the storage.
@@ -78,20 +84,29 @@ impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageReader<Provider, P
 }
 
 /// Ethereum storage implementation.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct EthStorage;
+#[derive(Debug, Clone, Copy)]
+pub struct EthStorage<T = TransactionSigned, H = Header>(PhantomData<(T, H)>);
 
-impl<Provider> BlockBodyWriter<Provider, reth_primitives::BlockBody> for EthStorage
+impl<T, H> Default for EthStorage<T, H> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<Provider, T, H> BlockBodyWriter<Provider, reth_primitives::BlockBody<T, H>>
+    for EthStorage<T, H>
 where
     Provider: DBProvider<Tx: DbTxMut>,
+    T: SignedTransaction,
+    H: FullBlockHeader,
 {
     fn write_block_bodies(
         &self,
         provider: &Provider,
-        bodies: Vec<(u64, Option<reth_primitives::BlockBody>)>,
+        bodies: Vec<(u64, Option<reth_primitives::BlockBody<T, H>>)>,
         _write_to: StorageLocation,
     ) -> ProviderResult<()> {
-        let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers>()?;
+        let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?;
         let mut withdrawals_cursor =
             provider.tx_ref().cursor_write::<tables::BlockWithdrawals>()?;
 
@@ -100,14 +115,14 @@ where
 
             // Write ommers if any
             if !body.ommers.is_empty() {
-                ommers_cursor.append(block_number, StoredBlockOmmers { ommers: body.ommers })?;
+                ommers_cursor.append(block_number, &StoredBlockOmmers { ommers: body.ommers })?;
             }
 
             // Write withdrawals if any
             if let Some(withdrawals) = body.withdrawals {
                 if !withdrawals.is_empty() {
                     withdrawals_cursor
-                        .append(block_number, StoredBlockWithdrawals { withdrawals })?;
+                        .append(block_number, &StoredBlockWithdrawals { withdrawals })?;
                 }
             }
         }
@@ -128,11 +143,14 @@ where
     }
 }
 
-impl<Provider> BlockBodyReader<Provider> for EthStorage
+impl<Provider, T, H> BlockBodyReader<Provider> for EthStorage<T, H>
 where
-    Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Provider:
+        DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks> + OmmersProvider<Header = H>,
+    T: SignedTransaction,
+    H: FullBlockHeader,
 {
-    type Block = reth_primitives::Block;
+    type Block = reth_primitives::Block<T, H>;
 
     fn read_block_bodies(
         &self,
@@ -142,7 +160,6 @@ where
         // TODO: Ideally storage should hold its own copy of chain spec
         let chain_spec = provider.chain_spec();
 
-        let mut ommers_cursor = provider.tx_ref().cursor_read::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = provider.tx_ref().cursor_read::<tables::BlockWithdrawals>()?;
 
         let mut bodies = Vec::with_capacity(inputs.len());
@@ -150,19 +167,19 @@ where
         for (header, transactions) in inputs {
             // If we are past shanghai, then all blocks should have a withdrawal list,
             // even if empty
-            let withdrawals = if chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
+            let withdrawals = if chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
                 withdrawals_cursor
-                    .seek_exact(header.number)?
+                    .seek_exact(header.number())?
                     .map(|(_, w)| w.withdrawals)
                     .unwrap_or_default()
                     .into()
             } else {
                 None
             };
-            let ommers = if chain_spec.final_paris_total_difficulty(header.number).is_some() {
+            let ommers = if chain_spec.final_paris_total_difficulty(header.number()).is_some() {
                 Vec::new()
             } else {
-                ommers_cursor.seek_exact(header.number)?.map(|(_, o)| o.ommers).unwrap_or_default()
+                provider.ommers(header.number().into())?.unwrap_or_default()
             };
 
             bodies.push(reth_primitives::BlockBody { transactions, ommers, withdrawals });

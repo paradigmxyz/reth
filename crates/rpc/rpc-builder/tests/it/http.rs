@@ -22,8 +22,8 @@ use reth_network_peers::NodeRecord;
 use reth_primitives::Receipt;
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
-    DebugApiClient, EthFilterApiClient, NetApiClient, OtterscanClient, TraceApiClient,
-    Web3ApiClient,
+    DebugApiClient, EthCallBundleApiClient, EthFilterApiClient, NetApiClient, OtterscanClient,
+    TraceApiClient, Web3ApiClient,
 };
 use reth_rpc_server_types::RethRpcModule;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -352,6 +352,7 @@ where
         .err()
         .unwrap()
     ));
+    EthCallBundleApiClient::call_bundle(client, Default::default()).await.unwrap_err();
 }
 
 async fn test_basic_debug_calls<C>(client: &C)

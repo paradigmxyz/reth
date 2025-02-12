@@ -1,5 +1,6 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
 
+use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;

@@ -2,7 +2,7 @@ use alloy_consensus::TxEnvelope;
 use alloy_network::eip2718::Decodable2718;
 use alloy_primitives::{Bytes, B256};
 use reth_chainspec::EthereumHardforks;
-use reth_node_api::{FullNodeComponents, NodePrimitives};
+use reth_node_api::{BlockTy, FullNodeComponents};
 use reth_node_builder::{rpc::RpcRegistry, NodeTypes};
 use reth_provider::BlockReader;
 use reth_rpc_api::DebugApiServer;
@@ -18,16 +18,8 @@ pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
 
 impl<Node, EthApi> RpcTestContext<Node, EthApi>
 where
-    Node: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: EthereumHardforks,
-            Primitives: NodePrimitives<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-            >,
-        >,
-    >,
-    EthApi: EthApiSpec<Provider: BlockReader<Block = reth_primitives::Block>>
+    Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
         + EthTransactions
         + TraceExt,
 {

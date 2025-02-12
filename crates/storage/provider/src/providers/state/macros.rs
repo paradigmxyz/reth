@@ -31,7 +31,7 @@ macro_rules! delegate_provider_impls {
         $crate::providers::state::macros::delegate_impls_to_as_ref!(
             for $target =>
             AccountReader $(where [$($generics)*])? {
-                fn basic_account(&self, address: alloy_primitives::Address) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::Account>>;
+                fn basic_account(&self, address: &alloy_primitives::Address) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::Account>>;
             }
             BlockHashReader $(where [$($generics)*])? {
                 fn block_hash(&self, number: u64) -> reth_storage_errors::provider::ProviderResult<Option<alloy_primitives::B256>>;
@@ -39,7 +39,7 @@ macro_rules! delegate_provider_impls {
             }
             StateProvider $(where [$($generics)*])? {
                 fn storage(&self, account: alloy_primitives::Address, storage_key: alloy_primitives::StorageKey) -> reth_storage_errors::provider::ProviderResult<Option<alloy_primitives::StorageValue>>;
-                fn bytecode_by_hash(&self, code_hash: alloy_primitives::B256) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::Bytecode>>;
+                fn bytecode_by_hash(&self, code_hash: &alloy_primitives::B256) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::Bytecode>>;
             }
             StateRootProvider $(where [$($generics)*])? {
                 fn state_root(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::B256>;

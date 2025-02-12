@@ -37,10 +37,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::{
-    capability::CapabilityMessage, Capabilities, DisconnectReason, EthNetworkPrimitives,
-    NetworkPrimitives,
-};
+use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
@@ -70,13 +67,37 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
+// TODO: Inlined diagram due to a bug in aquamarine library, should become an include when it's
+// fixed. See https://github.com/mersinvald/aquamarine/issues/50
+// include_mmd!("docs/mermaid/network-manager.mmd")
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
 ///
 /// The [`NetworkManager`] is the container type for all parts involved with advancing the network.
 ///
-/// include_mmd!("docs/mermaid/network-manager.mmd")
+/// ```mermaid
+/// graph TB
+///   handle(NetworkHandle)
+///   events(NetworkEvents)
+///   transactions(Transactions Task)
+///   ethrequest(ETH Request Task)
+///   discovery(Discovery Task)
+///   subgraph NetworkManager
+///     direction LR
+///     subgraph Swarm
+///         direction TB
+///         B1[(Session Manager)]
+///         B2[(Connection Lister)]
+///         B3[(Network State)]
+///     end
+///  end
+///  handle <--> |request response channel| NetworkManager
+///  NetworkManager --> |Network events| events
+///  transactions <--> |transactions| NetworkManager
+///  ethrequest <--> |ETH request handing| NetworkManager
+///  discovery --> |Discovered peers| NetworkManager
+/// ```
 #[derive(Debug)]
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -118,16 +139,51 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     disconnect_metrics: DisconnectMetrics,
 }
 
-// === impl NetworkManager ===
+impl NetworkManager {
+    /// Creates the manager of a new network with [`EthNetworkPrimitives`] types.
+    ///
+    /// ```no_run
+    /// # async fn f() {
+    /// use reth_chainspec::MAINNET;
+    /// use reth_network::{NetworkConfig, NetworkManager};
+    /// let config =
+    ///     NetworkConfig::builder_with_rng_secret_key().build_with_noop_provider(MAINNET.clone());
+    /// let manager = NetworkManager::eth(config).await;
+    /// # }
+    /// ```
+    pub async fn eth<C: BlockNumReader + 'static>(
+        config: NetworkConfig<C, EthNetworkPrimitives>,
+    ) -> Result<Self, NetworkError> {
+        Self::new(config).await
+    }
+}
+
 impl<N: NetworkPrimitives> NetworkManager<N> {
-    /// Sets the dedicated channel for events indented for the
+    /// Sets the dedicated channel for events intended for the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
+    pub fn with_transactions(
+        mut self,
+        tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>,
+    ) -> Self {
+        self.set_transactions(tx);
+        self
+    }
+
+    /// Sets the dedicated channel for events intended for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>) {
         self.to_transactions_manager =
             Some(UnboundedMeteredSender::new(tx, NETWORK_POOL_TRANSACTIONS_SCOPE));
     }
 
-    /// Sets the dedicated channel for events indented for the
+    /// Sets the dedicated channel for events intended for the
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
+    pub fn with_eth_request_handler(mut self, tx: mpsc::Sender<IncomingEthRequest<N>>) -> Self {
+        self.set_eth_request_handler(tx);
+        self
+    }
+
+    /// Sets the dedicated channel for events intended for the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
     pub fn set_eth_request_handler(&mut self, tx: mpsc::Sender<IncomingEthRequest<N>>) {
         self.to_eth_request_handler = Some(tx);
@@ -385,31 +441,18 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         let status = sessions.status();
         let hello_message = sessions.hello_message();
 
+        #[allow(deprecated)]
         NetworkStatus {
             client_version: hello_message.client_version,
             protocol_version: hello_message.protocol_version as u64,
             eth_protocol_info: EthProtocolInfo {
-                difficulty: status.total_difficulty,
+                difficulty: None,
                 head: status.blockhash,
                 network: status.chain.id(),
                 genesis: status.genesis,
                 config: Default::default(),
             },
         }
-    }
-
-    /// Event hook for an unexpected message from the peer.
-    fn on_invalid_message(
-        &mut self,
-        peer_id: PeerId,
-        _capabilities: Arc<Capabilities>,
-        _message: CapabilityMessage<N>,
-    ) {
-        trace!(target: "net", ?peer_id, "received unexpected message");
-        self.swarm
-            .state_mut()
-            .peers_mut()
-            .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
     }
 
     /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
@@ -659,10 +702,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         // handle event
         match event {
             SwarmEvent::ValidMessage { peer_id, message } => self.on_peer_message(peer_id, message),
-            SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message } => {
-                self.on_invalid_message(peer_id, capabilities, message);
-                self.metrics.invalid_messages_received.increment(1);
-            }
             SwarmEvent::TcpListenerClosed { remote_addr } => {
                 trace!(target: "net", ?remote_addr, "TCP listener closed.");
             }

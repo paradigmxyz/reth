@@ -1,13 +1,13 @@
 use crate::{
-    BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, OmmersProvider, ReceiptProvider,
+    ReceiptProviderIdExt, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
-use reth_db_models::StoredBlockBodyIndices;
-use reth_primitives::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader};
+use core::ops::RangeInclusive;
+use reth_primitives::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
-use std::ops::RangeInclusive;
 
 /// A helper enum that represents the origin of the requested block.
 ///
@@ -50,9 +50,11 @@ pub type ProviderBlock<P> = <P as BlockReader>::Block;
 pub trait BlockReader:
     BlockNumReader
     + HeaderProvider
+    + BlockBodyIndicesProvider
     + TransactionsProvider
     + ReceiptProvider
     + WithdrawalsProvider
+    + OmmersProvider
     + Send
     + Sync
 {
@@ -80,28 +82,21 @@ pub trait BlockReader:
 
     /// Returns the pending block if available
     ///
-    /// Note: This returns a [`SealedBlockFor`] because it's expected that this is sealed by the
+    /// Note: This returns a [`SealedBlock`] because it's expected that this is sealed by the
     /// provider and the caller does not know the hash.
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>>;
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>>;
 
     /// Returns the pending block if available
     ///
-    /// Note: This returns a [`SealedBlockWithSenders`] because it's expected that this is sealed by
+    /// Note: This returns a [`RecoveredBlock`] because it's expected that this is sealed by
     /// the provider and the caller does not know the hash.
-    fn pending_block_with_senders(
-        &self,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>>;
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>>;
 
     /// Returns the pending block and receipts if available.
     #[allow(clippy::type_complexity)]
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>>;
-
-    /// Returns the ommers/uncle headers of the given block from the database.
-    ///
-    /// Returns `None` if block is not found.
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>>;
+    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>>;
 
     /// Returns the block with matching hash from the database.
     ///
@@ -117,11 +112,6 @@ pub trait BlockReader:
         self.block(num.into())
     }
 
-    /// Returns the block body indices with matching number from database.
-    ///
-    /// Returns `None` if block is not found.
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>>;
-
     /// Returns the block with senders with matching number or hash from database.
     ///
     /// Returns the block's transactions in the requested variant.
@@ -131,7 +121,7 @@ pub trait BlockReader:
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>>;
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>>;
 
     /// Returns the sealed block with senders with matching number or hash from database.
     ///
@@ -142,7 +132,7 @@ pub trait BlockReader:
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>>;
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>>;
 
     /// Returns all blocks in the given inclusive range.
     ///
@@ -154,17 +144,17 @@ pub trait BlockReader:
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>>;
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>>;
 
     /// Returns a range of sealed blocks from the database, along with the senders of each
     /// transaction in the blocks.
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>>;
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>>;
 }
 
-impl<T: BlockReader> BlockReader for std::sync::Arc<T> {
+impl<T: BlockReader> BlockReader for Arc<T> {
     type Block = T::Block;
 
     fn find_block_by_hash(
@@ -177,21 +167,16 @@ impl<T: BlockReader> BlockReader for std::sync::Arc<T> {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
         T::pending_block(self)
     }
-    fn pending_block_with_senders(
-        &self,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block_with_senders(self)
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
         T::pending_block_and_receipts(self)
-    }
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        T::ommers(self, id)
     }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
         T::block_by_hash(self, hash)
@@ -199,21 +184,18 @@ impl<T: BlockReader> BlockReader for std::sync::Arc<T> {
     fn block_by_number(&self, num: u64) -> ProviderResult<Option<Self::Block>> {
         T::block_by_number(self, num)
     }
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        T::block_body_indices(self, num)
-    }
     fn block_with_senders(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::block_with_senders(self, id, transaction_kind)
     }
     fn sealed_block_with_senders(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::sealed_block_with_senders(self, id, transaction_kind)
     }
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -222,13 +204,13 @@ impl<T: BlockReader> BlockReader for std::sync::Arc<T> {
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::block_with_senders_range(self, range)
     }
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::sealed_block_with_senders_range(self, range)
     }
 }
@@ -246,21 +228,16 @@ impl<T: BlockReader> BlockReader for &T {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
         T::pending_block(self)
     }
-    fn pending_block_with_senders(
-        &self,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block_with_senders(self)
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
         T::pending_block_and_receipts(self)
-    }
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        T::ommers(self, id)
     }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
         T::block_by_hash(self, hash)
@@ -268,21 +245,18 @@ impl<T: BlockReader> BlockReader for &T {
     fn block_by_number(&self, num: u64) -> ProviderResult<Option<Self::Block>> {
         T::block_by_number(self, num)
     }
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        T::block_body_indices(self, num)
-    }
     fn block_with_senders(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::block_with_senders(self, id, transaction_kind)
     }
     fn sealed_block_with_senders(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::sealed_block_with_senders(self, id, transaction_kind)
     }
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
@@ -291,13 +265,13 @@ impl<T: BlockReader> BlockReader for &T {
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::block_with_senders_range(self, range)
     }
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::sealed_block_with_senders_range(self, range)
     }
 }
@@ -366,7 +340,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
         &self,
         id: BlockId,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         match id {
             BlockId::Hash(hash) => {
                 self.block_with_senders(hash.block_hash.into(), transaction_kind)
@@ -398,7 +372,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         self.convert_block_number(id)?
             .map_or_else(|| Ok(None), |num| self.header_by_hash_or_number(num.into()))?
-            .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h))))
+            .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h))))
     }
 
     /// Returns the sealed header with the matching `BlockId` from the database.

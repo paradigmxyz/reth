@@ -23,7 +23,7 @@ use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
-use revm_primitives::{ExecutionResult, SignedAuthorization};
+use revm_primitives::ExecutionResult;
 
 const API_LEVEL: u64 = 8;
 
@@ -53,7 +53,9 @@ where
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
             .iter()
-            .map(|receipt| receipt.gas_used().saturating_mul(receipt.effective_gas_price()))
+            .map(|receipt| {
+                (receipt.gas_used() as u128).saturating_mul(receipt.effective_gas_price())
+            })
             .sum::<u128>();
 
         Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
@@ -73,7 +75,7 @@ where
         + TraceExt
         + 'static,
 {
-    /// Handler for `{ots,erigon}_getHeaderByNumber`
+    /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(
         &self,
         block_number: u64,
@@ -185,7 +187,7 @@ where
         )
     }
 
-    /// Handler for `getBlockDetailsByHash`
+    /// Handler for `ots_getBlockDetailsByHash`
     async fn get_block_details_by_hash(
         &self,
         block_hash: B256,
@@ -200,7 +202,7 @@ where
         )
     }
 
-    /// Handler for `getBlockTransactions`
+    /// Handler for `ots_getBlockTransactions`
     async fn get_block_transactions(
         &self,
         block_number: u64,
@@ -256,7 +258,7 @@ where
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
                     status: receipt.status(),
-                    cumulative_gas_used: receipt.cumulative_gas_used() as u64,
+                    cumulative_gas_used: receipt.cumulative_gas_used(),
                     logs: None,
                     logs_bloom: None,
                     r#type: tx_ty,
@@ -275,9 +277,6 @@ where
                     from: receipt.from(),
                     to: receipt.to(),
                     contract_address: receipt.contract_address(),
-                    authorization_list: receipt
-                        .authorization_list()
-                        .map(<[SignedAuthorization]>::to_vec),
                 };
 
                 OtsTransactionReceipt { receipt, timestamp }
@@ -290,7 +289,7 @@ where
         Ok(block)
     }
 
-    /// Handler for `searchTransactionsBefore`
+    /// Handler for `ots_searchTransactionsBefore`
     async fn search_transactions_before(
         &self,
         _address: Address,
@@ -300,7 +299,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    /// Handler for `searchTransactionsAfter`
+    /// Handler for `ots_searchTransactionsAfter`
     async fn search_transactions_after(
         &self,
         _address: Address,
@@ -310,7 +309,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    /// Handler for `getTransactionBySenderAndNonce`
+    /// Handler for `ots_getTransactionBySenderAndNonce`
     async fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
@@ -324,7 +323,7 @@ where
             .map(|tx| tx.tx_hash()))
     }
 
-    /// Handler for `getContractCreator`
+    /// Handler for `ots_getContractCreator`
     async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
         if !self.has_code(address, None).await? {
             return Ok(None);

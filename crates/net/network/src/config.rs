@@ -148,7 +148,7 @@ where
 impl<C, N> NetworkConfig<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = reth_primitives::Receipt, Header = N::BlockHeader>
+    C: BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + HeaderProvider
         + Clone
         + Unpin
@@ -209,6 +209,13 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     nat: Option<NatResolver>,
 }
 
+impl NetworkConfigBuilder<EthNetworkPrimitives> {
+    /// Creates the `NetworkConfigBuilder` with [`EthNetworkPrimitives`] types.
+    pub fn eth(secret_key: SecretKey) -> Self {
+        Self::new(secret_key)
+    }
+}
+
 // === impl NetworkConfigBuilder ===
 
 #[allow(missing_docs)]
@@ -264,6 +271,17 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     pub const fn network_mode(mut self, network_mode: NetworkMode) -> Self {
         self.network_mode = network_mode;
         self
+    }
+
+    /// Configures the network to use proof-of-work.
+    ///
+    /// This effectively allows block propagation in the `eth` sub-protocol, which has been
+    /// soft-deprecated with ethereum `PoS` after the merge. Even if block propagation is
+    /// technically allowed, according to the eth protocol, it is not expected to be used in `PoS`
+    /// networks and peers are supposed to terminate the connection if they receive a `NewBlock`
+    /// message.
+    pub const fn with_pow(self) -> Self {
+        self.network_mode(NetworkMode::Work)
     }
 
     /// Sets the highest synced block.
@@ -356,6 +374,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     pub fn discovery_port(mut self, port: u16) -> Self {
         self.discovery_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
         self
+    }
+
+    /// Launches the network with an unused network and discovery port
+    /// This is useful for testing.
+    pub fn with_unused_ports(self) -> Self {
+        self.with_unused_discovery_port().with_unused_listener_port()
     }
 
     /// Sets the discovery port to an unused port.

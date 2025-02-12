@@ -17,7 +17,6 @@ use std::{
 
 use alloy_eips::BlockNumHash;
 use futures_util::FutureExt;
-use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{
@@ -25,6 +24,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
@@ -46,14 +46,14 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{BlockExt, EthPrimitives, Head, SealedBlockWithSenders, TransactionSigned};
+use reth_primitives::{EthPrimitives, RecoveredBlock, TransactionSigned};
+use reth_primitives_traits::Block as _;
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
 };
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-
 use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
@@ -175,7 +175,8 @@ pub type Adapter = NodeAdapter<
     RethFullAdapter<TmpDB, TestNode>,
     <<TestNode as Node<
         FullNodeTypesAdapter<
-            NodeTypesWithDBAdapter<TestNode, TmpDB>,
+            TestNode,
+            TmpDB,
             BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
         >,
     >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
@@ -187,7 +188,7 @@ pub type TestExExContext = ExExContext<Adapter>;
 #[derive(Debug)]
 pub struct TestExExHandle {
     /// Genesis block that was inserted into the storage
-    pub genesis: SealedBlockWithSenders,
+    pub genesis: RecoveredBlock<reth_primitives::Block>,
     /// Provider Factory for accessing the emphemeral storage of the host node
     pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
     /// Channel for receiving events from the Execution Extension
@@ -273,8 +274,7 @@ pub async fn test_exex_context_with_chain_spec(
     );
 
     let genesis_hash = init_genesis(&provider_factory)?;
-    let provider =
-        BlockchainProvider::new(provider_factory.clone(), Arc::new(NoopBlockchainTree::default()))?;
+    let provider = BlockchainProvider::new(provider_factory.clone())?;
 
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
@@ -288,9 +288,16 @@ pub async fn test_exex_context_with_chain_spec(
     let task_executor = tasks.executor();
     tasks.executor().spawn(network_manager);
 
-    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
+    let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+        provider.clone(),
+        transaction_pool.clone(),
+        evm_config.clone(),
+        EthereumBuilderConfig::new(Default::default()),
+    );
 
-    let components = NodeAdapter::<FullNodeTypesAdapter<_, _>, _> {
+    let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
+
+    let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
         components: Components {
             transaction_pool,
             evm_config,
@@ -298,6 +305,7 @@ pub async fn test_exex_context_with_chain_spec(
             consensus,
             network,
             payload_builder,
+            payload_builder_handle,
         },
         task_executor,
         provider,
@@ -307,16 +315,9 @@ pub async fn test_exex_context_with_chain_spec(
         .block_by_hash(genesis_hash)?
         .ok_or_else(|| eyre::eyre!("genesis block not found"))?
         .seal_slow()
-        .seal_with_senders::<reth_primitives::Block>()
-        .ok_or_else(|| eyre::eyre!("failed to recover senders"))?;
+        .try_recover()?;
 
-    let head = Head {
-        number: genesis.number,
-        hash: genesis_hash,
-        difficulty: genesis.difficulty,
-        timestamp: genesis.timestamp,
-        total_difficulty: Default::default(),
-    };
+    let head = genesis.num_hash();
 
     let wal_directory = tempfile::tempdir()?;
     let wal = Wal::new(wal_directory.path())?;

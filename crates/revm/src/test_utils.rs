@@ -4,7 +4,7 @@ use alloy_primitives::{
     map::{B256HashMap, HashMap},
     Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
-use reth_primitives::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
     StateRootProvider, StorageRootProvider,
@@ -47,8 +47,8 @@ impl StateProviderTest {
 }
 
 impl AccountReader for StateProviderTest {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        Ok(self.accounts.get(&address).map(|(_, acc)| *acc))
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        Ok(self.accounts.get(address).map(|(_, acc)| *acc))
     }
 }
 
@@ -165,7 +165,7 @@ impl StateProvider for StateProviderTest {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
 
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-        Ok(self.contracts.get(&code_hash).cloned())
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        Ok(self.contracts.get(code_hash).cloned())
     }
 }

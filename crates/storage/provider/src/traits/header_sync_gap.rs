@@ -1,6 +1,6 @@
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::SealedHeader;
 use reth_storage_errors::provider::ProviderResult;
@@ -16,7 +16,7 @@ pub struct HeaderSyncGap<H = Header> {
     pub target: SyncTarget,
 }
 
-impl<H: BlockHeader> HeaderSyncGap<H> {
+impl<H: BlockHeader + Sealable> HeaderSyncGap<H> {
     /// Returns `true` if the gap from the head to the target was closed
     #[inline]
     pub fn is_closed(&self) -> bool {

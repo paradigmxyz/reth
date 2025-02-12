@@ -1,22 +1,19 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
-use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
-use reth_primitives::{
-    logs_bloom,
-    proofs::{calculate_receipt_root_no_memo, calculate_transaction_root},
-    BlockBody, Receipt,
-};
+use reth_primitives::{logs_bloom, BlockBody, Receipt};
+use reth_primitives_traits::proofs::calculate_transaction_root;
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderBlock,
-    ProviderReceipt, ProviderTx, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderReceipt, ProviderTx,
+    StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
-    RpcNodeCore,
+    FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -29,14 +26,14 @@ impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
 where
     Self: SpawnBlocking<
             NetworkTypes: alloy_network::Network<HeaderResponse = alloy_rpc_types_eth::Header>,
+            Error: FromEvmError<Self::Evm>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<
                 Transaction = reth_primitives::TransactionSigned,
                 Block = reth_primitives::Block,
                 Receipt = reth_primitives::Receipt,
                 Header = reth_primitives::Header,
-            > + EvmEnvProvider
-                          + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+            > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                           + StateProviderFactory,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
@@ -65,7 +62,7 @@ where
         let chain_spec = self.provider().chain_spec();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root = calculate_receipt_root_no_memo(&receipts.iter().collect::<Vec<_>>());
+        let receipts_root = Receipt::calculate_receipt_root_no_memo(receipts);
 
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
 
@@ -94,11 +91,10 @@ where
             blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
-            excess_blob_gas: block_env.get_blob_excess_gas().map(Into::into),
+            excess_blob_gas: block_env.get_blob_excess_gas(),
             extra_data: Default::default(),
             parent_beacon_block_root: is_cancun.then_some(B256::ZERO),
             requests_hash: is_prague.then_some(EMPTY_REQUESTS_HASH),
-            target_blobs_per_block: None,
         };
 
         // seal the block
@@ -119,7 +115,7 @@ where
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
-            logs: result.into_logs().into_iter().map(Into::into).collect(),
+            logs: result.into_logs().into_iter().collect(),
             ..Default::default()
         }
     }

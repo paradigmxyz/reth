@@ -16,10 +16,9 @@ use std::{
 
 use crate::miner::{LocalMiner, MiningMode};
 use futures_util::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
-use reth_consensus::FullConsensus;
-use reth_engine_primitives::{BeaconEngineMessage, EngineValidator};
+use reth_consensus::{ConsensusError, FullConsensus};
+use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineValidator};
 use reth_engine_service::service::EngineMessageStream;
 use reth_engine_tree::{
     chain::{ChainEvent, HandlerEvent},
@@ -30,11 +29,14 @@ use reth_engine_tree::{
     persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
-use reth_evm::execute::BlockExecutorProvider;
-use reth_node_types::BlockTy;
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+use reth_node_types::{BlockTy, HeaderTy, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
-use reth_provider::{providers::BlockchainProvider2, ChainSpecProvider, ProviderFactory};
+use reth_provider::{
+    providers::{BlockchainProvider, EngineNodeTypes},
+    ChainSpecProvider, ProviderFactory,
+};
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::MetricEventsSender;
 use tokio::sync::mpsc::UnboundedSender;
@@ -63,11 +65,11 @@ where
 {
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
-    pub fn new<B, V>(
-        consensus: Arc<dyn FullConsensus<N::Primitives>>,
+    pub fn new<B, V, C>(
+        consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
+        blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
         payload_validator: V,
@@ -78,10 +80,12 @@ where
         from_engine: EngineMessageStream<N::Engine>,
         mode: MiningMode,
         payload_attributes_builder: B,
+        evm_config: C,
     ) -> Self
     where
         B: PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
         V: EngineValidator<N::Engine, Block = BlockTy<N>>,
+        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>>,
     {
         let chain_spec = provider.chain_spec();
         let engine_kind =
@@ -91,18 +95,20 @@ where
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
-            blockchain_db.clone(),
-            executor_factory,
-            consensus,
-            payload_validator,
-            persistence_handle,
-            payload_builder.clone(),
-            canonical_in_memory_state,
-            tree_config,
-            invalid_block_hook,
-            engine_kind,
-        );
+        let (to_tree_tx, from_tree) =
+            EngineApiTreeHandler::<N::Primitives, _, _, _, _, _>::spawn_new(
+                blockchain_db.clone(),
+                executor_factory,
+                consensus,
+                payload_validator,
+                persistence_handle,
+                payload_builder.clone(),
+                canonical_in_memory_state,
+                tree_config,
+                invalid_block_hook,
+                engine_kind,
+                evm_config,
+            );
 
         let handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
 

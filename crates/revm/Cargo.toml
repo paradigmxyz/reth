@@ -13,16 +13,12 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-storage-errors.workspace = true
-reth-execution-errors.workspace = true
-reth-prune-types.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, optional = true }
-reth-primitives-traits.workspace = true
 
 # alloy
-alloy-eips.workspace = true
 alloy-primitives.workspace = true
 
 # revm
@@ -37,29 +33,24 @@ alloy-consensus.workspace = true
 [features]
 default = ["std"]
 std = [
-	"reth-primitives/std",
-	"alloy-primitives/std",
-	"revm/std",
-	"alloy-eips/std",
-	"alloy-consensus/std",
-	"reth-primitives-traits/std",
-	"reth-ethereum-forks/std"
+    "reth-primitives-traits/std",
+    "alloy-primitives/std",
+    "revm/std",
+    "alloy-consensus/std",
+    "reth-ethereum-forks/std",
 ]
 witness = ["dep:reth-trie"]
 test-utils = [
-	"dep:reth-trie",
-	"reth-primitives/test-utils",
-	"reth-trie?/test-utils",
-	"revm/test-utils",
-	"reth-prune-types/test-utils",
+    "dep:reth-trie",
     "reth-primitives-traits/test-utils",
+    "reth-trie?/test-utils",
+    "revm/test-utils",
 ]
 serde = [
-	"revm/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"alloy-consensus/serde",
-	"reth-primitives-traits/serde",
-	"reth-trie?/serde",
-	"reth-ethereum-forks/serde"
+    "revm/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "reth-trie?/serde",
+    "reth-ethereum-forks/serde",
+    "reth-primitives-traits/serde",
 ]

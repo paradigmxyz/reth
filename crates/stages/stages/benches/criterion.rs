@@ -1,11 +1,10 @@
 #![allow(missing_docs)]
-use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
-#[cfg(not(target_os = "windows"))]
-use pprof::criterion::{Output, PProfProfiler};
-use reth_config::config::{EtlConfig, TransactionLookupConfig};
-use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
+#![allow(unexpected_cfgs)]
 
 use alloy_primitives::BlockNumber;
+use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
+use reth_config::config::{EtlConfig, TransactionLookupConfig};
+use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
 use reth_provider::{test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},
@@ -22,25 +21,30 @@ use setup::StageRange;
 // Expanded form of `criterion_group!`
 //
 // This is currently needed to only instantiate the tokio runtime once.
+#[cfg(not(codspeed))]
 fn benches() {
-    #[cfg(not(target_os = "windows"))]
-    let mut criterion = Criterion::default()
-        .with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)))
-        .configure_from_args();
+    #[cfg(not(windows))]
+    use pprof::criterion::{Output, PProfProfiler};
 
-    let runtime = Runtime::new().unwrap();
-    let _guard = runtime.enter();
-
-    #[cfg(target_os = "windows")]
-    let mut criterion = Criterion::default().configure_from_args();
-
-    transaction_lookup(&mut criterion, &runtime);
-    account_hashing(&mut criterion, &runtime);
-    senders(&mut criterion, &runtime);
-    merkle(&mut criterion, &runtime);
+    let criterion = Criterion::default();
+    #[cfg(not(windows))]
+    let criterion = criterion.with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
+    run_benches(&mut criterion.configure_from_args());
 }
 
+fn run_benches(criterion: &mut Criterion) {
+    let runtime = Runtime::new().unwrap();
+    let _guard = runtime.enter();
+    transaction_lookup(criterion, &runtime);
+    account_hashing(criterion, &runtime);
+    senders(criterion, &runtime);
+    merkle(criterion, &runtime);
+}
+
+#[cfg(not(codspeed))]
 criterion_main!(benches);
+#[cfg(codspeed)]
+criterion_main!(run_benches);
 
 const DEFAULT_NUM_BLOCKS: u64 = 10_000;
 

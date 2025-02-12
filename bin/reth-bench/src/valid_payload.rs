@@ -8,13 +8,13 @@ use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
-use alloy_transport::{Transport, TransportResult};
+use alloy_transport::TransportResult;
 use reth_node_api::EngineApiMessageVersion;
 use tracing::error;
 
 /// An extension trait for providers that implement the engine API, to wait for a VALID response.
 #[async_trait::async_trait]
-pub trait EngineApiValidWaitExt<N, T>: Send + Sync {
+pub trait EngineApiValidWaitExt<N>: Send + Sync {
     /// Calls `engine_newPayloadV1` with the given [ExecutionPayloadV1], and waits until the
     /// response is VALID.
     async fn new_payload_v1_wait(
@@ -64,11 +64,10 @@ pub trait EngineApiValidWaitExt<N, T>: Send + Sync {
 }
 
 #[async_trait::async_trait]
-impl<T, N, P> EngineApiValidWaitExt<N, T> for P
+impl<N, P> EngineApiValidWaitExt<N> for P
 where
     N: Network,
-    T: Transport + Clone,
-    P: EngineApi<N, T>,
+    P: EngineApi<N>,
 {
     async fn new_payload_v1_wait(
         &self,
@@ -120,6 +119,11 @@ where
                 );
                 panic!("Invalid newPayloadV3: {status:?}");
             }
+            if status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
             status = self
                 .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
                 .await?;
@@ -145,6 +149,11 @@ where
                 );
                 panic!("Invalid forkchoiceUpdatedV1: {status:?}");
             }
+            if status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
             status =
                 self.fork_choice_updated_v1(fork_choice_state, payload_attributes.clone()).await?;
         }
@@ -169,6 +178,11 @@ where
                     "Invalid forkchoiceUpdatedV2 message",
                 );
                 panic!("Invalid forkchoiceUpdatedV2: {status:?}");
+            }
+            if status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
             }
             status =
                 self.fork_choice_updated_v2(fork_choice_state, payload_attributes.clone()).await?;
@@ -208,7 +222,7 @@ where
 ///
 /// # Panics
 /// If the given payload is a V3 payload, but a parent beacon block root is provided as `None`.
-pub(crate) async fn call_new_payload<N, T, P: EngineApiValidWaitExt<N, T>>(
+pub(crate) async fn call_new_payload<N, P: EngineApiValidWaitExt<N>>(
     provider: P,
     payload: ExecutionPayload,
     parent_beacon_block_root: Option<B256>,
@@ -246,7 +260,7 @@ pub(crate) async fn call_new_payload<N, T, P: EngineApiValidWaitExt<N, T>>(
 /// Calls the correct `engine_forkchoiceUpdated` method depending on the given
 /// `EngineApiMessageVersion`, using the provided forkchoice state and payload attributes for the
 /// actual engine api message call.
-pub(crate) async fn call_forkchoice_updated<N, T, P: EngineApiValidWaitExt<N, T>>(
+pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
     provider: P,
     message_version: EngineApiMessageVersion,
     forkchoice_state: ForkchoiceState,

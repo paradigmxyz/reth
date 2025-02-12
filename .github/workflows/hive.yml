@@ -115,40 +115,38 @@ jobs:
               - eth_syncing
               # debug_ rpc methods
               - debug_
-          # Pyspec cancun jobs
-          # TODO: uncomment when https://github.com/ethereum/hive/issues/1147 is fixed
-          #- sim: pyspec
-          #  include: [cancun/eip4844]
-          #- sim: pyspec
-          #  include: [cancun/eip4788]
-          #- sim: pyspec
-          #  include: [cancun/eip6780]
-          #- sim: pyspec
-          #  include: [cancun/eip5656]
-          #- sim: pyspec
-          #  include: [cancun/eip1153]
-          #- sim: pyspec
-          #  include: [cancun/eip7516]
-          # Pyspec shanghai jobs
-          #- sim: pyspec
-          #  include: [shanghai/eip3651]
-          #- sim: pyspec
-          #  include: [shanghai/eip3855]
-          #- sim: pyspec
-          #  include: [shanghai/eip3860]
-          #- sim: pyspec
-          #  include: [shanghai/eip4895]
-          # Pyspec merge and earlier jobs
-          #- sim: pyspec
-          #  include: [merge/]
-          #- sim: pyspec
-          #  include: [berlin/]
-          #- sim: pyspec
-          #  include: [istanbul/]
-          #- sim: pyspec
-          #  include: [homestead/]
-          #- sim: pyspec
-          #  include: [frontier/]
+
+          # consume-engine
+          - sim: ethereum/eest/consume-engine
+            limit: tests/prague
+          - sim: ethereum/eest/consume-engine
+            limit: tests/cancun
+          - sim: ethereum/eest/consume-engine
+            limit: tests/shanghai
+          - sim: ethereum/eest/consume-engine
+            limit: tests/berlin
+          - sim: ethereum/eest/consume-engine
+            limit: tests/istanbul
+          - sim: ethereum/eest/consume-engine
+            limit: tests/homestead
+          - sim: ethereum/eest/consume-engine
+            limit: tests/frontier
+
+          # consume-rlp
+          - sim: ethereum/eest/consume-rlp
+            limit: tests/prague
+          - sim: ethereum/eest/consume-rlp
+            limit: tests/cancun
+          - sim: ethereum/eest/consume-rlp
+            limit: tests/shanghai
+          - sim: ethereum/eest/consume-rlp
+            limit: tests/berlin
+          - sim: ethereum/eest/consume-rlp
+            limit: tests/istanbul
+          - sim: ethereum/eest/consume-rlp
+            limit: tests/homestead
+          - sim: ethereum/eest/consume-rlp
+            limit: tests/frontier
     needs:
       - prepare-reth
       - prepare-hive

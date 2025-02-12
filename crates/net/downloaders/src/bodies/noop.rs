@@ -4,29 +4,26 @@ use reth_network_p2p::{
     bodies::{downloader::BodyDownloader, response::BlockResponse},
     error::{DownloadError, DownloadResult},
 };
+use reth_primitives_traits::Block;
 use std::{fmt::Debug, ops::RangeInclusive};
 
 /// A [`BodyDownloader`] implementation that does nothing.
 #[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct NoopBodiesDownloader<H, B> {
-    _header: std::marker::PhantomData<H>,
-    _body: std::marker::PhantomData<B>,
+pub struct NoopBodiesDownloader<B> {
+    _block: std::marker::PhantomData<B>,
 }
 
-impl<H: Debug + Send + Sync + Unpin + 'static, B: Debug + Send + Sync + Unpin + 'static>
-    BodyDownloader for NoopBodiesDownloader<H, B>
-{
-    type Body = B;
-    type Header = H;
+impl<B: Block + 'static> BodyDownloader for NoopBodiesDownloader<B> {
+    type Block = B;
 
     fn set_download_range(&mut self, _: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         Ok(())
     }
 }
 
-impl<H, B> Stream for NoopBodiesDownloader<H, B> {
-    type Item = Result<Vec<BlockResponse<H, B>>, DownloadError>;
+impl<B: Block + 'static> Stream for NoopBodiesDownloader<B> {
+    type Item = Result<Vec<BlockResponse<B>>, DownloadError>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,

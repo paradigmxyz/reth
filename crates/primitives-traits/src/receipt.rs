@@ -39,6 +39,6 @@ where
     receipts
         .into_iter()
         .enumerate()
-        .map(|(id, receipt)| (id as u64, receipt.cumulative_gas_used() as u64))
+        .map(|(id, receipt)| (id as u64, receipt.cumulative_gas_used()))
         .collect()
 }

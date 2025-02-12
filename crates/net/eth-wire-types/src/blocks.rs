@@ -2,6 +2,7 @@
 //! types.
 
 use crate::HeadersDirection;
+use alloc::vec::Vec;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
@@ -75,12 +76,12 @@ impl From<Vec<B256>> for GetBlockBodies {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct BlockBodies<B = reth_primitives::BlockBody>(
+pub struct BlockBodies<B = reth_ethereum_primitives::BlockBody>(
     /// The requested block bodies, each of which should correspond to a hash in the request.
     pub Vec<B>,
 );
 
-generate_tests!(#[rlp, 16] BlockBodies<reth_primitives::BlockBody>, EthBlockBodiesTests);
+generate_tests!(#[rlp, 16] BlockBodies<reth_ethereum_primitives::BlockBody>, EthBlockBodiesTests);
 
 impl<B> From<Vec<B>> for BlockBodies<B> {
     fn from(bodies: Vec<B>) -> Self {
@@ -98,7 +99,7 @@ mod tests {
     use alloy_eips::BlockHashOrNumber;
     use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{BlockBody, Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]
@@ -259,7 +260,6 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                     requests_hash: None,
-                    target_blobs_per_block: None,
                 },
             ]),
         }.encode(&mut data);
@@ -295,7 +295,6 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                     requests_hash: None,
-                    target_blobs_per_block: None,
                 },
             ]),
         };
@@ -396,7 +395,6 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                             requests_hash: None,
-                            target_blobs_per_block: None,
                         },
                     ],
                     withdrawals: None,
@@ -472,7 +470,6 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                             requests_hash: None,
-                            target_blobs_per_block: None,
                         },
                     ],
                     withdrawals: None,

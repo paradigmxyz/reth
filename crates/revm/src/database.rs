@@ -1,7 +1,8 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
+use reth_storage_api::{AccountReader, BlockHashReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{
     db::DatabaseRef,
@@ -16,7 +17,7 @@ pub trait EvmStateProvider: Send + Sync {
     /// Get basic account information.
     ///
     /// Returns [`None`] if the account doesn't exist.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>>;
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
 
     /// Get the hash of the block with the given number. Returns [`None`] if no block with this
     /// number exists.
@@ -25,8 +26,8 @@ pub trait EvmStateProvider: Send + Sync {
     /// Get account code by hash.
     fn bytecode_by_hash(
         &self,
-        code_hash: B256,
-    ) -> ProviderResult<Option<reth_primitives::Bytecode>>;
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>>;
 
     /// Get storage of the given account.
     fn storage(
@@ -37,20 +38,20 @@ pub trait EvmStateProvider: Send + Sync {
 }
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
-impl<T: reth_storage_api::StateProvider> EvmStateProvider for T {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        <T as reth_storage_api::AccountReader>::basic_account(self, address)
+impl<T: StateProvider> EvmStateProvider for T {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        <T as AccountReader>::basic_account(self, address)
     }
 
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
-        <T as reth_storage_api::BlockHashReader>::block_hash(self, number)
+        <T as BlockHashReader>::block_hash(self, number)
     }
 
     fn bytecode_by_hash(
         &self,
-        code_hash: B256,
-    ) -> ProviderResult<Option<reth_primitives::Bytecode>> {
-        <T as reth_storage_api::StateProvider>::bytecode_by_hash(self, code_hash)
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        <T as StateProvider>::bytecode_by_hash(self, code_hash)
     }
 
     fn storage(
@@ -58,7 +59,7 @@ impl<T: reth_storage_api::StateProvider> EvmStateProvider for T {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        <T as reth_storage_api::StateProvider>::storage(self, account, storage_key)
+        <T as StateProvider>::storage(self, account, storage_key)
     }
 }
 
@@ -141,14 +142,14 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.basic_account(address)?.map(Into::into))
+        Ok(self.basic_account(&address)?.map(Into::into))
     }
 
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.bytecode_by_hash(code_hash)?.unwrap_or_default().0)
+        Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
     }
 
     /// Retrieves the storage value at a specific index for a given address.

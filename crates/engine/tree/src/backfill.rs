@@ -231,13 +231,13 @@ mod tests {
     use super::*;
     use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
     use alloy_consensus::Header;
-    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::SealedHeader;
+    use reth_primitives_traits::SealedHeader;
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
@@ -271,10 +271,10 @@ mod tests {
             let client = TestFullBlockClient::default();
             let header = Header {
                 base_fee_per_gas: Some(7),
-                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
                 ..Default::default()
             };
-            let header = SealedHeader::seal(header);
+            let header = SealedHeader::seal_slow(header);
             insert_headers_into_client(&client, header, 0..total_blocks);
 
             let tip = client.highest_block().expect("there should be blocks here").hash();

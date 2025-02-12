@@ -2,21 +2,27 @@ use crate::{OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
-use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};
+use reth_e2e_test_utils::{
+    transaction::TransactionTestContext, wallet::Wallet, NodeHelperType, TmpDB,
+};
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_optimism_chainspec::OpChainSpecBuilder;
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_builder::EthPayloadBuilderAttributes;
+use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
-pub(crate) type OpNode = NodeHelperType<OtherOpNode>;
+pub(crate) type OpNode =
+    NodeHelperType<OtherOpNode, BlockchainProvider<NodeTypesWithDBAdapter<OtherOpNode, TmpDB>>>;
 
 /// Creates the initial setup with `num_nodes` of the node config, started and connected.
 pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
     let genesis: Genesis =
         serde_json::from_str(include_str!("../tests/assets/genesis.json")).unwrap();
-    reth_e2e_test_utils::setup(
+    reth_e2e_test_utils::setup_engine(
         num_nodes,
         Arc::new(OpChainSpecBuilder::base_mainnet().genesis(genesis).ecotone_activated().build()),
         false,
@@ -30,7 +36,7 @@ pub async fn advance_chain(
     length: usize,
     node: &mut OpNode,
     wallet: Arc<Mutex<Wallet>>,
-) -> eyre::Result<Vec<(OpBuiltPayload, OpPayloadBuilderAttributes)>> {
+) -> eyre::Result<Vec<(OpBuiltPayload, OpPayloadBuilderAttributes<OpTransactionSigned>)>> {
     node.advance(length as u64, |_| {
         let wallet = wallet.clone();
         Box::pin(async move {
@@ -48,15 +54,13 @@ pub async fn advance_chain(
 }
 
 /// Helper function to create a new eth payload attributes
-pub fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes {
+pub fn optimism_payload_attributes<T>(timestamp: u64) -> OpPayloadBuilderAttributes<T> {
     let attributes = PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-        target_blobs_per_block: None,
-        max_blobs_per_block: None,
     };
 
     OpPayloadBuilderAttributes {

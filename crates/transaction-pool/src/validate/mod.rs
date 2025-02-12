@@ -9,7 +9,7 @@ use crate::{
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{RecoveredTx, SealedBlock};
+use reth_primitives::{Recovered, SealedBlock};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -26,6 +26,7 @@ pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 pub use constants::{
     DEFAULT_MAX_TX_INPUT_BYTES, MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, TX_SLOT_BYTE_SIZE,
 };
+use reth_primitives_traits::Block;
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -206,7 +207,11 @@ pub trait TransactionValidator: Send + Sync {
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
-    fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {}
+    fn on_new_head_block<B>(&self, _new_tip_block: &SealedBlock<B>)
+    where
+        B: Block,
+    {
+    }
 }
 
 impl<A, B> TransactionValidator for Either<A, B>
@@ -237,7 +242,10 @@ where
         }
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<Bl>(&self, new_tip_block: &SealedBlock<Bl>)
+    where
+        Bl: Block,
+    {
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
             Self::Right(v) => v.on_new_head_block(new_tip_block),
@@ -274,7 +282,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 
     /// Returns the type identifier of the transaction
     pub fn tx_type(&self) -> u8 {
-        self.transaction.tx_type()
+        self.transaction.ty()
     }
 
     /// Returns the address of the sender
@@ -383,7 +391,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Converts to this type into the consensus transaction of the pooled transaction.
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    pub fn to_consensus(&self) -> RecoveredTx<T::Consensus> {
+    pub fn to_consensus(&self) -> Recovered<T::Consensus> {
         self.transaction.clone_into_consensus()
     }
 

@@ -1,4 +1,4 @@
-use reth_primitives::NodePrimitives;
+use reth_primitives_traits::NodePrimitives;
 
 /// Provider implementation that knows configured [`NodePrimitives`].
 #[auto_impl::auto_impl(&, Arc, Box)]

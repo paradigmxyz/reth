@@ -16,8 +16,19 @@ use alloy_rpc_types_eth::{
     EIP1186AccountProofResponse, Filter, Log, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
+
+/// Helper trait for the engine api server.
+///
+/// This type-erases the concrete [`jsonrpsee`] server implementation and only returns the
+/// [`RpcModule`] that contains all the endpoints of the server.
+pub trait IntoEngineApiRpcModule {
+    /// Consumes the type and returns all the methods and subscriptions defined in the trait and
+    /// returns them as a single [`RpcModule`]
+    fn into_rpc_module(self) -> RpcModule<()>;
+}
+
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
 // By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
@@ -221,10 +232,12 @@ pub trait EngineApi<Engine: EngineTypes> {
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 ///
+/// This also includes additional eth functions required by optimism.
+///
 /// Specifically for the engine auth server: <https://github.com/ethereum/execution-apis/blob/main/src/engine/common.md#underlying-protocol>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EngineEthApi<B: RpcObject> {
+pub trait EngineEthApi<B: RpcObject, R: RpcObject> {
     /// Returns an object with data about the sync status or false.
     #[method(name = "syncing")]
     fn syncing(&self) -> RpcResult<SyncStatus>;
@@ -259,9 +272,17 @@ pub trait EngineEthApi<B: RpcObject> {
     #[method(name = "getBlockByNumber")]
     async fn block_by_number(&self, number: BlockNumberOrTag, full: bool) -> RpcResult<Option<B>>;
 
+    /// Returns all transaction receipts for a given block.
+    #[method(name = "getBlockReceipts")]
+    async fn block_receipts(&self, block_id: BlockId) -> RpcResult<Option<Vec<R>>>;
+
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
     async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<B256>;
+
+    /// Returns the receipt of a transaction by transaction hash.
+    #[method(name = "getTransactionReceipt")]
+    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<R>>;
 
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]

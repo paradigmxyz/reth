@@ -17,12 +17,12 @@ use crate::{
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
     eip4844::{BlobAndProofV1, BlobTransactionSidecar},
 };
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::RecoveredTx;
+use reth_primitives::Recovered;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -43,7 +43,7 @@ impl TransactionPool for NoopTransactionPool {
 
     fn block_info(&self) -> BlockInfo {
         BlockInfo {
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             last_seen_block_hash: Default::default(),
             last_seen_block_number: 0,
             pending_basefee: 0,
@@ -143,7 +143,7 @@ impl TransactionPool for NoopTransactionPool {
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
-    ) -> Option<RecoveredTx<<Self::Transaction as PoolTransaction>::Pooled>> {
+    ) -> Option<Recovered<<Self::Transaction as PoolTransaction>::Pooled>> {
         None
     }
 

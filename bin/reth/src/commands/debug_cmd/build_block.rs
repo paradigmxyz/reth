@@ -1,5 +1,5 @@
 //! Command for debugging block building.
-use alloy_consensus::TxEip4844;
+use alloy_consensus::{BlockHeader, TxEip4844};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
@@ -9,34 +9,33 @@ use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
-use reth_basic_payload_builder::{
-    BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
-};
-use reth_beacon_consensus::EthBeaconConsensus;
-use reth_blockchain_tree::{
-    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
-};
+use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_consensus::{Consensus, FullConsensus};
-use reth_errors::RethResult;
+use reth_errors::{ConsensusError, RethResult};
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
+use reth_ethereum_primitives::{EthPrimitives, Transaction, TransactionSigned};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
-use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
-use reth_primitives::{
-    BlobTransaction, BlockExt, PooledTransactionsElement, SealedBlockFor, SealedBlockWithSenders,
-    SealedHeader, Transaction, TransactionSigned,
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
+use reth_primitives_traits::{
+    transaction::signed::SignedTransactionIntoRecoveredExt, Block as _, SealedBlock, SealedHeader,
+    SignedTransaction,
 };
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase, primitives::KzgSettings};
+use reth_revm::{
+    cached::CachedReads, cancelled::CancelOnDrop, database::StateProviderDatabase,
+    primitives::KzgSettings,
+};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -89,7 +88,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         factory: ProviderFactory<N>,
-    ) -> RethResult<Arc<SealedBlockFor<BlockTy<N>>>> {
+    ) -> RethResult<Arc<SealedBlock<BlockTy<N>>>> {
         let provider = factory.provider()?;
 
         let best_number =
@@ -102,7 +101,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             provider
                 .block(best_number.into())?
                 .expect("the header for the latest block is missing, database is corrupt")
-                .seal(best_hash),
+                .seal_unchecked(best_hash),
         ))
     }
 
@@ -121,42 +120,28 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn FullConsensus> =
+        let consensus: Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
-
-        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
-
-        // configure blockchain tree
-        let tree_externals =
-            TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
-        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
         let best_block = self
             .lookup_best_block(provider_factory.clone())
             .wrap_err("the head block is missing")?;
 
-        let blockchain_db =
-            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
-        let validator =
-            TransactionValidationTaskExecutor::eth_builder(provider_factory.chain_spec())
-                .with_head_timestamp(best_block.timestamp)
-                .kzg_settings(self.kzg_settings()?)
-                .with_additional_tasks(1)
-                .build_with_tasks(
-                    blockchain_db.clone(),
-                    ctx.task_executor.clone(),
-                    blob_store.clone(),
-                );
+        let validator = TransactionValidationTaskExecutor::eth_builder(blockchain_db.clone())
+            .with_head_timestamp(best_block.timestamp)
+            .kzg_settings(self.kzg_settings()?)
+            .with_additional_tasks(1)
+            .build_with_tasks(ctx.task_executor.clone(), blob_store.clone());
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             validator,
@@ -177,10 +162,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
-                .into_ecrecovered()
-                .ok_or_else(|| eyre::eyre!("failed to recover tx"))?;
+                .try_clone_into_recovered()
+                .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
 
-            let encoded_length = match &transaction.transaction {
+            let encoded_length = match transaction.transaction() {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
                     let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
                         eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
@@ -189,18 +174,15 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     let sidecar: BlobTransactionSidecar =
                         blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
 
-                    // first construct the tx, calculating the length of the tx with sidecar before
-                    // insertion
-                    let tx = BlobTransaction::try_from_signed(
-                        transaction.as_ref().clone(),
-                        sidecar.clone(),
-                    )
-                    .expect("should not fail to convert blob tx if it is already eip4844");
-                    let pooled = PooledTransactionsElement::BlobTransaction(tx);
+                    let pooled = transaction
+                        .clone()
+                        .into_tx()
+                        .try_into_pooled_eip4844(sidecar.clone())
+                        .expect("should not fail to convert blob tx if it is already eip4844");
                     let encoded_length = pooled.encode_2718_len();
 
                     // insert the blob into the store
-                    blob_store.insert(transaction.hash(), sidecar)?;
+                    blob_store.insert(*transaction.tx_hash(), sidecar)?;
 
                     encoded_length
                 }
@@ -223,12 +205,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
-            target_blobs_per_block: None,
-            max_blobs_per_block: None,
         };
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
-            Bytes::default(),
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
@@ -237,16 +216,17 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         );
 
         let args = BuildArguments::new(
-            blockchain_db.clone(),
-            transaction_pool,
             CachedReads::default(),
             payload_config,
-            Cancelled::default(),
+            CancelOnDrop::default(),
             None,
         );
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            blockchain_db.clone(),
+            transaction_pool,
             EthEvmConfig::new(provider_factory.chain_spec()),
+            EthereumBuilderConfig::new(Default::default()),
         );
 
         match payload_builder.try_build(args)? {
@@ -255,20 +235,17 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 debug!(target: "reth::cli", ?block, "Built new payload");
 
                 consensus.validate_header_with_total_difficulty(block, U256::MAX)?;
-                consensus.validate_header(block)?;
+                consensus.validate_header(block.sealed_header())?;
                 consensus.validate_block_pre_execution(block)?;
 
-                let senders = block.senders().expect("sender recovery failed");
-                let block_with_senders =
-                    SealedBlockWithSenders::<BlockTy<N>>::new(block.clone(), senders).unwrap();
+                let block_with_senders = block.clone().try_recover().unwrap();
 
                 let state_provider = blockchain_db.latest()?;
                 let db = StateProviderDatabase::new(&state_provider);
                 let executor =
                     EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
-                let block_execution_output =
-                    executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
+                let block_execution_output = executor.execute(&block_with_senders)?;
                 let execution_outcome =
                     ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
@@ -279,7 +256,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     hashed_post_state.clone(),
                 )?;
 
-                if state_root != block_with_senders.state_root {
+                if state_root != block_with_senders.state_root() {
                     eyre::bail!(
                         "state root mismatch. expected: {}. got: {}",
                         block_with_senders.state_root,
@@ -291,7 +268,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 let provider_rw = provider_factory.provider_rw()?;
                 provider_rw.append_blocks_with_state(
                     Vec::from([block_with_senders]),
-                    execution_outcome,
+                    &execution_outcome,
                     hashed_post_state.into_sorted(),
                     trie_updates,
                 )?;

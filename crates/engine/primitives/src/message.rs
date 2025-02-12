@@ -1,18 +1,21 @@
-use crate::{BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes, ForkchoiceStatus};
-use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadSidecar, ForkChoiceUpdateResult, ForkchoiceState,
-    ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
+use crate::{
+    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, EngineApiMessageVersion,
+    EngineTypes, ExecutionPayload, ForkchoiceStatus,
 };
-use futures::{future::Either, FutureExt};
-use reth_errors::RethResult;
-use reth_payload_builder_primitives::PayloadBuilderError;
-use std::{
-    fmt::Display,
+use alloy_rpc_types_engine::{
+    ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
+    PayloadStatus, PayloadStatusEnum,
+};
+use core::{
+    fmt::{self, Display},
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::sync::oneshot;
+use futures::{future::Either, FutureExt, TryFutureExt};
+use reth_errors::RethResult;
+use reth_payload_builder_primitives::PayloadBuilderError;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -142,10 +145,7 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
     /// Message with new payload.
     NewPayload {
         /// The execution payload received by Engine API.
-        payload: ExecutionPayload,
-        /// The execution payload sidecar with additional version-specific fields received by
-        /// engine API.
-        sidecar: ExecutionPayloadSidecar,
+        payload: Engine::ExecutionData,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
@@ -165,7 +165,7 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
 }
 
 impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NewPayload { payload, .. } => {
                 write!(
@@ -189,5 +189,83 @@ impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
                 write!(f, "TransitionConfigurationExchanged")
             }
         }
+    }
+}
+
+/// A clonable sender type that can be used to send engine API messages.
+///
+/// This type mirrors consensus related functions of the engine API.
+#[derive(Debug, Clone)]
+pub struct BeaconConsensusEngineHandle<Engine>
+where
+    Engine: EngineTypes,
+{
+    to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+}
+
+impl<Engine> BeaconConsensusEngineHandle<Engine>
+where
+    Engine: EngineTypes,
+{
+    /// Creates a new beacon consensus engine handle.
+    pub const fn new(to_engine: UnboundedSender<BeaconEngineMessage<Engine>>) -> Self {
+        Self { to_engine }
+    }
+
+    /// Sends a new payload message to the beacon consensus engine and waits for a response.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
+    pub async fn new_payload(
+        &self,
+        payload: Engine::ExecutionData,
+    ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
+        rx.await.map_err(|_| BeaconOnNewPayloadError::EngineUnavailable)?
+    }
+
+    /// Sends a forkchoice update message to the beacon consensus engine and waits for a response.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
+    pub async fn fork_choice_updated(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<Engine::PayloadAttributes>,
+        version: EngineApiMessageVersion,
+    ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
+        Ok(self
+            .send_fork_choice_updated(state, payload_attrs, version)
+            .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
+            .await?
+            .map_err(BeaconForkChoiceUpdateError::internal)?
+            .await?)
+    }
+
+    /// Sends a forkchoice update message to the beacon consensus engine and returns the receiver to
+    /// wait for a response.
+    fn send_fork_choice_updated(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<Engine::PayloadAttributes>,
+        version: EngineApiMessageVersion,
+    ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
+            state,
+            payload_attrs,
+            tx,
+            version,
+        });
+        rx
+    }
+
+    /// Sends a transition configuration exchange message to the beacon consensus engine.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_exchangetransitionconfigurationv1>
+    ///
+    /// This only notifies about the exchange. The actual exchange is done by the engine API impl
+    /// itself.
+    pub fn transition_configuration_exchanged(&self) {
+        let _ = self.to_engine.send(BeaconEngineMessage::TransitionConfigurationExchanged);
     }
 }

@@ -4,7 +4,7 @@ use crate::{
     StorageLocation, TrieWriter,
 };
 use alloy_consensus::BlockHeader;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_errors::ProviderResult;
 use reth_primitives::{NodePrimitives, StaticFileSegment};
@@ -132,7 +132,7 @@ where
         + StaticFileProviderFactory,
 {
     /// Writes executed blocks and receipts to storage.
-    pub fn save_blocks<N>(&self, blocks: Vec<ExecutedBlock<N>>) -> ProviderResult<()>
+    pub fn save_blocks<N>(&self, blocks: Vec<ExecutedBlockWithTrieUpdates<N>>) -> ProviderResult<()>
     where
         N: NodePrimitives<SignedTx: SignedTransaction>,
         ProviderDB: BlockWriter<Block = N::Block> + StateWriter<Receipt = N::Receipt>,
@@ -143,9 +143,9 @@ where
         }
 
         // NOTE: checked non-empty above
-        let first_block = blocks.first().unwrap().block();
+        let first_block = blocks.first().unwrap().recovered_block();
 
-        let last_block = blocks.last().unwrap().block();
+        let last_block = blocks.last().unwrap().recovered_block();
         let first_number = first_block.number();
         let last_block_number = last_block.number();
 
@@ -160,16 +160,18 @@ where
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for ExecutedBlock { block, senders, execution_output, hashed_state, trie } in blocks {
-            let sealed_block = Arc::unwrap_or_clone(block)
-                .try_with_senders_unchecked(Arc::unwrap_or_clone(senders))
-                .unwrap();
-            self.database().insert_block(sealed_block, StorageLocation::Both)?;
+        for ExecutedBlockWithTrieUpdates {
+            block: ExecutedBlock { recovered_block, execution_output, hashed_state },
+            trie,
+        } in blocks
+        {
+            self.database()
+                .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
             self.database().write_state(
-                Arc::unwrap_or_clone(execution_output),
+                &execution_output,
                 OriginalValuesKnown::No,
                 StorageLocation::StaticFiles,
             )?;
@@ -233,7 +235,7 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{Account, Receipt, Receipts, StorageEntry};
+    use reth_primitives::{Account, Receipt, StorageEntry};
     use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider};
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
@@ -273,10 +275,13 @@ mod tests {
             for address in addresses {
                 let hashed_address = keccak256(address);
                 accounts_cursor
-                    .insert(hashed_address, Account { nonce: 1, ..Default::default() })
+                    .insert(hashed_address, &Account { nonce: 1, ..Default::default() })
                     .unwrap();
                 storage_cursor
-                    .insert(hashed_address, StorageEntry { key: hashed_slot, value: U256::from(1) })
+                    .insert(
+                        hashed_address,
+                        &StorageEntry { key: hashed_slot, value: U256::from(1) },
+                    )
                     .unwrap();
             }
             provider_rw.commit().unwrap();
@@ -287,7 +292,7 @@ mod tests {
         hashed_state.storages.insert(destroyed_address_hashed, HashedStorage::new(true));
 
         let provider_rw = provider_factory.provider_rw().unwrap();
-        assert_eq!(provider_rw.write_hashed_state(&hashed_state.into_sorted()), Ok(()));
+        assert!(matches!(provider_rw.write_hashed_state(&hashed_state.into_sorted()), Ok(())));
         provider_rw.commit().unwrap();
 
         let provider = provider_factory.provider().unwrap();
@@ -361,12 +366,12 @@ mod tests {
 
         // Check plain state
         assert_eq!(
-            provider.basic_account(address_a).expect("Could not read account state"),
+            provider.basic_account(&address_a).expect("Could not read account state"),
             Some(reth_account_a),
             "Account A state is wrong"
         );
         assert_eq!(
-            provider.basic_account(address_b).expect("Could not read account state"),
+            provider.basic_account(&address_b).expect("Could not read account state"),
             Some(reth_account_b_changed),
             "Account B state is wrong"
         );
@@ -422,7 +427,7 @@ mod tests {
 
         // Check new plain state for account B
         assert_eq!(
-            provider.basic_account(address_b).expect("Could not read account state"),
+            provider.basic_account(&address_b).expect("Could not read account state"),
             None,
             "Account B should be deleted"
         );
@@ -493,10 +498,9 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
 
-        let outcome =
-            ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
+        let outcome = ExecutionOutcome::new(state.take_bundle(), Default::default(), 1, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -593,10 +597,9 @@ mod tests {
         )]));
 
         state.merge_transitions(BundleRetention::Reverts);
-        let outcome =
-            ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 2, Vec::new());
+        let outcome = ExecutionOutcome::new(state.take_bundle(), Default::default(), 2, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -661,9 +664,9 @@ mod tests {
         init_state.merge_transitions(BundleRetention::Reverts);
 
         let outcome =
-            ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
+            ExecutionOutcome::new(init_state.take_bundle(), Default::default(), 0, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -809,9 +812,9 @@ mod tests {
         let bundle = state.take_bundle();
 
         let outcome: ExecutionOutcome =
-            ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
+            ExecutionOutcome::new(bundle, Default::default(), 1, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -974,9 +977,9 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
         let outcome =
-            ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
+            ExecutionOutcome::new(init_state.take_bundle(), Default::default(), 0, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1020,10 +1023,9 @@ mod tests {
 
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
-        let outcome =
-            ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
+        let outcome = ExecutionOutcome::new(state.take_bundle(), Default::default(), 1, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -1054,7 +1056,7 @@ mod tests {
     fn revert_to_indices() {
         let base: ExecutionOutcome = ExecutionOutcome {
             bundle: BundleState::default(),
-            receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
+            receipts: vec![vec![Receipt::default(); 2]; 7],
             first_block: 10,
             requests: Vec::new(),
         };
@@ -1265,7 +1267,7 @@ mod tests {
 
         let mut test: ExecutionOutcome = ExecutionOutcome {
             bundle: present_state,
-            receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
+            receipts: vec![vec![Receipt::default(); 2]; 1],
             first_block: 2,
             requests: Vec::new(),
         };

@@ -2,7 +2,7 @@
 bin/                        @onbjerg
 crates/blockchain-tree/     @rakita @rkrasiuk @mattsse @Rjected
 crates/blockchain-tree-api/ @rakita @rkrasiuk @mattsse @Rjected
-crates/chainspec/           @Rjected @joshieDo @mattsse @emhane
+crates/chainspec/           @Rjected @joshieDo @mattsse
 crates/chain-state/         @fgimenez @mattsse @rkrasiuk
 crates/cli/                 @onbjerg @mattsse
 crates/config/              @onbjerg
@@ -16,18 +16,18 @@ crates/ethereum-forks/      @mattsse @Rjected
 crates/etl/                 @joshieDo @shekhirin
 crates/evm/                 @rakita @mattsse @Rjected
 crates/exex/                @onbjerg @shekhirin
-crates/fs-util/             @onbjerg @emhane
+crates/fs-util/             @onbjerg
 crates/metrics/             @onbjerg
-crates/net/                 @emhane @mattsse @Rjected
-crates/net/downloaders/     @onbjerg @rkrasiuk @emhane
-crates/node/                @mattsse @Rjected @onbjerg @emhane @klkvr
-crates/optimism/            @mattsse @Rjected @fgimenez @emhane
+crates/net/                 @mattsse @Rjected
+crates/net/downloaders/     @onbjerg @rkrasiuk
+crates/node/                @mattsse @Rjected @onbjerg @klkvr
+crates/optimism/            @mattsse @Rjected @fgimenez
 crates/payload/             @mattsse @Rjected
-crates/primitives/          @Rjected @emhane @mattsse @klkvr
-crates/primitives-traits/   @Rjected @joshieDo @emhane @mattsse @klkvr
+crates/primitives/          @Rjected @mattsse @klkvr
+crates/primitives-traits/   @Rjected @joshieDo @mattsse @klkvr
 crates/prune/               @shekhirin @joshieDo
 crates/revm/                @mattsse @rakita
-crates/rpc/                 @mattsse @Rjected @emhane
+crates/rpc/                 @mattsse @Rjected
 crates/stages/              @onbjerg @rkrasiuk @shekhirin
 crates/static-file/         @joshieDo @shekhirin
 crates/storage/codecs/      @joshieDo
@@ -40,7 +40,7 @@ crates/storage/nippy-jar/   @joshieDo @shekhirin
 crates/storage/provider/    @rakita @joshieDo @shekhirin
 crates/storage/storage-api/ @joshieDo @rkrasiuk
 crates/tasks/               @mattsse
-crates/tokio-util/          @fgimenez @emhane
+crates/tokio-util/          @fgimenez
 crates/tracing/             @onbjerg
 crates/transaction-pool/    @mattsse
 crates/trie/                @rkrasiuk @Rjected @shekhirin

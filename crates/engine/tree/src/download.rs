@@ -4,13 +4,12 @@ use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use futures::FutureExt;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
@@ -45,7 +44,7 @@ pub enum DownloadAction {
 #[derive(Debug)]
 pub enum DownloadOutcome<B: Block> {
     /// Downloaded blocks.
-    Blocks(Vec<SealedBlockWithSenders<B>>),
+    Blocks(Vec<RecoveredBlock<B>>),
     /// New download started.
     NewDownloadStarted {
         /// How many blocks are pending in this download.
@@ -69,7 +68,7 @@ where
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
-    set_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlockWithSenders<B>>>,
+    set_buffered_blocks: BinaryHeap<Reverse<OrderedRecoveredBlock<B>>>,
     /// Engine download metrics.
     metrics: BlockDownloaderMetrics,
     /// Pending events to be emitted.
@@ -78,14 +77,11 @@ where
 
 impl<Client, B> BasicBlockDownloader<Client, B>
 where
-    Client: BlockClient<Header = B::Header, Body = B::Body> + 'static,
+    Client: BlockClient<Block = B> + 'static,
     B: Block,
 {
     /// Create a new instance
-    pub fn new(
-        client: Client,
-        consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
-    ) -> Self {
+    pub fn new(client: Client, consensus: Arc<dyn Consensus<B, Error = ConsensusError>>) -> Self {
         Self {
             full_block_client: FullBlockClient::new(client, consensus),
             inflight_full_block_requests: Vec::new(),
@@ -192,7 +188,7 @@ where
 
 impl<Client, B> BlockDownloader for BasicBlockDownloader<Client, B>
 where
-    Client: BlockClient<Header = B::Header, Body = B::Body>,
+    Client: BlockClient<Block = B>,
     B: Block,
 {
     type Block = B;
@@ -233,10 +229,7 @@ where
                         .into_iter()
                         .map(|b| {
                             let senders = b.senders().unwrap_or_default();
-                            OrderedSealedBlockWithSenders(SealedBlockWithSenders {
-                                block: b,
-                                senders,
-                            })
+                            OrderedRecoveredBlock(RecoveredBlock::new_sealed(b, senders))
                         })
                         .map(Reverse),
                 );
@@ -253,7 +246,7 @@ where
         }
 
         // drain all unique element of the block buffer if there are any
-        let mut downloaded_blocks: Vec<SealedBlockWithSenders<B>> =
+        let mut downloaded_blocks: Vec<RecoveredBlock<B>> =
             Vec::with_capacity(self.set_buffered_blocks.len());
         while let Some(block) = self.set_buffered_blocks.pop() {
             // peek ahead and pop duplicates
@@ -270,34 +263,33 @@ where
     }
 }
 
-/// A wrapper type around [`SealedBlockWithSenders`] that implements the [Ord]
+/// A wrapper type around [`RecoveredBlock`] that implements the [Ord]
 /// trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderedSealedBlockWithSenders<B: Block>(SealedBlockWithSenders<B>);
+struct OrderedRecoveredBlock<B: Block>(RecoveredBlock<B>);
 
-impl<B: Block> PartialOrd for OrderedSealedBlockWithSenders<B> {
+impl<B: Block> PartialOrd for OrderedRecoveredBlock<B> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<B: Block> Ord for OrderedSealedBlockWithSenders<B> {
+impl<B: Block> Ord for OrderedRecoveredBlock<B> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.number().cmp(&other.0.number())
     }
 }
 
-impl<B: Block> From<SealedBlockFor<B>> for OrderedSealedBlockWithSenders<B> {
-    fn from(block: SealedBlockFor<B>) -> Self {
+impl<B: Block> From<SealedBlock<B>> for OrderedRecoveredBlock<B> {
+    fn from(block: SealedBlock<B>) -> Self {
         let senders = block.senders().unwrap_or_default();
-        Self(SealedBlockWithSenders { block, senders })
+        Self(RecoveredBlock::new_sealed(block, senders))
     }
 }
 
-impl<B: Block> From<OrderedSealedBlockWithSenders<B>> for SealedBlockWithSenders<B> {
-    fn from(value: OrderedSealedBlockWithSenders<B>) -> Self {
-        let senders = value.0.senders;
-        Self { block: value.0.block, senders }
+impl<B: Block> From<OrderedRecoveredBlock<B>> for RecoveredBlock<B> {
+    fn from(value: OrderedRecoveredBlock<B>) -> Self {
+        value.0
     }
 }
 
@@ -321,16 +313,17 @@ mod tests {
     use super::*;
     use crate::test_utils::insert_headers_into_client;
     use alloy_consensus::Header;
-    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use assert_matches::assert_matches;
-    use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::SealedHeader;
+    use reth_primitives_traits::SealedHeader;
     use std::{future::poll_fn, sync::Arc};
 
     struct TestHarness {
-        block_downloader: BasicBlockDownloader<TestFullBlockClient, reth_primitives::Block>,
+        block_downloader:
+            BasicBlockDownloader<TestFullBlockClient, reth_ethereum_primitives::Block>,
         client: TestFullBlockClient,
     }
 
@@ -347,10 +340,10 @@ mod tests {
             let client = TestFullBlockClient::default();
             let header = Header {
                 base_fee_per_gas: Some(7),
-                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
                 ..Default::default()
             };
-            let header = SealedHeader::seal(header);
+            let header = SealedHeader::seal_slow(header);
 
             insert_headers_into_client(&client, header, 0..total_blocks);
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));

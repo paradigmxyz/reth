@@ -30,7 +30,7 @@ use reth_network::{
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
-    HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
+    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
@@ -196,13 +196,13 @@ impl NetworkArgs {
     /// 1. --bootnodes flag
     /// 2. Network preset flags (e.g. --holesky)
     /// 3. default to mainnet nodes
-    pub fn network_config(
+    pub fn network_config<N: NetworkPrimitives>(
         &self,
         config: &Config,
         chain_spec: impl EthChainSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
-    ) -> NetworkConfigBuilder {
+    ) -> NetworkConfigBuilder<N> {
         let addr = self.resolved_addr();
         let chain_bootnodes = self
             .resolved_bootnodes()
@@ -230,7 +230,7 @@ impl NetworkArgs {
         };
 
         // Configure basic network stack
-        NetworkConfigBuilder::new(secret_key)
+        NetworkConfigBuilder::<N>::new(secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(
                 self.persistent_peers_file(peers_file).as_deref(),
             ))
@@ -408,12 +408,15 @@ pub struct DiscoveryArgs {
 
 impl DiscoveryArgs {
     /// Apply the discovery settings to the given [`NetworkConfigBuilder`]
-    pub fn apply_to_builder(
+    pub fn apply_to_builder<N>(
         &self,
-        mut network_config_builder: NetworkConfigBuilder,
+        mut network_config_builder: NetworkConfigBuilder<N>,
         rlpx_tcp_socket: SocketAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
-    ) -> NetworkConfigBuilder {
+    ) -> NetworkConfigBuilder<N>
+    where
+        N: NetworkPrimitives,
+    {
         if self.disable_discovery || self.disable_dns_discovery {
             network_config_builder = network_config_builder.disable_dns_discovery();
         }

@@ -1,10 +1,11 @@
 use crate::{BlockNumReader, BlockReader};
+use alloc::vec::Vec;
+use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
-use reth_primitives::TransactionMeta;
+use core::ops::{Range, RangeBounds, RangeInclusive};
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use std::ops::{Range, RangeBounds, RangeInclusive};
 
 /// Enum to control transaction hash inclusion.
 ///
@@ -86,7 +87,7 @@ pub type ProviderTx<P> = <P as TransactionsProvider>::Transaction;
 
 ///  Client trait for fetching additional transactions related data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionsProviderExt: BlockReader + Send + Sync {
+pub trait TransactionsProviderExt: BlockReader {
     /// Get transactions range by block range.
     fn transaction_range_by_block_range(
         &self,

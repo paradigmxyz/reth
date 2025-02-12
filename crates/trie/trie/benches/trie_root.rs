@@ -1,10 +1,12 @@
 #![allow(missing_docs, unreachable_pub)]
+use alloy_consensus::ReceiptWithBloom;
 use alloy_primitives::B256;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
-use reth_primitives::{Receipt, ReceiptWithBloom};
+use reth_ethereum_primitives::Receipt;
 use reth_trie::triehash::KeccakHasher;
+use std::hint::black_box;
 
 /// Benchmarks different implementations of the root calculation.
 pub fn trie_root_benchmark(c: &mut Criterion) {
@@ -29,7 +31,7 @@ pub fn trie_root_benchmark(c: &mut Criterion) {
 
 fn generate_test_data(size: usize) -> Vec<ReceiptWithBloom<Receipt>> {
     prop::collection::vec(arb::<ReceiptWithBloom<Receipt>>(), size)
-        .new_tree(&mut TestRunner::new(ProptestConfig::default()))
+        .new_tree(&mut TestRunner::deterministic())
         .unwrap()
         .current()
 }
@@ -46,7 +48,6 @@ mod implementations {
     use alloy_eips::eip2718::Encodable2718;
     use alloy_rlp::Encodable;
     use alloy_trie::root::adjust_index_for_rlp;
-    use reth_primitives::Receipt;
     use reth_trie_common::{HashBuilder, Nibbles};
 
     pub fn trie_hash_ordered_trie_root(receipts: &[ReceiptWithBloom<Receipt>]) -> B256 {

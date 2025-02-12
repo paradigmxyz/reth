@@ -41,7 +41,15 @@ pub fn generate_from_to(
         }
     };
 
-    let fn_from_compact = if has_lifetime {
+    let has_ref_fields = fields.iter().any(|field| {
+        if let FieldTypes::StructField(field) = field {
+            field.is_reference
+        } else {
+            false
+        }
+    });
+
+    let fn_from_compact = if has_ref_fields {
         quote! { unimplemented!("from_compact not supported with ref structs") }
     } else {
         quote! {
@@ -100,7 +108,7 @@ fn generate_from_compact(
 ) -> TokenStream2 {
     let mut lines = vec![];
     let mut known_types =
-        vec!["B256", "Address", "Bloom", "Vec", "TxHash", "BlockHash", "FixedBytes"];
+        vec!["B256", "Address", "Bloom", "Vec", "TxHash", "BlockHash", "FixedBytes", "Cow"];
 
     // Only types without `Bytes` should be added here. It's currently manually added, since
     // it's hard to figure out with derive_macro which types have Bytes fields.
@@ -132,8 +140,8 @@ fn generate_from_compact(
             });
         } else {
             let fields = fields.iter().filter_map(|field| {
-                if let FieldTypes::StructField((name, _, _, _)) = field {
-                    let ident = format_ident!("{name}");
+                if let FieldTypes::StructField(field) = field {
+                    let ident = format_ident!("{}", field.name);
                     return Some(quote! {
                         #ident: #ident,
                     })
