@@ -8375,7 +8375,6 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-trie",
- "crunchy",
  "derive_more",
  "op-alloy-consensus",
  "reth-chainspec",
