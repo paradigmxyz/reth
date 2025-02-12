@@ -36,7 +36,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
     use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmConfig;
@@ -64,7 +64,7 @@ mod tests {
             NoopNetwork::default(),
             cache.clone(),
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
-            ETHEREUM_BLOCK_GAS_LIMIT,
+            ETHEREUM_BLOCK_GAS_LIMIT_30M,
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
@@ -90,7 +90,7 @@ mod tests {
             (),
             cache.clone(),
             GasPriceOracle::new(mock_provider, Default::default(), cache),
-            ETHEREUM_BLOCK_GAS_LIMIT,
+            ETHEREUM_BLOCK_GAS_LIMIT_30M,
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW + 1,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
