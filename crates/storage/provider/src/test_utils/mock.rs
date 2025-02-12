@@ -11,7 +11,7 @@ use alloy_consensus::{
 use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256,
-    map::{B256HashMap, HashMap},
+    map::{B256Map, HashMap},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
@@ -724,7 +724,7 @@ impl<T: Transaction, ChainSpec: EthChainSpec> StateProofProvider for MockEthProv
         &self,
         _input: TrieInput,
         _target: HashedPostState,
-    ) -> ProviderResult<B256HashMap<Bytes>> {
+    ) -> ProviderResult<B256Map<Bytes>> {
         Ok(HashMap::default())
     }
 }
