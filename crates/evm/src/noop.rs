@@ -1,9 +1,8 @@
 //! A no operation block executor implementation.
 
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
-use revm::State;
 
 use crate::{
     execute::{BatchExecutor, BlockExecutorProvider, Executor},
@@ -40,35 +39,35 @@ impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
     }
 }
 
-impl<DB, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider<P> {
-    type Input<'a> = &'a RecoveredBlock<P::Block>;
-    type Output = BlockExecutionOutput<P::Receipt>;
+impl<DB: Database, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider<P> {
+    type Primitives = P;
     type Error = BlockExecutionError;
 
-    fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
-    }
-
-    fn execute_with_state_closure<F>(
-        self,
-        _: Self::Input<'_>,
-        _: F,
-    ) -> Result<Self::Output, Self::Error>
-    where
-        F: FnMut(&State<DB>),
+    fn execute_one(
+        &mut self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 
-    fn execute_with_state_hook<F>(
-        self,
-        _: Self::Input<'_>,
-        _: F,
-    ) -> Result<Self::Output, Self::Error>
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        _state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
+    }
+
+    fn into_state(self) -> revm::db::State<DB> {
+        unreachable!()
+    }
+
+    fn size_hint(&self) -> usize {
+        0
     }
 }
 
