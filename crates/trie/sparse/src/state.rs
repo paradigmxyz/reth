@@ -501,15 +501,15 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn storage_trie_updates(&mut self) -> B256Map<StorageTrieUpdates> {
         self.storages
             .iter_mut()
+            .filter_map(|(address, trie)| trie.as_revealed_mut().map(|trie| (*address, trie)))
             .map(|(address, trie)| {
-                let trie = trie.as_revealed_mut().unwrap();
                 let updates = trie.take_updates();
                 let updates = StorageTrieUpdates {
                     is_deleted: updates.wiped,
                     storage_nodes: updates.updated_nodes,
                     removed_nodes: updates.removed_nodes,
                 };
-                (*address, updates)
+                (address, updates)
             })
             .filter(|(_, updates)| !updates.is_empty())
             .collect()

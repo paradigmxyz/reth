@@ -119,7 +119,7 @@ impl<P> SparseTrie<P> {
                 retain_updates,
             )?))
         }
-        Ok(self.as_revealed_mut().unwrap())
+        Ok(self.as_revealed_mut().expect("trie has a revealed root"))
     }
 
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
@@ -142,7 +142,9 @@ impl<P> SparseTrie<P> {
 
     /// Calculates the hashes of the nodes below the provided level.
     pub fn calculate_below_level(&mut self, level: usize) {
-        self.as_revealed_mut().unwrap().update_rlp_node_level(level);
+        if let Some(revealed) = self.as_revealed_mut() {
+            revealed.update_rlp_node_level(level);
+        }
     }
 }
 
