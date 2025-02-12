@@ -105,7 +105,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
         }
 
         // Check empty shanghai-withdrawals
-        if self.chain_spec.is_canyon_active_at_timestamp(block.timestamp()) {
+        if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
             canyon::verify_empty_shanghai_withdrawals(block.body()).map_err(|err| {
                 trace!(target: "op::consensus",
                     block_number=block.number(),
