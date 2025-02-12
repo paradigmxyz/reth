@@ -7490,6 +7490,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-ethereum-cli",
  "reth-ethereum-consensus",
  "reth-ethereum-primitives",
  "reth-evm",
