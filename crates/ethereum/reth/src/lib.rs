@@ -44,6 +44,10 @@ pub mod evm {
     pub use reth_evm as primitives;
 }
 
+/// Re-exported exex types
+#[cfg(feature = "exex")]
+pub use reth_exex as exex;
+
 /// Re-exported reth network types
 #[cfg(feature = "network")]
 pub mod network {
