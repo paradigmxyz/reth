@@ -8613,6 +8613,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "async-trait",
+ "derive_more",
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
