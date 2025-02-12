@@ -1336,7 +1336,7 @@ where
                         // only relevant for Ethereum and configured in `EthereumAddOns`
                         // implementation
                         // TODO: can we get rid of this here?
-                        RethRpcModule::Flashbots => Default::default(),
+                        RethRpcModule::Flashbots | RethRpcModule::Mev => Default::default(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                     })
                     .clone()
