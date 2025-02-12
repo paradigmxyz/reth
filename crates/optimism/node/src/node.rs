@@ -4,7 +4,7 @@ use crate::{
     args::RollupArgs,
     engine::OpEngineValidator,
     txpool::{OpTransactionPool, OpTransactionValidator},
-    OpEngineTypes,
+    OpEngineApiBuilder, OpEngineTypes,
 };
 use op_alloy_consensus::OpPooledTransaction;
 use reth_chainspec::{EthChainSpec, Hardforks};
@@ -202,7 +202,12 @@ impl NodeTypesWithEngine for OpNode {
 pub struct OpAddOns<N: FullNodeComponents> {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
     /// and eth-api.
-    pub rpc_add_ons: RpcAddOns<N, OpEthApi<N>, OpEngineValidatorBuilder>,
+    pub rpc_add_ons: RpcAddOns<
+        N,
+        OpEthApi<N>,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >,
     /// Data availability configuration for the OP builder.
     pub da_config: OpDAConfig,
 }
@@ -351,6 +356,7 @@ impl OpAddOnsBuilder {
         OpAddOns {
             rpc_add_ons: RpcAddOns::new(
                 move |ctx| OpEthApi::<N>::builder().with_sequencer(sequencer_client).build(ctx),
+                Default::default(),
                 Default::default(),
             ),
             da_config: da_config.unwrap_or_default(),
