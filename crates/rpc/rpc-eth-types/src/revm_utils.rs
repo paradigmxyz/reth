@@ -272,7 +272,10 @@ where
         account_info.nonce = nonce;
     }
     if let Some(code) = account_override.code {
-        account_info.code = Some(Bytecode::new_raw(code));
+        account_info.code = Some(
+            Bytecode::new_raw_checked(code)
+                .map_err(|err| EthApiError::InvalidBytecode(err.to_string()))?,
+        );
     }
     if let Some(balance) = account_override.balance {
         account_info.balance = balance;

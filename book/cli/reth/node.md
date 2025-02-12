@@ -517,6 +517,11 @@ TxPool:
 
           [default: 200]
 
+      --txpool.lifetime <DURATION>
+          Maximum amount of time non-executable transaction are queued
+
+          [default: 10800]
+
 Builder:
       --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder
@@ -702,11 +707,16 @@ Engine:
 
           [default: 2]
 
-      --engine.state-root-task
-          Enable state root task
+      --engine.legacy-state-root
+          Enable legacy state root
 
       --engine.caching-and-prewarming
           Enable cross-block caching and parallel prewarming
+
+      --engine.cross-block-cache-size <CROSS_BLOCK_CACHE_SIZE>
+          Configure the size of cross-block cache in megabytes
+
+          [default: 4096]
 
       --engine.state-root-task-compare-updates
           Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation

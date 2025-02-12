@@ -2,8 +2,8 @@ ethereum_package:
   participants:
     - el_type: reth
       el_extra_params:
-        - "--rpc.eth-proof-window 100"
-      cl_type: lighthouse
+        - "--rpc.eth-proof-window=100"
+      cl_type: teku
 optimism_package:
   chains:
     - participants:

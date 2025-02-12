@@ -6,6 +6,7 @@ use std::sync::{
 };
 
 use alloy_primitives::hex;
+use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use reqwest::Client;
 use serde_json::json;
 use tracing::warn;
@@ -77,6 +78,43 @@ impl SequencerClient {
                     target = "rpc::eth",
                     %err,
                     "Failed to forward transaction to sequencer",
+                );
+            })?;
+
+        Ok(())
+    }
+
+    /// Forwards a transaction conditional to the sequencer endpoint.
+    pub async fn forward_raw_transaction_conditional(
+        &self,
+        tx: &[u8],
+        condition: TransactionConditional,
+    ) -> Result<(), SequencerClientError> {
+        let body = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "method": "eth_sendRawTransactionConditional",
+            "params": [format!("0x{}", hex::encode(tx)), condition],
+            "id": self.next_request_id()
+        }))
+        .map_err(|_| {
+            warn!(
+                target = "rpc::eth",
+                "Failed to serialize transaction conditional for forwarding to sequencer"
+            );
+            SequencerClientError::InvalidSequencerTransaction
+        })?;
+
+        self.http_client()
+            .post(self.endpoint())
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .send()
+            .await
+            .inspect_err(|err| {
+                warn!(
+                    target = "rpc::eth",
+                    %err,
+                    "Failed to forward transaction conditional to sequencer",
                 );
             })?;
 

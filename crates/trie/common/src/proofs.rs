@@ -11,7 +11,7 @@ use alloy_primitives::{
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::TrieNode,
-    proof::{verify_proof, ProofNodes, ProofVerificationError},
+    proof::{verify_proof, DecodedProofNodes, ProofNodes, ProofVerificationError},
     TrieMask, EMPTY_ROOT_HASH,
 };
 use itertools::Itertools;
@@ -192,6 +192,57 @@ impl StorageMultiProof {
     }
 }
 
+/// The decoded merkle multiproof for a storage trie.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DecodedStorageMultiProof {
+    /// Storage trie root.
+    pub root: B256,
+    /// Storage multiproof for requested slots.
+    pub subtree: DecodedProofNodes,
+    /// The hash masks of the branch nodes in the storage proof.
+    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+    /// The tree masks of the branch nodes in the storage proof.
+    pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+}
+
+impl DecodedStorageMultiProof {
+    /// Create new storage multiproof for empty trie.
+    pub fn empty() -> Self {
+        Self {
+            root: EMPTY_ROOT_HASH,
+            subtree: DecodedProofNodes::from_iter([(Nibbles::default(), TrieNode::EmptyRoot)]),
+            branch_node_hash_masks: HashMap::default(),
+            branch_node_tree_masks: HashMap::default(),
+        }
+    }
+
+    /// Return storage proofs for the target storage slot (unhashed).
+    pub fn storage_proof(&self, slot: B256) -> Result<DecodedStorageProof, alloy_rlp::Error> {
+        let nibbles = Nibbles::unpack(keccak256(slot));
+
+        // Retrieve the storage proof.
+        let proof = self
+            .subtree
+            .matching_nodes_iter(&nibbles)
+            .sorted_by(|a, b| a.0.cmp(b.0))
+            .map(|(_, node)| node.clone())
+            .collect::<Vec<_>>();
+
+        // Inspect the last node in the proof. If it's a leaf node with matching suffix,
+        // then the node contains the encoded slot value.
+        let value = 'value: {
+            if let Some(TrieNode::Leaf(leaf)) = proof.last() {
+                if nibbles.ends_with(&leaf.key) {
+                    break 'value U256::decode(&mut &leaf.value[..])?
+                }
+            }
+            U256::ZERO
+        };
+
+        Ok(DecodedStorageProof { key: slot, nibbles, value, proof })
+    }
+}
+
 /// The merkle proof with the relevant account info.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
@@ -329,6 +380,44 @@ impl StorageProof {
         let expected =
             if self.value.is_zero() { None } else { Some(encode_fixed_size(&self.value).to_vec()) };
         verify_proof(root, self.nibbles.clone(), expected, &self.proof)
+    }
+}
+
+/// The merkle proof of the storage entry, using decoded proofs.
+#[derive(Clone, PartialEq, Eq, Default, Debug)]
+pub struct DecodedStorageProof {
+    /// The raw storage key.
+    pub key: B256,
+    /// The hashed storage key nibbles.
+    pub nibbles: Nibbles,
+    /// The storage value.
+    pub value: U256,
+    /// Array of merkle trie nodes which starting from the storage root node and following the path
+    /// of the hashed storage slot as key.
+    pub proof: Vec<TrieNode>,
+}
+
+impl DecodedStorageProof {
+    /// Create new storage proof from the storage slot.
+    pub fn new(key: B256) -> Self {
+        let nibbles = Nibbles::unpack(keccak256(key));
+        Self { key, nibbles, ..Default::default() }
+    }
+
+    /// Create new storage proof from the storage slot and its pre-hashed image.
+    pub fn new_with_hashed(key: B256, hashed_key: B256) -> Self {
+        Self { key, nibbles: Nibbles::unpack(hashed_key), ..Default::default() }
+    }
+
+    /// Create new storage proof from the storage slot and its pre-hashed image.
+    pub fn new_with_nibbles(key: B256, nibbles: Nibbles) -> Self {
+        Self { key, nibbles, ..Default::default() }
+    }
+
+    /// Set proof nodes on storage proof.
+    pub fn with_proof(mut self, proof: Vec<TrieNode>) -> Self {
+        self.proof = proof;
+        self
     }
 }
 
