@@ -27,7 +27,7 @@ where
     EngineApiClient::new_payload_v2(
         client,
         ExecutionPayloadInputV2 {
-            execution_payload: ExecutionPayloadV1::from_block_slow::<TransactionSigned>(
+            execution_payload: ExecutionPayloadV1::from_block_slow::<TransactionSigned, _>(
                 &block.into_block(),
             ),
             withdrawals: None,
