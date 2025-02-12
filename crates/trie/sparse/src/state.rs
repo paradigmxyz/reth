@@ -468,9 +468,12 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Calculates the hashes of the nodes below the provided level.
-    pub fn calculate_below_level(&mut self, level: usize) -> SparseStateTrieResult<()> {
-        self.revealed_trie_mut()?.update_rlp_node_level(level);
-        Ok(())
+    ///
+    /// If the trie has not been revealed, this function does nothing.
+    pub fn calculate_below_level(&mut self, level: usize) {
+        if let SparseTrie::Revealed(trie) = &mut self.state {
+            trie.update_rlp_node_level(level);
+        }
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
@@ -507,7 +510,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         }
     }
 
-    /// Returns sparse trie root if the trie has been revealed.
+    /// Returns sparse trie root.
+    ///
+    /// If the trie has not been revealed, this function reveals the root node and returns its hash.
     pub fn root(&mut self) -> SparseStateTrieResult<B256> {
         Ok(self.revealed_trie_mut()?.root())
     }
