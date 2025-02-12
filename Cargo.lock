@@ -8395,6 +8395,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-db",
  "revm",
+ "thiserror 2.0.11",
  "tracing",
 ]
 

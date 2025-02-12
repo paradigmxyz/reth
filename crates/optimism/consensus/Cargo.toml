@@ -36,9 +36,10 @@ revm.workspace = true
 op-alloy-consensus.workspace = true
 
 # misc
-derive_more = { workspace = true, features = ["display", "error"] }
+derive_more = { workspace = true, features = ["display"] }
 tracing.workspace = true
 crunchy.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 reth-provider = { workspace = true, features = ["test-utils"] }
