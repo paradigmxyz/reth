@@ -25,9 +25,13 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
+pub use constants::{
+    BASE_MAINNET_GENESIS_HASH, BASE_SEPOLIA_GENESIS_HASH, OP_MAINNET_GENESIS_HASH,
+    OP_SEPOLIA_GENESIS_HASH,
+};
 use derive_more::{Constructor, Deref, Display, From, Into};
 pub use dev::OP_DEV;
-pub use op::{OP_MAINNET, OP_MAINNET_GENESIS_HASH};
+pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
@@ -448,6 +452,7 @@ impl OpGenesisInfo {
 
 #[cfg(test)]
 mod tests {
+    use alloy_consensus::constants::DEV_GENESIS_HASH;
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
@@ -1046,5 +1051,30 @@ mod tests {
         let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
         let chainspec = OpChainSpec::from_genesis(genesis);
         assert!(chainspec.is_holocene_active_at_timestamp(1732633200));
+    }
+
+    #[test]
+    fn op_mainnet_genesis_hash() {
+        assert_eq!(OP_MAINNET.genesis_hash(), OP_MAINNET_GENESIS_HASH)
+    }
+
+    #[test]
+    fn op_sepolia_genesis_hash() {
+        assert_eq!(OP_SEPOLIA.genesis_hash(), OP_SEPOLIA_GENESIS_HASH)
+    }
+
+    #[test]
+    fn base_mainnet_genesis_hash() {
+        assert_eq!(BASE_MAINNET.genesis_hash(), BASE_MAINNET_GENESIS_HASH)
+    }
+
+    #[test]
+    fn base_sepolia_genesis_hash() {
+        assert_eq!(BASE_SEPOLIA.genesis_hash(), BASE_SEPOLIA_GENESIS_HASH)
+    }
+
+    #[test]
+    fn op_dev_genesis_hash() {
+        assert_eq!(OP_DEV.genesis_hash(), DEV_GENESIS_HASH)
     }
 }
