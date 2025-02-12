@@ -2,11 +2,11 @@
 
 use crate::OpConsensusError;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::U256;
 use core::fmt;
 use reth_optimism_primitives::predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_storage_api::StorageRootProvider;
-use revm::db::AccountStatus;
+use reth_trie_common::HashedStorage;
+use revm::db::BundleAccount;
 
 /// Verifies that `withdrawals_root` (i.e. `l2tol1-msg-passer` storage root since Isthmus) field is
 /// set in block header.
@@ -19,14 +19,15 @@ pub fn verify_withdrawals_storage_root_is_some<H: BlockHeader + fmt::Debug>(
 }
 
 /// Verifies block header field `withdrawals_root` against storage root of
-/// `l2tol1-message-passer` predeploy post block execution.
-pub fn verify_withdrawals_storage_root<'a, I, DB, H>(
-    unhashed_storage_updates: Option<(AccountStatus, I)>,
+/// `L2ToL1MessagePasser.sol` predeploy post block execution.
+///
+/// See <https://specs.optimism.io/protocol/isthmus/exec-engine.html#l2tol1messagepasser-storage-root-in-header>.
+pub fn verify_withdrawals_storage_root<DB, H>(
+    predeploy_account_updates: Option<&BundleAccount>,
     state: DB,
     header: H,
 ) -> Result<(), OpConsensusError>
 where
-    I: IntoIterator<Item = (&'a U256, &'a U256)>,
     DB: StorageRootProvider,
     H: BlockHeader + fmt::Debug,
 {
@@ -35,7 +36,12 @@ where
 
     // if block contained l2 withdrawals transactions, use predeploy storage updates from
     // execution
-    let hashed_storage_updates = unhashed_storage_updates.map(|acc| acc.into());
+    let hashed_storage_updates = predeploy_account_updates.map(|acc| {
+        HashedStorage::from_plain_storage(
+            acc.status,
+            acc.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+        )
+    });
 
     let storage_root = state
         .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, hashed_storage_updates.unwrap_or_default())
@@ -67,7 +73,8 @@ mod test {
         StateWriter,
     };
     use reth_storage_api::StateProviderFactory;
-    use reth_trie::{test_utils::storage_root_prehashed, HashedPostState, HashedStorage};
+    use reth_trie::test_utils::storage_root_prehashed;
+    use reth_trie_common::HashedPostState;
 
     #[test]
     fn l2tol1_message_passer_no_withdrawals() {
@@ -111,7 +118,7 @@ mod test {
 
         // validate block against existing state by passing empty state updates
         verify_withdrawals_storage_root(
-            None::<(revm::db::AccountStatus, Vec<(&U256, &U256)>)>,
+            None,
             state_provider_factory.latest().expect("load state"),
             &header,
         )

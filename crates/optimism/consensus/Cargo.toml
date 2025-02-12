@@ -20,6 +20,7 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
@@ -36,7 +37,6 @@ revm.workspace = true
 op-alloy-consensus.workspace = true
 
 # misc
-derive_more = { workspace = true, features = ["display"] }
 tracing.workspace = true
 thiserror.workspace = true
 
@@ -65,6 +65,7 @@ std = [
     "reth-optimism-primitives/std",
     "reth-storage-api/std",
     "reth-storage-errors/std",
+    "reth-trie-common/std",
     "alloy-chains/std",
     "alloy-eips/std",
     "alloy-primitives/std",
@@ -73,7 +74,6 @@ std = [
     "op-alloy-consensus/std",
     "reth-revm/std",
     "revm/std",
-    "derive_more/std",
     "tracing/std",
 ]
 optimism = [
