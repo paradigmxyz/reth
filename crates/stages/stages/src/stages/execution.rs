@@ -4,6 +4,7 @@ use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{
     execute::{BatchExecutor, BlockExecutorProvider},
@@ -72,6 +73,9 @@ where
 {
     /// The stage's internal block executor
     executor_provider: E,
+    /// The consensus instance for validating blocks.
+    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    /// The consensu
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -100,6 +104,7 @@ where
     /// Create new execution stage with specified config.
     pub fn new(
         executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         exex_manager_handle: ExExManagerHandle<E::Primitives>,
@@ -107,6 +112,7 @@ where
         Self {
             external_clean_threshold,
             executor_provider,
+            consensus,
             thresholds,
             post_execute_commit_input: None,
             post_unwind_commit_input: None,
@@ -118,9 +124,13 @@ where
     /// Create an execution stage with the provided executor.
     ///
     /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD`].
-    pub fn new_with_executor(executor_provider: E) -> Self {
+    pub fn new_with_executor(
+        executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    ) -> Self {
         Self::new(
             executor_provider,
+            consensus,
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             ExExManagerHandle::empty(),
@@ -130,11 +140,13 @@ where
     /// Create new instance of [`ExecutionStage`] from configuration.
     pub fn from_config(
         executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         config: ExecutionConfig,
         external_clean_threshold: u64,
     ) -> Self {
         Self::new(
             executor_provider,
+            consensus,
             config.into(),
             external_clean_threshold,
             ExExManagerHandle::empty(),

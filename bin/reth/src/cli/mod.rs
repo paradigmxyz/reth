@@ -18,7 +18,7 @@ use reth_db::DatabaseEnv;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_network::EthNetworkPrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -170,10 +170,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<EthereumNode, _, _, EthNetworkPrimitives>(
-                    ctx,
-                    EthExecutorProvider::ethereum,
-                )
+                command.execute::<EthereumNode, _, _, EthNetworkPrimitives>(ctx, |spec| {
+                    (EthExecutorProvider::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
+                })
             }),
             Commands::P2P(command) => {
                 runner.run_until_ctrl_c(command.execute::<EthNetworkPrimitives>())

@@ -6,7 +6,7 @@ use futures::{Stream, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::tables;
 use reth_db_api::transaction::DbTx;
 use reth_downloaders::{
@@ -179,7 +179,7 @@ pub fn build_import_pipeline<N, C, E>(
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent<N::Primitives>>)>
 where
     N: ProviderNodeTypes + CliNodeTypes,
-    C: Consensus<BlockTy<N>, Error = ConsensusError> + 'static,
+    C: FullConsensus<N::Primitives, Error = ConsensusError> + 'static,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     if !file_client.has_canonical_blocks() {
