@@ -17,7 +17,6 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_eth_wire::NetPrimitivesFor;
-use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
@@ -162,8 +161,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
                 StageEnum::Headers => {
-                    let consensus =
-                        Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
+                    let consensus = Arc::new(components.consensus().clone());
 
                     let network_secret_path = self
                         .network

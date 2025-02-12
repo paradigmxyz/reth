@@ -200,6 +200,7 @@ impl AccessRights {
 pub trait CliNodeTypes: NodeTypesWithEngine + NodeTypesForProvider {}
 impl<N> CliNodeTypes for N where N: NodeTypesWithEngine + NodeTypesForProvider {}
 
+/// Helper trait aggregating components required for the CLI.
 pub trait CliNodeComponents<N: CliNodeTypes> {
     /// Block executor.
     type Executor: BlockExecutorProvider<Primitives = N::Primitives>;
