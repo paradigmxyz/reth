@@ -2,6 +2,8 @@
 
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
+extern crate alloc;
+use alloc::string::String;
 
 /// Client version that accessed the database.
 #[derive(Clone, Eq, PartialEq, Debug, Default, Serialize, Deserialize)]

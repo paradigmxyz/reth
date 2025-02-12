@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
 
 # ethereum
@@ -42,10 +42,16 @@ proptest-arbitrary-interop.workspace = true
 test-fuzz.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "reth-primitives-traits/std",
+    ]
 test-utils = [
     "reth-primitives-traits/test-utils",
     "arbitrary",
-    "reth-codecs/test-utils",
+    "reth-codecs?/test-utils",
 ]
 arbitrary = [
     "reth-primitives-traits/arbitrary",
@@ -53,5 +59,5 @@ arbitrary = [
     "dep:proptest",
     "alloy-primitives/arbitrary",
     "alloy-eips/arbitrary",
-    "reth-codecs/arbitrary",
+    "reth-codecs?/arbitrary",
 ]

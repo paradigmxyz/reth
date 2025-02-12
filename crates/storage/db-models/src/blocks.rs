@@ -3,7 +3,7 @@ use alloy_primitives::TxNumber;
 use bytes::Buf;
 use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::{Deserialize, Serialize};
-use std::ops::Range;
+use core::ops::Range;
 
 /// Total number of transactions.
 pub type NumTransactions = u64;
