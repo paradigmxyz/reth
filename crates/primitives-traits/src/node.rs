@@ -15,7 +15,7 @@ pub trait NodePrimitives:
     /// Block body primitive.
     type BlockBody: FullBlockBody<Transaction = Self::SignedTx, OmmerHeader = Self::BlockHeader>;
     /// Signed version of the transaction type.
-    type SignedTx: FullSignedTx + MaybeSerdeBincodeCompat;
+    type SignedTx: FullSignedTx;
     /// A receipt.
     type Receipt: Receipt;
 }
