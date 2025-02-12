@@ -58,7 +58,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             url
         } else {
             let latest_url = get_latest_snapshot_url().await?;
-            info!("No URL specified. Latest snapshot available as mainnet archive: {}", latest_url);
+            info!(target: "reth::cli", "No URL specified. Latest snapshot available as mainnet archive: {}", latest_url);
 
             print!("Do you want to use this snapshot? [Y/n] ");
             std::io::stdout().flush()?;
@@ -72,7 +72,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
         };
 
-        info!(
+        info!(target: "reth::cli",
             chain = %self.chain.chain(),
             dir = ?data_dir.data_dir(),
             url = %url,
@@ -80,7 +80,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         );
 
         stream_and_extract(&url, data_dir.data_dir()).await?;
-        info!("Snapshot downloaded and extracted successfully");
+        info!(target: "reth::cli", "Snapshot downloaded and extracted successfully");
 
         Ok(())
     }
