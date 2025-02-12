@@ -25,7 +25,7 @@ impl ClientVersion {
 }
 
 #[cfg(feature = "reth-codec")]
-impl reth_codecs::Compact  for ClientVersion {
+impl reth_codecs::Compact for ClientVersion {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
