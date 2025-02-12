@@ -1017,7 +1017,8 @@ where
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
 
     let start = Instant::now();
-    let (state_root, trie_updates) = trie.root_with_updates().expect("sparse trie should be revealed");
+    let (state_root, trie_updates) =
+        trie.root_with_updates().expect("sparse trie should be revealed");
     let elapsed = start.elapsed();
     metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
 
