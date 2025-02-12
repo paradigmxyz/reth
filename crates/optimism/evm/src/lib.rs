@@ -12,7 +12,7 @@
 
 extern crate alloc;
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_op_evm::OpEvmFactory;
 use alloy_primitives::{Address, U256};
