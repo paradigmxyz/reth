@@ -19,6 +19,10 @@ pub mod primitives {
     pub use reth_primitives_traits::*;
 }
 
+/// Re-exported cli types
+#[cfg(feature = "cli")]
+pub use reth_ethereum_cli as cli;
+
 /// Re-exported consensus types
 #[cfg(feature = "consensus")]
 pub mod consensus {

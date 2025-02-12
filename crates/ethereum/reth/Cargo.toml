@@ -30,6 +30,7 @@ reth-exex = { workspace = true, optional = true }
 
 # reth-ethereum
 reth-ethereum-primitives.workspace = true
+reth-ethereum-cli = { workspace = true, optional = true }
 reth-ethereum-consensus = { workspace = true, optional = true }
 reth-evm-ethereum = { workspace = true, optional = true }
 reth-node-ethereum = { workspace = true, optional = true }
@@ -71,6 +72,7 @@ test-utils = [
 full = ["consensus", "evm", "node", "provider", "rpc", "exex"]
 
 alloy-compat = ["reth-ethereum-primitives/alloy-compat"]
+cli = ["dep:reth-ethereum-cli"]
 consensus = ["dep:reth-consensus", "dep:reth-consensus-common", "dep:reth-ethereum-consensus"]
 evm = ["dep:reth-evm", "dep:reth-evm-ethereum"]
 exex = ["provider", "dep:reth-exex"]
