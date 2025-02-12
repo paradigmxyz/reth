@@ -38,6 +38,7 @@ use reth_primitives_traits::{
     InMemorySize, Recovered, SignedTransaction,
 };
 
+use alloy_eips::eip4844::env_settings::KzgSettings;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
@@ -905,7 +906,7 @@ impl EthPoolTransaction for MockTransaction {
     fn validate_blob(
         &self,
         _blob: &BlobTransactionSidecar,
-        _settings: &revm_primitives::kzg::KzgSettings,
+        _settings: &KzgSettings,
     ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         match &self {
             Self::Eip4844 { .. } => Ok(()),

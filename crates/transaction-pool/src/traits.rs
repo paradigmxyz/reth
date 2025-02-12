@@ -9,7 +9,10 @@ use alloy_consensus::{transaction::PooledTransaction, BlockHeader, Signed, Typed
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
-    eip4844::{BlobAndProofV1, BlobTransactionSidecar, BlobTransactionValidationError},
+    eip4844::{
+        env_settings::KzgSettings, BlobAndProofV1, BlobTransactionSidecar,
+        BlobTransactionValidationError,
+    },
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
@@ -31,7 +34,6 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use alloy_eips::eip4844::env_settings::KzgSettings;
 use tokio::sync::mpsc::Receiver;
 
 /// The `PeerId` type.
@@ -1088,7 +1090,7 @@ pub trait EthPoolTransaction: PoolTransaction {
     fn validate_blob(
         &self,
         blob: &BlobTransactionSidecar,
-        settings: &EnvKzgSettings,
+        settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError>;
 }
 
@@ -1500,7 +1502,7 @@ mod tests {
     use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::PrimitiveSignature as Signature;
-    use reth_primitives::{Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
 
     #[test]
     fn test_pool_size_invariants() {

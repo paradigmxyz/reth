@@ -709,10 +709,11 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
+    use alloy_consensus::transaction::PooledTransaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_fs_util as fs;
-    use reth_primitives::{PooledTransaction, TransactionSigned};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 
