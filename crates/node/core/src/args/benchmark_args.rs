@@ -15,6 +15,10 @@ pub struct BenchmarkArgs {
     #[arg(long, verbatim_doc_comment)]
     pub to: Option<u64>,
 
+    /// fetch metrics from the metrics endpoint
+    #[arg(long, verbatim_doc_comment)]
+    pub fetch_metrics: bool,
+
     /// Path to a JWT secret to use for the authenticated engine-API RPC server.
     ///
     /// This will perform JWT authentication for all requests to the given engine RPC url.
