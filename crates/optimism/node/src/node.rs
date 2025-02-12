@@ -185,6 +185,7 @@ where
         Self::AddOns::builder()
             .with_sequencer(self.args.sequencer_http.clone())
             .with_da_config(self.da_config.clone())
+            .with_enable_tx_conditional(self.args.enable_tx_conditional)
             .build()
     }
 }
@@ -216,6 +217,8 @@ pub struct OpAddOns<N: FullNodeComponents> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     pub sequencer_client: Option<SequencerClient>,
+    /// Enable transaction conditionals.
+    enable_tx_conditional: bool,
 }
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default for OpAddOns<N> {
@@ -251,7 +254,7 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        let Self { rpc_add_ons, da_config, sequencer_client } = self;
+        let Self { rpc_add_ons, da_config, sequencer_client, enable_tx_conditional } = self;
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
             ctx.node.pool().clone(),
@@ -289,11 +292,13 @@ where
                     auth_modules.merge_auth_methods(miner_ext.into_rpc())?;
                 }
 
-                // extend the eth namespace if configured in the regular http server
-                modules.merge_if_module_configured(
-                    RethRpcModule::Eth,
-                    tx_conditional_ext.into_rpc(),
-                )?;
+                if enable_tx_conditional {
+                    // extend the eth namespace if configured in the regular http server
+                    modules.merge_if_module_configured(
+                        RethRpcModule::Eth,
+                        tx_conditional_ext.into_rpc(),
+                    )?;
+                }
 
                 Ok(())
             })
@@ -348,6 +353,8 @@ pub struct OpAddOnsBuilder {
     sequencer_client: Option<SequencerClient>,
     /// Data availability configuration for the OP builder.
     da_config: Option<OpDAConfig>,
+    /// Enable transaction conditionals.
+    enable_tx_conditional: bool,
 }
 
 impl OpAddOnsBuilder {
@@ -362,6 +369,12 @@ impl OpAddOnsBuilder {
         self.da_config = Some(da_config);
         self
     }
+
+    /// Configure if transaction conditional should be enabled.
+    pub fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+        self.enable_tx_conditional = enable_tx_conditional;
+        self
+    }
 }
 
 impl OpAddOnsBuilder {
@@ -370,7 +383,7 @@ impl OpAddOnsBuilder {
     where
         N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
     {
-        let Self { sequencer_client, da_config } = self;
+        let Self { sequencer_client, da_config, enable_tx_conditional } = self;
 
         let sequencer_client_clone = sequencer_client.clone();
         OpAddOns {
@@ -383,6 +396,7 @@ impl OpAddOnsBuilder {
             ),
             da_config: da_config.unwrap_or_default(),
             sequencer_client,
+            enable_tx_conditional,
         }
     }
 }
