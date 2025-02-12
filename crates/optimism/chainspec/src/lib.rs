@@ -183,11 +183,6 @@ impl OpChainSpecBuilder {
     /// [`Self::genesis`])
     pub fn build(self) -> OpChainSpec {
         let inner = self.inner.build();
-        if inner.is_optimism_mainnet() {
-            // for OP mainnet we have to do this because the genesis header can't be properly
-            // computed from the genesis.json file
-            let _ = inner.genesis_hash.set(OP_MAINNET.genesis_hash());
-        }
         OpChainSpec::from(inner)
     }
 }
@@ -416,6 +411,12 @@ impl From<ChainSpec> for OpChainSpec {
                 }
                 None => (), // Predeploy L2ToL1MessagePasser.sol not found in genesis alloc
             }
+        }
+
+        if inner.is_optimism_mainnet() {
+            // for OP mainnet we have to do this because the genesis header can't be properly
+            // computed from the genesis.json file
+            let _ = inner.genesis_hash.set(OP_MAINNET.genesis_hash());
         }
 
         Self { inner }
