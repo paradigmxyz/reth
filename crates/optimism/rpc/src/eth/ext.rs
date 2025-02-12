@@ -1,6 +1,5 @@
 //! Eth API extension.
 
-use super::OpNodeCore;
 use crate::{error::TxConditionalErr, OpEthApiError, SequencerClient};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
@@ -12,6 +11,7 @@ use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::L2EthApiExtServer;
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use std::sync::Arc;
 
 /// Maximum execution const for conditional transactions.
 const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
@@ -22,25 +22,25 @@ const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
 #[derive(Clone)]
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct OpEthExtApi<N: OpNodeCore> {
+pub struct OpEthExtApi<Pool, Provider> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
     /// The transaction pool of the node.
-    pool: N::Pool,
+    pool: Arc<Pool>,
     /// The provider type used to interact with the node.
-    provider: N::Provider,
+    provider: Arc<Provider>,
 }
 
-impl<N> OpEthExtApi<N>
+impl<Pool, Provider> OpEthExtApi<Pool, Provider>
 where
-    N: OpNodeCore<Provider: BlockReaderIdExt + Clone + 'static>,
+    Provider: BlockReaderIdExt + Clone + 'static,
 {
     /// Creates a new [`OpEthExtApi`].
     pub fn new(
         sequencer_client: Option<SequencerClient>,
-        pool: N::Pool,
-        provider: N::Provider,
+        pool: Arc<Pool>,
+        provider: Arc<Provider>,
     ) -> Self {
         Self { sequencer_client, pool, provider }
     }
@@ -51,22 +51,21 @@ where
     }
 
     #[inline]
-    fn pool(&self) -> &N::Pool {
+    fn pool(&self) -> &Pool {
         &self.pool
     }
 
     #[inline]
-    fn provider(&self) -> &N::Provider {
+    fn provider(&self) -> &Provider {
         &self.provider
     }
 }
 
 #[async_trait::async_trait]
-impl<N> L2EthApiExtServer for OpEthExtApi<N>
+impl<Pool, Provider> L2EthApiExtServer for OpEthExtApi<Pool, Provider>
 where
-    N: OpNodeCore + 'static,
-    N::Provider: BlockReaderIdExt + StateProviderFactory,
-    N::Pool: TransactionPool<Transaction: MaybeConditionalTransaction>,
+    Provider: BlockReaderIdExt + StateProviderFactory + Clone + 'static,
+    Pool: TransactionPool<Transaction: MaybeConditionalTransaction> + 'static,
 {
     async fn send_raw_transaction_conditional(
         &self,
@@ -83,7 +82,7 @@ where
             OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::FailedToDecodeSignedTransaction)
         })?;
 
-        let mut tx = <N::Pool as TransactionPool>::Transaction::from_pooled(recovered_tx);
+        let mut tx = <Pool as TransactionPool>::Transaction::from_pooled(recovered_tx);
 
         // get current header
         let header_not_found = || {
