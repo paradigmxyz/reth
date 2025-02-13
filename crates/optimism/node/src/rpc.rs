@@ -2,9 +2,10 @@
 
 pub use reth_optimism_rpc::OpEngineApi;
 
+use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
-    AddOnsContext, EngineTypes, ExecutionData, FullNodeComponents, NodeTypes, NodeTypesWithEngine,
+    AddOnsContext, EngineTypes, FullNodeComponents, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_builder::rpc::{BasicEngineApiBuilder, EngineApiBuilder, EngineValidatorBuilder};
 

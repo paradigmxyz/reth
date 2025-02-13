@@ -3200,12 +3200,13 @@ mod tests {
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{
-        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+        CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1,
+        ExecutionPayloadV3,
     };
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-    use reth_engine_primitives::{ExecutionData, ForkchoiceStatus};
+    use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_ethereum_primitives::{Block, EthPrimitives};

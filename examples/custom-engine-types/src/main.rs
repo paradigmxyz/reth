@@ -22,8 +22,9 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
     engine::{
-        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-        ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
+        ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+        ExecutionPayloadEnvelopeV4, ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
+        PayloadId,
     },
     Withdrawal,
 };
@@ -53,7 +54,7 @@ use reth_engine_local::payload::UnsupportedLocalAttributes;
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-    validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator, ExecutionData,
+    validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
     FullNodeComponents, PayloadAttributes, PayloadBuilderAttributes, PayloadValidator,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
