@@ -27,7 +27,14 @@ pub struct Command {
     path: Option<String>,
 
     /// The engine RPC url to use.
-    #[arg(short, long, required_if_eq_any([("mode", "execute"), ("mode", "cast")]), required_unless_present("mode"))]
+    #[arg(
+        short,
+        long,
+        // Required if `mode` is `execute` or `cast`.
+        required_if_eq_any([("mode", "execute"), ("mode", "cast")]),
+        // If `mode` is not specified, then `execute` is used, so we need to require it.
+        required_unless_present("mode")
+    )]
     rpc_url: Option<String>,
 
     /// The JWT secret to use.
