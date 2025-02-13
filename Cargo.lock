@@ -6672,6 +6672,7 @@ dependencies = [
  "reqwest",
  "reth-cli-runner",
  "reth-cli-util",
+ "reth-fs-util",
  "reth-node-api",
  "reth-node-core",
  "reth-primitives",

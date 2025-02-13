@@ -121,7 +121,7 @@ impl Command {
     /// Read input from either a file or stdin
     fn read_input(&self) -> Result<String> {
         Ok(match &self.path {
-            Some(path) => std::fs::read_to_string(path)?,
+            Some(path) => reth_fs_util::read_to_string(path)?,
             None => String::from_utf8(std::io::stdin().bytes().collect::<Result<Vec<_>, _>>()?)?,
         })
     }
@@ -204,9 +204,11 @@ impl Command {
                 let mut process = command.stdin(std::process::Stdio::piped()).spawn()?;
 
                 // Write to cast's stdin
-                let mut stdin = process.stdin.take().ok_or_eyre("stdin not available")?;
-                stdin.write_all(json_request.as_bytes())?;
-                drop(stdin);
+                process
+                    .stdin
+                    .take()
+                    .ok_or_eyre("stdin not available")?
+                    .write_all(json_request.as_bytes())?;
 
                 // Wait for cast to finish
                 process.wait()?;
