@@ -131,11 +131,12 @@ impl<N: ProviderNodeTypes> DbTool<N> {
             .map_err(|e| eyre::eyre!(e))
     }
 
-    /// Drops the database and the static files at the given path.
-    pub fn drop(
+    /// Drops the database, the static files and ExEx WAL at the given paths.
+    pub fn drop<P: AsRef<Path>>(
         &self,
-        db_path: impl AsRef<Path>,
-        static_files_path: impl AsRef<Path>,
+        db_path: P,
+        static_files_path: P,
+        exex_wal_path: P,
     ) -> Result<()> {
         let db_path = db_path.as_ref();
         info!(target: "reth::cli", "Dropping database at {:?}", db_path);
@@ -145,6 +146,10 @@ impl<N: ProviderNodeTypes> DbTool<N> {
         info!(target: "reth::cli", "Dropping static files at {:?}", static_files_path);
         fs::remove_dir_all(static_files_path)?;
         fs::create_dir_all(static_files_path)?;
+
+        let exex_wal_path = exex_wal_path.as_ref();
+        info!(target: "reth::cli", "Dropping ExEx WAL at {:?}", exex_wal_path);
+        fs::remove_dir_all(exex_wal_path)?;
 
         Ok(())
     }
