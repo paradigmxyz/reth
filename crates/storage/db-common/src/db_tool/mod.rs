@@ -131,7 +131,7 @@ impl<N: ProviderNodeTypes> DbTool<N> {
             .map_err(|e| eyre::eyre!(e))
     }
 
-    /// Drops the database, the static files and exex WAL at the given paths.
+    /// Drops the database, the static files and ExEx WAL at the given paths.
     pub fn drop<P: AsRef<Path>>(
         &self,
         db_path: P,
