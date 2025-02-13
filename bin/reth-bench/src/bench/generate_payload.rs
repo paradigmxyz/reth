@@ -156,7 +156,7 @@ impl Command {
             println!("{json_request}");
         } else {
             let mut cmd = format!(
-                "cast rpc engine_newPayloadV{} --raw {}",
+                "cast rpc engine_newPayloadV{} --raw '{}'",
                 self.new_payload_version, json_request
             );
 
