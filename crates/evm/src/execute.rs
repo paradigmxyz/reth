@@ -57,9 +57,9 @@ pub trait Executor<DB: Database>: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let BlockExecutionResult { receipts, requests, gas_used } = self.execute_one(block)?;
+        let result = self.execute_one(block)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
@@ -96,10 +96,10 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: FnMut(&State<DB>),
     {
-        let BlockExecutionResult { receipts, requests, gas_used } = self.execute_one(block)?;
+        let result = self.execute_one(block)?;
         let mut state = self.into_state();
         f(&state);
-        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
@@ -112,10 +112,9 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: OnStateHook + 'static,
     {
-        let BlockExecutionResult { receipts, requests, gas_used } =
-            self.execute_one_with_state_hook(block, state_hook)?;
+        let result = self.execute_one_with_state_hook(block, state_hook)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
