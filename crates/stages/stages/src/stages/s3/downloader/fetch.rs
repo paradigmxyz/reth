@@ -174,7 +174,7 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let b3sum = b256!("81a7318f69fc1d6bb0a58a24af302f3b978bc75a435e4ae5d075f999cd060cfd");
-        let url = "https://link.testfile.org/500MB";
+        let url = "https://link.testfile.org/50MB";
 
         let file = tempfile::NamedTempFile::new().unwrap();
         let filename = file.path().file_name().unwrap().to_str().unwrap();
