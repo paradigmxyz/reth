@@ -73,7 +73,7 @@ pub struct BitfinityImportArgs {
     ///
     /// If validation is disabled, unsafe blocks will be ignored.
     #[arg(long)]
-    pub validate_unsafe_blocks: bool,
+    pub confirm_unsafe_blocks: bool,
 }
 
 /// Bitfinity Related Args

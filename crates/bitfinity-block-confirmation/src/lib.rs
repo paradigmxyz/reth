@@ -1,4 +1,4 @@
-//! Bitfinity block validator.
+//! Bitfinity block confirmation.
 use std::collections::HashSet;
 
 use did::{BlockConfirmationData, BlockConfirmationResult};
@@ -18,13 +18,13 @@ use reth_provider::{
 };
 use reth_revm::{batch::BlockBatchRecord, database::StateProviderDatabase};
 
-/// Block validator for Bitfinity.
+/// Block confirmation for Bitfinity.
 ///
-/// The validator validates the block by executing it and then
-/// confirming it on the EVM.
+/// Uses custom Bitfinity logic to prove that the block was executed and sends confirmation request
+/// to the EVM canister.
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
-pub struct BitfinityBlockValidator<C, DB>
+pub struct BitfinityBlockConfirmation<C, DB>
 where
     C: Client,
     DB: NodeTypesWithDB + Clone,
@@ -33,12 +33,12 @@ where
     provider_factory: ProviderFactory<DB>,
 }
 
-impl<C, DB> BitfinityBlockValidator<C, DB>
+impl<C, DB> BitfinityBlockConfirmation<C, DB>
 where
     C: Client,
     DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
 {
-    /// Create a new [`BitfinityBlockValidator`].
+    /// Create a new [`BitfinityBlockConfirmation`].
     pub const fn new(
         evm_client: EthJsonRpcClient<C>,
         provider_factory: ProviderFactory<DB>,
@@ -46,8 +46,8 @@ where
         Self { evm_client, provider_factory }
     }
 
-    /// Validate a block.
-    pub async fn validate_blocks(&self, blocks: &[Block]) -> eyre::Result<()> {
+    /// Execute the block and send the confirmation request to the EVM.
+    pub async fn confirm_blocks(&self, blocks: &[Block]) -> eyre::Result<()> {
         if blocks.is_empty() {
             return Ok(())
         }
@@ -93,7 +93,7 @@ where
         })
     }
 
-    /// Execute block and return validation arguments.
+    /// Execute block and return execution result.
     fn execute_blocks(&self, blocks: &[Block]) -> eyre::Result<ExecutionOutcome> {
         let executor = self.executor();
         let blocks_with_senders: Vec<_> = blocks.iter().map(Self::convert_block).collect();

@@ -172,7 +172,7 @@ pub async fn bitfinity_import_config_data(
         retry_delay_secs: 3,
         check_evm_state_before_importing: false,
         max_block_age_secs: 600,
-        validate_unsafe_blocks: false,
+        confirm_unsafe_blocks: false,
     };
 
     Ok((

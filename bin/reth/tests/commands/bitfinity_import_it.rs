@@ -367,7 +367,7 @@ async fn bitfinity_test_should_import_data_to_safe_block() {
 }
 
 #[tokio::test]
-async fn bitfinity_test_should_validate_and_import_unsafe_blocks() {
+async fn bitfinity_test_should_confirm_and_import_unsafe_blocks() {
     // Arrange
     let _log = init_logs();
 
@@ -392,7 +392,7 @@ async fn bitfinity_test_should_validate_and_import_unsafe_blocks() {
         bitfinity_import_config_data(&evm_datasource_url, None, None).await.unwrap();
 
     import_data.bitfinity_args.max_fetch_blocks = 100;
-    import_data.bitfinity_args.validate_unsafe_blocks = true;
+    import_data.bitfinity_args.confirm_unsafe_blocks = true;
 
     let import = BitfinityImportCommand::new(
         None,
@@ -442,7 +442,7 @@ async fn bitfinity_test_should_import_until_last_confirmed() {
         bitfinity_import_config_data(&evm_datasource_url, None, None).await.unwrap();
 
     import_data.bitfinity_args.max_fetch_blocks = 100;
-    import_data.bitfinity_args.validate_unsafe_blocks = true;
+    import_data.bitfinity_args.confirm_unsafe_blocks = true;
 
     let import = BitfinityImportCommand::new(
         None,

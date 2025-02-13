@@ -1456,7 +1456,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
 
 [[package]]
-name = "bitfinity-block-validator"
+name = "bitfinity-block-confirmation"
 version = "1.1.5"
 dependencies = [
  "alloy-consensus",
@@ -7263,7 +7263,7 @@ dependencies = [
  "async-channel 2.3.1",
  "async-trait",
  "backon",
- "bitfinity-block-validator",
+ "bitfinity-block-confirmation",
  "candid",
  "clap",
  "did",

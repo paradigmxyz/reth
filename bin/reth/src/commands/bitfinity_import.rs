@@ -1,7 +1,7 @@
 //! Command that initializes the node by importing a chain from a remote EVM node.
 
 use crate::{dirs::DataDirPath, version::SHORT_VERSION};
-use bitfinity_block_validator::BitfinityBlockValidator;
+use bitfinity_block_confirmation::BitfinityBlockConfirmation;
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -182,15 +182,15 @@ impl BitfinityImportCommand {
         )
         .await?;
 
-        if self.bitfinity.validate_unsafe_blocks {
+        if self.bitfinity.confirm_unsafe_blocks {
             let Some(mut tip) = remote_client.tip() else {
-                warn!(target: "reth::cli - BitfinityImportCommand", "Cannot find block for validation. Skipping.");
+                warn!(target: "reth::cli - BitfinityImportCommand", "Cannot find block for confirmation. Skipping.");
                 return Ok(());
             };
 
             while tip != safe_block {
                 match self
-                    .validate_block(&tip, remote_client.clone(), provider_factory.clone())
+                    .confirm_block(&tip, remote_client.clone(), provider_factory.clone())
                     .await
                 {
                     Ok(_) => {
@@ -200,7 +200,7 @@ impl BitfinityImportCommand {
                     }
 
                     Err(err) => {
-                        warn!(target: "reth::cli - BitfinityImportCommand", "Failed to validate block {}: {}", tip, err);
+                        warn!(target: "reth::cli - BitfinityImportCommand", "Failed to confirm block {}: {}", tip, err);
 
                         if let Some(parent) = remote_client.parent(&tip) {
                             tip = parent;
@@ -217,21 +217,21 @@ impl BitfinityImportCommand {
         Ok(())
     }
 
-    async fn validate_block(
+    async fn confirm_block(
         &self,
         block: &B256,
         remote_client: Arc<BitfinityEvmClient>,
         provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
-        debug!(target: "reth::cli - BitfinityImportCommand", "Validating block {block}");
+        debug!(target: "reth::cli - BitfinityImportCommand", "Configurming block {block}");
 
         let config = self.rpc_config();
         let client = BitfinityEvmClient::client(config).await?;
 
-        let validator = BitfinityBlockValidator::new(client, provider_factory);
+        let confirmator = BitfinityBlockConfirmation::new(client, provider_factory);
         let blocks = remote_client.unsafe_blocks(block)?;
 
-        validator.validate_blocks(&blocks).await
+        confirmator.confirm_blocks(&blocks).await
     }
 
     /// Imports the blocks up to the given block hash of the `remove_client`.
