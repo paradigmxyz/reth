@@ -349,7 +349,7 @@ reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-optimism-evm = { path = "crates/optimism/evm" }
 reth-execution-errors = { path = "crates/evm/execution-errors", default-features = false }
-reth-execution-types = { path = "crates/evm/execution-types" }
+reth-execution-types = { path = "crates/evm/execution-types", default-features = false }
 reth-exex = { path = "crates/exex/exex" }
 reth-exex-test-utils = { path = "crates/exex/test-utils" }
 reth-exex-types = { path = "crates/exex/types" }

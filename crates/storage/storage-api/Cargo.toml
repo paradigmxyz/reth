@@ -49,4 +49,5 @@ std = [
     "reth-stages-types/std",
     "reth-prune-types/std",
     "reth-storage-errors/std",
+    "reth-execution-types/std",
 ]

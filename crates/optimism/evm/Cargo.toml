@@ -72,6 +72,7 @@ std = [
     "reth-optimism-consensus/std",
     "reth-consensus-common/std",
     "reth-execution-errors/std",
+    "reth-execution-types/std",
 ]
 optimism = [
     "reth-execution-types/optimism",
