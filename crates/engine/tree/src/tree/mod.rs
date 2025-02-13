@@ -2806,8 +2806,14 @@ where
                 MultiProofTargets::with_capacity_and_hasher(res.state.len(), Default::default());
             let mut storage_targets = 0;
             for (addr, account) in res.state {
-                // if account was not touched, do not fetch for it
-                if !account.is_touched() {
+                // if the account was not touched, or if the account was selfdestructed, do not
+                // fetch proofs for it
+                //
+                // Since selfdestruct can only happen in the same transaction, we can skip
+                // prefetching proofs for selfdestructed accounts
+                //
+                // See: https://eips.ethereum.org/EIPS/eip-6780
+                if !account.is_touched() || account.is_selfdestructed() {
                     continue
                 }
 
