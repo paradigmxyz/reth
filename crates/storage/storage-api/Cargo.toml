@@ -47,4 +47,6 @@ std = [
     "reth-primitives-traits/std",
     "revm/std",
     "reth-stages-types/std",
+    "reth-prune-types/std",
+    "reth-storage-errors/std",
 ]

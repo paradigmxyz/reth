@@ -59,6 +59,8 @@ std = [
     "reth-ethereum-primitives/std",
     "reth-chainspec/std",
     "reth-consensus-common/std",
+    "reth-execution-errors/std",
+    "reth-storage-errors/std",
 ]
 test-utils = [
     "dep:parking_lot",
