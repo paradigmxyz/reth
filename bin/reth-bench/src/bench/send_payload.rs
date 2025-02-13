@@ -35,7 +35,8 @@ pub struct Command {
     )]
     rpc_url: Option<String>,
 
-    /// The JWT secret to use.
+    /// The JWT secret to use. Can be either a path to a file containing the secret or the secret
+    /// itself.
     #[arg(short, long)]
     jwt_secret: Option<String>,
 
@@ -117,8 +118,26 @@ impl Encodable2718 for RpcTransaction {
 }
 
 impl Command {
+    /// Load JWT secret from either a file or use the provided string directly
+    fn load_jwt_secret(&self) -> Result<Option<String>> {
+        match &self.jwt_secret {
+            Some(secret) => {
+                // Try to read as file first
+                match std::fs::read_to_string(secret) {
+                    Ok(contents) => Ok(Some(contents.trim().to_string())),
+                    Err(_) => Ok(Some(secret.clone())), /* If file read fails, use the string
+                                                         * directly */
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
     /// Execute the generate payload command
     pub async fn execute(self, _ctx: CliContext) -> Result<()> {
+        // Load JWT secret first
+        let jwt_secret = self.load_jwt_secret()?;
+
         // Read from file or stdin
         let block_json = if let Some(path) = &self.path {
             std::fs::read_to_string(path)?
@@ -174,7 +193,7 @@ impl Command {
                 if let Some(rpc_url) = self.rpc_url {
                     command.arg("--rpc-url").arg(rpc_url);
                 }
-                if let Some(secret) = self.jwt_secret {
+                if let Some(secret) = &jwt_secret {
                     command.arg("--jwt-secret").arg(secret);
                 }
 
@@ -195,7 +214,7 @@ impl Command {
                 if let Some(rpc_url) = self.rpc_url {
                     cmd += &format!(" --rpc-url {}", rpc_url);
                 }
-                if let Some(secret) = self.jwt_secret {
+                if let Some(secret) = &jwt_secret {
                     cmd += &format!(" --jwt-secret {}", secret);
                 }
 
