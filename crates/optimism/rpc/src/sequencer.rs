@@ -51,31 +51,52 @@ impl SequencerClient {
         self.inner.id.fetch_add(1, atomic::Ordering::SeqCst)
     }
 
-    /// Helper function to get body of the request
-    fn body_rpc(&self, method: &str, params: Value) -> Value {
-        json!({
+    /// Helper function to get body of the request with the given params array.
+    fn request_body(&self, method: &str, params: Value) -> serde_json::Result<String> {
+        let request = json!({
                 "jsonrpc": "2.0",
             "method": method,
             "params": params,
             "id": self.next_request_id()
-        })
+        });
+
+        serde_json::to_string(&request)
     }
 
     /// Sends a POST request to the sequencer endpoint.
-    async fn post_request(
-        &self,
-        body: String,
-        _error_message: &str,
-    ) -> Result<(), SequencerClientError> {
-        let _ = self
-            .http_client()
+    async fn post_request(&self, body: String) -> Result<(), reqwest::Error> {
+        self.http_client()
             .post(self.endpoint())
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body)
             .send()
-            .await;
+            .await?;
         Ok(())
     }
+
+    /// Forwards a transaction to the sequencer endpoint.
+    pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerClientError> {
+        let body = self
+            .request_body("eth_sendRawTransaction", json!([format!("0x{}", hex::encode(tx))]))
+            .map_err(|_| {
+                warn!(
+                    target: "rpc::eth",
+                    "Failed to serialize transaction for forwarding to sequencer"
+                );
+                SequencerClientError::InvalidSequencerTransaction
+            })?;
+
+        self.post_request(body).await.inspect_err(|err| {
+            warn!(
+                target: "rpc::eth",
+                %err,
+                "Failed to forward transaction to sequencer",
+            );
+        })?;
+
+        Ok(())
+    }
+
     /// Forwards a transaction conditional to the sequencer endpoint.
     pub async fn forward_raw_transaction_conditional(
         &self,
@@ -83,16 +104,23 @@ impl SequencerClient {
         condition: TransactionConditional,
     ) -> Result<(), SequencerClientError> {
         let params = json!([format!("0x{}", hex::encode(tx)), condition]);
-        let body = self.body_rpc("eth_sendRawTransactionConditional", params); // Corrected method name
-        let body_str = serde_json::to_string(&body).map_err(|_| {
+        let body =
+            self.request_body("eth_sendRawTransactionConditional", params).map_err(|_| {
+                warn!(
+                    target: "rpc::eth",
+                    "Failed to serialize transaction for forwarding to sequencer"
+                );
+                SequencerClientError::InvalidSequencerTransaction
+            })?;
+
+        self.post_request(body).await.inspect_err(|err| {
             warn!(
                 target: "rpc::eth",
-                "Failed to serialize transaction conditional for forwarding to sequencer"
+                %err,
+                "Failed to forward transaction conditional for sequencer",
             );
-            SequencerClientError::InvalidSequencerTransaction
         })?;
-
-        self.post_request(body_str, "Failed to forward transaction conditional to sequencer").await
+        Ok(())
     }
 }
 
@@ -116,10 +144,21 @@ mod tests {
         let client = SequencerClient::new("http://localhost:8545");
         let params = json!(["0x1234", {"block_number":10}]);
 
-        let body = client.body_rpc("eth_getBlockByNumber", params);
+        let body = client.request_body("eth_getBlockByNumber", params).unwrap();
 
-        assert!(body["params"].is_array());
-        assert_eq!(body["params"][0], "0x1234");
-        assert_eq!(body["params"][1]["block_number"], 10);
+        assert_eq!(
+            body,
+            r#"{"id":0,"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x1234",{"block_number":10}]}"#
+        );
+
+        let condition = TransactionConditional::default();
+        let params = json!([format!("0x{}", hex::encode("abcd")), condition]);
+
+        let body = client.request_body("eth_sendRawTransactionConditional", params).unwrap();
+
+        assert_eq!(
+            body,
+            r#"{"id":1,"jsonrpc":"2.0","method":"eth_sendRawTransactionConditional","params":["0x61626364",{"knownAccounts":{}}]}"#
+        );
     }
 }

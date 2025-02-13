@@ -2,7 +2,7 @@
 
 use alloy_consensus::Transaction as _;
 use alloy_primitives::{Bytes, PrimitiveSignature as Signature, Sealable, Sealed, B256};
-use alloy_rpc_types_eth::{erc4337::TransactionConditional, TransactionInfo};
+use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
 use reth_node_api::FullNodeComponents;
@@ -40,7 +40,7 @@ where
         // blocks that it builds.
         if let Some(client) = self.raw_tx_forwarder().as_ref() {
             tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to sequencer");
-            let _ = client.forward_raw_transaction_conditional(&tx, TransactionConditional::default()).await.inspect_err(|err| {
+            let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
                     tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
                 });
         }
