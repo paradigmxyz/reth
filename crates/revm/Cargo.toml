@@ -39,6 +39,7 @@ std = [
     "alloy-consensus/std",
     "reth-ethereum-forks/std",
     "reth-storage-errors/std",
+    "reth-storage-api/std",
 ]
 witness = ["dep:reth-trie"]
 test-utils = [
