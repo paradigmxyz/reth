@@ -16,10 +16,8 @@ use reth_cli_runner::CliContext;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
-/// Command for generating and sending an `engine_newPayload` request constructed from an RPC block.
-///
-/// This command takes a JSON block input (either from a file or stdin) and generates
-/// an execution payload that can be used with the `engine_newPayloadV*` API.
+/// Command for generating and sending an `engine_newPayload` request constructed from an RPC
+/// block.
 #[derive(Debug, Parser)]
 pub struct Command {
     /// Path to the json file to parse. If not specified, stdin will be used.

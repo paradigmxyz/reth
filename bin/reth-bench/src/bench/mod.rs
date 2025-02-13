@@ -30,7 +30,17 @@ pub enum Subcommands {
     /// Benchmark which only calls subsequent `newPayload` calls.
     NewPayloadOnly(new_payload_only::Command),
 
-    /// Generate a `newPayload` message for the given RPC block.
+    /// Command for generating and sending an `engine_newPayload` request constructed from an RPC
+    /// block.
+    ///
+    /// This command takes a JSON block input (either from a file or stdin) and generates
+    /// an execution payload that can be used with the `engine_newPayloadV*` API.
+    ///
+    /// One powerful use case is pairing this command with the `cast block` command, for example:
+    ///
+    /// `cast block latest -r https://reth-ethereum.ithaca.xyz/rpc --full --json |
+    /// reth-bench send-payload --rpc-url localhost:5000 --jwt-secret $(cat
+    /// ~/.local/share/reth/mainnet/jwt.hex)`
     SendPayload(send_payload::Command),
 }
 
