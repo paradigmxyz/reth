@@ -950,11 +950,14 @@ where
         };
 
         let mut outcome = TreeOutcome::new(status);
+        // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
-            // if the block is valid and it is the sync target head, make it canonical
-            outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
-                sync_target_head: block_hash,
-            }));
+            // but only if it isn't already the canonical head
+            if self.state.tree_state.canonical_block_hash() != block_hash {
+                outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
+                    sync_target_head: block_hash,
+                }));
+            }
         }
 
         Ok(outcome)
@@ -1436,7 +1439,12 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
-                                let output = self.on_new_payload(payload);
+                                let mut output = self.on_new_payload(payload);
+
+                                let maybe_event =
+                                    output.as_mut().ok().and_then(|out| out.event.take());
+
+                                // emit response
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(|e| {
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
@@ -1448,6 +1456,9 @@ where
                                         .failed_new_payload_response_deliveries
                                         .increment(1);
                                 }
+
+                                // handle the event if any
+                                self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
                                 // triggering this hook will record that we received a request from
@@ -1592,6 +1603,8 @@ where
     }
 
     /// Handles a tree event.
+    ///
+    /// Returns an error if a [`TreeAction::MakeCanonical`] results in a fatal error.
     fn on_tree_event(&mut self, event: TreeEvent) -> ProviderResult<()> {
         match event {
             TreeEvent::TreeAction(action) => match action {
