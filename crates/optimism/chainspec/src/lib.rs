@@ -19,7 +19,7 @@ mod op_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::{constants::DEV_GENESIS_HASH, Header, EMPTY_ROOT_HASH};
+use alloy_consensus::{Header, EMPTY_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
@@ -498,7 +498,6 @@ impl OpGenesisInfo {
 
 #[cfg(test)]
 mod tests {
-    use alloy_consensus::constants::DEV_GENESIS_HASH;
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};

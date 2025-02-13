@@ -3,10 +3,7 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 use crate::{constants::MAINNET_DEPOSIT_CONTRACT, EthChainSpec};
 use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
-use alloy_consensus::{
-    constants::{DEV_GENESIS_HASH, EMPTY_WITHDRAWALS},
-    Header,
-};
+use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header};
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
     eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
