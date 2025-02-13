@@ -190,6 +190,7 @@ impl Command {
         // Print output or execute command
         match self.mode {
             Mode::Execute => {
+                // Create cast command
                 let mut command = std::process::Command::new("cast");
                 command.arg("rpc").arg("engine_newPayloadV3").arg("--raw");
                 if let Some(rpc_url) = self.rpc_url {
@@ -199,12 +200,15 @@ impl Command {
                     command.arg("--jwt-secret").arg(secret);
                 }
 
+                // Start cast process
                 let mut process = command.stdin(std::process::Stdio::piped()).spawn()?;
 
+                // Write to cast's stdin
                 let mut stdin = process.stdin.take().ok_or_eyre("stdin not available")?;
                 stdin.write_all(json_request.as_bytes())?;
                 drop(stdin);
 
+                // Wait for cast to finish
                 process.wait()?;
             }
             Mode::Cast => {
