@@ -1,6 +1,6 @@
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
 use alloy_primitives::{
-    map::{B256HashMap, HashMap},
+    map::{B256Map, HashMap},
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
@@ -119,7 +119,7 @@ where
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
         let mut storage_proofs =
-            B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
+            B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -231,7 +231,7 @@ where
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut storages: B256HashMap<_> =
+        let mut storages: B256Map<_> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(
@@ -317,7 +317,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{
         keccak256,
-        map::{B256HashSet, DefaultHashBuilder},
+        map::{B256Set, DefaultHashBuilder},
         Address, U256,
     };
     use rand::Rng;
@@ -373,7 +373,7 @@ mod tests {
         let mut targets = MultiProofTargets::default();
         for (address, (_, storage)) in state.iter().take(10) {
             let hashed_address = keccak256(*address);
-            let mut target_slots = B256HashSet::default();
+            let mut target_slots = B256Set::default();
 
             for (slot, _) in storage.iter().take(5) {
                 target_slots.insert(*slot);

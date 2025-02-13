@@ -8,7 +8,7 @@ use alloy_consensus::{
     Header, SignableTransaction, Transaction as _, TxEip1559, TxReceipt, EMPTY_ROOT_HASH,
 };
 use alloy_eips::{
-    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, INITIAL_BASE_FEE},
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, INITIAL_BASE_FEE},
     eip7685::Requests,
 };
 use alloy_primitives::{Address, BlockNumber, B256, U256};
@@ -146,7 +146,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             parent_hash,
             gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
             mix_hash: B256::random(),
-            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(
                 &transactions.clone().into_iter().map(|tx| tx.into_tx()).collect::<Vec<_>>(),

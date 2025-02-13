@@ -142,6 +142,7 @@ reth-codec = [
 ]
 op = [
     "dep:op-alloy-consensus",
+    "reth-codecs?/op",
 ]
 rayon = [
     "dep:rayon",

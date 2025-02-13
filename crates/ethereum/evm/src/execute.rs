@@ -241,6 +241,10 @@ where
         &mut self.state
     }
 
+    fn into_state(self) -> State<Self::DB> {
+        self.state
+    }
+
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
     }
@@ -287,10 +291,8 @@ mod tests {
     };
     use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition};
-    use reth_evm::execute::{
-        BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
-    };
-    use reth_execution_types::BlockExecutionOutput;
+    use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
+    use reth_execution_types::BlockExecutionResult;
     use reth_primitives::{Account, Block, BlockBody, Transaction};
     use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Block as _};
     use reth_revm::{
@@ -364,11 +366,11 @@ mod tests {
 
         let provider = executor_provider(chain_spec);
 
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // attempt to execute a block without parent beacon block root, expect err
         let err = executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header: header.clone(),
                     body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
@@ -389,7 +391,7 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header: header.clone(),
                     body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
@@ -448,8 +450,8 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         provider
-            .batch_executor(StateProviderDatabase::new(&db))
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .executor(StateProviderDatabase::new(&db))
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
@@ -489,11 +491,11 @@ mod tests {
             ..Header::default()
         };
 
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
@@ -524,12 +526,12 @@ mod tests {
 
         let mut header = chain_spec.genesis_header().clone();
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
         let _err = executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header: header.clone(), body: Default::default() },
                 vec![],
             ))
@@ -544,7 +546,7 @@ mod tests {
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -588,11 +590,11 @@ mod tests {
         let provider = executor_provider(chain_spec);
 
         // execute header
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header: header.clone(), body: Default::default() },
                 vec![],
             ))
@@ -655,14 +657,14 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // construct the header for block one
         let header = Header { timestamp: 1, number: 1, ..Header::default() };
 
         // attempt to execute an empty block, this should not fail
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -696,11 +698,11 @@ mod tests {
 
         let header = chain_spec.genesis_header().clone();
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // attempt to execute genesis block, this should not fail
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -743,11 +745,11 @@ mod tests {
             ..Header::default()
         };
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // attempt to execute the fork activation block, this should not fail
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -787,7 +789,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         let header = Header {
             parent_hash: B256::random(),
@@ -801,7 +803,7 @@ mod tests {
 
         // attempt to execute the fork activation block, this should not fail
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -830,11 +832,11 @@ mod tests {
         let header_hash = header.hash_slow();
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // attempt to execute the genesis block, this should not fail
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -865,7 +867,7 @@ mod tests {
         let header_hash = header.hash_slow();
 
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -899,7 +901,7 @@ mod tests {
         };
 
         executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+            .execute_one(&RecoveredBlock::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -980,10 +982,10 @@ mod tests {
 
         let provider = executor_provider(chain_spec);
 
-        let executor = provider.executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
-        let BlockExecutionOutput { receipts, requests, .. } = executor
-            .execute(
+        let BlockExecutionResult { receipts, requests, .. } = executor
+            .execute_one(
                 &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
                     .try_into_recovered()
                     .unwrap(),
@@ -1056,10 +1058,10 @@ mod tests {
         );
 
         // Create an executor from the state provider
-        let executor = executor_provider(chain_spec).executor(StateProviderDatabase::new(&db));
+        let mut executor = executor_provider(chain_spec).executor(StateProviderDatabase::new(&db));
 
         // Execute the block and capture the result
-        let exec_result = executor.execute(
+        let exec_result = executor.execute_one(
             &Block { header, body: BlockBody { transactions: vec![tx], ..Default::default() } }
                 .try_into_recovered()
                 .unwrap(),
