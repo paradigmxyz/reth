@@ -17,7 +17,6 @@ reth-chainspec.workspace = true
 reth-db-models.workspace = true
 reth-db-api.workspace = true
 reth-execution-types.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
@@ -26,6 +25,7 @@ reth-trie.workspace = true
 reth-trie-db.workspace = true
 reth-db.workspace = true
 revm.workspace = true
+reth-ethereum-primitives.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -43,7 +43,7 @@ std = [
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-rpc-types-engine/std",
-    "reth-primitives/std",
+    "reth-ethereum-primitives/std",
     "reth-primitives-traits/std",
     "revm/std",
     "reth-stages-types/std",
