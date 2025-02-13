@@ -1003,22 +1003,24 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
     };
 
-    let shared_capabilities = p2p_stream.shared_capabilities().clone();
+    if !extra_handlers.is_empty() {
+        let shared_capabilities = p2p_stream.shared_capabilities().clone();
 
-    // check if we have sub-protocols that the remote peer must match.
-    for handler in extra_handlers.iter() {
-        let cap = handler.protocol().cap;
+        // check if we have sub-protocols that the remote peer must match.
+        for handler in extra_handlers.iter() {
+            let cap = handler.protocol().cap;
 
-        if let Err(err) = shared_capabilities.ensure_matching_capability(&cap) {
-            if handler.on_unsupported_by_peer(&shared_capabilities, direction, their_hello.id) ==
-                OnNotSupported::Disconnect
-            {
-                return PendingSessionEvent::Disconnected {
-                    remote_addr,
-                    session_id,
-                    direction,
-                    error: Some(PendingSessionHandshakeError::UnsupportedCapability(err)),
-                };
+            if let Err(err) = shared_capabilities.ensure_matching_capability(&cap) {
+                if handler.on_unsupported_by_peer(&shared_capabilities, direction, their_hello.id) ==
+                    OnNotSupported::Disconnect
+                {
+                    return PendingSessionEvent::Disconnected {
+                        remote_addr,
+                        session_id,
+                        direction,
+                        error: Some(PendingSessionHandshakeError::UnsupportedCapability(err)),
+                    };
+                }
             }
         }
     }

@@ -217,7 +217,7 @@ impl SessionError for PendingSessionHandshakeError {
                     ECIESErrorImpl::InvalidHandshake { .. }
             ),
             Self::Timeout => false,
-            Self::UnsupportedCapability(_) => true,
+            Self::UnsupportedCapability(_) => false,
         }
     }
 
