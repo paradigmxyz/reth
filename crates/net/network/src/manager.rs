@@ -37,10 +37,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::{
-    capability::CapabilityMessage, Capabilities, DisconnectReason, EthNetworkPrimitives,
-    NetworkPrimitives,
-};
+use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
@@ -142,16 +139,51 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     disconnect_metrics: DisconnectMetrics,
 }
 
-// === impl NetworkManager ===
+impl NetworkManager {
+    /// Creates the manager of a new network with [`EthNetworkPrimitives`] types.
+    ///
+    /// ```no_run
+    /// # async fn f() {
+    /// use reth_chainspec::MAINNET;
+    /// use reth_network::{NetworkConfig, NetworkManager};
+    /// let config =
+    ///     NetworkConfig::builder_with_rng_secret_key().build_with_noop_provider(MAINNET.clone());
+    /// let manager = NetworkManager::eth(config).await;
+    /// # }
+    /// ```
+    pub async fn eth<C: BlockNumReader + 'static>(
+        config: NetworkConfig<C, EthNetworkPrimitives>,
+    ) -> Result<Self, NetworkError> {
+        Self::new(config).await
+    }
+}
+
 impl<N: NetworkPrimitives> NetworkManager<N> {
-    /// Sets the dedicated channel for events indented for the
+    /// Sets the dedicated channel for events intended for the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
+    pub fn with_transactions(
+        mut self,
+        tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>,
+    ) -> Self {
+        self.set_transactions(tx);
+        self
+    }
+
+    /// Sets the dedicated channel for events intended for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>) {
         self.to_transactions_manager =
             Some(UnboundedMeteredSender::new(tx, NETWORK_POOL_TRANSACTIONS_SCOPE));
     }
 
-    /// Sets the dedicated channel for events indented for the
+    /// Sets the dedicated channel for events intended for the
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
+    pub fn with_eth_request_handler(mut self, tx: mpsc::Sender<IncomingEthRequest<N>>) -> Self {
+        self.set_eth_request_handler(tx);
+        self
+    }
+
+    /// Sets the dedicated channel for events intended for the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
     pub fn set_eth_request_handler(&mut self, tx: mpsc::Sender<IncomingEthRequest<N>>) {
         self.to_eth_request_handler = Some(tx);
@@ -423,20 +455,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         }
     }
 
-    /// Event hook for an unexpected message from the peer.
-    fn on_invalid_message(
-        &mut self,
-        peer_id: PeerId,
-        _capabilities: Arc<Capabilities>,
-        _message: CapabilityMessage<N>,
-    ) {
-        trace!(target: "net", ?peer_id, "received unexpected message");
-        self.swarm
-            .state_mut()
-            .peers_mut()
-            .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
-    }
-
     /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
     /// configured.
     fn notify_tx_manager(&self, event: NetworkTransactionEvent<N>) {
@@ -684,10 +702,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         // handle event
         match event {
             SwarmEvent::ValidMessage { peer_id, message } => self.on_peer_message(peer_id, message),
-            SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message } => {
-                self.on_invalid_message(peer_id, capabilities, message);
-                self.metrics.invalid_messages_received.increment(1);
-            }
             SwarmEvent::TcpListenerClosed { remote_addr } => {
                 trace!(target: "net", ?remote_addr, "TCP listener closed.");
             }

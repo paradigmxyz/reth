@@ -20,6 +20,7 @@ mod op_sepolia;
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::Header;
+use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
@@ -27,7 +28,6 @@ pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
 pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
-use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
@@ -190,53 +190,9 @@ pub struct OpChainSpec {
 }
 
 impl OpChainSpec {
-    /// Extracts the Holocene 1599 parameters from the encoded extra data from the parent header.
-    ///
-    /// Caution: Caller must ensure that holocene is active in the parent header.
-    ///
-    /// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
-    pub fn decode_holocene_base_fee(
-        &self,
-        parent: &Header,
-        timestamp: u64,
-    ) -> Result<u64, EIP1559ParamError> {
-        let (elasticity, denominator) = decode_holocene_extra_data(&parent.extra_data)?;
-        let base_fee = if elasticity == 0 && denominator == 0 {
-            parent
-                .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
-                .unwrap_or_default()
-        } else {
-            let base_fee_params = BaseFeeParams::new(denominator as u128, elasticity as u128);
-            parent.next_block_base_fee(base_fee_params).unwrap_or_default()
-        };
-        Ok(base_fee)
-    }
-
-    /// Read from parent to determine the base fee for the next block
-    ///
-    /// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
-    pub fn next_block_base_fee(
-        &self,
-        parent: &Header,
-        timestamp: u64,
-    ) -> Result<U256, EIP1559ParamError> {
-        // > if Holocene is active in parent_header.timestamp, then the parameters from
-        // > parent_header.extraData are used.
-        let is_holocene_activated =
-            self.inner.is_fork_active_at_timestamp(OpHardfork::Holocene, parent.timestamp);
-
-        // If we are in the Holocene, we need to use the base fee params
-        // from the parent block's extra data.
-        // Else, use the base fee params (default values) from chainspec
-        if is_holocene_activated {
-            Ok(U256::from(self.decode_holocene_base_fee(parent, timestamp)?))
-        } else {
-            Ok(U256::from(
-                parent
-                    .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
-                    .unwrap_or_default(),
-            ))
-        }
+    /// Converts the given [`Genesis`] into a [`OpChainSpec`].
+    pub fn from_genesis(genesis: Genesis) -> Self {
+        genesis.into()
     }
 }
 
@@ -253,6 +209,10 @@ impl EthChainSpec for OpChainSpec {
 
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.inner.base_fee_params_at_timestamp(timestamp)
+    }
+
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
+        self.inner.blob_params_at_timestamp(timestamp)
     }
 
     fn deposit_contract(&self) -> Option<&DepositContract> {
@@ -341,6 +301,7 @@ impl From<Genesis> for OpChainSpec {
 
         // Block-based hardforks
         let hardfork_opts = [
+            (EthereumHardfork::Frontier.boxed(), Some(0)),
             (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
             (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
             (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
@@ -472,10 +433,8 @@ impl OpGenesisInfo {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use alloy_genesis::{ChainConfig, Genesis};
-    use alloy_primitives::{b256, hex, Bytes};
+    use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OpHardfork, OpHardforks};
@@ -982,6 +941,7 @@ mod tests {
 
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![
+            EthereumHardfork::Frontier.boxed(),
             EthereumHardfork::Homestead.boxed(),
             EthereumHardfork::Tangerine.boxed(),
             EthereumHardfork::SpuriousDragon.boxed(),
@@ -1015,101 +975,61 @@ mod tests {
     }
 
     #[test]
-    fn test_get_base_fee_pre_holocene() {
-        let op_chain_spec = &BASE_SEPOLIA;
-        let parent = Header {
-            base_fee_per_gas: Some(1),
-            gas_used: 15763614,
-            gas_limit: 144000000,
-            ..Default::default()
-        };
-        let base_fee = op_chain_spec.next_block_base_fee(&parent, 0);
-        assert_eq!(
-            base_fee.unwrap(),
-            U256::from(
-                parent
-                    .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
-                    .unwrap_or_default()
-            )
-        );
-    }
+    fn json_genesis() {
+        let geth_genesis = r#"
+{
+    "config": {
+        "chainId": 1301,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "muirGlacierBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "arrowGlacierBlock": 0,
+        "grayGlacierBlock": 0,
+        "mergeNetsplitBlock": 0,
+        "shanghaiTime": 0,
+        "cancunTime": 0,
+        "bedrockBlock": 0,
+        "regolithTime": 0,
+        "canyonTime": 0,
+        "ecotoneTime": 0,
+        "fjordTime": 0,
+        "graniteTime": 0,
+        "holoceneTime": 1732633200,
+        "terminalTotalDifficulty": 0,
+        "terminalTotalDifficultyPassed": true,
+        "optimism": {
+            "eip1559Elasticity": 6,
+            "eip1559Denominator": 50,
+            "eip1559DenominatorCanyon": 250
+        }
+    },
+    "nonce": "0x0",
+    "timestamp": "0x66edad4c",
+    "extraData": "0x424544524f434b",
+    "gasLimit": "0x1c9c380",
+    "difficulty": "0x0",
+    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x4200000000000000000000000000000000000011",
+    "alloc": {},
+    "number": "0x0",
+    "gasUsed": "0x0",
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "baseFeePerGas": "0x3b9aca00",
+    "excessBlobGas": "0x0",
+    "blobGasUsed": "0x0"
+}
+        "#;
 
-    fn holocene_chainspec() -> Arc<OpChainSpec> {
-        let mut hardforks = OpHardfork::base_sepolia();
-        hardforks.insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
-        Arc::new(OpChainSpec {
-            inner: ChainSpec {
-                chain: BASE_SEPOLIA.inner.chain,
-                genesis: BASE_SEPOLIA.inner.genesis.clone(),
-                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
-                paris_block_and_final_difficulty: Some((0, U256::from(0))),
-                hardforks,
-                base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
-                prune_delete_limit: 10000,
-                ..Default::default()
-            },
-        })
-    }
-
-    #[test]
-    fn test_get_base_fee_holocene_extra_data_not_set() {
-        let op_chain_spec = holocene_chainspec();
-        let parent = Header {
-            base_fee_per_gas: Some(1),
-            gas_used: 15763614,
-            gas_limit: 144000000,
-            timestamp: 1800000003,
-            extra_data: Bytes::from_static(&[0, 0, 0, 0, 0, 0, 0, 0, 0]),
-            ..Default::default()
-        };
-        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
-        assert_eq!(
-            base_fee.unwrap(),
-            U256::from(
-                parent
-                    .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
-                    .unwrap_or_default()
-            )
-        );
-    }
-
-    #[test]
-    fn test_get_base_fee_holocene_extra_data_set() {
-        let op_chain_spec = holocene_chainspec();
-        let parent = Header {
-            base_fee_per_gas: Some(1),
-            gas_used: 15763614,
-            gas_limit: 144000000,
-            extra_data: Bytes::from_static(&[0, 0, 0, 0, 8, 0, 0, 0, 8]),
-            timestamp: 1800000003,
-            ..Default::default()
-        };
-
-        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1800000005);
-        assert_eq!(
-            base_fee.unwrap(),
-            U256::from(
-                parent
-                    .next_block_base_fee(BaseFeeParams::new(0x00000008, 0x00000008))
-                    .unwrap_or_default()
-            )
-        );
-    }
-
-    // <https://sepolia.basescan.org/block/19773628>
-    #[test]
-    fn test_get_base_fee_holocene_extra_data_set_base_sepolia() {
-        let op_chain_spec = BASE_SEPOLIA.clone();
-        let parent = Header {
-            base_fee_per_gas: Some(507),
-            gas_used: 4847634,
-            gas_limit: 60000000,
-            extra_data: hex!("00000000fa0000000a").into(),
-            timestamp: 1735315544,
-            ..Default::default()
-        };
-
-        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1735315546).unwrap();
-        assert_eq!(base_fee, U256::from(507));
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chainspec = OpChainSpec::from_genesis(genesis);
+        assert!(chainspec.is_holocene_active_at_timestamp(1732633200));
     }
 }

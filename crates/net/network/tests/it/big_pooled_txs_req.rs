@@ -7,6 +7,7 @@ use reth_network::{
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_primitives::TransactionSigned;
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::MockEthProvider;
 use reth_transaction_pool::{
     test_utils::{testing_pool, MockTransaction},

@@ -1,26 +1,13 @@
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
-use reth_codecs::{add_arbitrary_tests, Compact};
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.
-#[derive(
-    Debug,
-    Display,
-    Clone,
-    Copy,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Hash,
-    Serialize,
-    Deserialize,
-    Compact,
-)]
+#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(test, derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub enum PruneSegment {
     /// Prune segment responsible for the `TransactionSenders` table.
     SenderRecovery,
@@ -42,7 +29,7 @@ pub enum PruneSegment {
 }
 
 impl PruneSegment {
-    /// Returns minimum number of blocks to left in the database for this segment.
+    /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
         match self {
             Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
@@ -84,9 +71,6 @@ pub enum PruneSegmentError {
     /// Invalid configuration of a prune segment.
     #[error("the configuration provided for {0} is invalid")]
     Configuration(PruneSegment),
-    /// Receipts have been pruned
-    #[error("receipts have been pruned")]
-    ReceiptsPruned,
 }
 
 #[cfg(test)]

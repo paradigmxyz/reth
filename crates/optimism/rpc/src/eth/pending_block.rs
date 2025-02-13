@@ -14,14 +14,14 @@ use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
-use reth_primitives::{logs_bloom, BlockBody, SealedBlockWithSenders};
+use reth_primitives::{logs_bloom, BlockBody, RecoveredBlock};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -34,6 +34,7 @@ where
             NetworkTypes: Network<
                 HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
+            Error: FromEvmError<Self::Evm>,
         >,
     N: RpcNodeCore<
         Provider: BlockReaderIdExt<
@@ -64,7 +65,7 @@ where
         &self,
     ) -> Result<
         Option<(
-            SealedBlockWithSenders<ProviderBlock<Self::Provider>>,
+            RecoveredBlock<ProviderBlock<Self::Provider>>,
             Vec<ProviderReceipt<Self::Provider>>,
         )>,
         Self::Error,
@@ -80,8 +81,7 @@ where
             .provider()
             .block_with_senders(block_id, Default::default())
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?
-            .seal_unchecked(latest.hash());
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         let receipts = self
             .provider()
@@ -104,11 +104,8 @@ where
         let timestamp = block_env.timestamp.to::<u64>();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root = calculate_receipt_root_no_memo_optimism(
-            &receipts.iter().collect::<Vec<_>>(),
-            &chain_spec,
-            timestamp,
-        );
+        let receipts_root =
+            calculate_receipt_root_no_memo_optimism(receipts, &chain_spec, timestamp);
 
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
         let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);

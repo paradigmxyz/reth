@@ -1,5 +1,6 @@
 //! OP-Reth `eth_` endpoint implementation.
 
+pub mod ext;
 pub mod receipt;
 pub mod transaction;
 
@@ -8,17 +9,15 @@ mod call;
 mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
-use reth_node_api::NodePrimitives;
-use reth_optimism_primitives::OpPrimitives;
-
-use std::{fmt, sync::Arc};
 
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
+use reth_node_api::NodePrimitives;
 use reth_node_builder::EthApiBuilderCtx;
+use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
@@ -30,7 +29,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes, RpcNodeCore, RpcNodeCoreExt,
+    EthApiTypes, FromEvmError, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
@@ -38,6 +37,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
+use std::{fmt, sync::Arc};
 
 use crate::{OpEthApiError, SequencerClient};
 
@@ -252,6 +252,7 @@ where
                 Header = ProviderHeader<Self::Provider>,
                 Transaction = ProviderTx<Self::Provider>,
             >,
+            Error: FromEvmError<Self::Evm>,
         >,
     N: OpNodeCore,
 {
@@ -344,7 +345,7 @@ impl OpEthApiBuilder {
             blocking_task_pool,
             ctx.new_fee_history_cache(),
             ctx.evm_config.clone(),
-            ctx.executor.clone(),
+            Box::new(ctx.executor.clone()),
             ctx.config.proof_permits,
         );
 

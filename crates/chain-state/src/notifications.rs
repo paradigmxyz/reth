@@ -3,7 +3,7 @@
 use alloy_eips::eip2718::Encodable2718;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_storage_api::NodePrimitivesProvider;
 use std::{
     pin::Pin,
@@ -123,7 +123,7 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
-    pub fn tip(&self) -> &SealedBlockWithSenders<N::Block> {
+    pub fn tip(&self) -> &RecoveredBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
         }
@@ -204,7 +204,7 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
         loop {
             match ready!(self.as_mut().project().st.poll_next(cx)) {
                 Some(Some(notification)) => return Poll::Ready(Some(notification)),
-                Some(None) => continue,
+                Some(None) => {}
                 None => return Poll::Ready(None),
             }
         }
@@ -217,11 +217,11 @@ mod tests {
     use alloy_consensus::BlockBody;
     use alloy_primitives::{b256, B256};
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{Receipt, Receipts, SealedBlock, TransactionSigned, TxType};
+    use reth_primitives::{Receipt, SealedBlock, TransactionSigned, TxType};
 
     #[test]
     fn test_commit_notification() {
-        let block: SealedBlockWithSenders = Default::default();
+        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
 
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_reorg_notification() {
-        let block: SealedBlockWithSenders = Default::default();
+        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
@@ -306,10 +306,12 @@ mod tests {
         let tx = TransactionSigned::default();
         body.transactions.push(tx);
 
-        let block: SealedBlockWithSenders =
-            SealedBlock::new(SealedHeader::seal(alloy_consensus::Header::default()), body)
-                .seal_with_senders()
-                .unwrap();
+        let block = SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
+            SealedHeader::seal_slow(alloy_consensus::Header::default()),
+            body,
+        )
+        .try_recover()
+        .unwrap();
 
         // Create a clone of the default block and customize it to act as block1.
         let mut block1 = block.clone();
@@ -332,7 +334,7 @@ mod tests {
         };
 
         // Wrap the receipt in a `Receipts` structure, as expected in the `ExecutionOutcome`.
-        let receipts = Receipts { receipt_vec: vec![vec![Some(receipt1.clone())]] };
+        let receipts = vec![vec![receipt1.clone()]];
 
         // Define an `ExecutionOutcome` with the created receipts.
         let execution_outcome = ExecutionOutcome { receipts, ..Default::default() };
@@ -372,10 +374,13 @@ mod tests {
         // Define block1 for the old chain segment, which will be reverted.
         let mut body = BlockBody::<TransactionSigned>::default();
         body.transactions.push(TransactionSigned::default());
-        let mut old_block1: SealedBlockWithSenders =
-            SealedBlock::new(SealedHeader::seal(alloy_consensus::Header::default()), body)
-                .seal_with_senders()
-                .unwrap();
+        let mut old_block1 =
+            SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
+                SealedHeader::seal_slow(alloy_consensus::Header::default()),
+                body,
+            )
+            .try_recover()
+            .unwrap();
         old_block1.set_block_number(1);
         old_block1.set_hash(B256::new([0x01; 32]));
 
@@ -388,7 +393,7 @@ mod tests {
             success: false,
             ..Default::default()
         };
-        let old_receipts = Receipts { receipt_vec: vec![vec![Some(old_receipt.clone())]] };
+        let old_receipts = vec![vec![old_receipt.clone()]];
 
         let old_execution_outcome =
             ExecutionOutcome { receipts: old_receipts, ..Default::default() };
@@ -400,10 +405,13 @@ mod tests {
         // Define block2 for the new chain segment, which will be committed.
         let mut body = BlockBody::<TransactionSigned>::default();
         body.transactions.push(TransactionSigned::default());
-        let mut new_block1: SealedBlockWithSenders =
-            SealedBlock::new(SealedHeader::seal(alloy_consensus::Header::default()), body)
-                .seal_with_senders()
-                .unwrap();
+        let mut new_block1 =
+            SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
+                SealedHeader::seal_slow(alloy_consensus::Header::default()),
+                body,
+            )
+            .try_recover()
+            .unwrap();
         new_block1.set_block_number(2);
         new_block1.set_hash(B256::new([0x02; 32]));
 
@@ -416,7 +424,7 @@ mod tests {
             success: true,
             ..Default::default()
         };
-        let new_receipts = Receipts { receipt_vec: vec![vec![Some(new_receipt.clone())]] };
+        let new_receipts = vec![vec![new_receipt.clone()]];
 
         let new_execution_outcome =
             ExecutionOutcome { receipts: new_receipts, ..Default::default() };

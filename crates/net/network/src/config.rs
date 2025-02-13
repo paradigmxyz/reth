@@ -209,6 +209,13 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     nat: Option<NatResolver>,
 }
 
+impl NetworkConfigBuilder<EthNetworkPrimitives> {
+    /// Creates the `NetworkConfigBuilder` with [`EthNetworkPrimitives`] types.
+    pub fn eth(secret_key: SecretKey) -> Self {
+        Self::new(secret_key)
+    }
+}
+
 // === impl NetworkConfigBuilder ===
 
 #[allow(missing_docs)]
@@ -367,6 +374,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     pub fn discovery_port(mut self, port: u16) -> Self {
         self.discovery_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
         self
+    }
+
+    /// Launches the network with an unused network and discovery port
+    /// This is useful for testing.
+    pub fn with_unused_ports(self) -> Self {
+        self.with_unused_discovery_port().with_unused_listener_port()
     }
 
     /// Sets the discovery port to an unused port.

@@ -1,16 +1,17 @@
-use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_eth::{Filter, FilteredParams};
-use reth_chainspec::ChainSpecBuilder;
-use reth_db::{open_db_read_only, DatabaseEnv};
-use reth_node_ethereum::EthereumNode;
-use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives::{BlockExt, SealedHeader, TransactionSigned};
-use reth_provider::{
-    providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
-    ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
+use reth_ethereum::{
+    chainspec::ChainSpecBuilder,
+    node::EthereumNode,
+    primitives::{
+        transaction::signed::SignedTransaction, AlloyBlockHeader, SealedBlock, SealedHeader,
+    },
+    provider::{
+        providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
+        ReceiptProvider, StateProvider, TransactionsProvider,
+    },
+    rpc::eth::primitives::{Filter, FilteredParams},
+    TransactionSigned,
 };
-use std::{path::Path, sync::Arc};
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
 // exposing a familiar API to query the chain's information without requiring knowledge
@@ -21,17 +22,11 @@ use std::{path::Path, sync::Arc};
 fn main() -> eyre::Result<()> {
     // Opens a RO handle to the database file.
     let db_path = std::env::var("RETH_DB_PATH")?;
-    let db_path = Path::new(&db_path);
-    let db = open_db_read_only(db_path.join("db").as_path(), Default::default())?;
 
-    // Instantiate a provider factory for Ethereum mainnet using the provided DB.
-    // TODO: Should the DB version include the spec so that you do not need to specify it here?
+    // Instantiate a provider factory for Ethereum mainnet using the provided DB path.
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = ProviderFactory::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::new(
-        db.into(),
-        spec.into(),
-        StaticFileProvider::read_only(db_path.join("static_files"), true)?,
-    );
+    let factory = EthereumNode::provider_factory_builder()
+        .open_read_only(spec.into(), ReadOnlyConfig::from_db_dir(db_path))?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
@@ -64,7 +59,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 
     // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
     // it every time.
-    let sealed_header = SealedHeader::seal(header);
+    let sealed_header = SealedHeader::seal_slow(header);
 
     // Can also query the header by hash!
     let header_by_hash =
@@ -95,17 +90,17 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 
     // Can query the tx by hash
     let tx_by_hash =
-        provider.transaction_by_hash(tx.hash())?.ok_or(eyre::eyre!("txhash not found"))?;
+        provider.transaction_by_hash(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(tx, tx_by_hash);
 
     // Can query the tx by hash with info about the block it was included in
     let (tx, meta) = provider
-        .transaction_by_hash_with_meta(tx.hash())?
+        .transaction_by_hash_with_meta(*tx.tx_hash())?
         .ok_or(eyre::eyre!("txhash not found"))?;
-    assert_eq!(tx.hash(), meta.tx_hash);
+    assert_eq!(*tx.tx_hash(), meta.tx_hash);
 
     // Can reverse lookup the key too
-    let id = provider.transaction_id(tx.hash())?.ok_or(eyre::eyre!("txhash not found"))?;
+    let id = provider.transaction_id(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(id, txid);
 
     // Can find the block of a transaction given its key
@@ -120,7 +115,7 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 }
 
 /// The `BlockReader` allows querying the headers-related tables.
-fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
+fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     provider: T,
     number: u64,
 ) -> eyre::Result<()> {
@@ -134,7 +129,7 @@ fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
 
     // Can seal the block to cache the hash, like the Header above.
-    let sealed_block = block.clone().seal_slow();
+    let sealed_block = SealedBlock::seal_slow(block.clone());
 
     // Can also query the block by hash directly
     let block_by_hash = provider
@@ -167,7 +162,7 @@ fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
 
 /// The `ReceiptProvider` allows querying the receipts tables.
 fn receipts_provider_example<
-    T: ReceiptProvider<Receipt = reth_primitives::Receipt>
+    T: ReceiptProvider<Receipt = reth_ethereum::Receipt>
         + TransactionsProvider<Transaction = TransactionSigned>
         + HeaderProvider,
 >(
@@ -181,8 +176,9 @@ fn receipts_provider_example<
 
     // Can query receipt by txhash too
     let tx = provider.transaction_by_id(txid)?.unwrap();
-    let receipt_by_hash =
-        provider.receipt_by_hash(tx.hash())?.ok_or(eyre::eyre!("tx receipt by hash not found"))?;
+    let receipt_by_hash = provider
+        .receipt_by_hash(*tx.tx_hash())?
+        .ok_or(eyre::eyre!("tx receipt by hash not found"))?;
     assert_eq!(receipt, receipt_by_hash);
 
     // Can query all the receipts in a block

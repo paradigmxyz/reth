@@ -26,7 +26,6 @@ alloy-primitives = { workspace = true, optional = true }
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 # async
-async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 futures-util.workspace = true
@@ -46,9 +45,9 @@ alloy-consensus.workspace = true
 
 [features]
 test-utils = [
-	"alloy-primitives",
-	"reth-chain-state/test-utils",
-	"reth-primitives/test-utils",
-	"revm/test-utils",
-	"reth-primitives-traits/test-utils"
+    "alloy-primitives",
+    "reth-chain-state/test-utils",
+    "reth-primitives/test-utils",
+    "revm/test-utils",
+    "reth-primitives-traits/test-utils",
 ]

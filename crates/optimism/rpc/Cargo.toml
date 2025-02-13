@@ -28,13 +28,16 @@ reth-node-api.workspace = true
 reth-network-api.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
+reth-rpc-engine-api.workspace = true
 
 # op-reth
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-payload-builder.workspace = true
-reth-optimism-primitives.workspace = true
+reth-optimism-txpool.workspace = true
+# TODO remove node-builder import
+reth-optimism-primitives = { workspace = true, features = ["reth-codec", "serde-bincode-compat"] }
 reth-optimism-forks.workspace = true
 
 # ethereum
@@ -43,6 +46,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types.workspace = true
 op-alloy-rpc-types-engine.workspace = true
@@ -54,26 +58,33 @@ revm.workspace = true
 parking_lot.workspace = true
 tokio.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
+async-trait.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
+jsonrpsee.workspace = true
 serde_json.workspace = true
 
 # misc
 thiserror.workspace = true
 tracing.workspace = true
+derive_more = { workspace = true, features = ["constructor"] }
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true
 
 [features]
 optimism = [
-	"reth-optimism-evm/optimism",
-	"reth-primitives/optimism",
-	"reth-provider/optimism",
-	"revm/optimism",
-	"reth-optimism-consensus/optimism",
-	"reth-optimism-payload-builder/optimism",
-	"reth-optimism-primitives/optimism",
+    "reth-optimism-evm/optimism",
+    "revm/optimism",
+    "reth-optimism-consensus/optimism",
+    "reth-optimism-payload-builder/optimism",
+    "reth-optimism-primitives/optimism",
+    "reth-optimism-txpool/optimism",
+]
+client = [
+    "jsonrpsee/client",
+    "jsonrpsee/async-client",
+    "reth-rpc-eth-api/client",
 ]

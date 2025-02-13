@@ -1,4 +1,4 @@
-use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
 use alloy_primitives::Bytes;
 use reth_primitives_traits::constants::GAS_LIMIT_BOUND_DIVISOR;
 
@@ -14,7 +14,7 @@ pub struct EthereumBuilderConfig {
 impl EthereumBuilderConfig {
     /// Create new payload builder config.
     pub const fn new(extra_data: Bytes) -> Self {
-        Self { extra_data, desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT }
+        Self { extra_data, desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M }
     }
 
     /// Set desired gas limit.

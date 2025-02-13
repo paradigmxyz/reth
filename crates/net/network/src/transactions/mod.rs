@@ -1217,7 +1217,7 @@ where
             let mut new_txs = Vec::with_capacity(transactions.len());
             for tx in transactions {
                 // recover transaction
-                let tx = match tx.try_into_ecrecovered() {
+                let tx = match tx.try_into_recovered() {
                     Ok(tx) => tx,
                     Err(badtx) => {
                         trace!(target: "net::tx",
@@ -1710,7 +1710,7 @@ impl PooledTransactionsHashesBuilder {
             Self::Eth68(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
                 msg.sizes.push(pooled_tx.encoded_length());
-                msg.types.push(pooled_tx.transaction.tx_type());
+                msg.types.push(pooled_tx.transaction.ty());
             }
         }
     }
@@ -1998,7 +1998,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
+        let config = NetworkConfigBuilder::eth(secret_key)
             .disable_discovery()
             .listener_port(0)
             .build(client);
@@ -2026,7 +2026,7 @@ mod tests {
                     transactions
                         .on_network_event(NetworkEvent::Peer(PeerEvent::SessionEstablished(info)))
                 }
-                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => {}
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2097,7 +2097,7 @@ mod tests {
                     // to insert a new peer in transactions peerset
                     transactions.on_network_event(ev);
                 }
-                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => {}
                 _ => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2166,7 +2166,7 @@ mod tests {
                     // to insert a new peer in transactions peerset
                     transactions.on_network_event(ev);
                 }
-                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => {}
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2181,7 +2181,7 @@ mod tests {
         });
         assert!(transactions
             .transactions_by_peers
-            .get(&signed_tx.hash())
+            .get(signed_tx.tx_hash())
             .unwrap()
             .contains(handle1.peer_id()));
 
@@ -2241,7 +2241,7 @@ mod tests {
                 NetworkEvent::Peer(PeerEvent::SessionEstablished(_)) => {
                     transactions.on_network_event(ev);
                 }
-                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => {}
                 ev => {
                     error!("unexpected event {ev:?}")
                 }

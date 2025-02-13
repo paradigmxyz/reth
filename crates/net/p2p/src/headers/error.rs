@@ -1,13 +1,14 @@
+use alloy_primitives::Sealable;
 use derive_more::{Display, Error};
 use reth_consensus::ConsensusError;
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 
 /// Header downloader result
 pub type HeadersDownloaderResult<T, H> = Result<T, HeadersDownloaderError<H>>;
 
 /// Error variants that can happen when sending requests to a session.
 #[derive(Debug, Clone, Eq, PartialEq, Display, Error)]
-pub enum HeadersDownloaderError<H> {
+pub enum HeadersDownloaderError<H: Sealable> {
     /// The downloaded header cannot be attached to the local head,
     /// but is valid otherwise.
     #[display("valid downloaded header cannot be attached to the local head: {error}")]

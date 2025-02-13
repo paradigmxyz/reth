@@ -1,16 +1,15 @@
+use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::Decodable;
-
-use alloy_consensus::{BlockHeader, Header};
 use reth_codecs::Compact;
 use reth_node_builder::NodePrimitives;
-use reth_primitives::{SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment};
+use reth_primitives::{SealedBlock, SealedHeader, StaticFileSegment};
+use reth_primitives_traits::SealedHeaderFor;
 use reth_provider::{
     providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileProviderFactory,
     StaticFileWriter, StorageLocation,
 };
 use reth_stages::{StageCheckpoint, StageId};
-
 use std::{fs::File, io::Read, path::PathBuf};
 use tracing::info;
 
@@ -61,7 +60,7 @@ where
 /// height.
 fn append_first_block<Provider>(
     provider_rw: &Provider,
-    header: &SealedHeader<<Provider::Primitives as NodePrimitives>::BlockHeader>,
+    header: &SealedHeaderFor<Provider::Primitives>,
     total_difficulty: U256,
 ) -> Result<(), eyre::Error>
 where
@@ -69,8 +68,12 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>,
 {
     provider_rw.insert_block(
-        SealedBlockWithSenders::new(SealedBlock::new(header.clone(), Default::default()), vec![])
-            .expect("no senders or txes"),
+        SealedBlock::<<Provider::Primitives as NodePrimitives>::Block>::from_sealed_parts(
+            header.clone(),
+            Default::default(),
+        )
+        .try_recover()
+        .expect("no senders or txes"),
         StorageLocation::Database,
     )?;
 

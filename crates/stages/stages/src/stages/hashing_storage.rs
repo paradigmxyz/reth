@@ -220,6 +220,7 @@ mod tests {
         models::StoredBlockBodyIndices,
     };
     use reth_primitives::SealedBlock;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::providers::StaticFileWriter;
     use reth_testing_utils::generators::{
         self, random_block_range, random_contract_account_range, BlockRangeParams,
@@ -356,7 +357,7 @@ mod tests {
                     progress.body().transactions.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
                             tx.put::<tables::TransactionHashNumbers>(
-                                transaction.hash(),
+                                *transaction.tx_hash(),
                                 next_tx_num,
                             )?;
                             tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;

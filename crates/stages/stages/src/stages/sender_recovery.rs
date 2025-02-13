@@ -313,9 +313,9 @@ fn recover_sender<T: SignedTransaction>(
     // value is greater than `secp256k1n / 2` if past EIP-2. There are transactions
     // pre-homestead which have large `s` values, so using [Signature::recover_signer] here
     // would not be backwards-compatible.
-    let sender = tx
-        .recover_signer_unchecked_with_buf(rlp_buf)
-        .ok_or(SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id }))?;
+    let sender = tx.recover_signer_unchecked_with_buf(rlp_buf).map_err(|_| {
+        SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id })
+    })?;
 
     Ok((tx_id, sender))
 }
@@ -672,9 +672,6 @@ mod tests {
                         for tx_id in body.tx_num_range() {
                             let transaction: TransactionSigned = provider
                                 .transaction_by_id_unhashed(tx_id)?
-                                .map(|tx| {
-                                    TransactionSigned::new_unhashed(tx.transaction, tx.signature)
-                                })
                                 .expect("no transaction entry");
                             let signer =
                                 transaction.recover_signer().expect("failed to recover signer");

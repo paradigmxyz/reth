@@ -10,7 +10,7 @@ use crate::{
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_chainspec::{ChainSpecProvider, Hardforks, MAINNET};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks, Hardforks};
 use reth_eth_wire::{
     protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
 };
@@ -175,7 +175,12 @@ where
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: StateProviderFactory + BlockReaderIdExt + HeaderProvider + Clone + 'static,
+    C: ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + StateProviderFactory
+        + BlockReaderIdExt
+        + HeaderProvider
+        + Clone
+        + 'static,
     Pool: TransactionPool,
 {
     /// Installs an eth pool on each peer
@@ -184,7 +189,6 @@ where
             let blob_store = InMemoryBlobStore::default();
             let pool = TransactionValidationTaskExecutor::eth(
                 peer.client.clone(),
-                MAINNET.clone(),
                 blob_store.clone(),
                 TokioTaskExecutor::default(),
             );
@@ -205,7 +209,6 @@ where
             let blob_store = InMemoryBlobStore::default();
             let pool = TransactionValidationTaskExecutor::eth(
                 peer.client.clone(),
-                MAINNET.clone(),
                 blob_store.clone(),
                 TokioTaskExecutor::default(),
             );
@@ -698,11 +701,8 @@ impl NetworkEventStream {
     /// Awaits the next event for a session to be closed
     pub async fn next_session_closed(&mut self) -> Option<(PeerId, Option<DisconnectReason>)> {
         while let Some(ev) = self.inner.next().await {
-            match ev {
-                NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {
-                    return Some((peer_id, reason))
-                }
-                _ => continue,
+            if let NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) = ev {
+                return Some((peer_id, reason))
             }
         }
         None
@@ -716,7 +716,7 @@ impl NetworkEventStream {
                 NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     return Some(info.peer_id)
                 }
-                _ => continue,
+                _ => {}
             }
         }
         None
@@ -729,15 +729,12 @@ impl NetworkEventStream {
         }
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
-            match ev {
-                NetworkEvent::ActivePeerSession { info: SessionInfo { peer_id, .. }, .. } => {
-                    peers.push(peer_id);
-                    num -= 1;
-                    if num == 0 {
-                        return peers;
-                    }
+            if let NetworkEvent::ActivePeerSession { info: SessionInfo { peer_id, .. }, .. } = ev {
+                peers.push(peer_id);
+                num -= 1;
+                if num == 0 {
+                    return peers;
                 }
-                _ => continue,
             }
         }
         peers
@@ -765,5 +762,25 @@ impl NetworkEventStream {
             }
             _ => None,
         }
+    }
+
+    /// Awaits the next event for a peer added.
+    pub async fn peer_added(&mut self) -> Option<PeerId> {
+        let peer_id = match self.inner.next().await {
+            Some(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id))) => peer_id,
+            _ => return None,
+        };
+
+        Some(peer_id)
+    }
+
+    /// Awaits the next event for a peer removed.
+    pub async fn peer_removed(&mut self) -> Option<PeerId> {
+        let peer_id = match self.inner.next().await {
+            Some(NetworkEvent::Peer(PeerEvent::PeerRemoved(peer_id))) => peer_id,
+            _ => return None,
+        };
+
+        Some(peer_id)
     }
 }

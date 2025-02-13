@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::RecoveredBlock;
 use reth_provider::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderError, ProviderReceipt,
@@ -43,6 +43,8 @@ use tracing::{error, trace};
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// `Eth` filter RPC implementation.
+///
+/// This type handles `eth_` rpc requests related to filters (`eth_getLogs`).
 pub struct EthFilter<Eth: EthApiTypes> {
     /// All nested fields bundled together
     inner: Arc<EthFilterInner<Eth>>,
@@ -69,6 +71,25 @@ where
     /// See also [`EthFilterConfig`].
     ///
     /// This also spawns a task that periodically clears stale filters.
+    ///
+    /// # Create a new instance with [`EthApi`](crate::EthApi)
+    ///
+    /// ```no_run
+    /// use reth_evm_ethereum::EthEvmConfig;
+    /// use reth_network_api::noop::NoopNetwork;
+    /// use reth_provider::noop::NoopProvider;
+    /// use reth_rpc::{EthApi, EthFilter};
+    /// use reth_tasks::TokioTaskExecutor;
+    /// use reth_transaction_pool::noop::NoopTransactionPool;
+    /// let eth_api = EthApi::builder(
+    ///     NoopProvider::default(),
+    ///     NoopTransactionPool::default(),
+    ///     NoopNetwork::default(),
+    ///     EthEvmConfig::mainnet(),
+    /// )
+    /// .build();
+    /// let filter = EthFilter::new(eth_api, Default::default(), TokioTaskExecutor::default().boxed());
+    /// ```
     pub fn new(eth_api: Eth, config: EthFilterConfig, task_spawner: Box<dyn TaskSpawner>) -> Self {
         let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
             config;
@@ -546,7 +567,7 @@ where
     ) -> Result<
         Option<(
             Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<SealedBlockWithSenders<ProviderBlock<Eth::Provider>>>>,
+            Option<Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
         )>,
         EthFilterError,
     > {

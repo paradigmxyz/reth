@@ -1,7 +1,7 @@
-use super::ExecutedBlock;
+use super::ExecutedBlockWithTrieUpdates;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{
-    keccak256, map::B256HashMap, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+    keccak256, map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
 };
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode, NodePrimitives};
@@ -23,7 +23,7 @@ pub struct MemoryOverlayStateProviderRef<'a, N: NodePrimitives = reth_primitives
     /// Historical state provider for state lookups that are not found in in-memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
-    pub(crate) in_memory: Vec<ExecutedBlock<N>>,
+    pub(crate) in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
     /// Lazy-loaded in-memory trie data.
     pub(crate) trie_state: OnceLock<MemoryOverlayTrieState>,
 }
@@ -40,7 +40,10 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// - `in_memory` - the collection of executed ancestor blocks in reverse.
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
-    pub fn new(historical: Box<dyn StateProvider + 'a>, in_memory: Vec<ExecutedBlock<N>>) -> Self {
+    pub fn new(
+        historical: Box<dyn StateProvider + 'a>,
+        in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
+    ) -> Self {
         Self { historical, in_memory, trie_state: OnceLock::new() }
     }
 
@@ -65,8 +68,8 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
 impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N> {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         for block in &self.in_memory {
-            if block.block.number() == number {
-                return Ok(Some(block.block.hash()));
+            if block.recovered_block().number() == number {
+                return Ok(Some(block.recovered_block().hash()));
             }
         }
 
@@ -82,9 +85,9 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
         let mut earliest_block_number = None;
         let mut in_memory_hashes = Vec::new();
         for block in &self.in_memory {
-            if range.contains(&block.block.number()) {
-                in_memory_hashes.insert(0, block.block.hash());
-                earliest_block_number = Some(block.block.number());
+            if range.contains(&block.recovered_block().number()) {
+                in_memory_hashes.insert(0, block.recovered_block().hash());
+                earliest_block_number = Some(block.recovered_block().number());
             }
         }
 
@@ -200,7 +203,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         &self,
         mut input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<B256HashMap<Bytes>> {
+    ) -> ProviderResult<B256Map<Bytes>> {
         let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
         input.prepend_cached(nodes, state);
         self.historical.witness(input, target)

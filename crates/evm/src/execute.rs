@@ -5,132 +5,125 @@ use alloy_consensus::BlockHeader;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
+use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use crate::{system_calls::OnStateHook, TxEnvOverrides};
+use crate::{system_calls::OnStateHook, Database};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
-    Address, BlockNumber,
+    Address,
 };
-use core::fmt::Display;
 use reth_consensus::ConsensusError;
-use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
-use reth_primitives_traits::Block;
-use reth_prune_types::PruneModes;
-use reth_revm::batch::BlockBatchRecord;
-use revm::{
-    db::{states::bundle_state::BundleRetention, BundleState},
-    State,
-};
-use revm_primitives::{db::Database, Account, AccountStatus, EvmState};
+use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
+use revm::db::{states::bundle_state::BundleRetention, State};
+use revm_primitives::{Account, AccountStatus, EvmState};
 
-/// A general purpose executor trait that executes an input (e.g. block) and produces an output
-/// (e.g. state changes and receipts).
-///
-/// This executor does not validate the output, see [`BatchExecutor`] for that.
-pub trait Executor<DB> {
-    /// The input type for the executor.
-    type Input<'a>;
-    /// The output type for the executor.
-    type Output;
+/// A type that knows how to execute a block. It is assumed to operate on a
+/// [`crate::Evm`] internally and use [`State`] as database.
+pub trait Executor<DB: Database>: Sized {
+    /// The primitive types used by the executor.
+    type Primitives: NodePrimitives;
     /// The error type returned by the executor.
     type Error;
 
-    /// Initialize the executor with the given transaction environment overrides.
-    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
+    /// Executes a single block and returns [`BlockExecutionResult`], without the state changes.
+    fn execute_one(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
+
+    /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
+    /// the EVM state after execution.
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: OnStateHook + 'static;
 
     /// Consumes the type and executes the block.
     ///
     /// # Note
-    /// Execution happens without any validation of the output. To validate the output, use the
-    /// [`BatchExecutor`].
+    /// Execution happens without any validation of the output.
     ///
     /// # Returns
     /// The output of the block execution.
-    fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
+    fn execute(
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
+        let result = self.execute_one(block)?;
+        let mut state = self.into_state();
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+    }
+
+    /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
+    fn execute_batch<'a, I>(
+        mut self,
+        blocks: I,
+    ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+    {
+        let mut results = Vec::new();
+        let mut first_block = None;
+        for block in blocks {
+            if first_block.is_none() {
+                first_block = Some(block.header().number());
+            }
+            results.push(self.execute_one(block)?);
+        }
+
+        Ok(ExecutionOutcome::from_blocks(
+            first_block.unwrap_or_default(),
+            self.into_state().take_bundle(),
+            results,
+        ))
+    }
 
     /// Executes the EVM with the given input and accepts a state closure that is invoked with
     /// the EVM state after execution.
     fn execute_with_state_closure<F>(
-        self,
-        input: Self::Input<'_>,
-        state: F,
-    ) -> Result<Self::Output, Self::Error>
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        mut f: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&State<DB>);
+        F: FnMut(&State<DB>),
+    {
+        let result = self.execute_one(block)?;
+        let mut state = self.into_state();
+        f(&state);
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
+    }
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
     fn execute_with_state_hook<F>(
-        self,
-        input: Self::Input<'_>,
+        mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         state_hook: F,
-    ) -> Result<Self::Output, Self::Error>
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: OnStateHook + 'static;
-}
-
-/// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
-/// and keep track of the state over the entire batch.
-pub trait BatchExecutor<DB> {
-    /// The input type for the executor.
-    type Input<'a>;
-    /// The output type for the executor.
-    type Output;
-    /// The error type returned by the executor.
-    type Error;
-
-    /// Executes the next block in the batch, verifies the output and updates the state internally.
-    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
-
-    /// Executes multiple inputs in the batch, verifies the output, and updates the state
-    /// internally.
-    ///
-    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_one`]
-    /// for each input.
-    fn execute_and_verify_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Self::Input<'a>>,
+        F: OnStateHook + 'static,
     {
-        for input in inputs {
-            self.execute_and_verify_one(input)?;
-        }
-        Ok(())
+        let result = self.execute_one_with_state_hook(block, state_hook)?;
+        let mut state = self.into_state();
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
-    /// Executes the entire batch, verifies the output, and returns the final state.
-    ///
-    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_many`]
-    /// and [`BatchExecutor::finalize`].
-    fn execute_and_verify_batch<'a, I>(mut self, batch: I) -> Result<Self::Output, Self::Error>
-    where
-        I: IntoIterator<Item = Self::Input<'a>>,
-        Self: Sized,
-    {
-        self.execute_and_verify_many(batch)?;
-        Ok(self.finalize())
-    }
-
-    /// Finishes the batch and return the final state.
-    fn finalize(self) -> Self::Output;
-
-    /// Set the expected tip of the batch.
-    ///
-    /// This can be used to optimize state pruning during execution.
-    fn set_tip(&mut self, tip: BlockNumber);
-
-    /// Set the prune modes.
-    ///
-    /// They are used to determine which parts of the state should be kept during execution.
-    fn set_prune_modes(&mut self, prune_modes: PruneModes);
+    /// Consumes the executor and returns the [`State`] containing all state changes.
+    fn into_state(self) -> State<DB>;
 
     /// The size hint of the batch's tracked state size.
     ///
     /// This is used to optimize DB commits depending on the size of the state.
-    fn size_hint(&self) -> Option<usize>;
+    fn size_hint(&self) -> usize;
 }
 
 /// A type that can create a new executor for block execution.
@@ -149,18 +142,9 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// It is not expected to validate the state trie root, this must be done by the caller using
     /// the returned state.
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
+    type Executor<DB: Database>: Executor<
         DB,
-        Input<'a> = &'a BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
-        Output = BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>,
-        Error = BlockExecutionError,
-    >;
-
-    /// An executor that can execute a batch of blocks given a database.
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
-        DB,
-        Input<'a> = &'a BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
-        Output = ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>,
+        Primitives = Self::Primitives,
         Error = BlockExecutionError,
     >;
 
@@ -169,15 +153,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>;
-
-    /// Creates a new batch executor with the given database and pruning modes.
-    ///
-    /// Batch executor is used to execute multiple blocks in sequence and keep track of the state
-    /// during historical sync which involves executing multiple blocks in sequence.
-    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
-    where
-        DB: Database<Error: Into<ProviderError> + Display>;
+        DB: Database;
 }
 
 /// Helper type for the output of executing a block.
@@ -192,33 +168,30 @@ pub struct ExecuteOutput<R = Receipt> {
 /// Defines the strategy for executing a single block.
 pub trait BlockExecutionStrategy {
     /// Database this strategy operates on.
-    type DB: Database;
+    type DB: revm::Database;
 
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
 
     /// The error type returned by this strategy's methods.
-    type Error: From<ProviderError> + core::error::Error;
-
-    /// Initialize the strategy with the given transaction environment overrides.
-    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
+    type Error: core::error::Error;
 
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(
         &mut self,
-        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all transactions in the block.
     fn execute_transactions(
         &mut self,
-        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<ExecuteOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
         &mut self,
-        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
     ) -> Result<Requests, Self::Error>;
 
@@ -228,19 +201,16 @@ pub trait BlockExecutionStrategy {
     /// Returns a mutable reference to the current state.
     fn state_mut(&mut self) -> &mut State<Self::DB>;
 
+    /// Consumes the strategy and returns inner [`State`].
+    fn into_state(self) -> State<Self::DB>;
+
     /// Sets a hook to be called after each state change during execution.
     fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
-
-    /// Returns the final bundle state.
-    fn finish(&mut self) -> BundleState {
-        self.state_mut().merge_transitions(BundleRetention::Reverts);
-        self.state_mut().take_bundle()
-    }
 
     /// Validate a block with regard to execution results.
     fn validate_block_post_execution(
         &self,
-        _block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         _receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
@@ -254,7 +224,7 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     type Primitives: NodePrimitives;
 
     /// Associated strategy type.
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
+    type Strategy<DB: Database>: BlockExecutionStrategy<
         DB = DB,
         Primitives = Self::Primitives,
         Error = BlockExecutionError,
@@ -263,7 +233,7 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     /// Creates a strategy using the give database.
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>;
+        DB: Database;
 }
 
 impl<F> Clone for BasicBlockExecutorProvider<F>
@@ -294,27 +264,14 @@ where
 {
     type Primitives = F::Primitives;
 
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBlockExecutor<F::Strategy<DB>>;
-
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBatchExecutor<F::Strategy<DB>>;
+    type Executor<DB: Database> = BasicBlockExecutor<F::Strategy<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         let strategy = self.strategy_factory.create_strategy(db);
         BasicBlockExecutor::new(strategy)
-    }
-
-    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
-    where
-        DB: Database<Error: Into<ProviderError> + Display>,
-    {
-        let strategy = self.strategy_factory.create_strategy(db);
-        let batch_record = BlockBatchRecord::default();
-        BasicBatchExecutor::new(strategy, batch_record)
     }
 }
 
@@ -336,142 +293,45 @@ impl<S> BasicBlockExecutor<S> {
 impl<S, DB> Executor<DB> for BasicBlockExecutor<S>
 where
     S: BlockExecutionStrategy<DB = DB>,
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
 {
-    type Input<'a> = &'a BlockWithSenders<<S::Primitives as NodePrimitives>::Block>;
-    type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
+    type Primitives = S::Primitives;
     type Error = S::Error;
 
-    fn init(&mut self, env_overrides: Box<dyn TxEnvOverrides>) {
-        self.strategy.init(env_overrides);
-    }
-
-    fn execute(mut self, block: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        self.strategy.apply_pre_execution_changes(block)?;
-        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
-        let state = self.strategy.finish();
-
-        Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
-    }
-
-    fn execute_with_state_closure<F>(
-        mut self,
-        block: Self::Input<'_>,
-        mut state: F,
-    ) -> Result<Self::Output, Self::Error>
-    where
-        F: FnMut(&State<DB>),
+    fn execute_one(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         self.strategy.apply_pre_execution_changes(block)?;
         let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
         let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
+        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
 
-        state(self.strategy.state_ref());
-
-        let state = self.strategy.finish();
-
-        Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
+        Ok(BlockExecutionResult { receipts, requests, gas_used })
     }
 
-    fn execute_with_state_hook<H>(
-        mut self,
-        block: Self::Input<'_>,
-        state_hook: H,
-    ) -> Result<Self::Output, Self::Error>
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        H: OnStateHook + 'static,
+        F: OnStateHook + 'static,
     {
         self.strategy.with_state_hook(Some(Box::new(state_hook)));
+        let result = self.execute_one(block);
+        self.strategy.with_state_hook(None);
 
-        self.strategy.apply_pre_execution_changes(block)?;
-        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
-
-        let state = self.strategy.finish();
-
-        Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
-    }
-}
-
-/// A generic batch executor that uses a [`BlockExecutionStrategy`] to
-/// execute batches.
-#[allow(missing_debug_implementations)]
-pub struct BasicBatchExecutor<S>
-where
-    S: BlockExecutionStrategy,
-{
-    /// Batch execution strategy.
-    pub(crate) strategy: S,
-    /// Keeps track of batch execution receipts and requests.
-    pub(crate) batch_record: BlockBatchRecord<<S::Primitives as NodePrimitives>::Receipt>,
-}
-
-impl<S> BasicBatchExecutor<S>
-where
-    S: BlockExecutionStrategy,
-{
-    /// Creates a new `BasicBatchExecutor` with the given strategy.
-    pub const fn new(
-        strategy: S,
-        batch_record: BlockBatchRecord<<S::Primitives as NodePrimitives>::Receipt>,
-    ) -> Self {
-        Self { strategy, batch_record }
-    }
-}
-
-impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S>
-where
-    S: BlockExecutionStrategy<DB = DB, Error = BlockExecutionError>,
-    DB: Database<Error: Into<ProviderError> + Display>,
-{
-    type Input<'a> = &'a BlockWithSenders<<S::Primitives as NodePrimitives>::Block>;
-    type Output = ExecutionOutcome<<S::Primitives as NodePrimitives>::Receipt>;
-    type Error = BlockExecutionError;
-
-    fn execute_and_verify_one(&mut self, block: Self::Input<'_>) -> Result<(), Self::Error> {
-        if self.batch_record.first_block().is_none() {
-            self.batch_record.set_first_block(block.header().number());
-        }
-
-        self.strategy.apply_pre_execution_changes(block)?;
-        let ExecuteOutput { receipts, .. } = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
-
-        self.strategy.validate_block_post_execution(block, &receipts, &requests)?;
-
-        // prepare the state according to the prune mode
-        let retention = self.batch_record.bundle_retention(block.header().number());
-        self.strategy.state_mut().merge_transitions(retention);
-
-        // store receipts in the set
-        self.batch_record.save_receipts(receipts)?;
-
-        // store requests in the set
-        self.batch_record.save_requests(requests);
-
-        Ok(())
+        result
     }
 
-    fn finalize(mut self) -> Self::Output {
-        ExecutionOutcome::new(
-            self.strategy.state_mut().take_bundle(),
-            self.batch_record.take_receipts(),
-            self.batch_record.first_block().unwrap_or_default(),
-            self.batch_record.take_requests(),
-        )
+    fn into_state(self) -> State<DB> {
+        self.strategy.into_state()
     }
 
-    fn set_tip(&mut self, tip: BlockNumber) {
-        self.batch_record.set_tip(tip);
-    }
-
-    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-        self.batch_record.set_prune_modes(prune_modes);
-    }
-
-    fn size_hint(&self) -> Option<usize> {
-        Some(self.strategy.state_ref().bundle_state.size_hint())
+    fn size_hint(&self) -> usize {
+        self.strategy.state_ref().bundle_state.size_hint()
     }
 }
 
@@ -519,7 +379,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_primitives::EthPrimitives;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{address, bytes, AccountInfo, TxEnv, KECCAK_EMPTY};
+    use revm_primitives::{address, bytes, AccountInfo, KECCAK_EMPTY};
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
@@ -527,19 +387,11 @@ mod tests {
 
     impl BlockExecutorProvider for TestExecutorProvider {
         type Primitives = EthPrimitives;
-        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
-        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
+        type Executor<DB: Database> = TestExecutor<DB>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
-            DB: Database<Error: Into<ProviderError> + Display>,
-        {
-            TestExecutor(PhantomData)
-        }
-
-        fn batch_executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
-        where
-            DB: Database<Error: Into<ProviderError> + Display>,
+            DB: Database,
         {
             TestExecutor(PhantomData)
         }
@@ -547,61 +399,35 @@ mod tests {
 
     struct TestExecutor<DB>(PhantomData<DB>);
 
-    impl<DB> Executor<DB> for TestExecutor<DB> {
-        type Input<'a> = &'a BlockWithSenders;
-        type Output = BlockExecutionOutput<Receipt>;
+    impl<DB: Database> Executor<DB> for TestExecutor<DB> {
+        type Primitives = EthPrimitives;
         type Error = BlockExecutionError;
 
-        fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-            Err(BlockExecutionError::msg("execution unavailable for tests"))
-        }
-
-        fn execute_with_state_closure<F>(
-            self,
-            _: Self::Input<'_>,
-            _: F,
-        ) -> Result<Self::Output, Self::Error>
-        where
-            F: FnMut(&State<DB>),
+        fn execute_one(
+            &mut self,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
 
-        fn execute_with_state_hook<F>(
-            self,
-            _: Self::Input<'_>,
-            _: F,
-        ) -> Result<Self::Output, Self::Error>
+        fn execute_one_with_state_hook<F>(
+            &mut self,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+            _state_hook: F,
+        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         where
-            F: OnStateHook,
+            F: OnStateHook + 'static,
         {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
-    }
 
-    impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
-        type Input<'a> = &'a BlockWithSenders;
-        type Output = ExecutionOutcome;
-        type Error = BlockExecutionError;
-
-        fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
-            Ok(())
+        fn into_state(self) -> State<DB> {
+            unreachable!()
         }
 
-        fn finalize(self) -> Self::Output {
-            todo!()
-        }
-
-        fn set_tip(&mut self, _tip: BlockNumber) {
-            todo!()
-        }
-
-        fn set_prune_modes(&mut self, _prune_modes: PruneModes) {
-            todo!()
-        }
-
-        fn size_hint(&self) -> Option<usize> {
-            None
+        fn size_hint(&self) -> usize {
+            0
         }
     }
 
@@ -613,24 +439,21 @@ mod tests {
         state: State<DB>,
         execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
-        finish_result: BundleState,
     }
 
     #[derive(Clone)]
     struct TestExecutorStrategyFactory {
         execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
-        finish_result: BundleState,
     }
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
         type Primitives = EthPrimitives;
-        type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
-            TestExecutorStrategy<DB, TestEvmConfig>;
+        type Strategy<DB: Database> = TestExecutorStrategy<DB, TestEvmConfig>;
 
         fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
         where
-            DB: Database<Error: Into<ProviderError> + Display>,
+            DB: Database,
         {
             let state = State::builder()
                 .with_database(db)
@@ -645,7 +468,6 @@ mod tests {
                 apply_post_execution_changes_result: self
                     .apply_post_execution_changes_result
                     .clone(),
-                finish_result: self.finish_result.clone(),
                 state,
             }
         }
@@ -661,21 +483,21 @@ mod tests {
 
         fn apply_pre_execution_changes(
             &mut self,
-            _block: &BlockWithSenders,
+            _block: &RecoveredBlock<reth_primitives::Block>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }
 
         fn execute_transactions(
             &mut self,
-            _block: &BlockWithSenders,
+            _block: &RecoveredBlock<reth_primitives::Block>,
         ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
             Ok(self.execute_transactions_result.clone())
         }
 
         fn apply_post_execution_changes(
             &mut self,
-            _block: &BlockWithSenders,
+            _block: &RecoveredBlock<reth_primitives::Block>,
             _receipts: &[Receipt],
         ) -> Result<Requests, Self::Error> {
             Ok(self.apply_post_execution_changes_result.clone())
@@ -689,19 +511,8 @@ mod tests {
             &mut self.state
         }
 
-        fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
-
-        fn finish(&mut self) -> BundleState {
-            self.finish_result.clone()
-        }
-
-        fn validate_block_post_execution(
-            &self,
-            _block: &BlockWithSenders,
-            _receipts: &[Receipt],
-            _requests: &Requests,
-        ) -> Result<(), ConsensusError> {
-            Ok(())
+        fn into_state(self) -> State<Self::DB> {
+            self.state
         }
     }
 
@@ -725,13 +536,11 @@ mod tests {
             gas_used: expected_gas_used,
         };
         let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
-        let expected_finish_result = BundleState::default();
 
         let strategy_factory = TestExecutorStrategyFactory {
             execute_transactions_result: expected_execute_transactions_result,
             apply_post_execution_changes_result: expected_apply_post_execution_changes_result
                 .clone(),
-            finish_result: expected_finish_result.clone(),
         };
         let provider = BasicBlockExecutorProvider::new(strategy_factory);
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
@@ -743,30 +552,6 @@ mod tests {
         assert_eq!(block_execution_output.gas_used, expected_gas_used);
         assert_eq!(block_execution_output.receipts, expected_receipts);
         assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
-        assert_eq!(block_execution_output.state, expected_finish_result);
-    }
-
-    #[test]
-    fn test_tx_env_overrider() {
-        let strategy_factory = TestExecutorStrategyFactory {
-            execute_transactions_result: ExecuteOutput {
-                receipts: vec![Receipt::default()],
-                gas_used: 10,
-            },
-            apply_post_execution_changes_result: Requests::new(vec![bytes!("deadbeef")]),
-            finish_result: BundleState::default(),
-        };
-        let provider = BasicBlockExecutorProvider::new(strategy_factory);
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-
-        // if we want to apply tx env overrides the executor must be mut.
-        let mut executor = provider.executor(db);
-        // execute consumes the executor, so we can only call it once.
-        executor.init(Box::new(|tx_env: &mut TxEnv| {
-            tx_env.nonce.take();
-        }));
-        let result = executor.execute(&Default::default());
-        assert!(result.is_ok());
     }
 
     fn setup_state_with_account(

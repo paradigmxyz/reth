@@ -1,7 +1,7 @@
 use std::{fmt, io};
 
 use futures::Future;
-use reth_primitives::{Receipt, Receipts};
+use reth_primitives::Receipt;
 use tokio::io::AsyncReadExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, FramedRead};
@@ -27,10 +27,10 @@ where
 #[derive(Debug)]
 pub struct ReceiptFileClient<D: ReceiptDecoder> {
     /// The buffered receipts, read from file, as nested lists. One list per block number.
-    pub receipts: Receipts<D::Receipt>,
+    pub receipts: Vec<Vec<D::Receipt>>,
     /// First (lowest) block number read from file.
     pub first_block: u64,
-    /// Total number of receipts. Count of elements in [`Receipts`] flattened.
+    /// Total number of receipts. Count of elements in receipts flattened.
     pub total_receipts: usize,
 }
 
@@ -66,7 +66,7 @@ where
     where
         B: AsyncReadExt + Unpin,
     {
-        let mut receipts = Receipts::default();
+        let mut receipts = Vec::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
         let mut stream = FramedRead::with_capacity(reader, D::default(), num_bytes as usize);
@@ -121,13 +121,13 @@ where
                         }
 
                         if block_number == number {
-                            receipts_for_block.push(Some(receipt));
+                            receipts_for_block.push(receipt);
                         } else {
                             receipts.push(receipts_for_block);
 
                             // next block
                             block_number = number;
-                            receipts_for_block = vec![Some(receipt)];
+                            receipts_for_block = vec![receipt];
                         }
                     }
                     None => {
@@ -240,14 +240,15 @@ mod test {
     struct MockReceiptContainer(Option<MockReceipt>);
 
     impl TryFrom<MockReceipt> for ReceiptWithBlockNumber {
-        type Error = &'static str;
+        type Error = FileClientError;
         fn try_from(exported_receipt: MockReceipt) -> Result<Self, Self::Error> {
             let MockReceipt { tx_type, status, cumulative_gas_used, logs, block_number: number } =
                 exported_receipt;
 
             #[allow(clippy::needless_update)]
             let receipt = Receipt {
-                tx_type: TxType::try_from(tx_type.to_be_bytes()[0])?,
+                tx_type: TxType::try_from(tx_type.to_be_bytes()[0])
+                    .map_err(|err| FileClientError::Rlp(err.into(), vec![tx_type]))?,
                 success: status != 0,
                 cumulative_gas_used,
                 logs,
@@ -276,11 +277,7 @@ mod test {
                 .0;
             src.advance(src.len() - buf_slice.len());
 
-            Ok(Some(
-                receipt
-                    .map(|receipt| receipt.try_into().map_err(FileClientError::from))
-                    .transpose()?,
-            ))
+            Ok(Some(receipt.map(|receipt| receipt.try_into()).transpose()?))
         }
     }
 
@@ -588,8 +585,8 @@ mod test {
         assert_eq!(2, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
-        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone().unwrap());
-        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone().unwrap());
+        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone());
+        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone());
         assert!(receipts[3].is_empty());
     }
 
@@ -624,9 +621,9 @@ mod test {
         assert_eq!(2, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
-        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone().unwrap());
+        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone());
         assert!(receipts[2].is_empty());
-        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone().unwrap());
+        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone());
     }
 
     #[tokio::test]
@@ -661,9 +658,9 @@ mod test {
         assert_eq!(4, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
-        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone().unwrap());
-        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone().unwrap());
-        assert_eq!(receipt_block_2().receipt, receipts[2][1].clone().unwrap());
-        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone().unwrap());
+        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone());
+        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone());
+        assert_eq!(receipt_block_2().receipt, receipts[2][1].clone());
+        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone());
     }
 }
