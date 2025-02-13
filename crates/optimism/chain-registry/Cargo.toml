@@ -25,6 +25,5 @@ tracing.workspace = true
 # async
 reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
 
-
 [dev-dependencies]
 tempfile.workspace = true
