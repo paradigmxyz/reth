@@ -86,12 +86,12 @@ where
 #[allow(missing_debug_implementations)]
 #[derive(derive_more::Deref, derive_more::DerefMut)]
 pub struct EthExecutionStrategy<'a, Evm, EvmConfig> {
-    /// Reference to the parent factory.
+    /// Reference to the parent factory providing access to [`SystemCaller`] and [`ChainSpec`].
     #[deref]
     #[deref_mut]
     factory: &'a EthExecutionStrategyFactory<EvmConfig>,
 
-    /// Header of the block being executed.
+    /// Block being executed.
     block: &'a SealedBlock,
     /// The EVM used by strategy.
     evm: EvmWithHook<Evm>,
