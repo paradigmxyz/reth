@@ -1,5 +1,7 @@
 use alloc::vec::Vec;
 use alloy_eips::eip7685::Requests;
+use alloy_primitives::{logs_bloom, Bloom};
+use reth_primitives_traits::Receipt;
 use revm::db::BundleState;
 
 /// The result of executing a block.
@@ -11,6 +13,13 @@ pub struct BlockExecutionResult<T> {
     pub requests: Requests,
     /// The total gas used by the block.
     pub gas_used: u64,
+}
+
+impl<T: Receipt> BlockExecutionResult<T> {
+    /// Calculates the logs bloom.
+    pub fn logs_bloom(&self) -> Bloom {
+        logs_bloom(self.receipts.iter().flat_map(|r| r.logs()))
+    }
 }
 
 /// [`BlockExecutionResult`] combined with state.

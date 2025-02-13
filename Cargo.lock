@@ -6620,6 +6620,7 @@ dependencies = [
  "metrics",
  "reth-chainspec",
  "reth-evm",
+ "reth-execution-types",
  "reth-metrics",
  "reth-payload-builder",
  "reth-payload-builder-primitives",

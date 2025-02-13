@@ -40,6 +40,8 @@ use tokio::{
 };
 use tracing::{debug, trace, warn};
 
+mod header;
+pub use header::{BuildHeaderInput, HeaderBuilder};
 mod metrics;
 mod stack;
 
@@ -811,11 +813,11 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
 ///
 /// Generic parameters `Pool` and `Client` represent the transaction pool and
 /// Ethereum client types.
-pub trait PayloadBuilder: Send + Sync + Clone {
+pub trait PayloadBuilder: HeaderBuilder<Self::Attributes> + Send + Sync + Clone {
     /// The payload attributes type to accept for building.
     type Attributes: PayloadBuilderAttributes;
     /// The type of the built payload.
-    type BuiltPayload: BuiltPayload;
+    type BuiltPayload: BuiltPayload<Primitives = Self::Primitives>;
 
     /// Tries to build a transaction payload using provided arguments.
     ///

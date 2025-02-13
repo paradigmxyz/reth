@@ -1,4 +1,5 @@
 use crate::{
+    header::{BuildHeaderInput, HeaderBuilder},
     BuildArguments, BuildOutcome, HeaderForPayload, PayloadBuilder, PayloadBuilderAttributes,
     PayloadBuilderError, PayloadConfig,
 };
@@ -177,10 +178,48 @@ where
     }
 }
 
+impl<L, R, AttrsL, AttrsR> HeaderBuilder<Either<AttrsL, AttrsR>> for PayloadBuilderStack<L, R>
+where
+    L: HeaderBuilder<AttrsL>,
+    R: HeaderBuilder<AttrsR, Primitives = L::Primitives, Error = L::Error>,
+{
+    type Error = L::Error;
+    type Primitives = L::Primitives;
+
+    fn build_header(
+        &self,
+        input: BuildHeaderInput<'_, Self::Primitives, Either<AttrsL, AttrsR>>,
+    ) -> Result<<Self::Primitives as NodePrimitives>::BlockHeader, Self::Error> {
+        let BuildHeaderInput {
+            parent_header,
+            body,
+            execution_result,
+            payload_attributes,
+            state_root,
+        } = input;
+        match payload_attributes {
+            Either::Left(payload_attributes) => self.left.build_header(BuildHeaderInput {
+                parent_header,
+                body,
+                execution_result,
+                payload_attributes,
+                state_root,
+            }),
+            Either::Right(payload_attributes) => self.right.build_header(BuildHeaderInput {
+                parent_header,
+                body,
+                execution_result,
+                payload_attributes,
+                state_root,
+            }),
+        }
+    }
+}
+
 impl<L, R> PayloadBuilder for PayloadBuilderStack<L, R>
 where
     L: PayloadBuilder + Unpin + 'static,
-    R: PayloadBuilder + Unpin + 'static,
+    R: PayloadBuilder<Primitives = L::Primitives, Error = L::Error> + Unpin + 'static,
     L::Attributes: Unpin + Clone,
     R::Attributes: Unpin + Clone,
     L::BuiltPayload: Unpin + Clone,

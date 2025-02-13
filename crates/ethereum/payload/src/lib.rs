@@ -9,16 +9,19 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-use alloy_consensus::{BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{
+    proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
+    BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH,
+};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip6110, eip7685::Requests, merge::BEACON_NONCE};
-use alloy_primitives::U256;
+use alloy_primitives::{logs_bloom, U256};
 use reth_basic_payload_builder::{
-    commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
-    PayloadConfig,
+    commit_withdrawals, is_better_payload, BuildArguments, BuildHeaderInput, BuildOutcome,
+    HeaderBuilder, PayloadBuilder, PayloadConfig,
 };
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
-use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
+use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{
     env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, EvmError, InvalidTxError,
     NextBlockEnvAttributes,
@@ -98,6 +101,65 @@ where
             gas_limit: self.builder_config.gas_limit(parent.gas_limit),
         };
         self.evm_config.next_evm_env(parent, next_attributes)
+    }
+}
+
+impl<Pool, Client, EvmConfig> HeaderBuilder<EthPayloadBuilderAttributes>
+    for EthereumPayloadBuilder<Pool, Client, EvmConfig>
+where
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+{
+    type Primitives = EthPrimitives;
+    type Error = PayloadBuilderError;
+
+    fn build_header(
+        &self,
+        input: BuildHeaderInput<'_, Self::Primitives, EthPayloadBuilderAttributes>,
+    ) -> Result<Header, Self::Error> {
+        let BuildHeaderInput {
+            parent_header,
+            body,
+            execution_result,
+            payload_attributes,
+            state_root,
+        } = input;
+
+        let timestamp = payload_attributes.timestamp;
+        let chain_spec = self.client.chain_spec();
+
+        let blob_params = chain_spec.blob_params_at_timestamp(timestamp);
+
+        let withdrawals_root = chain_spec
+            .is_shanghai_active_at_timestamp(timestamp)
+            .then(|| calculate_withdrawals_root(&body.withdrawals.unwrap_or_default()));
+
+        let requests_hash = chain_spec
+            .is_prague_active_at_timestamp(timestamp)
+            .then(|| execution_result.requests.requests_hash());
+
+        Ok(Header {
+            parent_hash: parent_header.hash(),
+            ommers_hash: EMPTY_OMMER_ROOT_HASH,
+            beneficiary: payload_attributes.suggested_fee_recipient,
+            state_root,
+            transactions_root: calculate_transaction_root(&body.transactions),
+            receipts_root: calculate_receipt_root(&execution_result.receipts),
+            withdrawals_root,
+            logs_bloom: execution_result.logs_bloom(),
+            timestamp: payload_attributes.timestamp,
+            mix_hash: payload_attributes.prev_randao,
+            nonce: BEACON_NONCE.into(),
+            base_fee_per_gas: Some(base_fee),
+            number: parent_header.number + 1,
+            gas_limit: block_gas_limit,
+            difficulty: U256::ZERO,
+            gas_used: execution_result.gas_used,
+            extra_data: self.builder_config.extra_data,
+            parent_beacon_block_root: payload_attributes.parent_beacon_block_root,
+            blob_gas_used,
+            excess_blob_gas,
+            requests_hash,
+        })
     }
 }
 
