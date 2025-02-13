@@ -18,7 +18,7 @@ reth-primitives-traits.workspace = true
 reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-payload-builder.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["std"] }
 reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-execution-types.workspace = true
