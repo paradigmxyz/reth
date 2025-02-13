@@ -10,9 +10,10 @@ use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuild
 use alloy_rpc_types::engine::{ClientVersionV1, ExecutionData};
 use futures::TryFutureExt;
 use reth_chainspec::EthereumHardforks;
+use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, NodeAddOns,
-    NodeTypes, NodeTypesWithEngine,
+    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
+    NodeAddOns, NodeTypes, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -610,6 +611,40 @@ where
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         self.engine_validator_builder.clone().build(ctx).await
+    }
+}
+
+/// Helper trait to provide a [`PayloadAttributesBuilder`] on-demand.
+pub trait PayloadAttributesBuilderAddOn<Node: FullNodeComponents>: Send {
+    /// The type of payload attributes produced by the builder.
+    type PayloadAttributes;
+
+    /// Returns a boxed payload attributes builder to use in local engine launcher.
+    fn payload_attributes_builder(
+        &self,
+        ctx: &AddOnsContext<'_, Node>,
+    ) -> eyre::Result<Box<dyn PayloadAttributesBuilder<Self::PayloadAttributes>>>;
+}
+
+impl<N, EthApi, EV> PayloadAttributesBuilderAddOn<N> for RpcAddOns<N, EthApi, EV>
+where
+    N: FullNodeComponents,
+    EthApi: EthApiTypes,
+    EV: EngineValidatorBuilder<N>,
+    <<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
+    LocalPayloadAttributesBuilder<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>:
+        PayloadAttributesBuilder<
+            <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        >,
+{
+    type PayloadAttributes =
+        <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes;
+
+    fn payload_attributes_builder(
+        &self,
+        ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<Box<dyn PayloadAttributesBuilder<Self::PayloadAttributes>>> {
+        Ok(Box::new(LocalPayloadAttributesBuilder::new(ctx.config.chain.clone())))
     }
 }
 

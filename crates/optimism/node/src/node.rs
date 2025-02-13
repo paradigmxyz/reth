@@ -7,13 +7,16 @@ use crate::{
     OpEngineApiBuilder, OpEngineTypes,
 };
 use op_alloy_consensus::OpPooledTransaction;
+use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
 };
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadAttributesBuilder,
+    PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -21,7 +24,10 @@ use reth_node_builder::{
         PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
+    rpc::{
+        EngineValidatorAddOn, EngineValidatorBuilder, PayloadAttributesBuilderAddOn, RethRpcAddOns,
+        RpcAddOns, RpcHandle,
+    },
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
@@ -341,6 +347,26 @@ where
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         OpEngineValidatorBuilder::default().build(ctx).await
+    }
+}
+
+impl<N> PayloadAttributesBuilderAddOn<N> for OpAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Engine = OpEngineTypes,
+        >,
+    >,
+{
+    type PayloadAttributes = OpPayloadAttributes;
+
+    fn payload_attributes_builder(
+        &self,
+        ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<Box<dyn PayloadAttributesBuilder<Self::PayloadAttributes>>> {
+        Ok(Box::new(LocalPayloadAttributesBuilder::new(ctx.config.chain.clone())))
     }
 }
 
