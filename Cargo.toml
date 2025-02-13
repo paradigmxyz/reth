@@ -73,6 +73,7 @@ members = [
     "crates/optimism/evm/",
     "crates/optimism/hardforks/",
     "crates/optimism/node/",
+    "crates/optimism/chain-registry/",
     "crates/optimism/payload/",
     "crates/optimism/primitives/",
     "crates/optimism/reth/",
@@ -377,6 +378,7 @@ reth-optimism-node = { path = "crates/optimism/node" }
 reth-node-types = { path = "crates/node/types" }
 reth-op = { path = "crates/optimism/reth" }
 reth-optimism-chainspec = { path = "crates/optimism/chainspec" }
+reth-optimism-chain-resitry = { path = "crates/optimism/chain-registry" }
 reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-optimism-forks = { path = "crates/optimism/hardforks", default-features = false }
@@ -490,6 +492,7 @@ cfg-if = "1.0"
 clap = "4"
 dashmap = "6.0"
 derive_more = { version = "1", default-features = false, features = ["full"] }
+dirs-next = "2.0.0"
 dyn-clone = "1.0.17"
 eyre = "0.6"
 fdlimit = "0.3.0"
