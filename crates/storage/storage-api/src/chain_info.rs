@@ -1,12 +1,5 @@
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_primitives_traits::SealedHeader;
-#[cfg(feature = "std")]
-use std::time::Instant;
-#[cfg_attr(feature = "std", allow(unused_imports))]
-#[cfg(feature = "std")]
-use tokio::time as _;
-#[cfg(not(feature = "std"))]
-use tokio::time::Instant;
 
 /// A type that can track updates related to fork choice updates.
 pub trait CanonChainTracker: Send + Sync {
@@ -18,14 +11,16 @@ pub trait CanonChainTracker: Send + Sync {
 
     /// Returns the last time a fork choice update was received from the CL
     /// ([`CanonChainTracker::on_forkchoice_update_received`])
-    fn last_received_update_timestamp(&self) -> Option<Instant>;
+    #[cfg(feature = "std")]
+    fn last_received_update_timestamp(&self) -> Option<std::time::Instant>;
 
     /// Notify the tracker about a transition configuration exchange.
     fn on_transition_configuration_exchanged(&self);
 
     /// Returns the last time a transition configuration was exchanged with the CL
     /// ([`CanonChainTracker::on_transition_configuration_exchanged`])
-    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant>;
+    #[cfg(feature = "std")]
+    fn last_exchanged_transition_configuration_timestamp(&self) -> Option<std::time::Instant>;
 
     /// Sets the canonical head of the chain.
     fn set_canonical_head(&self, header: SealedHeader<Self::Header>);

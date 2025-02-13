@@ -43,7 +43,6 @@ std = [
     "reth-primitives-traits/std",
     "reth-consensus?/std",
     "reth-consensus-common?/std",
-    "reth-storage-api?/std",
 ]
 arbitrary = [
     "std",
