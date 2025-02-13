@@ -8,9 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_rpc_types::engine::{MaybeCancunPayloadFields, PayloadError};
+use alloy_rpc_types::engine::{ExecutionData, MaybeCancunPayloadFields, PayloadError};
 use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::ExecutionData;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::{Block, SignedTransaction};
 use std::sync::Arc;
@@ -48,7 +47,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         self.chain_spec().is_shanghai_active_at_timestamp(timestamp)
     }
 
-    /// Returns true if the Prague harkdfork is active at the given timestamp.
+    /// Returns true if the Prague hardfork is active at the given timestamp.
     #[inline]
     fn is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.chain_spec().is_prague_active_at_timestamp(timestamp)

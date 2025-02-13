@@ -26,7 +26,7 @@ use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
+use reth_consensus::{Consensus, FullConsensus};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
@@ -2527,10 +2527,7 @@ where
         // Ensure that prewarm tasks don't send proof messages after state root sender is dropped
         cancel_execution.cancel();
 
-        if let Err(err) = self.consensus.validate_block_post_execution(
-            &block,
-            PostExecutionInput::new(&output.receipts, &output.requests),
-        ) {
+        if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
             return Err(err.into())
@@ -3200,12 +3197,13 @@ mod tests {
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{
-        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+        CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1,
+        ExecutionPayloadV3,
     };
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-    use reth_engine_primitives::{ExecutionData, ForkchoiceStatus};
+    use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_ethereum_primitives::{Block, EthPrimitives};

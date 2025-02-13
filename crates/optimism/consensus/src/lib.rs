@@ -18,15 +18,14 @@ use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_consensus::{
-    Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
-};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
     validate_body_against_header, validate_cancun_gas, validate_header_base_fee,
     validate_header_extra_data, validate_header_gas, validate_shanghai_withdrawals,
 };
+use reth_execution_types::BlockExecutionResult;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
@@ -62,9 +61,9 @@ impl<ChainSpec: EthChainSpec + OpHardforks, N: NodePrimitives<Receipt: DepositRe
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
-        input: PostExecutionInput<'_, N::Receipt>,
+        result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block.header(), &self.chain_spec, input.receipts)
+        validate_block_post_execution(block.header(), &self.chain_spec, &result.receipts)
     }
 }
 

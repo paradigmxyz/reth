@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-execution-types.workspace = true
 reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-consensus.workspace = true
@@ -54,5 +55,9 @@ std = [
     "alloy-consensus/std",
     "alloy-trie/std",
     "op-alloy-consensus/std",
+    "reth-execution-types/std",
 ]
-optimism = ["reth-optimism-primitives/optimism"]
+optimism = [
+    "reth-optimism-primitives/optimism",
+    "reth-execution-types/optimism",
+]
