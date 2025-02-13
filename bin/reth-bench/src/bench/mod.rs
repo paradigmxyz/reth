@@ -6,10 +6,10 @@ use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
 
 mod context;
-mod generate_payload;
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;
+mod send_payload;
 
 /// `reth bench` command
 #[derive(Debug, Parser)]
@@ -31,7 +31,7 @@ pub enum Subcommands {
     NewPayloadOnly(new_payload_only::Command),
 
     /// Generate a `newPayload` message for the given RPC block.
-    GeneratePayload(generate_payload::Command),
+    SendPayload(send_payload::Command),
 }
 
 impl BenchmarkCommand {
@@ -43,7 +43,7 @@ impl BenchmarkCommand {
         match self.command {
             Subcommands::NewPayloadFcu(command) => command.execute(ctx).await,
             Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
-            Subcommands::GeneratePayload(command) => command.execute(ctx).await,
+            Subcommands::SendPayload(command) => command.execute(ctx).await,
         }
     }
 

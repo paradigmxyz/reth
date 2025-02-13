@@ -10,13 +10,13 @@ use alloy_rpc_types::{
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use delegate::delegate;
-use eyre::Result;
+use eyre::{OptionExt, Result};
 use op_alloy_rpc_types::Transaction as OpRpcTransaction;
 use reth_cli_runner::CliContext;
 use serde::{Deserialize, Serialize};
-use std::io::Read;
+use std::io::{Read, Write};
 
-/// Command for generating an `engine_newPayload` request data from an RPC block.
+/// Command for generating and sending an `engine_newPayload` request constructed from an RPC block.
 ///
 /// This command takes a JSON block input (either from a file or stdin) and generates
 /// an execution payload that can be used with the `engine_newPayloadV*` API.
@@ -27,22 +27,34 @@ pub struct Command {
     path: Option<String>,
 
     /// The engine RPC url to use.
-    #[arg(short, long, conflicts_with = "raw")]
+    #[arg(short, long)]
     rpc_url: Option<String>,
 
     /// The JWT secret to use.
-    #[arg(short, long, conflicts_with = "raw")]
+    #[arg(short, long)]
     jwt_secret: Option<String>,
-
-    /// Output the raw JSON payload, instead of `cast` command. When used with stdin this
-    /// can be very powerful, for example:
-    ///
-    /// `cast block latest -r https://reth-ethereum.ithaca.xyz/rpc --full -j | reth-bench generate-payload --raw | cast rpc --jwt-secret <JWT_SECRET> engine_newPayloadV3 --raw`
-    #[arg(long)]
-    raw: bool,
 
     #[arg(long, default_value_t = 3)]
     new_payload_version: u8,
+
+    /// The mode to use.
+    #[arg(long, value_enum, default_value = "execute")]
+    mode: Mode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum Mode {
+    /// Execute the `cast` command
+    ///
+    /// This works with blocks of any size, because it saves a temporary file with the
+    /// payload, and deletes it afterwards.
+    Execute,
+    /// Print the `cast` command
+    ///
+    /// Caution: this may not work with large blocks because of the command length limit.
+    Cast,
+    /// Print the JSON payload
+    Json,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,22 +164,43 @@ impl Command {
         ))?;
 
         // Print output
-        if self.raw {
-            println!("{json_request}");
-        } else {
-            let mut cmd = format!(
-                "cast rpc engine_newPayloadV{} --raw '{}'",
-                self.new_payload_version, json_request
-            );
+        match self.mode {
+            Mode::Execute => {
+                let mut command = std::process::Command::new("cast");
+                command.arg("rpc").arg("engine_newPayloadV3");
+                if let Some(rpc_url) = self.rpc_url {
+                    command.arg("--rpc-url").arg(rpc_url);
+                }
+                if let Some(secret) = self.jwt_secret {
+                    command.arg("--jwt-secret").arg(secret);
+                }
 
-            if let Some(rpc_url) = self.rpc_url {
-                cmd += &format!(" --rpc-url {}", rpc_url);
-            }
-            if let Some(secret) = self.jwt_secret {
-                cmd += &format!(" --jwt-secret {}", secret);
-            }
+                let mut process = command.stdin(std::process::Stdio::piped()).spawn()?;
 
-            println!("{cmd}");
+                let mut stdin = process.stdin.take().ok_or_eyre("stdin not available")?;
+                stdin.write_all(json_request.as_bytes())?;
+                drop(stdin);
+
+                process.wait()?;
+            }
+            Mode::Cast => {
+                let mut cmd = format!(
+                    "cast rpc engine_newPayloadV{} --raw '{}'",
+                    self.new_payload_version, json_request
+                );
+
+                if let Some(rpc_url) = self.rpc_url {
+                    cmd += &format!(" --rpc-url {}", rpc_url);
+                }
+                if let Some(secret) = self.jwt_secret {
+                    cmd += &format!(" --jwt-secret {}", secret);
+                }
+
+                println!("{cmd}");
+            }
+            Mode::Json => {
+                println!("{json_request}");
+            }
         }
 
         Ok(())
