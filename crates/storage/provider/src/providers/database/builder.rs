@@ -119,15 +119,14 @@ impl ReadOnlyConfig {
     /// ```text
     ///  -`datadir`
     ///    |__db
-    ///        |__static_files
+    ///    |__static_files
     /// ```
     ///
     /// By default this watches the static file directory for changes, see also
     /// [`StaticFileProvider::read_only`]
     pub fn from_datadir(datadir: impl AsRef<Path>) -> Self {
         let datadir = datadir.as_ref();
-        let db_path = datadir.join("db");
-        Self::from_db_dir(db_path)
+        Self::from_dirs(datadir.join("db"), datadir.join("static_files"))
     }
 
     /// Derives the [`ReadOnlyConfig`] from the database dir.
@@ -136,16 +135,35 @@ impl ReadOnlyConfig {
     ///
     /// ```text
     ///    - db
-    ///      |__static_files
+    ///    -static_files
     /// ```
     ///
     /// By default this watches the static file directory for changes, see also
     /// [`StaticFileProvider::read_only`]
+    ///
+    /// # Panics
+    ///
+    /// If the path does not exist
     pub fn from_db_dir(db_dir: impl AsRef<Path>) -> Self {
         let db_dir = db_dir.as_ref();
+        let static_files_dir = std::fs::canonicalize(db_dir)
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+            .join("static_files");
+        Self::from_dirs(db_dir, static_files_dir)
+    }
+
+    /// Creates the config for the given paths.
+    ///
+    ///
+    /// By default this watches the static file directory for changes, see also
+    /// [`StaticFileProvider::read_only`]
+    pub fn from_dirs(db_dir: impl AsRef<Path>, static_files_dir: impl AsRef<Path>) -> Self {
         Self {
-            static_files_dir: db_dir.join("static_files"),
-            db_dir: db_dir.into(),
+            static_files_dir: static_files_dir.as_ref().into(),
+            db_dir: db_dir.as_ref().into(),
             db_args: Default::default(),
             watch_static_files: true,
         }
@@ -247,8 +265,6 @@ impl<N, Val1, Val2> TypesAnd2<N, Val1, Val2> {
     {
         TypesAnd3::new(self.val_1, self.val_2, static_file_provider)
     }
-
-    // TODO: add helper fns for opening static file provider
 }
 
 /// This is staging type that contains the configured types and _three_ values.
