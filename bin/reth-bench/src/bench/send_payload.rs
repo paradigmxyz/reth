@@ -118,6 +118,14 @@ impl Encodable2718 for RpcTransaction {
 }
 
 impl Command {
+    /// Read input from either a file or stdin
+    fn read_input(&self) -> Result<String> {
+        Ok(match &self.path {
+            Some(path) => std::fs::read_to_string(path)?,
+            None => String::from_utf8(std::io::stdin().bytes().collect::<Result<Vec<_>, _>>()?)?,
+        })
+    }
+
     /// Load JWT secret from either a file or use the provided string directly
     fn load_jwt_secret(&self) -> Result<Option<String>> {
         match &self.jwt_secret {
@@ -125,8 +133,8 @@ impl Command {
                 // Try to read as file first
                 match std::fs::read_to_string(secret) {
                     Ok(contents) => Ok(Some(contents.trim().to_string())),
-                    Err(_) => Ok(Some(secret.clone())), /* If file read fails, use the string
-                                                         * directly */
+                    // If file read fails, use the string directly
+                    Err(_) => Ok(Some(secret.clone())),
                 }
             }
             None => Ok(None),
@@ -135,17 +143,11 @@ impl Command {
 
     /// Execute the generate payload command
     pub async fn execute(self, _ctx: CliContext) -> Result<()> {
-        // Load JWT secret first
-        let jwt_secret = self.load_jwt_secret()?;
+        // Load block
+        let block_json = self.read_input()?;
 
-        // Read from file or stdin
-        let block_json = if let Some(path) = &self.path {
-            std::fs::read_to_string(path)?
-        } else {
-            let mut buffer = String::new();
-            std::io::stdin().read_to_string(&mut buffer)?;
-            buffer
-        };
+        // Load JWT secret
+        let jwt_secret = self.load_jwt_secret()?;
 
         // Parse the block
         let block: RpcBlock<RpcTransaction> = serde_json::from_str(&block_json)?;
