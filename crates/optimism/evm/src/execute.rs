@@ -434,7 +434,7 @@ mod tests {
             ))
             .unwrap();
 
-        let receipts = output.receipts;
+        let receipts = &output.receipts;
         let tx_receipt = &receipts[0];
         let deposit_receipt = &receipts[1];
 
@@ -510,7 +510,7 @@ mod tests {
             ))
             .expect("Executing a block while canyon is active should not fail");
 
-        let receipts = output.receipts;
+        let receipts = &output.receipts;
         let tx_receipt = &receipts[0];
         let deposit_receipt = &receipts[1];
 

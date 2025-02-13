@@ -13,7 +13,7 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
+use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
@@ -184,10 +184,7 @@ where
             return Err(ValidationApiError::Blacklist(account))
         }
 
-        self.consensus.validate_block_post_execution(
-            &block,
-            PostExecutionInput::new(&output.receipts, &output.requests),
-        )?;
+        self.consensus.validate_block_post_execution(&block, &output)?;
 
         self.ensure_payment(&block, &output, &message)?;
 
