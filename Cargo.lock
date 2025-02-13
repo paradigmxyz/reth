@@ -8361,6 +8361,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-trie",
  "derive_more",
  "once_cell",
  "op-alloy-consensus",

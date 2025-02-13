@@ -27,6 +27,7 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
+alloy-trie.workspace = true
 
 # op
 op-alloy-rpc-types.workspace = true
@@ -58,6 +59,7 @@ std = [
     "reth-primitives-traits/std",
     "reth-optimism-forks/std",
     "alloy-consensus/std",
+    "alloy-trie/std",
     "once_cell/std",
     "derive_more/std",
     "reth-network-peers/std",

@@ -19,10 +19,11 @@ mod op_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::{constants::DEV_GENESIS_HASH, Header};
+use alloy_consensus::{constants::DEV_GENESIS_HASH, Header, EMPTY_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
+use alloy_trie::root::state_root_ref_unhashed;
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 pub use constants::{
@@ -201,7 +202,7 @@ impl OpChainSpec {
 
     fn get_or_init_sealed_genesis_header(&self) -> &SealedHeader {
         self.inner.genesis_header.get_or_init(|| {
-            let header = self.inner.make_genesis_header();
+            let header = self.make_genesis_header();
             if self.is_optimism_mainnet() {
                 // for OP mainnet we have to do this because the genesis header can't be
                 // properly computed from the genesis.json file due to OVM history
@@ -212,6 +213,54 @@ impl OpChainSpec {
                 SealedHeader::seal_slow(header)
             }
         })
+    }
+
+    /// Assembles genesis header from genesis file.
+    fn make_genesis_header(&self) -> Header {
+        // If London is activated at genesis, we set the initial base fee as per EIP-1559.
+        let base_fee_per_gas = self.initial_base_fee();
+
+        // If shanghai is activated, initialize the header with an empty withdrawals hash, and
+        // empty withdrawals list.
+        let withdrawals_root = self
+            .fork(EthereumHardfork::Shanghai)
+            .active_at_timestamp(self.genesis.timestamp)
+            .then_some(EMPTY_ROOT_HASH);
+
+        // If Cancun is activated at genesis, we set:
+        // * parent beacon block root to 0x0
+        // * blob gas used to provided genesis or 0x0
+        // * excess blob gas to provided genesis or 0x0
+        let (parent_beacon_block_root, blob_gas_used, excess_blob_gas) =
+            if self.is_cancun_active_at_timestamp(self.genesis.timestamp) {
+                let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
+                let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
+                (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
+            } else {
+                (None, None, None)
+            };
+
+        // If Prague is activated at genesis we set requests root to an empty trie root.
+        let requests_hash =
+            self.is_prague_active_at_timestamp(self.genesis.timestamp).then_some(EMPTY_ROOT_HASH);
+
+        Header {
+            gas_limit: self.genesis.gas_limit,
+            difficulty: self.genesis.difficulty,
+            nonce: self.genesis.nonce.into(),
+            extra_data: self.genesis.extra_data.clone(),
+            state_root: state_root_ref_unhashed(&self.genesis.alloc),
+            timestamp: self.genesis.timestamp,
+            mix_hash: self.genesis.mix_hash,
+            beneficiary: self.genesis.coinbase,
+            base_fee_per_gas,
+            withdrawals_root,
+            parent_beacon_block_root,
+            blob_gas_used,
+            excess_blob_gas,
+            requests_hash,
+            ..Default::default()
+        }
     }
 }
 

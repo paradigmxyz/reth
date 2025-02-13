@@ -303,7 +303,7 @@ impl ChainSpec {
     }
 
     /// Assembles genesis header from genesis file.
-    pub fn make_genesis_header(&self) -> Header {
+    fn make_genesis_header(&self) -> Header {
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
         let base_fee_per_gas = self.initial_base_fee();
 
