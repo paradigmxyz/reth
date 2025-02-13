@@ -144,6 +144,7 @@ impl Command {
         let blob_versioned_hashes = transactions
             .iter()
             .filter_map(|tx| tx.blob_versioned_hashes().map(|v| v.to_vec()))
+            .flatten()
             .collect::<Vec<_>>();
 
         // Convert to execution payload
