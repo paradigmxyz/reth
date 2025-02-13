@@ -21,7 +21,7 @@ alloy-rpc-types-eth.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives-traits.workspace = true
-reth-storage-api = { workspace = true, features = ["std"] }
+reth-storage-api.workspace = true
 reth-transaction-pool.workspace = true
 
 # revm
