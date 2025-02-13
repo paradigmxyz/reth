@@ -20,13 +20,13 @@ use reth_ethereum::{
 // These abstractions do not include any caching and the user is responsible for doing that.
 // Other parts of the code which include caching are parts of the `EthApi` abstraction.
 fn main() -> eyre::Result<()> {
-    // Opens a RO handle to the database file.
-    let db_path = std::env::var("RETH_DB_PATH")?;
+    // The path to data directory, e.g. "~/.local/reth/share/mainnet"
+    let datadir = std::env::var("RETH_DATADIR")?;
 
-    // Instantiate a provider factory for Ethereum mainnet using the provided DB path.
+    // Instantiate a provider factory for Ethereum mainnet using the provided datadir path.
     let spec = ChainSpecBuilder::mainnet().build();
     let factory = EthereumNode::provider_factory_builder()
-        .open_read_only(spec.into(), ReadOnlyConfig::from_db_dir(db_path))?;
+        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
