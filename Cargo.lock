@@ -2195,7 +2195,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2783,6 +2783,7 @@ dependencies = [
 [[package]]
 name = "did"
 version = "0.42.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1132_block_validation#f2f6650129275cabe67df0743cf344f1752e8e30"
 dependencies = [
  "alloy",
  "bincode",
@@ -3137,6 +3138,7 @@ dependencies = [
 [[package]]
 name = "ethereum-json-rpc-client"
 version = "0.42.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1132_block_validation#f2f6650129275cabe67df0743cf344f1752e8e30"
 dependencies = [
  "alloy",
  "anyhow",
@@ -3222,6 +3224,7 @@ dependencies = [
 [[package]]
 name = "evm-canister-client"
 version = "0.42.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1132_block_validation#f2f6650129275cabe67df0743cf344f1752e8e30"
 dependencies = [
  "candid",
  "did",
@@ -4444,7 +4447,7 @@ dependencies = [
 [[package]]
 name = "ic-canister-client"
 version = "0.23.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#85f5619ec74fab01090fb66dc391ec60d3e28895"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#8e7672dbc3c21376051e9150d4ff982b3effe009"
 dependencies = [
  "async-trait",
  "candid",
@@ -4542,7 +4545,7 @@ dependencies = [
 [[package]]
 name = "ic-crypto-getrandom-for-wasm"
 version = "0.23.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#85f5619ec74fab01090fb66dc391ec60d3e28895"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#8e7672dbc3c21376051e9150d4ff982b3effe009"
 dependencies = [
  "getrandom 0.2.15",
 ]
@@ -4550,7 +4553,7 @@ dependencies = [
 [[package]]
 name = "ic-exports"
 version = "0.23.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#85f5619ec74fab01090fb66dc391ec60d3e28895"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#8e7672dbc3c21376051e9150d4ff982b3effe009"
 dependencies = [
  "candid",
  "ic-cdk",
@@ -4564,7 +4567,7 @@ dependencies = [
 [[package]]
 name = "ic-kit"
 version = "0.23.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#85f5619ec74fab01090fb66dc391ec60d3e28895"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#8e7672dbc3c21376051e9150d4ff982b3effe009"
 dependencies = [
  "candid",
  "futures",
@@ -4577,7 +4580,7 @@ dependencies = [
 [[package]]
 name = "ic-log"
 version = "0.23.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#85f5619ec74fab01090fb66dc391ec60d3e28895"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#8e7672dbc3c21376051e9150d4ff982b3effe009"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -4602,7 +4605,7 @@ dependencies = [
 [[package]]
 name = "ic-stable-structures"
 version = "0.23.0"
-source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#85f5619ec74fab01090fb66dc391ec60d3e28895"
+source = "git+https://github.com/bitfinity-network/canister-sdk?tag=v0.23.x#8e7672dbc3c21376051e9150d4ff982b3effe009"
 dependencies = [
  "candid",
  "ic-stable-structures 0.6.7",
@@ -5405,7 +5408,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -12013,7 +12016,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69fff37da548239c3bf9e64a12193d261e8b22b660991c6fd2df057c168f435f"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -12454,7 +12457,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -12948,11 +12951,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "eth-signer"
-version = "0.42.0"
-
-[[patch.unused]]
-name = "signature-verification-canister-client"
-version = "0.42.0"
