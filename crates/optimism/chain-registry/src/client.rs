@@ -5,7 +5,7 @@ use reth_fs_util as fs;
 use reth_fs_util::Result;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 use zstd::{dict::DecoderDictionary, stream::read::Decoder};
 
 /// Directory manager that handles caching and downloading of genesis files
@@ -90,8 +90,8 @@ impl SuperChainRegistryManager {
         let decoder = Decoder::with_prepared_dictionary(&compressed_bytes[..], &dictionary)
             .context("Failed to create decoder with dictionary")?;
 
-        info!("Parsing JSON...");
-        let json: Value = serde_json::from_reader(decoder).context("Failed to parse JSON")?;
+        let json: Value = serde_json::from_reader(decoder)
+            .with_context(|| format!("Failed to parse JSON: {path:?}"))?;
 
         Ok(json)
     }
