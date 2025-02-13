@@ -31,6 +31,7 @@ std = [
     "alloy-consensus/std",
     "reth-primitives-traits/std",
     "derive_more/std",
+    "reth-execution-types/std",
 ]
 test-utils = [
     "reth-primitives-traits/test-utils",

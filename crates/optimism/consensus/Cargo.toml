@@ -55,6 +55,7 @@ std = [
     "alloy-consensus/std",
     "alloy-trie/std",
     "op-alloy-consensus/std",
+    "reth-execution-types/std",
 ]
 optimism = [
     "reth-optimism-primitives/optimism",
