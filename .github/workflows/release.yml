@@ -135,6 +135,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
 
   draft-release:
     name: draft release

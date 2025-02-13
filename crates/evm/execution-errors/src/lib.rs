@@ -17,7 +17,6 @@ use alloc::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
-use reth_consensus::ConsensusError;
 use reth_storage_errors::provider::ProviderError;
 use thiserror::Error;
 
@@ -109,9 +108,6 @@ pub enum BlockExecutionError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-    /// Consensus error, transparently wrapping [`ConsensusError`]
-    #[error(transparent)]
-    Consensus(#[from] ConsensusError),
     /// Internal, i.e. non consensus or validation related Block Executor Errors
     #[error(transparent)]
     Internal(#[from] InternalBlockExecutionError),

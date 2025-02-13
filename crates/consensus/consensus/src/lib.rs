@@ -13,8 +13,8 @@ extern crate alloc;
 
 use alloc::{fmt::Debug, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
-use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
+use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     constants::MINIMUM_GAS_LIMIT, transaction::error::InvalidTransactionError, Block, GotExpected,
     GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
@@ -26,22 +26,6 @@ pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking consensus
 pub mod test_utils;
-
-/// Post execution input passed to [`FullConsensus::validate_block_post_execution`].
-#[derive(Debug)]
-pub struct PostExecutionInput<'a, R> {
-    /// Receipts of the block.
-    pub receipts: &'a [R],
-    /// EIP-7685 requests of the block.
-    pub requests: &'a Requests,
-}
-
-impl<'a, R> PostExecutionInput<'a, R> {
-    /// Creates a new instance of `PostExecutionInput`.
-    pub const fn new(receipts: &'a [R], requests: &'a Requests) -> Self {
-        Self { receipts, requests }
-    }
-}
 
 /// [`Consensus`] implementation which knows full node primitives and is able to validation block's
 /// execution outcome.
@@ -56,7 +40,7 @@ pub trait FullConsensus<N: NodePrimitives>: AsConsensus<N::Block> {
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
-        input: PostExecutionInput<'_, N::Receipt>,
+        result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError>;
 }
 

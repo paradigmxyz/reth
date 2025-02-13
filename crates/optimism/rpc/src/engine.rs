@@ -3,15 +3,15 @@
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
+    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_chainspec::EthereumHardforks;
-use reth_node_api::{EngineTypes, EngineValidator, ExecutionData};
+use reth_node_api::{EngineTypes, EngineValidator};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::{EngineApi, EngineApiServer};

@@ -288,6 +288,10 @@ where
         &mut self.state
     }
 
+    fn into_state(self) -> revm::db::State<Self::DB> {
+        self.state
+    }
+
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
     }
@@ -325,7 +329,7 @@ mod tests {
     };
     use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
+    use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::Account;
@@ -412,7 +416,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {
@@ -420,8 +424,8 @@ mod tests {
         });
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
-        executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+        let output = executor
+            .execute(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
@@ -430,9 +434,9 @@ mod tests {
             ))
             .unwrap();
 
-        let receipts = executor.receipts();
-        let tx_receipt = &receipts[0][0];
-        let deposit_receipt = &receipts[0][1];
+        let receipts = &output.receipts;
+        let tx_receipt = &receipts[0];
+        let deposit_receipt = &receipts[1];
 
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
         // deposit_nonce is present only in deposit transactions
@@ -488,7 +492,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {
@@ -496,8 +500,8 @@ mod tests {
         });
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
-        executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+        let output = executor
+            .execute(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
@@ -506,9 +510,9 @@ mod tests {
             ))
             .expect("Executing a block while canyon is active should not fail");
 
-        let receipts = executor.receipts();
-        let tx_receipt = &receipts[0][0];
-        let deposit_receipt = &receipts[0][1];
+        let receipts = &output.receipts;
+        let tx_receipt = &receipts[0];
+        let deposit_receipt = &receipts[1];
 
         // deposit_receipt_version is set to 1 for post canyon deposit transactions
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
