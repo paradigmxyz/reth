@@ -2511,6 +2511,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delegate"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "297806318ef30ad066b15792a8372858020ae3ca2e414ee6c2133b1eb9e9e945"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
 name = "der"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6638,12 +6649,14 @@ dependencies = [
 name = "reth-bench"
 version = "1.2.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-json-rpc",
  "alloy-primitives",
  "alloy-provider",
  "alloy-pubsub",
  "alloy-rpc-client",
+ "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "alloy-transport",
  "alloy-transport-http",
@@ -6652,17 +6665,21 @@ dependencies = [
  "async-trait",
  "clap",
  "csv",
+ "delegate",
  "eyre",
  "futures",
+ "op-alloy-rpc-types",
  "reqwest",
  "reth-cli-runner",
  "reth-cli-util",
+ "reth-fs-util",
  "reth-node-api",
  "reth-node-core",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-tracing",
  "serde",
+ "serde_json",
  "thiserror 2.0.11",
  "tokio",
  "tower 0.4.13",
