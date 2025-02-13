@@ -348,8 +348,8 @@ reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-optimism-evm = { path = "crates/optimism/evm" }
-reth-execution-errors = { path = "crates/evm/execution-errors" }
-reth-execution-types = { path = "crates/evm/execution-types" }
+reth-execution-errors = { path = "crates/evm/execution-errors", default-features = false }
+reth-execution-types = { path = "crates/evm/execution-types", default-features = false }
 reth-exex = { path = "crates/exex/exex" }
 reth-exex-test-utils = { path = "crates/exex/test-utils" }
 reth-exex-types = { path = "crates/exex/types" }
@@ -394,7 +394,7 @@ reth-primitives = { path = "crates/primitives", default-features = false }
 reth-primitives-traits = { path = "crates/primitives-traits", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
-reth-prune-types = { path = "crates/prune/types" }
+reth-prune-types = { path = "crates/prune/types", default-features = false }
 reth-revm = { path = "crates/revm", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
@@ -410,9 +410,9 @@ reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types", default-features = false }
 reth-static-file = { path = "crates/static-file/static-file" }
-reth-static-file-types = { path = "crates/static-file/types" }
+reth-static-file-types = { path = "crates/static-file/types", default-features = false }
 reth-storage-api = { path = "crates/storage/storage-api" }
-reth-storage-errors = { path = "crates/storage/errors" }
+reth-storage-errors = { path = "crates/storage/errors", default-features = false }
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
@@ -436,7 +436,7 @@ alloy-chains = { version = "0.1.32", default-features = false }
 alloy-dyn-abi = "0.8.20"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
 alloy-primitives = { version = "0.8.20", default-features = false, features = ["map-foldhash"] }
-alloy-rlp = { version = "0.3.10", default-features = false }
+alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-types = "0.8.20"
 alloy-trie = { version = "0.7", default-features = false }
 
