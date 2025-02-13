@@ -19,7 +19,7 @@ reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-storage-api = { workspace = true, features = ["std"] }
+reth-storage-api.workspace = true
 reth-tasks.workspace = true
 
 # optional deps for the test-utils feature

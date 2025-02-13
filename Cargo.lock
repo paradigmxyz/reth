@@ -9445,7 +9445,6 @@ dependencies = [
  "reth-trie",
  "reth-trie-db",
  "revm",
- "tokio",
 ]
 
 [[package]]
