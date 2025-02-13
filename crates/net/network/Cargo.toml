@@ -29,7 +29,7 @@ reth-eth-wire-types.workspace = true
 reth-ecies.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["std"] }
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
