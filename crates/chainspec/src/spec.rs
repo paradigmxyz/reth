@@ -1562,7 +1562,7 @@ Post-merge hard forks (timestamp based):
             &DEV,
             &[(
                 Head { number: 0, ..Default::default() },
-                ForkId { hash: ForkHash([0x45, 0xb8, 0x36, 0x12]), next: 0 },
+                ForkId { hash: ForkHash([0xd5, 0xbc, 0xa3, 0xa4]), next: 0 },
             )],
         )
     }
