@@ -129,12 +129,12 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Creates a new `ExecutionOutcome` from a single block execution result.
-    pub fn single(block_number: u64, result: BlockExecutionOutput<T>) -> Self {
+    pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
         Self {
-            bundle: result.state,
-            receipts: vec![result.receipts],
+            bundle: output.state,
+            receipts: vec![output.result.receipts],
             first_block: block_number,
-            requests: vec![result.requests],
+            requests: vec![output.result.requests],
         }
     }
 
@@ -396,13 +396,8 @@ impl ExecutionOutcome {
 }
 
 impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
-    fn from(value: (BlockExecutionOutput<T>, BlockNumber)) -> Self {
-        Self {
-            bundle: value.0.state,
-            receipts: vec![value.0.receipts],
-            first_block: value.1,
-            requests: vec![value.0.requests],
-        }
+    fn from((output, block_number): (BlockExecutionOutput<T>, BlockNumber)) -> Self {
+        Self::single(block_number, output)
     }
 }
 
