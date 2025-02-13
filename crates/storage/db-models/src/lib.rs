@@ -20,3 +20,6 @@ pub use blocks::{StaticFileBlockWithdrawals, StoredBlockBodyIndices, StoredBlock
 /// Client Version
 pub mod client_version;
 pub use client_version::ClientVersion;
+
+/// Alloc crate from core for String
+extern crate alloc;

@@ -1,7 +1,6 @@
 //! Client version model.
 
 use serde::{Deserialize, Serialize};
-extern crate alloc;
 use alloc::string::String;
 
 /// Client version that accessed the database.
