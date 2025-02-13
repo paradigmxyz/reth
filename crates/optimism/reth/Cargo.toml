@@ -38,12 +38,12 @@ reth-optimism-rpc = { workspace = true, optional = true }
 [features]
 default = ["std"]
 std = [
-	"reth-chainspec/std",
-	"reth-optimism-primitives/std",
-	"reth-primitives-traits/std",
-	"reth-consensus?/std",
-	"reth-consensus-common?/std",
-	"reth-storage-api?/std",
+    "reth-chainspec/std",
+    "reth-optimism-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-consensus?/std",
+    "reth-consensus-common?/std",
+    "reth-storage-api?/std",
 ]
 arbitrary = [
     "std",
