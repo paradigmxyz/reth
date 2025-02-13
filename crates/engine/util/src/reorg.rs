@@ -293,14 +293,10 @@ where
     let mut evm = evm_config.evm_for_block(&mut state, &reorg_target.header);
 
     // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
+    let mut system_caller = SystemCaller::new(chain_spec.clone());
 
-    system_caller.apply_beacon_root_contract_call(
-        reorg_target.timestamp,
-        reorg_target.number,
-        reorg_target.parent_beacon_block_root,
-        &mut evm,
-    )?;
+    system_caller
+        .apply_beacon_root_contract_call(reorg_target.parent_beacon_block_root, &mut evm)?;
 
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;

@@ -1,6 +1,6 @@
 //! System contract call functions.
 
-use crate::{ConfigureEvm, Database, Evm, EvmEnv};
+use crate::Evm;
 use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::BlockHeader;
 use alloy_eips::{
@@ -46,18 +46,17 @@ impl OnStateHook for NoopHook {
 ///
 /// This can be used to chain system transaction calls.
 #[allow(missing_debug_implementations)]
-pub struct SystemCaller<EvmConfig, Chainspec> {
-    evm_config: EvmConfig,
+pub struct SystemCaller<Chainspec> {
     chain_spec: Arc<Chainspec>,
     /// Optional hook to be called after each state change.
     hook: Option<Box<dyn OnStateHook>>,
 }
 
-impl<EvmConfig, Chainspec> SystemCaller<EvmConfig, Chainspec> {
+impl<Chainspec> SystemCaller<Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
-    pub const fn new(evm_config: EvmConfig, chain_spec: Arc<Chainspec>) -> Self {
-        Self { evm_config, chain_spec, hook: None }
+    pub const fn new(chain_spec: Arc<Chainspec>) -> Self {
+        Self { chain_spec, hook: None }
     }
 
     /// Installs a custom hook to be called after each state change.
@@ -70,29 +69,18 @@ impl<EvmConfig, Chainspec> SystemCaller<EvmConfig, Chainspec> {
     pub fn finish(self) {}
 }
 
-impl<EvmConfig, Chainspec> SystemCaller<EvmConfig, Chainspec>
+impl<Chainspec> SystemCaller<Chainspec>
 where
-    EvmConfig: ConfigureEvm,
     Chainspec: EthereumHardforks,
 {
     /// Apply pre execution changes.
     pub fn apply_pre_execution_changes(
         &mut self,
-        header: &EvmConfig::Header,
+        header: impl BlockHeader,
         evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
     ) -> Result<(), BlockExecutionError> {
-        self.apply_blockhashes_contract_call(
-            header.timestamp(),
-            header.number(),
-            header.parent_hash(),
-            evm,
-        )?;
-        self.apply_beacon_root_contract_call(
-            header.timestamp(),
-            header.number(),
-            header.parent_beacon_block_root(),
-            evm,
-        )?;
+        self.apply_blockhashes_contract_call(header.parent_hash(), evm)?;
+        self.apply_beacon_root_contract_call(header.parent_beacon_block_root(), evm)?;
 
         Ok(())
     }
@@ -120,44 +108,13 @@ where
     }
 
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
-    pub fn pre_block_blockhashes_contract_call<DB>(
-        &mut self,
-        db: &mut DB,
-        evm_env: &EvmEnv<EvmConfig::Spec>,
-        parent_block_hash: B256,
-    ) -> Result<(), BlockExecutionError>
-    where
-        DB: Database + DatabaseCommit,
-        DB::Error: Display,
-    {
-        let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
-
-        self.apply_blockhashes_contract_call(
-            evm_env.block_env.timestamp.to(),
-            evm_env.block_env.number.to(),
-            parent_block_hash,
-            &mut evm,
-        )?;
-
-        Ok(())
-    }
-
-    /// Applies the pre-block call to the EIP-2935 blockhashes contract.
     pub fn apply_blockhashes_contract_call(
         &mut self,
-        timestamp: u64,
-        block_number: u64,
         parent_block_hash: B256,
         evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
     ) -> Result<(), BlockExecutionError> {
-        let result_and_state = eip2935::transact_blockhashes_contract_call(
-            &self.chain_spec,
-            timestamp,
-            block_number,
-            parent_block_hash,
-            evm,
-        )?;
+        let result_and_state =
+            eip2935::transact_blockhashes_contract_call(&self.chain_spec, parent_block_hash, evm)?;
 
         if let Some(res) = result_and_state {
             if let Some(ref mut hook) = self.hook {
@@ -165,30 +122,6 @@ where
             }
             evm.db_mut().commit(res.state);
         }
-
-        Ok(())
-    }
-
-    /// Applies the pre-block call to the EIP-4788 beacon root contract.
-    pub fn pre_block_beacon_root_contract_call<DB>(
-        &mut self,
-        db: &mut DB,
-        evm_env: &EvmEnv<EvmConfig::Spec>,
-        parent_beacon_block_root: Option<B256>,
-    ) -> Result<(), BlockExecutionError>
-    where
-        DB: Database + DatabaseCommit,
-        DB::Error: Display,
-    {
-        let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
-
-        self.apply_beacon_root_contract_call(
-            evm_env.block_env.timestamp.to(),
-            evm_env.block_env.number.to(),
-            parent_beacon_block_root,
-            &mut evm,
-        )?;
 
         Ok(())
     }
@@ -196,16 +129,12 @@ where
     /// Applies the pre-block call to the EIP-4788 beacon root contract.
     pub fn apply_beacon_root_contract_call(
         &mut self,
-        timestamp: u64,
-        block_number: u64,
-        parent_block_hash: Option<B256>,
+        parent_beacon_block_root: Option<B256>,
         evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
     ) -> Result<(), BlockExecutionError> {
         let result_and_state = eip4788::transact_beacon_root_contract_call(
             &self.chain_spec,
-            timestamp,
-            block_number,
-            parent_block_hash,
+            parent_beacon_block_root,
             evm,
         )?;
 
@@ -217,24 +146,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Applies the post-block call to the EIP-7002 withdrawal request contract.
-    pub fn post_block_withdrawal_requests_contract_call<DB>(
-        &mut self,
-        db: &mut DB,
-        evm_env: &EvmEnv<EvmConfig::Spec>,
-    ) -> Result<Bytes, BlockExecutionError>
-    where
-        DB: Database + DatabaseCommit,
-        DB::Error: Display,
-    {
-        let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
-
-        let result = self.apply_withdrawal_requests_contract_call(&mut evm)?;
-
-        Ok(result)
     }
 
     /// Applies the post-block call to the EIP-7002 withdrawal request contract.
@@ -250,23 +161,6 @@ where
         evm.db_mut().commit(result_and_state.state);
 
         eip7002::post_commit(result_and_state.result)
-    }
-
-    /// Applies the post-block call to the EIP-7251 consolidation requests contract.
-    pub fn post_block_consolidation_requests_contract_call<DB>(
-        &mut self,
-        db: &mut DB,
-        evm_env: &EvmEnv<EvmConfig::Spec>,
-    ) -> Result<Bytes, BlockExecutionError>
-    where
-        DB: Database + DatabaseCommit,
-    {
-        let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
-
-        let res = self.apply_consolidation_requests_contract_call(&mut evm)?;
-
-        Ok(res)
     }
 
     /// Applies the post-block call to the EIP-7251 consolidation requests contract.
