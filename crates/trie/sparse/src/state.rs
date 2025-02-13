@@ -174,10 +174,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         let trie = self.state.reveal_root_with_provider(
             self.provider_factory.account_node_provider(),
             root_node,
-            TrieMasks {
-                hash_mask: None,
-                tree_mask: None,
-            },
+            TrieMasks { hash_mask: None, tree_mask: None },
             self.retain_updates,
         )?;
 
@@ -295,8 +292,14 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     self.provider_factory.storage_node_provider(account),
                     root_node,
                     TrieMasks {
-                        hash_mask: storage_subtree.branch_node_hash_masks.get(&Nibbles::default()).copied(),
-                        tree_mask: storage_subtree.branch_node_tree_masks.get(&Nibbles::default()).copied(),
+                        hash_mask: storage_subtree
+                            .branch_node_hash_masks
+                            .get(&Nibbles::default())
+                            .copied(),
+                        tree_mask: storage_subtree
+                            .branch_node_tree_masks
+                            .get(&Nibbles::default())
+                            .copied(),
                     },
                     self.retain_updates,
                 )?;
@@ -319,7 +322,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     };
 
                     trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
-                    trie.reveal_node(path.clone(), node, TrieMasks{hash_mask, tree_mask})?;
+                    trie.reveal_node(path.clone(), node, TrieMasks { hash_mask, tree_mask })?;
 
                     // Track the revealed path.
                     revealed_nodes.insert(path);
@@ -405,7 +408,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         storage_trie_entry
                             .as_revealed_mut()
                             .ok_or(SparseTrieErrorKind::Blind)?
-                            .reveal_node(path.clone(), trie_node, TrieMasks { hash_mask: None, tree_mask: None })?;
+                            .reveal_node(
+                                path.clone(),
+                                trie_node,
+                                TrieMasks { hash_mask: None, tree_mask: None },
+                            )?;
                     }
 
                     // Track the revealed path.
