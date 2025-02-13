@@ -2,6 +2,7 @@
 
 pub mod canyon;
 pub mod isthmus;
+pub mod shanghai;
 
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;

@@ -10,7 +10,7 @@ use revm::db::BundleAccount;
 
 /// Verifies that `withdrawals_root` (i.e. `l2tol1-msg-passer` storage root since Isthmus) field is
 /// set in block header.
-pub fn verify_withdrawals_storage_root_is_some<H: BlockHeader + fmt::Debug>(
+pub fn ensure_withdrawals_storage_root_is_some<H: BlockHeader + fmt::Debug>(
     header: H,
 ) -> Result<(), OpConsensusError> {
     header.withdrawals_root().ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;

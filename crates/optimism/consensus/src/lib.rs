@@ -36,7 +36,8 @@ pub use proof::calculate_receipt_root_no_memo_optimism;
 
 pub mod validation;
 pub use validation::{
-    canyon, decode_holocene_base_fee, isthmus, next_block_base_fee, validate_block_post_execution,
+    canyon, decode_holocene_base_fee, isthmus, next_block_base_fee, shanghai,
+    validate_block_post_execution,
 };
 
 pub mod error;
@@ -103,7 +104,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
 
         // Check empty shanghai-withdrawals
         if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
-            canyon::verify_empty_shanghai_withdrawals(block.body()).map_err(|err| {
+            shanghai::ensure_empty_shanghai_withdrawals(block.body()).map_err(|err| {
                 trace!(target: "op::consensus",
                     block_number=block.number(),
                     %err,
@@ -125,7 +126,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
         // Check withdrawals root field in header
         if self.chain_spec.is_isthmus_active_at_timestamp(block.timestamp()) {
             // storage root of withdrawals pre-deploy is verified post-execution
-            isthmus::verify_withdrawals_storage_root_is_some(block.header()).map_err(|err| {
+            isthmus::ensure_withdrawals_storage_root_is_some(block.header()).map_err(|err| {
                 trace!(target: "op::consensus",
                     block_number=block.number(),
                     %err,
@@ -136,7 +137,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
             })?
         } else {
             // canyon is active, else would have returned already
-            canyon::verify_empty_withdrawals_root(block.header())?
+            canyon::ensure_empty_withdrawals_root(block.header())?
         }
 
         Ok(())
