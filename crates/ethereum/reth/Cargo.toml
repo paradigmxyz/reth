@@ -44,6 +44,7 @@ std = [
     "reth-chainspec/std",
     "reth-ethereum-primitives/std",
     "reth-primitives-traits/std",
+    "reth-storage-api/std",
     "reth-consensus?/std",
     "reth-consensus-common?/std",
     "alloy-rpc-types-eth?/std",

@@ -19,7 +19,7 @@ reth-primitives-traits = { workspace = true, features = ["rayon"] }
 reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-storage-errors.workspace = true
-reth-storage-api.workspace = true
+reth-storage-api = { workspace = true, features = ["std"] }
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
