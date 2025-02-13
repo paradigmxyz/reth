@@ -67,4 +67,5 @@ std = [
     "reth-trie-common/std",
     "reth-ethereum-primitives/std",
     "reth-execution-errors/std",
+    "derive_more/std",
 ]
