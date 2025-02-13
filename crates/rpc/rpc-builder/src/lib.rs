@@ -17,7 +17,7 @@
 //!
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
-//! use reth_engine_primitives::{ExecutionData, PayloadValidator};
+//! use reth_engine_primitives::PayloadValidator;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -87,7 +87,7 @@
 //!
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
-//! use reth_engine_primitives::{ExecutionData, PayloadValidator};
+//! use reth_engine_primitives::PayloadValidator;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -641,7 +641,7 @@ where
     ///
     /// ```no_run
     /// use reth_consensus::noop::NoopConsensus;
-    /// use reth_engine_primitives::{ExecutionData, PayloadValidator};
+    /// use reth_engine_primitives::PayloadValidator;
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;

@@ -7,12 +7,12 @@ use std::{
 };
 
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
-use alloy_rpc_types::engine::ClientVersionV1;
+use alloy_rpc_types::engine::{ClientVersionV1, ExecutionData};
 use futures::TryFutureExt;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, EngineValidator, ExecutionData, FullNodeComponents,
-    NodeAddOns, NodeTypes, NodeTypesWithEngine,
+    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, NodeAddOns,
+    NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,

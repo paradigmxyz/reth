@@ -8758,7 +8758,6 @@ version = "1.2.0"
 dependencies = [
  "alloy-rpc-types",
  "reth-chainspec",
- "reth-engine-primitives",
  "reth-primitives",
  "reth-primitives-traits",
 ]

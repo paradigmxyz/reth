@@ -9,18 +9,16 @@ use alloy_eips::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields, TransitionConfiguration,
+    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload,
+    ExecutionPayloadBodiesV1, ExecutionPayloadBodyV1, ExecutionPayloadInputV2,
+    ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields, TransitionConfiguration,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use parking_lot::Mutex;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
-use reth_engine_primitives::{
-    BeaconConsensusEngineHandle, EngineTypes, EngineValidator, ExecutionData,
-};
+use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes, EngineValidator};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
