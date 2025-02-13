@@ -29,4 +29,5 @@ std = [
     "alloy-rlp/std",
     "thiserror/std",
     "nybbles/std",
+    "reth-storage-errors/std",
 ]

@@ -11,11 +11,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
-reth-trie-common = { workspace = true, optional = true }
-reth-trie.workspace = true
+reth-trie-common.workspace = true
 
 revm.workspace = true
 
@@ -31,7 +30,6 @@ serde_with = { workspace = true, optional = true }
 arbitrary.workspace = true
 bincode.workspace = true
 rand.workspace = true
-reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-ethereum-primitives.workspace = true
 
 [features]
@@ -45,13 +43,11 @@ serde = [
     "alloy-primitives/serde",
     "reth-primitives-traits/serde",
     "alloy-consensus/serde",
-    "reth-trie/serde",
-    "reth-trie-common?/serde",
+    "reth-trie-common/serde",
 ]
 serde-bincode-compat = [
     "serde",
     "reth-trie-common/serde-bincode-compat",
-    "reth-primitives/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
     "serde_with",
     "alloy-eips/serde-bincode-compat",
@@ -59,7 +55,6 @@ serde-bincode-compat = [
     "reth-ethereum-primitives/serde-bincode-compat",
 ]
 std = [
-    "reth-primitives/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "revm/std",
@@ -67,6 +62,7 @@ std = [
     "reth-primitives-traits/std",
     "alloy-consensus/std",
     "serde_with?/std",
-    "reth-trie-common?/std",
+    "reth-trie-common/std",
     "reth-ethereum-primitives/std",
+    "reth-execution-errors/std",
 ]
