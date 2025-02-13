@@ -61,4 +61,5 @@ std = [
     "reth-primitives-traits/std",
     "reth-chainspec/std",
     "derive_more/std",
+    "reth-execution-types/std",
 ]

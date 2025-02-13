@@ -3,7 +3,7 @@ use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
-use reth_trie::{HashedPostState, KeyHasher};
+use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
@@ -33,7 +33,7 @@ impl ChangedAccount {
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ExecutionOutcome<T = reth_primitives::Receipt> {
+pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// Bundle state with reverts.
     pub bundle: BundleState,
     /// The collection of receipts.
@@ -390,7 +390,7 @@ impl ExecutionOutcome {
     pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
         self.generic_receipts_root_slow(
             block_number,
-            reth_primitives::Receipt::calculate_receipt_root_no_memo,
+            reth_ethereum_primitives::Receipt::calculate_receipt_root_no_memo,
         )
     }
 }
