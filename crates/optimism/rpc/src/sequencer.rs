@@ -54,7 +54,7 @@ impl SequencerClient {
     /// Helper function to get body of the request with the given params array.
     fn request_body(&self, method: &str, params: Value) -> serde_json::Result<String> {
         let request = json!({
-                "jsonrpc": "2.0",
+            "jsonrpc": "2.0",
             "method": method,
             "params": params,
             "id": self.next_request_id()
