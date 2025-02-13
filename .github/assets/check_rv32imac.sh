@@ -10,6 +10,11 @@ crates_to_check=(
     reth-chainspec
     reth-consensus
     reth-consensus-common
+    reth-prune-types
+    reth-static-file-types
+    reth-storage-errors
+    reth-execution-errors
+    reth-execution-types
 
     ## ethereum
     reth-ethereum-forks

@@ -1,8 +1,12 @@
 use crate::{BlockNumber, Compression};
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 use alloy_primitives::TxNumber;
+use core::{ops::RangeInclusive, str::FromStr};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use std::{ops::RangeInclusive, str::FromStr};
 use strum::{AsRefStr, EnumString};
 
 #[derive(
@@ -338,8 +342,8 @@ impl SegmentRangeInclusive {
     }
 }
 
-impl std::fmt::Display for SegmentRangeInclusive {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for SegmentRangeInclusive {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}..={}", self.start, self.end)
     }
 }
