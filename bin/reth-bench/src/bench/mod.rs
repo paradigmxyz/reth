@@ -30,7 +30,7 @@ pub enum Subcommands {
     /// Benchmark which only calls subsequent `newPayload` calls.
     NewPayloadOnly(new_payload_only::Command),
 
-    /// Generate a `newPayload` message for the given block.
+    /// Generate a `newPayload` message for the given RPC block.
     GeneratePayload(generate_payload::Command),
 }
 
