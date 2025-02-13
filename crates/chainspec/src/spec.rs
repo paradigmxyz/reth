@@ -1018,7 +1018,7 @@ mod tests {
     use super::*;
     use alloy_chains::Chain;
     use alloy_consensus::constants::{
-        DEV_GENESIS_HASH, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
     };
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
@@ -1925,8 +1925,10 @@ Post-merge hard forks (timestamp based):
 
         assert_eq!(chainspec.genesis_header().withdrawals_root, Some(EMPTY_ROOT_HASH));
 
+        let expected_hash: B256 =
+            hex!("1fc027d65f820d3eef441ebeec139ebe09e471cf98516dce7b5643ccb27f418c").into();
         let hash = chainspec.genesis_hash();
-        assert_eq!(hash, DEV_GENESIS_HASH);
+        assert_eq!(hash, expected_hash);
     }
 
     #[test]
