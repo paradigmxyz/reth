@@ -1,48 +1,43 @@
 //! Directory Manager downloads and manages files from the op-superchain-registry
 
-use eyre::{Context, Result};
+use eyre::Context;
+use reth_fs_util as fs;
+use reth_fs_util::Result;
 use serde_json::Value;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
-use tracing::{info, trace};
+use std::path::{Path, PathBuf};
+use tracing::{debug, info, trace};
 use zstd::{dict::DecoderDictionary, stream::read::Decoder};
 
 /// Directory manager that handles caching and downloading of genesis files
 #[derive(Debug)]
-pub struct DirectoryManager {
+pub struct SuperChainRegistryManager {
     base_path: PathBuf,
 }
 
-impl DirectoryManager {
+impl SuperChainRegistryManager {
     const DICT_URL: &'static str = "https://raw.githubusercontent.com/ethereum-optimism/superchain-registry/main/superchain/extra/dictionary";
     const GENESIS_BASE_URL: &'static str = "https://raw.githubusercontent.com/ethereum-optimism/superchain-registry/main/superchain/extra/genesis";
 
     /// Create a new registry manager with the given base path
-    pub(crate) fn new(base_path: PathBuf) -> Result<Self> {
+    pub fn new(base_path: impl Into<PathBuf>) -> Result<Self> {
+        let base_path = base_path.into();
         fs::create_dir_all(&base_path)?;
         Ok(Self { base_path })
     }
 
     /// Get the path to the dictionary file
-    fn dictionary_path(&self) -> PathBuf {
+    pub fn dictionary_path(&self) -> PathBuf {
         self.base_path.join("dictionary")
     }
 
-    /// Get the path to a genesis file
-    fn genesis_path(&self, network_type: &str, network: &str) -> PathBuf {
+    /// Get the path to a genesis file for the given network (`mainnet`, `base`).
+    pub fn genesis_path(&self, network_type: &str, network: &str) -> PathBuf {
         self.base_path.join(network_type).join(format!("{}.json.zst", network))
-    }
-
-    /// Check if a file exists at the given path
-    fn file_exists(&self, path: &Path) -> bool {
-        path.exists()
     }
 
     /// Read file from the given path
     fn read_file(&self, path: &Path) -> Result<Vec<u8>> {
-        fs::read(path).context("Failed to read file")
+        fs::read(path)
     }
 
     /// Save data to the given path
@@ -50,14 +45,14 @@ impl DirectoryManager {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(path, data).context("Failed to write file")
+        fs::write(path, data)
     }
 
     /// Download a file from the given URL
-    fn download_file(&self, url: &str, path: &Path) -> Result<Vec<u8>> {
-        if self.file_exists(path) {
-            info!(target: "reth::cli", path = ?path.display() ,"Reading from cache");
-            return self.read_file(path);
+    fn download_file(&self, url: &str, path: &Path) -> eyre::Result<Vec<u8>> {
+        if path.exists() {
+            debug!(target: "reth::cli", path = ?path.display() ,"Reading from cache");
+            return Ok(self.read_file(path)?);
         }
 
         trace!(target: "reth::cli", url = ?url ,"Downloading from URL");
@@ -74,13 +69,13 @@ impl DirectoryManager {
     }
 
     /// Download and update the dictionary
-    fn update_dictionary(&self) -> Result<Vec<u8>> {
+    fn update_dictionary(&self) -> eyre::Result<Vec<u8>> {
         let path = self.dictionary_path();
         self.download_file(Self::DICT_URL, &path)
     }
 
     /// Get genesis data for a network, downloading it if necessary
-    pub(crate) fn get_genesis(&self, network_type: &str, network: &str) -> Result<Value> {
+    pub fn get_genesis(&self, network_type: &str, network: &str) -> eyre::Result<Value> {
         let dict_bytes = self.update_dictionary()?;
         trace!(target: "reth::cli", bytes = ?dict_bytes.len(),"Got dictionary");
 
@@ -109,13 +104,16 @@ mod tests {
 
     #[test]
     fn test_directory_manager() -> Result<()> {
+        let dir = tempfile::tempdir()?;
         // Create a temporary directory for testing
-        let test_dir = PathBuf::from("test-registry");
-        let manager = DirectoryManager::new(test_dir)?;
+        let manager = SuperChainRegistryManager::new(dir.path())?;
 
+        assert!(!manager.genesis_path("mainnet", "base").exists());
         // Test downloading genesis data
         let json_data = manager.get_genesis("mainnet", "base")?;
         assert!(json_data.is_object(), "Parsed JSON should be an object");
+
+        assert!(manager.genesis_path("mainnet", "base").exists());
 
         // Test using cached data
         let cached_json_data = manager.get_genesis("mainnet", "base")?;

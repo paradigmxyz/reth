@@ -1,5 +1,5 @@
 [package]
-name = "op-chain-registry"
+name = "reth-optimism-chain-registry"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,9 +8,11 @@ homepage.workspace = true
 repository.workspace = true
 exclude.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
-# io
-dirs-next = "2.0.0"
+reth-fs-util.workspace = true
 
 # misc
 serde_json = { workspace = true, features = ["std"] }
@@ -20,11 +22,9 @@ eyre.workspace = true
 # tracing
 tracing.workspace = true
 
-# tokio
-tokio = { workspace = true, features = ["fs", "test-util", "macros"] }
-
 # async
-reqwest = { workspace = true, features = ["blocking", "native-tls"] }
+reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
 
-[lints]
-workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
