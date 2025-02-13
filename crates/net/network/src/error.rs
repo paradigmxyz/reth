@@ -216,8 +216,7 @@ impl SessionError for PendingSessionHandshakeError {
                     ECIESErrorImpl::Secp256k1(_) |
                     ECIESErrorImpl::InvalidHandshake { .. }
             ),
-            Self::Timeout => false,
-            Self::UnsupportedCapability(_) => false,
+            Self::Timeout | Self::UnsupportedCapability(_) => false,
         }
     }
 
