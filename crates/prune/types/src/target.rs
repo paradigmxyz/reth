@@ -1,4 +1,5 @@
 use crate::{PruneMode, ReceiptsLogPruneConfig};
+use alloc::format;
 
 /// Minimum distance from the tip necessary for the node to work correctly:
 /// 1. Minimum 2 epochs (32 blocks per epoch) required to handle any reorg according to the
