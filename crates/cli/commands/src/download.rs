@@ -53,22 +53,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let data_dir = self.datadir.resolve_datadir(self.chain.chain());
         fs::create_dir_all(&data_dir)?;
 
-        // URL handling logic
-        let url = if let Some(url) = self.url {
-            url
-        } else {
-            let latest_url = get_latest_snapshot_url().await?;
-            info!(target: "reth::cli", "No URL specified. Latest snapshot available as mainnet archive: {}", latest_url);
-
-            print!("Do you want to use this snapshot? [Y/n] ");
-            std::io::stdout().flush()?;
-
-            let mut response = String::new();
-            std::io::stdin().read_line(&mut response)?;
-
-            match response.trim().to_lowercase().as_str() {
-                "" | "y" | "yes" => latest_url,
-                _ => return Err(eyre::eyre!("Please specify a snapshot URL using --url")),
+        let url = match self.url {
+            Some(url) => url,
+            None => {
+                let url = get_latest_snapshot_url().await?;
+                info!(target: "reth::cli", "Using default snapshot URL: {}", url);
+                url
             }
         };
 
@@ -177,7 +167,6 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     let client = Client::new();
     let mut response = client.get(url).send().await?.error_for_status()?;
 
-    // Require content-length for progress tracking and download validation
     let total_size = response.content_length().ok_or_else(|| {
         eyre::eyre!(
             "Server did not provide Content-Length header. This is required for snapshot downloads"
@@ -223,7 +212,7 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-// Builds default URL for latest r mainnet archive  snapshot
+// Builds default URL for latest mainnet archive  snapshot
 async fn get_latest_snapshot_url() -> Result<String> {
     let latest_url = format!("{}/latest.txt", MERKLE_BASE_URL);
     let filename = Client::new()
