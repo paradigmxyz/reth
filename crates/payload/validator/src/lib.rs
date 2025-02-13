@@ -48,7 +48,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         self.chain_spec().is_shanghai_active_at_timestamp(timestamp)
     }
 
-    /// Returns true if the Prague harkdfork is active at the given timestamp.
+    /// Returns true if the Prague hardfork is active at the given timestamp.
     #[inline]
     fn is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.chain_spec().is_prague_active_at_timestamp(timestamp)
