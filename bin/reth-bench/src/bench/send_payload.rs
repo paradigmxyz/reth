@@ -164,7 +164,7 @@ impl Command {
         match self.mode {
             Mode::Execute => {
                 let mut command = std::process::Command::new("cast");
-                command.arg("rpc").arg("engine_newPayloadV3");
+                command.arg("rpc").arg("engine_newPayloadV3").arg("--raw");
                 if let Some(rpc_url) = self.rpc_url {
                     command.arg("--rpc-url").arg(rpc_url);
                 }
