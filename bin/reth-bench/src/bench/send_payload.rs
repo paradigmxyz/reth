@@ -27,7 +27,7 @@ pub struct Command {
     path: Option<String>,
 
     /// The engine RPC url to use.
-    #[arg(short, long)]
+    #[arg(short, long, required_if_eq_any([("mode", "execute"), ("mode", "cast")]), required_unless_present("mode"))]
     rpc_url: Option<String>,
 
     /// The JWT secret to use.
@@ -42,18 +42,15 @@ pub struct Command {
     mode: Mode,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Debug, Clone, clap::ValueEnum)]
 enum Mode {
-    /// Execute the `cast` command
-    ///
-    /// This works with blocks of any size, because it saves a temporary file with the
-    /// payload, and deletes it afterwards.
+    /// Execute the `cast` command. This works with blocks of any size, because it pipes the
+    /// payload into the `cast` command.
     Execute,
-    /// Print the `cast` command
-    ///
-    /// Caution: this may not work with large blocks because of the command length limit.
+    /// Print the `cast` command. Caution: this may not work with large blocks because of the
+    /// command length limit.
     Cast,
-    /// Print the JSON payload
+    /// Print the JSON payload. Can be piped into `cast` command if the block is small enough.
     Json,
 }
 
@@ -163,7 +160,7 @@ impl Command {
             parent_beacon_block_root,
         ))?;
 
-        // Print output
+        // Print output or execute command
         match self.mode {
             Mode::Execute => {
                 let mut command = std::process::Command::new("cast");
