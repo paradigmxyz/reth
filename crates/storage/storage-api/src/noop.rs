@@ -21,8 +21,10 @@ use core::{
 };
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_primitives::{EthPrimitives, RecoveredBlock, SealedBlock};
-use reth_primitives_traits::{Account, Bytecode, NodePrimitives, SealedHeader};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_primitives_traits::{
+    Account, Bytecode, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};

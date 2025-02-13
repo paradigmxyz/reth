@@ -34,4 +34,6 @@ std = [
     "derive_more/std",
     "reth-primitives-traits/std",
     "thiserror/std",
+    "reth-prune-types/std",
+    "reth-static-file-types/std",
 ]

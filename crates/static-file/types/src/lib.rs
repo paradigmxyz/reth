@@ -7,6 +7,9 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 mod compression;
 mod event;
@@ -14,9 +17,9 @@ mod segment;
 
 use alloy_primitives::BlockNumber;
 pub use compression::Compression;
+use core::ops::RangeInclusive;
 pub use event::StaticFileProducerEvent;
 pub use segment::{SegmentConfig, SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
-use std::ops::RangeInclusive;
 
 /// Default static file block count.
 pub const DEFAULT_BLOCKS_PER_STATIC_FILE: u64 = 500_000;
