@@ -6881,10 +6881,10 @@ name = "reth-consensus"
 version = "1.2.0"
 dependencies = [
  "alloy-consensus",
- "alloy-eips",
  "alloy-primitives",
  "auto_impl",
  "derive_more",
+ "reth-execution-types",
  "reth-primitives-traits",
 ]
 
@@ -7529,6 +7529,7 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
+ "reth-execution-types",
  "reth-primitives",
  "reth-primitives-traits",
  "tracing",
@@ -7704,6 +7705,7 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "bincode",
+ "derive_more",
  "rand 0.8.5",
  "reth-ethereum-primitives",
  "reth-execution-errors",
@@ -8433,6 +8435,7 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
+ "reth-execution-types",
  "reth-optimism-chainspec",
  "reth-optimism-forks",
  "reth-optimism-primitives",

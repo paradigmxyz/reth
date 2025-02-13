@@ -12,15 +12,14 @@ use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_consensus::{
-    Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
-};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
+use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
@@ -104,9 +103,9 @@ where
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
-        input: PostExecutionInput<'_, N::Receipt>,
+        result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
+        validate_block_post_execution(block, &self.chain_spec, &result.receipts, &result.requests)
     }
 }
 

@@ -4,7 +4,7 @@ use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
-use reth_consensus::{ConsensusError, FullConsensus, PostExecutionInput};
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
@@ -355,10 +355,7 @@ where
                 })
             })?;
 
-            if let Err(err) = self.consensus.validate_block_post_execution(
-                &block,
-                PostExecutionInput::new(&result.receipts, &result.requests),
-            ) {
+            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
                 return Err(StageError::Block {
                     block: Box::new(BlockWithParent::new(
                         block.header().parent_hash(),
