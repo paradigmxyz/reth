@@ -201,7 +201,7 @@ where
     let beneficiary = evm_env.block_env.coinbase;
 
     let mut evm = evm_config.evm_with_env(&mut db, evm_env);
-    let mut system_caller = SystemCaller::new(chain_spec.clone());
+    let system_caller = SystemCaller::new(chain_spec.clone());
 
     // apply eip-4788 pre block contract call
     system_caller

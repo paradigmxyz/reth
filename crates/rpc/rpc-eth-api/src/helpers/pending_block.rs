@@ -271,7 +271,7 @@ pub trait LoadPendingBlock:
 
         let chain_spec = self.provider().chain_spec();
 
-        let mut system_caller = SystemCaller::new(chain_spec.clone());
+        let system_caller = SystemCaller::new(chain_spec.clone());
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env.clone());
 
         system_caller

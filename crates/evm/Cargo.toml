@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-consensus.workspace = true
 reth-consensus-common.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
@@ -47,7 +46,6 @@ default = ["std"]
 std = [
     "dep:metrics",
     "dep:reth-metrics",
-    "reth-consensus/std",
     "reth-primitives/std",
     "reth-primitives-traits/std",
     "alloy-eips/std",
@@ -66,7 +64,6 @@ std = [
 test-utils = [
     "dep:parking_lot",
     "reth-chainspec/test-utils",
-    "reth-consensus/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",

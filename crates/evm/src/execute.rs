@@ -7,16 +7,15 @@ pub use reth_execution_errors::{
 };
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+use reth_primitives_traits::BlockBody;
 pub use reth_storage_errors::provider::ProviderError;
 
 use crate::{system_calls::OnStateHook, Database};
 use alloc::{boxed::Box, vec::Vec};
-use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
     Address,
 };
-use reth_consensus::ConsensusError;
 use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
 use revm::db::{states::bundle_state::BundleRetention, State};
 use revm_primitives::{Account, AccountStatus, EvmState};
@@ -167,9 +166,6 @@ pub struct ExecuteOutput<R = Receipt> {
 
 /// Defines the strategy for executing a single block.
 pub trait BlockExecutionStrategy {
-    /// Database this strategy operates on.
-    type DB: revm::Database;
-
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
 
@@ -177,45 +173,22 @@ pub trait BlockExecutionStrategy {
     type Error: core::error::Error;
 
     /// Applies any necessary changes before executing the block's transactions.
-    fn apply_pre_execution_changes(
-        &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<(), Self::Error>;
+    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error>;
 
     /// Executes all transactions in the block.
     fn execute_transactions(
         &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<ExecuteOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
+        transactions: &[<Self::Primitives as NodePrimitives>::SignedTx],
+        senders: &[Address],
+    ) -> Result<(), Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
-        &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
-    ) -> Result<Requests, Self::Error>;
-
-    /// Returns a reference to the current state.
-    fn state_ref(&self) -> &State<Self::DB>;
-
-    /// Returns a mutable reference to the current state.
-    fn state_mut(&mut self) -> &mut State<Self::DB>;
-
-    /// Consumes the strategy and returns inner [`State`].
-    fn into_state(self) -> State<Self::DB>;
+        self,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
     /// Sets a hook to be called after each state change during execution.
-    fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
-
-    /// Validate a block with regard to execution results.
-    fn validate_block_post_execution(
-        &self,
-        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        _receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
-        _requests: &Requests,
-    ) -> Result<(), ConsensusError> {
-        Ok(())
-    }
+    fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>);
 }
 
 /// A strategy factory that can create block execution strategies.
@@ -223,15 +196,12 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
 
-    /// Associated strategy type.
-    type Strategy<DB: Database>: BlockExecutionStrategy<
-        DB = DB,
-        Primitives = Self::Primitives,
-        Error = BlockExecutionError,
-    >;
-
-    /// Creates a strategy using the give database.
-    fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
+    /// Creates a strategy using the given database.
+    fn create_strategy<'a, DB>(
+        &'a mut self,
+        db: &'a mut State<DB>,
+        header: &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
     where
         DB: Database;
 }
@@ -264,74 +234,85 @@ where
 {
     type Primitives = F::Primitives;
 
-    type Executor<DB: Database> = BasicBlockExecutor<F::Strategy<DB>>;
+    type Executor<DB: Database> = BasicBlockExecutor<F, DB>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database,
     {
-        let strategy = self.strategy_factory.create_strategy(db);
-        BasicBlockExecutor::new(strategy)
+        BasicBlockExecutor::new(self.strategy_factory.clone(), db)
     }
 }
 
 /// A generic block executor that uses a [`BlockExecutionStrategy`] to
 /// execute blocks.
 #[allow(missing_debug_implementations, dead_code)]
-pub struct BasicBlockExecutor<S> {
+pub struct BasicBlockExecutor<F, DB> {
     /// Block execution strategy.
-    pub(crate) strategy: S,
+    pub(crate) strategy_factory: F,
+    /// Database.
+    pub(crate) db: State<DB>,
 }
 
-impl<S> BasicBlockExecutor<S> {
+impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
-    pub const fn new(strategy: S) -> Self {
-        Self { strategy }
+    pub fn new(strategy_factory: F, db: DB) -> Self {
+        let db =
+            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        Self { strategy_factory, db }
     }
 }
 
-impl<S, DB> Executor<DB> for BasicBlockExecutor<S>
+impl<F, DB> Executor<DB> for BasicBlockExecutor<F, DB>
 where
-    S: BlockExecutionStrategy<DB = DB>,
+    F: BlockExecutionStrategyFactory,
     DB: Database,
 {
-    type Primitives = S::Primitives;
-    type Error = S::Error;
+    type Primitives = F::Primitives;
+    type Error = BlockExecutionError;
 
     fn execute_one(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        self.strategy.apply_pre_execution_changes(block)?;
-        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
-        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
+        let mut strategy = self.strategy_factory.create_strategy(&mut self.db, block);
 
-        Ok(BlockExecutionResult { receipts, requests, gas_used })
+        strategy.apply_pre_execution_changes()?;
+        strategy.execute_transactions(block.body().transactions(), block.senders())?;
+        let result = strategy.apply_post_execution_changes()?;
+
+        self.db.merge_transitions(BundleRetention::Reverts);
+
+        Ok(result)
     }
 
-    fn execute_one_with_state_hook<F>(
+    fn execute_one_with_state_hook<H>(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        state_hook: F,
+        state_hook: H,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: OnStateHook + 'static,
+        H: OnStateHook + 'static,
     {
-        self.strategy.with_state_hook(Some(Box::new(state_hook)));
-        let result = self.execute_one(block);
-        self.strategy.with_state_hook(None);
+        let mut strategy = self.strategy_factory.create_strategy(&mut self.db, block);
+        strategy.with_state_hook(Some(Box::new(state_hook)));
 
-        result
+        strategy.apply_pre_execution_changes()?;
+        strategy.execute_transactions(block.body().transactions(), block.senders())?;
+        let result = strategy.apply_post_execution_changes()?;
+
+        self.db.merge_transitions(BundleRetention::Reverts);
+
+        Ok(result)
     }
 
     fn into_state(self) -> State<DB> {
-        self.strategy.into_state()
+        self.db
     }
 
     fn size_hint(&self) -> usize {
-        self.strategy.state_ref().bundle_state.size_hint()
+        self.db.bundle_state.size_hint()
     }
 }
 

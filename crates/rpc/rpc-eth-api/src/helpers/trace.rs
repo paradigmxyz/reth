@@ -454,7 +454,7 @@ pub trait Trace:
         db: &mut DB,
         evm_env: &EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
     ) -> Result<(), Self::Error> {
-        let mut system_caller = SystemCaller::new(self.provider().chain_spec());
+        let system_caller = SystemCaller::new(self.provider().chain_spec());
 
         // apply relevant system calls
         let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());

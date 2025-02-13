@@ -1,7 +1,7 @@
 //! System contract call functions.
 
 use crate::Evm;
-use alloc::{boxed::Box, sync::Arc};
+use alloc::sync::Arc;
 use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests,
@@ -19,14 +19,14 @@ mod eip7002;
 mod eip7251;
 
 /// A hook that is called after each state change.
-pub trait OnStateHook {
+pub trait OnStateHook: Send + Sync {
     /// Invoked with the state after each system call.
     fn on_state(&mut self, state: &EvmState);
 }
 
 impl<F> OnStateHook for F
 where
-    F: FnMut(&EvmState),
+    F: Send + Sync + FnMut(&EvmState),
 {
     fn on_state(&mut self, state: &EvmState) {
         self(state)
@@ -45,24 +45,16 @@ impl OnStateHook for NoopHook {
 /// An ephemeral helper type for executing system calls.
 ///
 /// This can be used to chain system transaction calls.
-#[allow(missing_debug_implementations)]
+#[derive(Debug, Clone)]
 pub struct SystemCaller<Chainspec> {
     chain_spec: Arc<Chainspec>,
-    /// Optional hook to be called after each state change.
-    hook: Option<Box<dyn OnStateHook>>,
 }
 
 impl<Chainspec> SystemCaller<Chainspec> {
     /// Create a new system caller with the given EVM config, database, and chain spec, and creates
     /// the EVM with the given initialized config and block environment.
     pub const fn new(chain_spec: Arc<Chainspec>) -> Self {
-        Self { chain_spec, hook: None }
-    }
-
-    /// Installs a custom hook to be called after each state change.
-    pub fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) -> &mut Self {
-        self.hook = hook;
-        self
+        Self { chain_spec }
     }
 
     /// Convenience method to consume the type and drop borrowed fields
@@ -75,7 +67,7 @@ where
 {
     /// Apply pre execution changes.
     pub fn apply_pre_execution_changes(
-        &mut self,
+        &self,
         header: impl BlockHeader,
         evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
     ) -> Result<(), BlockExecutionError> {
@@ -87,7 +79,7 @@ where
 
     /// Apply post execution changes.
     pub fn apply_post_execution_changes(
-        &mut self,
+        &self,
         evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
     ) -> Result<Requests, BlockExecutionError> {
         let mut requests = Requests::default();
@@ -109,7 +101,7 @@ where
 
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
     pub fn apply_blockhashes_contract_call(
-        &mut self,
+        &self,
         parent_block_hash: B256,
         evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
     ) -> Result<(), BlockExecutionError> {
@@ -117,9 +109,6 @@ where
             eip2935::transact_blockhashes_contract_call(&self.chain_spec, parent_block_hash, evm)?;
 
         if let Some(res) = result_and_state {
-            if let Some(ref mut hook) = self.hook {
-                hook.on_state(&res.state);
-            }
             evm.db_mut().commit(res.state);
         }
 
@@ -128,7 +117,7 @@ where
 
     /// Applies the pre-block call to the EIP-4788 beacon root contract.
     pub fn apply_beacon_root_contract_call(
-        &mut self,
+        &self,
         parent_beacon_block_root: Option<B256>,
         evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
     ) -> Result<(), BlockExecutionError> {
@@ -139,9 +128,6 @@ where
         )?;
 
         if let Some(res) = result_and_state {
-            if let Some(ref mut hook) = self.hook {
-                hook.on_state(&res.state);
-            }
             evm.db_mut().commit(res.state);
         }
 
@@ -150,14 +136,10 @@ where
 
     /// Applies the post-block call to the EIP-7002 withdrawal request contract.
     pub fn apply_withdrawal_requests_contract_call(
-        &mut self,
+        &self,
         evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
     ) -> Result<Bytes, BlockExecutionError> {
         let result_and_state = eip7002::transact_withdrawal_requests_contract_call(evm)?;
-
-        if let Some(ref mut hook) = self.hook {
-            hook.on_state(&result_and_state.state);
-        }
         evm.db_mut().commit(result_and_state.state);
 
         eip7002::post_commit(result_and_state.result)
@@ -165,23 +147,12 @@ where
 
     /// Applies the post-block call to the EIP-7251 consolidation requests contract.
     pub fn apply_consolidation_requests_contract_call(
-        &mut self,
+        &self,
         evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
     ) -> Result<Bytes, BlockExecutionError> {
         let result_and_state = eip7251::transact_consolidation_requests_contract_call(evm)?;
-
-        if let Some(ref mut hook) = self.hook {
-            hook.on_state(&result_and_state.state);
-        }
         evm.db_mut().commit(result_and_state.state);
 
         eip7251::post_commit(result_and_state.result)
-    }
-
-    /// Delegate to stored `OnStateHook`, noop if hook is `None`.
-    pub fn on_state(&mut self, state: &EvmState) {
-        if let Some(ref mut hook) = &mut self.hook {
-            hook.on_state(state);
-        }
     }
 }
