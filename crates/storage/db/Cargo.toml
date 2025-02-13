@@ -57,6 +57,7 @@ parking_lot = { workspace = true, optional = true }
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }
+bincode.workspace = true
 
 [dev-dependencies]
 # reth libs with arbitrary

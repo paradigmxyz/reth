@@ -1,5 +1,5 @@
-use rlp::{RlpStream, Rlp, Encodable, Decodable};
 use alloy_primitives::{B256, U256};
+use rlp::{Decodable, Encodable, Rlp, RlpStream};
 
 /// Account storage entry.
 ///
@@ -26,7 +26,7 @@ impl Encodable for StorageEntry {
     fn rlp_append(&self, stream: &mut RlpStream) {
         stream.begin_list(2);
         stream.append(&self.key.to_vec());
-        
+
         let mut value_bytes = [0u8; 32];
         value_bytes.copy_from_slice(&self.value.to_be_bytes::<32>());
         stream.append(&value_bytes.to_vec());
@@ -40,11 +40,13 @@ impl Decodable for StorageEntry {
 
         // Decode key
         let key = B256::from_slice(&key_bytes);
-        
+
         // Convert value bytes back to U256
         let value = U256::from_be_bytes::<32>(
-            value_bytes.as_slice().try_into()
-                .map_err(|_| rlp::DecoderError::Custom("Invalid value length"))?
+            value_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| rlp::DecoderError::Custom("Invalid value length"))?,
         );
 
         Ok(StorageEntry { key, value })

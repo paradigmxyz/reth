@@ -1,5 +1,4 @@
 use alloy_consensus::constants::KECCAK_EMPTY;
-use rlp::{RlpStream, Rlp, Encodable, Decodable};
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
 use alloy_trie::TrieAccount;
@@ -69,44 +68,6 @@ impl Account {
             storage_root,
             code_hash: bytecode_hash.unwrap_or(KECCAK_EMPTY),
         }
-    }
-}
-
-impl Encodable for Account {
-    fn rlp_append(&self, stream: &mut RlpStream) {
-        stream.begin_list(3);
-        stream.append(&self.nonce);
-        let mut balance_bytes = [0u8; 32];
-        balance_bytes.copy_from_slice(&self.balance.to_be_bytes::<32>());
-        stream.append(&balance_bytes.to_vec());
-        
-        match &self.bytecode_hash {
-            Some(hash) => stream.append(&hash.to_vec()),
-            None => stream.append(&Vec::<u8>::new()),
-        };
-    }
-}
-
-impl Decodable for Account {
-    fn decode(rlp: &Rlp<'_>) -> Result<Self, rlp::DecoderError> {
-        let nonce: u64 = rlp.val_at(0)?;
-        let balance_bytes: Vec<u8> = rlp.val_at(1)?;
-        let bytecode_hash_bytes: Vec<u8> = rlp.val_at(2)?;
-        
-        // Convert balance bytes back to U256
-        let balance = U256::from_be_bytes::<32>(
-            balance_bytes.as_slice().try_into()
-                .map_err(|_| rlp::DecoderError::Custom("Invalid balance length"))?
-        );
-        
-        // Decode bytecode hash
-        let bytecode_hash = if bytecode_hash_bytes.is_empty() {
-            None
-        } else {
-            Some(B256::from_slice(&bytecode_hash_bytes))
-        };
-        
-        Ok(Account { nonce, balance, bytecode_hash })
     }
 }
 

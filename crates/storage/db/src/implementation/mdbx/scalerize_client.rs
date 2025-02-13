@@ -1,10 +1,12 @@
-use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
-use std::result::Result::Ok;
-use thiserror::Error;
-use reth_storage_errors::db::DatabaseError;
-use std::time::{SystemTime, UNIX_EPOCH};
 use rand::{thread_rng, Rng};
+use reth_storage_errors::db::DatabaseError;
+use std::{
+    fmt,
+    io::{Read, Write},
+    os::unix::net::UnixStream,
+    result::Result::Ok,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 const OP_PUT: u8 = 1;
 const OP_GET: u8 = 2;
@@ -36,27 +38,22 @@ const STATUS_SUCCESS: u8 = 1;
 const STATUS_ERROR: u8 = 0;
 
 const SOCKET_PATH: &str = "/tmp/scalerize";
-
 /// Represents errors that can occur while interacting with the Scalerize client.
 ///
 /// This enum is used to categorize different types of errors that may arise during
 /// operations such as I/O errors, operation failures, and invalid responses from the server.
-#[derive(Error, Debug)]
+#[derive(Debug)]
 pub enum ClientError {
-	/// An I/O error occurred.
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    /// An I/O error occurred.
+    Io(std::io::Error),
 
-	/// The requested operation failed with a specific message.
-    #[error("Operation failed: {0}")]
+    /// The requested operation failed with a specific message.
     OperationFailed(String),
 
     /// The request made is invalid.
-    #[error("Operation failed: {0}")]
     InvalidRequest(String),
 
-	/// The response received from the server was invalid.
-    #[error("Invalid response from server: {0}")]
+    /// The response received from the server was invalid.
     InvalidResponse(String),
 }
 
@@ -64,14 +61,48 @@ impl From<ClientError> for DatabaseError {
     fn from(error: ClientError) -> Self {
         match error {
             ClientError::Io(err) => DatabaseError::Other(format!("IO error: {}", err)),
-            ClientError::InvalidResponse(msg) => DatabaseError::Other(format!("Invalid response: {}", msg)),
-            ClientError::InvalidRequest(msg) => DatabaseError::Other(format!("Invalid request: {}", msg)),
-			ClientError::OperationFailed(msg) => DatabaseError::Other(format!("Operation failed: {}", msg)),
+            ClientError::InvalidResponse(msg) => {
+                DatabaseError::Other(format!("Invalid response: {}", msg))
+            }
+            ClientError::InvalidRequest(msg) => {
+                DatabaseError::Other(format!("Invalid request: {}", msg))
+            }
+            ClientError::OperationFailed(msg) => {
+                DatabaseError::Other(format!("Operation failed: {}", msg))
+            }
         }
     }
 }
 
+impl fmt::Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ClientError::Io(err) => write!(f, "IO error: {}", err),
+            ClientError::InvalidResponse(msg) => write!(f, "Invalid response: {}", msg),
+            ClientError::InvalidRequest(msg) => write!(f, "Invalid request: {}", msg),
+            ClientError::OperationFailed(msg) => write!(f, "Operation failed: {}", msg),
+        }
+    }
+}
 
+impl From<std::io::Error> for ClientError {
+    fn from(error: std::io::Error) -> Self {
+        ClientError::Io(error)
+    }
+}
+
+impl Into<i32> for ClientError {
+    fn into(self) -> i32 {
+        match self {
+            ClientError::Io(_) => 1,
+            ClientError::InvalidResponse(_) => 2,
+            ClientError::InvalidRequest(_) => 3,
+            ClientError::OperationFailed(_) => 4,
+        }
+    }
+}
+
+// Client for making DB calls to scalerize
 pub struct ScalerizeClient {
     stream: UnixStream,
 }
@@ -136,14 +167,12 @@ impl ScalerizeClient {
 
     // no need to send rlp encoded for dupsorted even when using this method
     // just send the value at that subkey
-    pub fn put(&mut self, table_code: u8, key: &[u8], subkey: Option<&[u8]>, value: &[u8]) -> Result<(), ClientError> {
+    pub fn put(&mut self, table_code: u8, key: &[u8], value: &[u8]) -> Result<(), ClientError> {
         let mut request = vec![OP_PUT, table_code];
         
-        request.extend_from_slice(key);
-        if let Some(subkey) = subkey {
-            request.extend_from_slice(subkey);
-        }           request.extend_from_slice(value);
-        
+        request.extend_from_slice(key);        
+        request.extend_from_slice(value);
+
         println!("PUT REQUEST: {:?}", request);
         self.stream.write_all(&request)?;
         self.stream.flush()?;
@@ -160,27 +189,6 @@ impl ScalerizeClient {
             _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
         }
     }
-
-    // pub fn delete(&mut self, table_code: u8, key: &[u8], value: &[u8]) -> Result<Vec<u8>, ClientError> {
-    //     let mut request = vec![OP_DELETE, table_code];
-    //     request.extend_from_slice(key);
-    //     request.extend_from_slice(value);
-        
-    //     println!("DELETE REQUEST: {:?}", request);
-    //     self.stream.write_all(&request)?;
-    //     self.stream.flush()?;
-
-    //     let response = self.read_full_response()?;
-    //     println!("RESPONSE FOR DELETE: {:?}", response);
-    //     let status = response[0];
-    //     let data = response[1..].to_vec();
-
-    //     match status {
-    //         STATUS_SUCCESS => Ok(data),
-    //         STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
-    //         _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
-    //     }
-    // }
 
     pub fn delete(&mut self, table_code: u8, key: &[u8], subkey: Option<&[u8]>) -> Result<(), ClientError> {
         let mut request = vec![OP_DELETE, table_code];
@@ -204,7 +212,7 @@ impl ScalerizeClient {
         }
     }
 
-    pub fn write(&mut self) -> Result<Vec<u8>, ClientError> {
+    pub fn write(&mut self) -> Result<(), ClientError> {
         let store_number: u8 = 0;
         let mut request = vec![OP_WRITE];
         request.extend_from_slice(&store_number.to_be_bytes());
@@ -219,7 +227,7 @@ impl ScalerizeClient {
         let data = response[1..].to_vec();
 
         match status {
-            STATUS_SUCCESS => Ok(data),
+            STATUS_SUCCESS => Ok(()),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
             _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
         }
