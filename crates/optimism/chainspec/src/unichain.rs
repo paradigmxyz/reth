@@ -1,7 +1,7 @@
 //! Chain specification for the Unichain Mainnet network.
 
 use crate::{LazyLock, OpChainSpec};
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_eips::eip1559::BaseFeeParams;
 use alloy_primitives::{b256, U256};
