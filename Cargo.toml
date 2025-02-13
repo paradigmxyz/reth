@@ -434,7 +434,7 @@ revm-interpreter = { version = "15.2.0", default-features = false }
 revm-inspectors = "0.15.0"
 
 # eth
-alloy-chains = { version = "0.1.32", default-features = false }
+alloy-chains = { version = "0.1.61", default-features = false }
 alloy-dyn-abi = "0.8.20"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
 alloy-primitives = { version = "0.8.20", default-features = false, features = ["map-foldhash"] }

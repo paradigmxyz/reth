@@ -16,6 +16,7 @@ pub mod constants;
 mod dev;
 mod op;
 mod op_sepolia;
+mod unichain;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
@@ -37,6 +38,7 @@ use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardf
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_primitives_traits::sync::LazyLock;
+pub use unichain::UNICHAIN_MAINNET;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -62,6 +64,17 @@ impl OpChainSpecBuilder {
         let mut inner =
             ChainSpecBuilder::default().chain(OP_MAINNET.chain).genesis(OP_MAINNET.genesis.clone());
         let forks = OP_MAINNET.hardforks.clone();
+        inner = inner.with_forks(forks);
+
+        Self { inner }
+    }
+
+    /// Construct a new builder from the unichain mainnet chain spec.
+    pub fn unichain_mainnet() -> Self {
+        let mut inner = ChainSpecBuilder::default()
+            .chain(UNICHAIN_MAINNET.chain)
+            .genesis(UNICHAIN_MAINNET.genesis.clone());
+        let forks = UNICHAIN_MAINNET.hardforks.clone();
         inner = inner.with_forks(forks);
 
         Self { inner }
@@ -648,6 +661,20 @@ mod tests {
             .unwrap();
         // <https://optimism-sepolia.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
+    }
+
+    #[test]
+    fn unichain_mainnet_genesis() {
+        let genesis = UNICHAIN_MAINNET.genesis_header();
+        assert_eq!(
+            genesis.hash_slow(),
+            b256!("0x3425162ddf41a0a1f0106d67b71828c9a9577e6ddeb94e4f33d2cde1fdc3befe")
+        );
+        let base_fee = genesis
+            .next_block_base_fee(UNICHAIN_MAINNET.base_fee_params_at_timestamp(genesis.timestamp))
+            .unwrap();
+        // <https://uniscan.xyz/block/1>
+        assert_eq!(base_fee, 996000000);
     }
 
     #[test]
