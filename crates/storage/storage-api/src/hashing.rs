@@ -1,11 +1,13 @@
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+};
 use alloy_primitives::{map::HashMap, Address, BlockNumber, B256};
 use auto_impl::auto_impl;
 use core::ops::{RangeBounds, RangeInclusive};
 use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
 use reth_primitives::{Account, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
-use alloc::boxed::Box;
 
 /// Hashing Writer
 #[auto_impl(&, Arc, Box)]

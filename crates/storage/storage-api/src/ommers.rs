@@ -1,8 +1,7 @@
 use crate::HeaderProvider;
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::BlockHashOrNumber;
 use reth_storage_errors::provider::ProviderResult;
-use alloc::vec::Vec;
 
 /// Client trait for fetching ommers.
 pub trait OmmersProvider: HeaderProvider + Send + Sync {

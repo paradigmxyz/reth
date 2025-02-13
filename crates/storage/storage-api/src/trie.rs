@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloy_primitives::{map::B256HashMap, Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -5,7 +6,6 @@ use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
-use alloc::boxed::Box;
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]

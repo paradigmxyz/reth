@@ -1,4 +1,5 @@
 use crate::{DBProvider, OmmersProvider, StorageLocation};
+use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
@@ -10,7 +11,6 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use alloc::vec::Vec;
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::{
     Block, BlockBody, FullBlockHeader, FullNodePrimitives, SignedTransaction,

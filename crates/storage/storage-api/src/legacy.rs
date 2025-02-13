@@ -2,12 +2,12 @@
 //!
 //! This module is scheduled for removal in the future.
 
+use alloc::boxed::Box;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use alloc::boxed::Box;
 
 /// Blockchain trait provider that gives access to the blockchain state that is not yet committed
 /// (pending).
