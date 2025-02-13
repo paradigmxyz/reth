@@ -15,11 +15,13 @@ use reth_trie_common::{
 use smallvec::SmallVec;
 use std::{borrow::Cow, fmt};
 
-/// Struct for passing around `hash_mask` and `trie_mask`
+/// Struct for passing around `hash_mask` and `tree_mask`
 #[derive(Debug)]
 pub struct TrieMasks {
-    hash_mask: Option<TrieMask>,
-    tree_mask: Option<TrieMask>,
+    /// Branch node hash mask, if any.
+    pub hash_mask: Option<TrieMask>,
+    /// Branch node tree mask, if any.
+    pub tree_mask: Option<TrieMask>,
 }
 
 /// Inner representation of the sparse trie.
@@ -69,12 +71,7 @@ impl SparseTrie {
         mask: TrieMasks,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie> {
-        self.reveal_root_with_provider(
-            Default::default(),
-            root,
-            mask,
-            retain_updates,
-        )
+        self.reveal_root_with_provider(Default::default(), root, mask, retain_updates)
     }
 }
 
@@ -310,7 +307,7 @@ impl<P> RevealedSparseTrie<P> {
         &mut self,
         path: Nibbles,
         node: TrieNode,
-        mask: TrieMasks
+        mask: TrieMasks,
     ) -> SparseTrieResult<()> {
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
@@ -465,7 +462,11 @@ impl<P> RevealedSparseTrie<P> {
             return Ok(())
         }
 
-        self.reveal_node(path, TrieNode::decode(&mut &child[..])?, TrieMasks{hash_mask: None, tree_mask: None})
+        self.reveal_node(
+            path,
+            TrieNode::decode(&mut &child[..])?,
+            TrieMasks { hash_mask: None, tree_mask: None },
+        )
     }
 
     /// Traverse trie nodes down to the leaf node and collect all nodes along the path.
@@ -1057,10 +1058,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                                     self.reveal_node(
                                         current.clone(),
                                         decoded,
-                                        TrieMasks{
-                                            hash_mask,
-                                            tree_mask,
-                                        }
+                                        TrieMasks { hash_mask, tree_mask },
                                     )?;
                                 }
                             }
@@ -1223,10 +1221,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                                 self.reveal_node(
                                     child_path.clone(),
                                     decoded,
-                                    TrieMasks {
-                                        hash_mask,
-                                        tree_mask,
-                                    }
+                                    TrieMasks { hash_mask, tree_mask },
                                 )?;
                             }
                         }
@@ -2111,17 +2106,32 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let mut sparse =
-            RevealedSparseTrie::from_root(branch.clone(), TrieMasks{hash_mask: Some(TrieMask::new(0b01)), tree_mask: None}, false)
-                .unwrap();
+        let mut sparse = RevealedSparseTrie::from_root(
+            branch.clone(),
+            TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
+            false,
+        )
+        .unwrap();
 
         // Reveal a branch node and one of its children
         //
         // Branch (Mask = 11)
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
-        sparse.reveal_node(Nibbles::default(), branch, TrieMasks{hash_mask: None, tree_mask: Some(TrieMask::new(0b01))}).unwrap();
-        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), TrieMasks{hash_mask: None, tree_mask: None}).unwrap();
+        sparse
+            .reveal_node(
+                Nibbles::default(),
+                branch,
+                TrieMasks { hash_mask: None, tree_mask: Some(TrieMask::new(0b01)) },
+            )
+            .unwrap();
+        sparse
+            .reveal_node(
+                Nibbles::from_nibbles([0x1]),
+                TrieNode::Leaf(leaf),
+                TrieMasks { hash_mask: None, tree_mask: None },
+            )
+            .unwrap();
 
         // Removing a blinded leaf should result in an error
         assert_matches!(
@@ -2144,17 +2154,32 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let mut sparse =
-            RevealedSparseTrie::from_root(branch.clone(), TrieMasks{hash_mask: Some(TrieMask::new(0b01)), tree_mask: None}, false)
-                .unwrap();
+        let mut sparse = RevealedSparseTrie::from_root(
+            branch.clone(),
+            TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
+            false,
+        )
+        .unwrap();
 
         // Reveal a branch node and one of its children
         //
         // Branch (Mask = 11)
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
-        sparse.reveal_node(Nibbles::default(), branch, TrieMasks{hash_mask: None, tree_mask: Some(TrieMask::new(0b01))}).unwrap();
-        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), TrieMasks{hash_mask: None, tree_mask: None}).unwrap();
+        sparse
+            .reveal_node(
+                Nibbles::default(),
+                branch,
+                TrieMasks { hash_mask: None, tree_mask: Some(TrieMask::new(0b01)) },
+            )
+            .unwrap();
+        sparse
+            .reveal_node(
+                Nibbles::from_nibbles([0x1]),
+                TrieNode::Leaf(leaf),
+                TrieMasks { hash_mask: None, tree_mask: None },
+            )
+            .unwrap();
 
         // Removing a non-existent leaf should be a noop
         let sparse_old = sparse.clone();
@@ -2333,8 +2358,9 @@ mod tests {
             );
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
-            TrieMasks {hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
-            tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
+            TrieMasks {
+                hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
+                tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
             },
             false,
         )
@@ -2352,7 +2378,11 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), TrieMasks{hash_mask, tree_mask})
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
                 .unwrap();
         }
 
@@ -2383,7 +2413,11 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), TrieMasks{hash_mask, tree_mask})
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
                 .unwrap();
         }
 
@@ -2432,8 +2466,9 @@ mod tests {
             );
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
-            TrieMasks{hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
-            tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
+            TrieMasks {
+                hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
+                tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
             },
             false,
         )
@@ -2452,7 +2487,11 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), TrieMasks{hash_mask, tree_mask})
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
                 .unwrap();
         }
 
@@ -2483,7 +2522,11 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), TrieMasks{hash_mask, tree_mask})
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
                 .unwrap();
         }
 
@@ -2524,8 +2567,9 @@ mod tests {
             );
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
-            TrieMasks {hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
-            tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
+            TrieMasks {
+                hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
+                tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
             },
             false,
         )
@@ -2558,7 +2602,11 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), TrieMasks{hash_mask, tree_mask})
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
                 .unwrap();
         }
 
