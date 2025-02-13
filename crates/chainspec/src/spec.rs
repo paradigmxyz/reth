@@ -278,12 +278,6 @@ impl ChainSpec {
         self.chain == Chain::optimism_mainnet()
     }
 
-    /// Returns `true` if this chain is private devnet.
-    #[inline]
-    pub fn is_dev(&self) -> bool {
-        self.chain == Chain::dev()
-    }
-
     /// Returns the known paris block, if it exists.
     #[inline]
     pub fn paris_block(&self) -> Option<u64> {
@@ -352,14 +346,7 @@ impl ChainSpec {
     }
 
     fn get_or_init_sealed_genesis_header(&self) -> &SealedHeader {
-        self.genesis_header.get_or_init(|| {
-            let header = self.make_genesis_header();
-            if self.is_dev() {
-                SealedHeader::new(header, DEV_GENESIS_HASH)
-            } else {
-                SealedHeader::seal_slow(header)
-            }
-        })
+        self.genesis_header.get_or_init(|| SealedHeader::seal_slow(self.make_genesis_header()))
     }
 
     /// Get the sealed header for the genesis block.
@@ -2428,10 +2415,5 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn sepolia_genesis_hash() {
         assert_eq!(SEPOLIA.genesis_hash(), SEPOLIA_GENESIS_HASH)
-    }
-
-    #[test]
-    fn dev_genesis_hash() {
-        assert_eq!(DEV.genesis_hash(), DEV_GENESIS_HASH)
     }
 }

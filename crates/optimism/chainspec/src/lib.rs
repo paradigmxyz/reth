@@ -206,12 +206,9 @@ impl OpChainSpec {
             if self.is_optimism_mainnet() {
                 // for OP mainnet we have to do this because the genesis header can't be
                 // properly computed from the genesis.json file due to OVM history
-                SealedHeader::new(header, OP_MAINNET_GENESIS_HASH)
-            } else if self.is_dev() {
-                SealedHeader::new(header, DEV_GENESIS_HASH)
-            } else {
-                SealedHeader::seal_slow(header)
+                return SealedHeader::new(header, OP_MAINNET_GENESIS_HASH)
             }
+            SealedHeader::seal_slow(header)
         })
     }
 
@@ -1120,10 +1117,5 @@ mod tests {
     #[test]
     fn base_sepolia_genesis_hash() {
         assert_eq!(BASE_SEPOLIA.genesis_hash(), BASE_SEPOLIA_GENESIS_HASH)
-    }
-
-    #[test]
-    fn op_dev_genesis_hash() {
-        assert_eq!(OP_DEV.genesis_hash(), DEV_GENESIS_HASH)
     }
 }
