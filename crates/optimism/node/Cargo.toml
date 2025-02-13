@@ -98,6 +98,7 @@ optimism = [
     "reth-node-core/optimism",
     "reth-optimism-primitives/optimism",
     "reth-optimism-txpool/optimism",
+    "reth-optimism-node/optimism",
 ]
 asm-keccak = [
     "reth-primitives/asm-keccak",
