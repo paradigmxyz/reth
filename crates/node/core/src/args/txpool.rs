@@ -1,7 +1,7 @@
 //! Transaction pool arguments
 
 use crate::cli::config::RethTransactionPoolConfig;
-use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
 use reth_cli_util::parse_duration_from_secs_or_ms;
@@ -62,7 +62,7 @@ pub struct TxPoolArgs {
     pub minimal_protocol_basefee: u64,
 
     /// The default enforced gas limit for transactions entering the pool
-    #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT)]
+    #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT_30M)]
     pub enforced_gas_limit: u64,
 
     /// Price bump percentage to replace an already existing blob transaction
@@ -122,7 +122,7 @@ impl Default for TxPoolArgs {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            enforced_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            enforced_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
             max_cached_entries: DEFAULT_MAX_CACHED_BLOBS,

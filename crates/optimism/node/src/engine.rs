@@ -1,5 +1,5 @@
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
+    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
 };
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
@@ -11,8 +11,8 @@ use reth_node_api::{
         EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
         VersionSpecificValidationError,
     },
-    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, ExecutionData,
-    NodePrimitives, PayloadValidator,
+    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
+    PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};

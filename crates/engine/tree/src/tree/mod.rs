@@ -26,7 +26,7 @@ use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
+use reth_consensus::{Consensus, FullConsensus};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
@@ -950,11 +950,14 @@ where
         };
 
         let mut outcome = TreeOutcome::new(status);
+        // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
-            // if the block is valid and it is the sync target head, make it canonical
-            outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
-                sync_target_head: block_hash,
-            }));
+            // but only if it isn't already the canonical head
+            if self.state.tree_state.canonical_block_hash() != block_hash {
+                outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
+                    sync_target_head: block_hash,
+                }));
+            }
         }
 
         Ok(outcome)
@@ -1436,7 +1439,12 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
-                                let output = self.on_new_payload(payload);
+                                let mut output = self.on_new_payload(payload);
+
+                                let maybe_event =
+                                    output.as_mut().ok().and_then(|out| out.event.take());
+
+                                // emit response
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(|e| {
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
@@ -1448,6 +1456,9 @@ where
                                         .failed_new_payload_response_deliveries
                                         .increment(1);
                                 }
+
+                                // handle the event if any
+                                self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
                                 // triggering this hook will record that we received a request from
@@ -1592,6 +1603,8 @@ where
     }
 
     /// Handles a tree event.
+    ///
+    /// Returns an error if a [`TreeAction::MakeCanonical`] results in a fatal error.
     fn on_tree_event(&mut self, event: TreeEvent) -> ProviderResult<()> {
         match event {
             TreeEvent::TreeAction(action) => match action {
@@ -2527,10 +2540,7 @@ where
         // Ensure that prewarm tasks don't send proof messages after state root sender is dropped
         cancel_execution.cancel();
 
-        if let Err(err) = self.consensus.validate_block_post_execution(
-            &block,
-            PostExecutionInput::new(&output.receipts, &output.requests),
-        ) {
+        if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
             return Err(err.into())
@@ -3200,12 +3210,13 @@ mod tests {
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{
-        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+        CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1,
+        ExecutionPayloadV3,
     };
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-    use reth_engine_primitives::{ExecutionData, ForkchoiceStatus};
+    use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_ethereum_primitives::{Block, EthPrimitives};

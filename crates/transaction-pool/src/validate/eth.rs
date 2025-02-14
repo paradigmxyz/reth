@@ -19,7 +19,8 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams,
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
+    eip7840::BlobParams,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
@@ -591,7 +592,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     ///  - EIP-4844
     pub fn new(client: Client) -> Self {
         Self {
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT.into(),
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
             client,
             minimum_priority_fee: None,
             additional_tasks: 1,

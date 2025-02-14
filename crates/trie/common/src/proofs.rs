@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256HashMap, B256HashSet, HashMap},
+    map::{hash_map, B256Map, B256Set, HashMap},
     Address, Bytes, B256, U256,
 };
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
@@ -18,7 +18,7 @@ use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 /// Proof targets map.
-pub type MultiProofTargets = B256HashMap<B256HashSet>;
+pub type MultiProofTargets = B256Map<B256Set>;
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
@@ -32,10 +32,18 @@ pub struct MultiProof {
     /// The tree masks of the branch nodes in the account proof.
     pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     /// Storage trie multiproofs.
-    pub storages: B256HashMap<StorageMultiProof>,
+    pub storages: B256Map<StorageMultiProof>,
 }
 
 impl MultiProof {
+    /// Returns true if the multiproof is empty.
+    pub fn is_empty(&self) -> bool {
+        self.account_subtree.is_empty() &&
+            self.branch_node_hash_masks.is_empty() &&
+            self.branch_node_tree_masks.is_empty() &&
+            self.storages.is_empty()
+    }
+
     /// Return the account proof nodes for the given account path.
     pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, Bytes)> {
         self.account_subtree.matching_nodes_sorted(path)

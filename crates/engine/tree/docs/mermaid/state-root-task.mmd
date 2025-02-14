@@ -1,0 +1,44 @@
+flowchart TD
+    subgraph StateRootTaskMessages[State Root Task messages]
+        StateRootMessage::StateUpdate
+        StateRootMessage::PrefetchProofs
+        StateRootMessage::EmptyProof
+        StateRootMessage::ProofCalculated
+        StataRootMessage::FinishedStateUpdates
+    end
+
+    subgraph StateRootTask[State Root Task thread]
+        DeduplicateProofTargets[Deduplicate proof targets according to the list of already fetched proofs]
+        GenerateProofTargets[Generate proof targets from state update]
+            --> DeduplicateProofTargets
+
+        NewProof[New proof calculated]
+            -->|Add new proof| ProofSequencer
+            --> EndCondition1
+        ProofSequencer --> ProofSequencerCondition{{Has sequential proofs?}}
+
+        EndCondition1{{All updates processed?}}
+            --> EndCondition2{{All pending proofs requested?}}
+            --> EndCondition3{{All proofs finished processing?}}
+    end
+
+    subgraph SparseTrieTask[Sparse Trie thread]
+        SparseTrieUpdate([SparseTrieUpdate channel])
+    end
+
+    subgraph MultiProofManager[MultiProofManager]
+        MultiProofCompletion[on_calculation_complete]
+        MultiProofSpawn[spawn_or_queue]
+    end
+
+    StateRootMessage::PrefetchProofs --> DeduplicateProofTargets
+    StateRootMessage::StateUpdate --> GenerateProofTargets
+
+    DeduplicateProofTargets -----> MultiProofSpawn
+
+    StateRootMessage::EmptyProof --> NewProof
+    StateRootMessage::ProofCalculated --> NewProof
+    NewProof ---> MultiProofCompletion
+    ProofSequencerCondition -->|Yes, send multiproof and state update| SparseTrieUpdate
+    StataRootMessage::FinishedStateUpdates --> EndCondition1
+    EndCondition3 -->|Close SparseTrieUpdate channel| SparseTrieUpdate
