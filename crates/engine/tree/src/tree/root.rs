@@ -659,8 +659,10 @@ where
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(&mut self, update: EvmState) {
+    fn on_state_update(&mut self, update: EvmState) -> u64 {
         let mut hashed_state_update = evm_state_to_hashed_post_state(update);
+
+        let mut total_updates = 0;
 
         for accounts_chunk in &hashed_state_update.accounts.into_iter().chunks(5) {
             let mut chunks = vec![vec![]; 1];
@@ -713,6 +715,7 @@ where
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
                 });
+                total_updates += 1;
             }
         }
 
@@ -730,7 +733,10 @@ where
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
             });
+            total_updates += 1;
         }
+
+        total_updates
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -831,14 +837,16 @@ where
                         }
                         last_update_time = Some(Instant::now());
 
-                        updates_received += 1;
+                        let update_size = update.len();
+                        let new_updates = self.on_state_update(update);
+                        updates_received += new_updates;
                         debug!(
                             target: "engine::root",
-                            len = update.len(),
+                            update_size,
+                            new_updates,
                             total_updates = updates_received,
                             "Received new state update"
                         );
-                        self.on_state_update(update);
                     }
                     StateRootMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
