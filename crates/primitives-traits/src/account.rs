@@ -9,19 +9,19 @@ use revm_state::AccountInfo;
 #[cfg(any(test, feature = "reth-codec"))]
 /// Identifiers used in [`Compact`](reth_codecs::Compact) encoding of [`Bytecode`].
 pub mod compact_ids {
-    /// Identifier for [`LegacyRaw`](revm_primitives::Bytecode::LegacyRaw).
+    /// Identifier for legacy raw bytecode.
     pub const LEGACY_RAW_BYTECODE_ID: u8 = 0;
 
     /// Identifier for removed bytecode variant.
     pub const REMOVED_BYTECODE_ID: u8 = 1;
 
-    /// Identifier for [`LegacyAnalyzed`](revm_primitives::Bytecode::LegacyAnalyzed).
+    /// Identifier for [`LegacyAnalyzed`](revm_bytecode::Bytecode::LegacyAnalyzed).
     pub const LEGACY_ANALYZED_BYTECODE_ID: u8 = 2;
 
-    /// Identifier for [`Eof`](revm_primitives::Bytecode::Eof).
+    /// Identifier for [`Eof`](revm_bytecode::Bytecode::Eof).
     pub const EOF_BYTECODE_ID: u8 = 3;
 
-    /// Identifier for [`Eip7702`](revm_primitives::Bytecode::Eip7702).
+    /// Identifier for [`Eip7702`](revm_bytecode::Bytecode::Eip7702).
     pub const EIP7702_BYTECODE_ID: u8 = 4;
 }
 
@@ -91,7 +91,7 @@ impl Bytecode {
         Self(RevmBytecode::new_raw(bytes))
     }
 
-    /// Creates a new raw [`revm_primitives::Bytecode`].
+    /// Creates a new raw [`revm_bytecode::Bytecode`].
     ///
     /// Returns an error on incorrect Bytecode format.
     #[inline]
@@ -265,12 +265,12 @@ mod tests {
         let mut buf = vec![];
         let bytecode = Bytecode::new_raw(Bytes::default());
         let len = bytecode.to_compact(&mut buf);
-        assert_eq!(len, 5);
+        assert_eq!(len, 46);
 
         let mut buf = vec![];
         let bytecode = Bytecode::new_raw(Bytes::from(&hex!("ffff")));
         let len = bytecode.to_compact(&mut buf);
-        assert_eq!(len, 7);
+        assert_eq!(len, 49);
 
         let mut buf = vec![];
         let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(LegacyAnalyzedBytecode::new(

@@ -6,7 +6,7 @@ use crate::{
     Database,
 };
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
+use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";

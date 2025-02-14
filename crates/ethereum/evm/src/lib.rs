@@ -86,8 +86,8 @@ impl ConfigureEvmEnv for EthEvmConfig {
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         let spec = config::revm_spec(self.chain_spec(), header);
 
-        let mut cfg_env = CfgEnv::default();
-        cfg_env.chain_id = self.chain_spec.chain().id();
+        // configure evm env based on parent block
+        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec.chain().id()).with_spec(spec);
 
         let block_env = BlockEnv {
             number: header.number(),
@@ -353,7 +353,6 @@ mod tests {
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 
         // Check that the spec ID is set properly
-        assert_eq!(evm.cfg.spec, SpecId::PETERSBURG);
         assert_eq!(evm.block, evm_env.block_env);
         assert_eq!(evm.cfg, evm_env.cfg_env);
         assert_eq!(evm.tx, Default::default());

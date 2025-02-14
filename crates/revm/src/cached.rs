@@ -14,8 +14,7 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 /// # Example
 ///
 /// ```
-/// use reth_revm::cached::CachedReads;
-/// use revm_database::{DatabaseRef, State};
+/// use reth_revm::{cached::CachedReads, DatabaseRef, db::State};
 ///
 /// fn build_payload<DB: DatabaseRef>(db: DB) {
 ///     let mut cached_reads = CachedReads::default();

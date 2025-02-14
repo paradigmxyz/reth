@@ -8,7 +8,7 @@ use alloy_consensus::{
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
-    eip7702::{constants::SECP256K1N_HALF, SignedAuthorization},
+    eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
@@ -776,15 +776,9 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 kind: tx.to,
                 value: tx.value,
                 data: tx.input.clone(),
-                chain_id: None,
+                chain_id: Some(tx.chain_id),
                 nonce: tx.nonce,
-                access_list: tx
-                    .access_list
-                    .0
-                    .clone()
-                    .into_iter()
-                    .map(|item| (item.address, item.storage_keys))
-                    .collect(),
+                access_list: tx.access_list.clone(),
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
                 authorization_list: Default::default(),
@@ -800,13 +794,7 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 data: tx.input.clone(),
                 chain_id: Some(tx.chain_id),
                 nonce: tx.nonce,
-                access_list: tx
-                    .access_list
-                    .0
-                    .clone()
-                    .into_iter()
-                    .map(|item| (item.address, item.storage_keys))
-                    .collect(),
+                access_list: tx.access_list.clone(),
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
                 authorization_list: Default::default(),
@@ -822,13 +810,7 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 data: tx.input.clone(),
                 chain_id: Some(tx.chain_id),
                 nonce: tx.nonce,
-                access_list: tx
-                    .access_list
-                    .0
-                    .clone()
-                    .into_iter()
-                    .map(|item| (item.address, item.storage_keys))
-                    .collect(),
+                access_list: tx.access_list.clone(),
                 blob_hashes: tx.blob_versioned_hashes.clone(),
                 max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
                 authorization_list: Default::default(),
@@ -844,22 +826,10 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 data: tx.input.clone(),
                 chain_id: Some(tx.chain_id),
                 nonce: tx.nonce,
-                access_list: tx
-                    .access_list
-                    .0
-                    .clone()
-                    .into_iter()
-                    .map(|item| (item.address, item.storage_keys))
-                    .collect(),
+                access_list: tx.access_list.clone(),
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
-                authorization_list: tx
-                    .authorization_list
-                    .iter()
-                    .map(|item| {
-                        (item.recover_authority().ok(), item.chain_id, item.nonce, item.address)
-                    })
-                    .collect(),
+                authorization_list: tx.authorization_list.clone(),
                 tx_type: 4,
                 caller: sender,
             },

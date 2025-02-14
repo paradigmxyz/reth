@@ -146,8 +146,13 @@ mod tests {
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-    use revm::state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot};
-    use revm_database::BundleState;
+    use reth_execution_types::BlockExecutionResult;
+    use reth_primitives::EthPrimitives;
+    use revm::{
+        database_interface::EmptyDB,
+        state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
+    };
+    use revm_database::State;
     use std::sync::mpsc;
 
     /// A mock executor that simulates state changes
@@ -189,7 +194,7 @@ mod tests {
             })
         }
 
-        fn into_state(self) -> revm::db::State<DB> {
+        fn into_state(self) -> revm_database::State<DB> {
             State::builder().with_database(Default::default()).build()
         }
 

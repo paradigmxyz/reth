@@ -18,7 +18,6 @@ use core::{
     hash::{Hash, Hasher},
     mem,
 };
-use revm_context::TxEnv;
 use derive_more::{AsRef, Deref};
 use op_alloy_consensus::{
     DepositTransaction, OpPooledTransaction, OpTxEnvelope, OpTypedTransaction, TxDeposit,
@@ -31,6 +30,7 @@ use reth_primitives_traits::{
     transaction::{error::TransactionConversionError, signed::RecoveryError},
     FillTxEnv, InMemorySize, SignedTransaction,
 };
+use revm_context::TxEnv;
 use revm_optimism::transaction::deposit::DepositTransactionParts;
 
 /// Signed transaction.
@@ -240,15 +240,9 @@ impl FillTxEnv<revm_optimism::OpTransaction<TxEnv>> for OpTransactionSigned {
                 kind: tx.to,
                 value: tx.value,
                 data: tx.input.clone(),
-                chain_id: None,
+                chain_id: Some(tx.chain_id),
                 nonce: tx.nonce,
-                access_list: tx
-                    .access_list
-                    .0
-                    .clone()
-                    .into_iter()
-                    .map(|item| (item.address, item.storage_keys))
-                    .collect(),
+                access_list: tx.access_list.clone(),
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
                 authorization_list: Default::default(),
@@ -264,13 +258,7 @@ impl FillTxEnv<revm_optimism::OpTransaction<TxEnv>> for OpTransactionSigned {
                 data: tx.input.clone(),
                 chain_id: Some(tx.chain_id),
                 nonce: tx.nonce,
-                access_list: tx
-                    .access_list
-                    .0
-                    .clone()
-                    .into_iter()
-                    .map(|item| (item.address, item.storage_keys))
-                    .collect(),
+                access_list: tx.access_list.clone(),
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
                 authorization_list: Default::default(),
@@ -286,22 +274,10 @@ impl FillTxEnv<revm_optimism::OpTransaction<TxEnv>> for OpTransactionSigned {
                 data: tx.input.clone(),
                 chain_id: Some(tx.chain_id),
                 nonce: tx.nonce,
-                access_list: tx
-                    .access_list
-                    .0
-                    .clone()
-                    .into_iter()
-                    .map(|item| (item.address, item.storage_keys))
-                    .collect(),
+                access_list: tx.access_list.clone(),
                 blob_hashes: Default::default(),
                 max_fee_per_blob_gas: Default::default(),
-                authorization_list: tx
-                    .authorization_list
-                    .iter()
-                    .map(|item| {
-                        (item.recover_authority().ok(), item.chain_id, item.nonce, item.address)
-                    })
-                    .collect(),
+                authorization_list: tx.authorization_list.clone(),
                 tx_type: 4,
                 caller: sender,
             },

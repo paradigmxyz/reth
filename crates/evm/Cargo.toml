@@ -25,6 +25,7 @@ reth-storage-errors.workspace = true
 
 revm.workspace = true
 revm-database.workspace = true
+revm-optimism = { workspace = true, optional = true }
 
 # alloy
 alloy-primitives.workspace = true
@@ -61,6 +62,7 @@ std = [
     "reth-consensus-common/std",
     "alloy-evm/std",
     "revm-database/std",
+    "revm-optimism?/std",
     "reth-execution-errors/std",
     "reth-execution-types/std",
     "reth-storage-errors/std",
@@ -73,4 +75,9 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "revm/test-utils",
+]
+op = [
+    "revm-optimism",
+    "alloy-evm/op",
+    "reth-primitives-traits/op",
 ]

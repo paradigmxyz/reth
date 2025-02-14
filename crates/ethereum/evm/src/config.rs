@@ -3,14 +3,12 @@ use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_revm::specification::hardfork::SpecId;
 
-/// Map the latest active hardfork at the given header to a revm
-/// [`SpecId`](revm_primitives::SpecId).
+/// Map the latest active hardfork at the given header to a revm [`SpecId`].
 pub fn revm_spec(chain_spec: &ChainSpec, header: &Header) -> SpecId {
     revm_spec_by_timestamp_and_block_number(chain_spec, header.timestamp, header.number)
 }
 
-/// Map the latest active hardfork at the given timestamp or block number to a revm
-/// [`SpecId`](revm_primitives::SpecId).
+/// Map the latest active hardfork at the given timestamp or block number to a revm [`SpecId`].
 pub fn revm_spec_by_timestamp_and_block_number(
     chain_spec: &ChainSpec,
     timestamp: u64,

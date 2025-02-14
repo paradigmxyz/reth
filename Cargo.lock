@@ -261,7 +261,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=0fcb2e0#0fcb2e04c5a1af36761a76292c5245d3a87ed1d4"
+source = "git+https://github.com/alloy-rs/evm?rev=8c7ead7#8c7ead71080a9f644b6fdd9da3aa63b6d8a357e5"
 dependencies = [
  "alloy-primitives",
  "revm",
@@ -368,7 +368,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=0fcb2e0#0fcb2e04c5a1af36761a76292c5245d3a87ed1d4"
+source = "git+https://github.com/alloy-rs/evm?rev=8c7ead7#8c7ead71080a9f644b6fdd9da3aa63b6d8a357e5"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -7734,6 +7734,7 @@ dependencies = [
  "reth-storage-errors",
  "revm",
  "revm-database",
+ "revm-optimism",
 ]
 
 [[package]]
@@ -8574,6 +8575,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-revm",
  "revm",
+ "revm-database",
  "revm-optimism",
  "revm-primitives",
  "thiserror 2.0.11",
@@ -8641,6 +8643,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie-db",
  "revm",
+ "revm-optimism",
  "serde",
  "serde_json",
  "tokio",
@@ -8759,6 +8762,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "revm-optimism",
  "serde_json",
  "thiserror 2.0.11",
  "tokio",
@@ -8800,7 +8804,7 @@ dependencies = [
  "reth-provider",
  "reth-storage-api",
  "reth-transaction-pool",
- "revm",
+ "revm-optimism",
 ]
 
 [[package]]
@@ -9822,8 +9826,8 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "19.2.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+version = "19.5.0"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -9840,7 +9844,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "bitvec",
  "revm-primitives",
@@ -9851,8 +9855,10 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
+ "alloy-eip2930",
+ "alloy-eip7702",
  "auto_impl",
  "cfg-if",
  "derive-where",
@@ -9869,8 +9875,10 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
+ "alloy-eip2930",
+ "alloy-eip7702",
  "auto_impl",
  "revm-database-interface",
  "revm-primitives",
@@ -9882,7 +9890,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "auto_impl",
  "revm-bytecode",
@@ -9895,7 +9903,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "auto_impl",
  "revm-primitives",
@@ -9906,7 +9914,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "auto_impl",
  "revm-bytecode",
@@ -9923,7 +9931,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "revm",
  "serde",
@@ -9933,7 +9941,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.15.0"
-source = "git+https://github.com/paradigmxyz/revm-inspectors?rev=abd2011#abd201198ea1c2293d0cd7947660eec026828659"
+source = "git+https://github.com/paradigmxyz/revm-inspectors?rev=0e9da64#0e9da647c34bf725c829da7e113cacc40c62fab1"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -9951,8 +9959,8 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "15.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+version = "15.2.0"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -9964,7 +9972,7 @@ dependencies = [
 [[package]]
 name = "revm-optimism"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "auto_impl",
  "once_cell",
@@ -9975,8 +9983,8 @@ dependencies = [
 
 [[package]]
 name = "revm-precompile"
-version = "16.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+version = "16.1.0"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -9997,8 +10005,8 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "15.1.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+version = "15.2.0"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "alloy-primitives",
 ]
@@ -10006,7 +10014,7 @@ dependencies = [
 [[package]]
 name = "revm-specification"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "enumn",
  "revm-primitives",
@@ -10016,7 +10024,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "1.0.0"
-source = "git+https://github.com/bluealloy/revm?rev=26d16a1a#26d16a1a3ae0a5d1bc63bb818db953f66740bf7a"
+source = "git+https://github.com/bluealloy/revm?rev=3a4acd4#3a4acd4fa7e3f8a4b6bf1bb8ea4826aad7a6314e"
 dependencies = [
  "bitflags 2.8.0",
  "revm-bytecode",
