@@ -69,7 +69,7 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
         address: Address,
         block_number: u64,
         page_size: usize,
-    ) -> RpcResult<TransactionsWithReceipts>;
+    ) -> RpcResult<TransactionsWithReceipts<T>>;
 
     /// Gets paginated inbound/outbound transaction calls for a certain address.
     #[method(name = "searchTransactionsAfter")]
