@@ -289,6 +289,13 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
+
+            // If the account is self-destructed in the same transaction as it was created, we can
+            // skip it, as it will not affect the trie.
+            if account.is_created() && destroyed {
+                continue
+            }
+
             let info = if destroyed { None } else { Some(account.info.into()) };
             hashed_state.accounts.insert(hashed_address, info);
 
