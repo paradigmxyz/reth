@@ -3,7 +3,8 @@ use crate::{
     HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -387,9 +388,11 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
         &self,
         mut input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<B256Map<Bytes>> {
+    ) -> ProviderResult<Vec<Bytes>> {
         input.prepend(self.revert_state()?);
-        TrieWitness::overlay_witness(self.tx(), input, target).map_err(ProviderError::from)
+        TrieWitness::overlay_witness(self.tx(), input, target)
+            .map_err(ProviderError::from)
+            .map(|hm| hm.values().cloned().collect())
     }
 }
 
