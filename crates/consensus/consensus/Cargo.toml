@@ -21,7 +21,7 @@ alloy-consensus.workspace = true
 
 # misc
 auto_impl.workspace = true
-derive_more.workspace = true
+thiserror.workspace = true
 
 [features]
 default = ["std"]
@@ -30,8 +30,8 @@ std = [
     "alloy-primitives/std",
     "alloy-consensus/std",
     "reth-primitives-traits/std",
-    "derive_more/std",
     "reth-execution-types/std",
+    "thiserror/std",
 ]
 test-utils = [
     "reth-primitives-traits/test-utils",

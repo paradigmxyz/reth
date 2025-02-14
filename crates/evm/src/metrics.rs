@@ -2,7 +2,11 @@
 //!
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use crate::{execute::Executor, system_calls::OnStateHook, Database};
+use crate::{
+    execute::Executor,
+    system_calls::{OnStateHook, StateChangeSource},
+    Database,
+};
 use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
@@ -18,7 +22,7 @@ struct MeteredStateHook {
 }
 
 impl OnStateHook for MeteredStateHook {
-    fn on_state(&mut self, state: &EvmState) {
+    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
         let accounts = state.keys().len();
         let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
@@ -33,7 +37,7 @@ impl OnStateHook for MeteredStateHook {
         self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
 
         // Call the original state hook
-        self.inner_hook.on_state(state);
+        self.inner_hook.on_state(source, state);
     }
 }
 
@@ -178,7 +182,7 @@ mod tests {
             F: OnStateHook + 'static,
         {
             // Call hook with our mock state
-            hook.on_state(&self.state);
+            hook.on_state(StateChangeSource::Transaction(0), &self.state);
 
             Ok(BlockExecutionResult {
                 receipts: vec![],
@@ -202,7 +206,7 @@ mod tests {
     }
 
     impl OnStateHook for ChannelStateHook {
-        fn on_state(&mut self, _state: &EvmState) {
+        fn on_state(&mut self, _source: StateChangeSource, _state: &EvmState) {
             let _ = self.sender.send(self.output);
         }
     }
