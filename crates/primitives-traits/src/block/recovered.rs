@@ -295,7 +295,7 @@ impl<B: Block> RecoveredBlock<B> {
     #[inline]
     pub fn transactions_recovered(
         &self,
-    ) -> impl Iterator<Item = Recovered<&'_ <B::Body as BlockBody>::Transaction>> {
+    ) -> impl Iterator<Item = Recovered<&'_ <B::Body as BlockBody>::Transaction>> + '_ {
         self.transactions_with_sender().map(|(sender, tx)| Recovered::new_unchecked(tx, *sender))
     }
 

@@ -58,7 +58,6 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::ResultAndState;
 use root::{
     StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
 };
@@ -950,11 +949,14 @@ where
         };
 
         let mut outcome = TreeOutcome::new(status);
+        // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
-            // if the block is valid and it is the sync target head, make it canonical
-            outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
-                sync_target_head: block_hash,
-            }));
+            // but only if it isn't already the canonical head
+            if self.state.tree_state.canonical_block_hash() != block_hash {
+                outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
+                    sync_target_head: block_hash,
+                }));
+            }
         }
 
         Ok(outcome)
@@ -1436,7 +1438,12 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
-                                let output = self.on_new_payload(payload);
+                                let mut output = self.on_new_payload(payload);
+
+                                let maybe_event =
+                                    output.as_mut().ok().and_then(|out| out.event.take());
+
+                                // emit response
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(|e| {
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
@@ -1448,6 +1455,9 @@ where
                                         .failed_new_payload_response_deliveries
                                         .increment(1);
                                 }
+
+                                // handle the event if any
+                                self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
                                 // triggering this hook will record that we received a request from
@@ -1592,6 +1602,8 @@ where
     }
 
     /// Handles a tree event.
+    ///
+    /// Returns an error if a [`TreeAction::MakeCanonical`] results in a fatal error.
     fn on_tree_event(&mut self, event: TreeEvent) -> ProviderResult<()> {
         match event {
             TreeEvent::TreeAction(action) => match action {
@@ -2717,7 +2729,11 @@ where
     ) -> Result<(), InsertBlockErrorKind> {
         // Get the builder once, outside the thread
         let Some(state_provider_builder) = self.state_provider_builder(block.parent_hash())? else {
-            trace!(target: "engine::tree", parent=%block.parent_hash(), "Could not get state provider builder for prewarm");
+            trace!(
+                target: "engine::tree",
+                parent=%block.parent_hash(),
+                "Could not get state provider builder for prewarm",
+            );
             return Ok(())
         };
 
@@ -2733,17 +2749,18 @@ where
             let state_provider = match state_provider_builder.build() {
                 Ok(provider) => provider,
                 Err(err) => {
-                    trace!(target: "engine::tree", %err, "Failed to build state provider in prewarm thread");
+                    trace!(
+                        target: "engine::tree",
+                        %err,
+                        "Failed to build state provider in prewarm thread"
+                    );
                     return
                 }
             };
 
             // Use the caches to create a new provider with caching
-            let state_provider = CachedStateProvider::new_with_caches(
-                state_provider,
-                caches,
-                cache_metrics,
-            );
+            let state_provider =
+                CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
             let state_provider = StateProviderDatabase::new(&state_provider);
 
@@ -2760,10 +2777,16 @@ where
             }
 
             let execution_start = Instant::now();
-            let ResultAndState { state, .. } = match evm.transact(tx_env) {
+            let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    trace!(target: "engine::tree", %err, tx_hash=%tx.tx_hash(), sender=%tx.signer(), "Error when executing prewarm transaction");
+                    trace!(
+                        target: "engine::tree",
+                        %err,
+                        tx_hash=%tx.tx_hash(),
+                        sender=%tx.signer(),
+                        "Error when executing prewarm transaction",
+                    );
                     return
                 }
             };
@@ -2777,18 +2800,19 @@ where
                 return
             }
 
-            let Some(state_root_sender) = state_root_sender else {
-                return
-            };
+            let Some(state_root_sender) = state_root_sender else { return };
 
-            let mut targets = MultiProofTargets::default();
-            for (addr, account) in state {
+            let mut targets =
+                MultiProofTargets::with_capacity_and_hasher(res.state.len(), Default::default());
+            let mut storage_targets = 0;
+            for (addr, account) in res.state {
                 // if account was not touched, do not fetch for it
                 if !account.is_touched() {
                     continue
                 }
 
-                let mut storage_set = B256Set::default();
+                let mut storage_set =
+                    B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
                 for (key, slot) in account.storage {
                     // do nothing if unchanged
                     if !slot.is_changed() {
@@ -2798,10 +2822,10 @@ where
                     storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
                 }
 
+                storage_targets += storage_set.len();
                 targets.insert(keccak256(addr), storage_set);
             }
 
-            let storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>();
             debug!(
                 target: "engine::tree",
                 tx_hash = ?tx.tx_hash(),
@@ -2838,7 +2862,13 @@ where
         // If the error was due to an invalid payload, the payload is added to the
         // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
         // returned.
-        warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number(), %validation_err, "Invalid block error on new payload");
+        warn!(
+            target: "engine::tree",
+            invalid_hash=%block.hash(),
+            invalid_number=block.number(),
+            %validation_err,
+            "Invalid block error on new payload",
+        );
         let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
 
         // keep track of the invalid header
@@ -2903,7 +2933,9 @@ where
                             return Ok((regular_root, regular_updates, time_from_last_update));
                         }
                     } else {
-                        debug!(target: "engine::tree", "Regular state root does not match block state root");
+                        debug!(target: "engine::tree",
+                            "Regular state root does not match block state root"
+                        );
                     }
                 }
 

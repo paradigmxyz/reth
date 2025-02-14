@@ -281,7 +281,7 @@ impl Drop for StateHookSender {
 }
 
 fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::default();
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
         if account.is_touched() {
@@ -295,9 +295,8 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             let mut changed_storage_iter = account
                 .storage
                 .into_iter()
-                .filter_map(|(slot, value)| {
-                    value.is_changed().then(|| (keccak256(B256::from(slot)), value.present_value))
-                })
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
                 .peekable();
 
             if destroyed {
@@ -410,8 +409,8 @@ where
                 target: "engine::root",
                 proof_sequence_number,
                 ?proof_targets,
-                ?account_targets,
-                ?storage_targets,
+                account_targets,
+                storage_targets,
                 "Starting multiproof calculation",
             );
             let start = Instant::now();
@@ -421,8 +420,8 @@ where
                 target: "engine::root",
                 proof_sequence_number,
                 ?elapsed,
-                ?account_targets,
-                ?storage_targets,
+                account_targets,
+                storage_targets,
                 "Multiproof calculated",
             );
 
@@ -556,7 +555,7 @@ where
         std::thread::Builder::new()
             .name("State Root Task".to_string())
             .spawn(move || {
-                debug!(target: "engine::tree", "Starting state root task");
+                debug!(target: "engine::tree", "State root task starting");
 
                 let result = self.run(sparse_trie_tx);
                 let _ = tx.send(result);
@@ -575,7 +574,7 @@ where
     ) -> Sender<SparseTrieUpdate> {
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
-            debug!(target: "engine::tree", "Starting sparse trie task");
+            debug!(target: "engine::tree", "Sparse trie task starting");
             // We clone the task sender here so that it can be used in case the sparse trie task
             // succeeds, without blocking due to any `Drop` implementation.
             //
