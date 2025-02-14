@@ -146,7 +146,7 @@ impl<Factory> StateRootConfig<Factory> {
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
-    /// New state update from transaction execution
+    /// New state update from transaction execution with its source
     StateUpdate(StateChangeSource, EvmState),
     /// Empty proof for a specific state update
     EmptyProof {
