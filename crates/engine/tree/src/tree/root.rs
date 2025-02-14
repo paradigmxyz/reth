@@ -662,31 +662,58 @@ where
     fn on_state_update(&mut self, update: EvmState) {
         let mut hashed_state_update = evm_state_to_hashed_post_state(update);
 
-        for chunk in &hashed_state_update.accounts.into_iter().chunks(5) {
-            let (accounts, storages) = chunk
-                .map(|(address, account)| {
-                    (
-                        (address, account),
-                        (
-                            address,
-                            hashed_state_update.storages.remove(&address).unwrap_or_default(),
-                        ),
-                    )
-                })
-                .unzip();
-            let account_hashed_state_update = HashedPostState { accounts, storages };
+        for accounts_chunk in &hashed_state_update.accounts.into_iter().chunks(5) {
+            let mut chunks = Vec::<Vec<_>>::new();
 
-            let proof_targets =
-                get_proof_targets(&account_hashed_state_update, &self.fetched_proof_targets);
-            extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+            for (address, account) in accounts_chunk {
+                let storages =
+                    hashed_state_update.storages.remove(&address).unwrap_or_default().storage;
+                let chunks_num = storages.len().div_ceil(5);
+                if chunks.len() < chunks_num {
+                    chunks.resize(chunks_num, Vec::new());
+                }
 
-            self.multiproof_manager.spawn_or_queue(MultiproofInput {
-                config: self.config.clone(),
-                hashed_state_update: account_hashed_state_update,
-                proof_targets,
-                proof_sequence_number: self.proof_sequencer.next_sequence(),
-                state_root_message_sender: self.tx.clone(),
-            });
+                let storages = storages.into_iter().chunks(5);
+                let mut storages_iter = storages.into_iter();
+
+                chunks[0].push((
+                    address,
+                    account,
+                    if let Some(storages) = storages_iter.next() {
+                        HashedStorage::from_iter(false, storages)
+                    } else {
+                        HashedStorage::new(false)
+                    },
+                ));
+
+                for (i, storages_chunk) in storages_iter.enumerate() {
+                    chunks[i + 1].push((
+                        address,
+                        account,
+                        HashedStorage::from_iter(false, storages_chunk),
+                    ));
+                }
+            }
+
+            for chunk in chunks {
+                let (accounts, storages) = chunk
+                    .into_iter()
+                    .map(|(address, account, storages)| ((address, account), (address, storages)))
+                    .unzip();
+                let account_hashed_state_update = HashedPostState { accounts, storages };
+
+                let proof_targets =
+                    get_proof_targets(&account_hashed_state_update, &self.fetched_proof_targets);
+                extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+
+                self.multiproof_manager.spawn_or_queue(MultiproofInput {
+                    config: self.config.clone(),
+                    hashed_state_update: account_hashed_state_update,
+                    proof_targets,
+                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    state_root_message_sender: self.tx.clone(),
+                });
+            }
         }
 
         if !hashed_state_update.storages.is_empty() {
