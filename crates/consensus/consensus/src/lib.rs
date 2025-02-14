@@ -168,10 +168,10 @@ impl<T: Consensus<B>, B: Block> AsConsensus<B> for T {
 }
 
 /// Consensus Errors
-#[derive(Debug, PartialEq, Eq, Clone, derive_more::Display, derive_more::Error)]
+#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
 pub enum ConsensusError {
     /// Error when the gas used in the header exceeds the gas limit.
-    #[display("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
+    #[error("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
     HeaderGasUsedExceedsGasLimit {
         /// The gas used in the block header.
         gas_used: u64,
@@ -180,9 +180,7 @@ pub enum ConsensusError {
     },
 
     /// Error when block gas used doesn't match expected value
-    #[display(
-        "block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}"
-    )]
+    #[error("block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}")]
     BlockGasUsed {
         /// The gas diff.
         gas: GotExpected<u64>,
@@ -191,38 +189,38 @@ pub enum ConsensusError {
     },
 
     /// Error when the hash of block ommer is different from the expected hash.
-    #[display("mismatched block ommer hash: {_0}")]
+    #[error("mismatched block ommer hash: {0}")]
     BodyOmmersHashDiff(GotExpectedBoxed<B256>),
 
     /// Error when the state root in the block is different from the expected state root.
-    #[display("mismatched block state root: {_0}")]
+    #[error("mismatched block state root: {0}")]
     BodyStateRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the transaction root in the block is different from the expected transaction
     /// root.
-    #[display("mismatched block transaction root: {_0}")]
+    #[error("mismatched block transaction root: {0}")]
     BodyTransactionRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the receipt root in the block is different from the expected receipt root.
-    #[display("receipt root mismatch: {_0}")]
+    #[error("receipt root mismatch: {0}")]
     BodyReceiptRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when header bloom filter is different from the expected bloom filter.
-    #[display("header bloom filter mismatch: {_0}")]
+    #[error("header bloom filter mismatch: {0}")]
     BodyBloomLogDiff(GotExpectedBoxed<Bloom>),
 
     /// Error when the withdrawals root in the block is different from the expected withdrawals
     /// root.
-    #[display("mismatched block withdrawals root: {_0}")]
+    #[error("mismatched block withdrawals root: {0}")]
     BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the requests hash in the block is different from the expected requests
     /// hash.
-    #[display("mismatched block requests hash: {_0}")]
+    #[error("mismatched block requests hash: {0}")]
     BodyRequestsHashDiff(GotExpectedBoxed<B256>),
 
     /// Error when a block with a specific hash and number is already known.
-    #[display("block with [hash={hash}, number={number}] is already known")]
+    #[error("block with [hash={hash}, number={number}] is already known")]
     BlockKnown {
         /// The hash of the known block.
         hash: BlockHash,
@@ -231,14 +229,14 @@ pub enum ConsensusError {
     },
 
     /// Error when the parent hash of a block is not known.
-    #[display("block parent [hash={hash}] is not known")]
+    #[error("block parent [hash={hash}] is not known")]
     ParentUnknown {
         /// The hash of the unknown parent block.
         hash: BlockHash,
     },
 
     /// Error when the block number does not match the parent block number.
-    #[display(
+    #[error(
         "block number {block_number} does not match parent block number {parent_block_number}"
     )]
     ParentBlockNumberMismatch {
@@ -249,11 +247,11 @@ pub enum ConsensusError {
     },
 
     /// Error when the parent hash does not match the expected parent hash.
-    #[display("mismatched parent hash: {_0}")]
+    #[error("mismatched parent hash: {0}")]
     ParentHashMismatch(GotExpectedBoxed<B256>),
 
     /// Error when the block timestamp is in the future compared to our clock time.
-    #[display(
+    #[error(
         "block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}"
     )]
     TimestampIsInFuture {
@@ -264,82 +262,82 @@ pub enum ConsensusError {
     },
 
     /// Error when the base fee is missing.
-    #[display("base fee missing")]
+    #[error("base fee missing")]
     BaseFeeMissing,
 
     /// Error when there is a transaction signer recovery error.
-    #[display("transaction signer recovery error")]
+    #[error("transaction signer recovery error")]
     TransactionSignerRecoveryError,
 
     /// Error when the extra data length exceeds the maximum allowed.
-    #[display("extra data {len} exceeds max length")]
+    #[error("extra data {len} exceeds max length")]
     ExtraDataExceedsMax {
         /// The length of the extra data.
         len: usize,
     },
 
     /// Error when the difficulty after a merge is not zero.
-    #[display("difficulty after merge is not zero")]
+    #[error("difficulty after merge is not zero")]
     TheMergeDifficultyIsNotZero,
 
     /// Error when the nonce after a merge is not zero.
-    #[display("nonce after merge is not zero")]
+    #[error("nonce after merge is not zero")]
     TheMergeNonceIsNotZero,
 
     /// Error when the ommer root after a merge is not empty.
-    #[display("ommer root after merge is not empty")]
+    #[error("ommer root after merge is not empty")]
     TheMergeOmmerRootIsNotEmpty,
 
     /// Error when the withdrawals root is missing.
-    #[display("missing withdrawals root")]
+    #[error("missing withdrawals root")]
     WithdrawalsRootMissing,
 
     /// Error when the requests hash is missing.
-    #[display("missing requests hash")]
+    #[error("missing requests hash")]
     RequestsHashMissing,
 
     /// Error when an unexpected withdrawals root is encountered.
-    #[display("unexpected withdrawals root")]
+    #[error("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
 
     /// Error when an unexpected requests hash is encountered.
-    #[display("unexpected requests hash")]
+    #[error("unexpected requests hash")]
     RequestsHashUnexpected,
 
     /// Error when withdrawals are missing.
-    #[display("missing withdrawals")]
+    #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
 
     /// Error when requests are missing.
-    #[display("missing requests")]
+    #[error("missing requests")]
     BodyRequestsMissing,
 
     /// Error when blob gas used is missing.
-    #[display("missing blob gas used")]
+    #[error("missing blob gas used")]
     BlobGasUsedMissing,
 
     /// Error when unexpected blob gas used is encountered.
-    #[display("unexpected blob gas used")]
+    #[error("unexpected blob gas used")]
     BlobGasUsedUnexpected,
 
     /// Error when excess blob gas is missing.
-    #[display("missing excess blob gas")]
+    #[error("missing excess blob gas")]
     ExcessBlobGasMissing,
 
     /// Error when unexpected excess blob gas is encountered.
-    #[display("unexpected excess blob gas")]
+    #[error("unexpected excess blob gas")]
     ExcessBlobGasUnexpected,
 
     /// Error when the parent beacon block root is missing.
-    #[display("missing parent beacon block root")]
+    #[error("missing parent beacon block root")]
     ParentBeaconBlockRootMissing,
 
     /// Error when an unexpected parent beacon block root is encountered.
-    #[display("unexpected parent beacon block root")]
+    #[error("unexpected parent beacon block root")]
     ParentBeaconBlockRootUnexpected,
 
     /// Error when blob gas used exceeds the maximum allowed.
-    #[display("blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
+    #[error("blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
     BlobGasUsedExceedsMaxBlobGasPerBlock {
         /// The actual blob gas used.
         blob_gas_used: u64,
@@ -348,7 +346,7 @@ pub enum ConsensusError {
     },
 
     /// Error when blob gas used is not a multiple of blob gas per blob.
-    #[display(
+    #[error(
         "blob gas used {blob_gas_used} is not a multiple of blob gas per blob {blob_gas_per_blob}"
     )]
     BlobGasUsedNotMultipleOfBlobGasPerBlob {
@@ -359,7 +357,7 @@ pub enum ConsensusError {
     },
 
     /// Error when excess blob gas is not a multiple of blob gas per blob.
-    #[display(
+    #[error(
         "excess blob gas {excess_blob_gas} is not a multiple of blob gas per blob {blob_gas_per_blob}"
     )]
     ExcessBlobGasNotMultipleOfBlobGasPerBlob {
@@ -370,18 +368,19 @@ pub enum ConsensusError {
     },
 
     /// Error when the blob gas used in the header does not match the expected blob gas used.
-    #[display("blob gas used mismatch: {_0}")]
+    #[error("blob gas used mismatch: {0}")]
     BlobGasUsedDiff(GotExpected<u64>),
 
     /// Error for a transaction that violates consensus.
+    #[error(transparent)]
     InvalidTransaction(InvalidTransactionError),
 
     /// Error when the block's base fee is different from the expected base fee.
-    #[display("block base fee mismatch: {_0}")]
+    #[error("block base fee mismatch: {0}")]
     BaseFeeDiff(GotExpected<u64>),
 
     /// Error when there is an invalid excess blob gas.
-    #[display(
+    #[error(
         "invalid excess blob gas: {diff}; \
             parent excess blob gas: {parent_excess_blob_gas}, \
             parent blob gas used: {parent_blob_gas_used}"
@@ -396,7 +395,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the child gas limit exceeds the maximum allowed increase.
-    #[display("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
+    #[error("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
     GasLimitInvalidIncrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
@@ -407,7 +406,7 @@ pub enum ConsensusError {
     /// Error indicating that the child gas limit is below the minimum allowed limit.
     ///
     /// This error occurs when the child gas limit is less than the specified minimum gas limit.
-    #[display(
+    #[error(
         "child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})"
     )]
     GasLimitInvalidMinimum {
@@ -416,7 +415,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the child gas limit exceeds the maximum allowed decrease.
-    #[display("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
+    #[error("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
     GasLimitInvalidDecrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
@@ -425,7 +424,7 @@ pub enum ConsensusError {
     },
 
     /// Error when the block timestamp is in the past compared to the parent timestamp.
-    #[display(
+    #[error(
         "block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}"
     )]
     TimestampIsInPast {
@@ -450,6 +449,6 @@ impl From<InvalidTransactionError> for ConsensusError {
 }
 
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
-#[derive(derive_more::Display, derive_more::Error, Debug)]
-#[display("Consensus error: {_0}, Invalid header: {_1:?}")]
+#[derive(thiserror::Error, Debug)]
+#[error("Consensus error: {0}, Invalid header: {1:?}")]
 pub struct HeaderConsensusError<H>(ConsensusError, SealedHeader<H>);
