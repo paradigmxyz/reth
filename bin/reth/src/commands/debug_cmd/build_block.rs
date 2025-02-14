@@ -7,6 +7,7 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
+use alloy_rpc_types::Withdrawal;
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
@@ -70,6 +71,15 @@ pub struct Command<C: ChainSpecParser> {
     #[arg(long)]
     suggested_fee_recipient: Address,
 
+    /// Optional withdrawals for post-Shanghai blocks.
+    /// Each withdrawal should be in JSON format containing:
+    /// - index: withdrawal index
+    /// - validator_index: validator index
+    /// - address: recipient address
+    /// - amount: amount in Gwei
+    #[arg(long)]
+    withdrawals: Option<Vec<String>>,
+
     /// Array of transactions.
     /// NOTE: 4844 transactions must be provided in the same order as they appear in the blobs
     /// bundle.
@@ -117,6 +127,16 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         } else {
             Ok(EnvKzgSettings::Default)
         }
+    }
+
+    /// Parse withdrawals from string format
+    fn parse_withdrawals(&self) -> eyre::Result<Option<Vec<Withdrawal>>> {
+        self.withdrawals.as_ref().map(|withdrawals| {
+            withdrawals
+                .iter()
+                .map(|w| serde_json::from_str(w).wrap_err("Failed to parse withdrawal"))
+                .collect::<Result<Vec<Withdrawal>, _>>()
+        }).transpose()
     }
 
     /// Execute `debug in-memory-merkle` command
@@ -198,13 +218,22 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .await?;
         }
 
+        let is_shanghai_active = provider_factory.chain_spec().is_shanghai_active_at_timestamp(self.timestamp);
+        let withdrawals = if is_shanghai_active {
+            Some(self.parse_withdrawals()?.unwrap_or_default())
+        } else {
+            if self.withdrawals.is_some() {
+                warn!(target: "reth::cli", "Withdrawals provided but Shanghai is not active at timestamp {}", self.timestamp);
+            }
+            None
+        };
+
         let payload_attrs = PayloadAttributes {
             parent_beacon_block_root: self.parent_beacon_block_root,
             prev_randao: self.prev_randao,
             timestamp: self.timestamp,
             suggested_fee_recipient: self.suggested_fee_recipient,
-            // TODO: add support for withdrawals
-            withdrawals: None,
+            withdrawals,
         };
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
