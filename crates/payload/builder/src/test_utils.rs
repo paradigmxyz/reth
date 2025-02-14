@@ -6,6 +6,7 @@ use crate::{
 };
 
 use alloy_primitives::U256;
+use futures_util::Stream;
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{PayloadKind, PayloadTypes};
@@ -80,10 +81,10 @@ impl Future for TestPayloadJob {
 }
 
 impl PayloadJob for TestPayloadJob {
+    type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadBuilderAttributes;
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<EthBuiltPayload, PayloadBuilderError>>;
-    type BuiltPayload = EthBuiltPayload;
 
     fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
         Ok(EthBuiltPayload::new(
@@ -104,5 +105,11 @@ impl PayloadJob for TestPayloadJob {
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let fut = futures_util::future::ready(self.best_payload());
         (fut, KeepPayloadJobAlive::No)
+    }
+
+    fn subscribe_best_payloads(
+        &self,
+    ) -> Pin<Box<dyn Stream<Item = Self::BuiltPayload> + Send + 'static>> {
+        Box::pin(futures_util::stream::pending())
     }
 }

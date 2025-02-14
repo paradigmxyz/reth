@@ -6642,6 +6642,7 @@ dependencies = [
  "reth-tasks",
  "revm",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 

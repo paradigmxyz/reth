@@ -1,10 +1,11 @@
 //! Trait abstractions used by the payload crate.
 
+use futures_util::Stream;
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
 use reth_primitives_traits::NodePrimitives;
-use std::future::Future;
+use std::{future::Future, pin::Pin};
 
 /// A type that can build a payload.
 ///
@@ -25,6 +26,7 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
         + Send
         + Sync
         + 'static;
+
     /// Represents the built payload type that is returned to the CL.
     type BuiltPayload: BuiltPayload + Clone + std::fmt::Debug;
 
@@ -32,6 +34,11 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     ///
     /// Note: This is never called by the CL.
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError>;
+
+    /// Returns a stream of the best payloads that have been built so far.
+    fn subscribe_best_payloads(
+        &self,
+    ) -> Pin<Box<dyn Stream<Item = Self::BuiltPayload> + Send + 'static>>;
 
     /// Returns the payload attributes for the payload being built.
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError>;

@@ -1,4 +1,4 @@
-use futures_util::Future;
+use futures_util::{Future, Stream};
 use reth::tasks::TaskSpawner;
 use reth_basic_payload_builder::{HeaderForPayload, PayloadBuilder, PayloadConfig};
 use reth_node_api::PayloadKind;
@@ -35,7 +35,6 @@ where
     type ResolvePayloadFuture =
         futures_util::future::Ready<Result<Self::BuiltPayload, PayloadBuilderError>>;
     type BuiltPayload = Builder::BuiltPayload;
-
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let payload = self.builder.build_empty_payload(self.config.clone())?;
         Ok(payload)
@@ -51,6 +50,12 @@ where
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let payload = self.best_payload();
         (futures_util::future::ready(payload), KeepPayloadJobAlive::No)
+    }
+
+    fn subscribe_best_payloads(
+        &self,
+    ) -> Pin<Box<dyn Stream<Item = Self::BuiltPayload> + Send + 'static>> {
+        Box::pin(futures_util::stream::pending())
     }
 }
 
