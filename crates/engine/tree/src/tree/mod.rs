@@ -21,7 +21,7 @@ use alloy_rpc_types_engine::{
 use cached_state::{ProviderCaches, SavedCache};
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use metrics::PrewarmThreadMetrics;
-use persistence_state::CurrentPersistenceAction;
+pub use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -148,7 +148,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns the block by hash.
-    fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock<N::Block>>> {
+    pub fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock<N::Block>>> {
         self.blocks_by_hash.get(&hash).map(|b| Arc::new(b.recovered_block().sealed_block().clone()))
     }
 
@@ -169,7 +169,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Insert executed block into the state.
-    fn insert_executed(&mut self, executed: ExecutedBlockWithTrieUpdates<N>) {
+    pub fn insert_executed(&mut self, executed: ExecutedBlockWithTrieUpdates<N>) {
         let hash = executed.recovered_block().hash();
         let parent_hash = executed.recovered_block().parent_hash();
         let block_number = executed.recovered_block().number();
@@ -418,12 +418,12 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Updates the canonical head to the given block.
-    fn set_canonical_head(&mut self, new_head: BlockNumHash) {
+    pub fn set_canonical_head(&mut self, new_head: BlockNumHash) {
         self.current_canonical_head = new_head;
     }
 
     /// Returns the tracked canonical head.
-    const fn canonical_head(&self) -> &BlockNumHash {
+    pub const fn canonical_head(&self) -> &BlockNumHash {
         &self.current_canonical_head
     }
 
@@ -477,11 +477,11 @@ where
 #[derive(Debug)]
 pub struct EngineApiTreeState<N: NodePrimitives> {
     /// Tracks the state of the blockchain tree.
-    tree_state: TreeState<N>,
+    pub tree_state: TreeState<N>,
     /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
-    buffer: BlockBuffer<N::Block>,
+    pub buffer: BlockBuffer<N::Block>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
@@ -568,7 +568,7 @@ where
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
-    state: EngineApiTreeState<N>,
+    pub state: EngineApiTreeState<N>,
     /// The half for sending messages to the engine.
     ///
     /// This is kept so that we can queue in messages to ourself that we can process later, for
@@ -577,7 +577,7 @@ where
     /// them one by one so that we can handle incoming engine API in between and don't become
     /// unresponsive. This can happen during live sync transition where we're trying to close the
     /// gap (up to 3 epochs of blocks in the worst case).
-    incoming_tx: Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>,
+    pub incoming_tx: Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>,
     /// Incoming engine API requests.
     incoming: Receiver<FromEngine<EngineApiRequest<T, N>, N::Block>>,
     /// Outgoing events that are emitted to the handler.
@@ -585,17 +585,17 @@ where
     /// Channels to the persistence layer.
     persistence: PersistenceHandle<N>,
     /// Tracks the state changes of the persistence task.
-    persistence_state: PersistenceState,
+    pub persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
-    backfill_sync_state: BackfillSyncState,
+    pub backfill_sync_state: BackfillSyncState,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
-    canonical_in_memory_state: CanonicalInMemoryState<N>,
+    pub canonical_in_memory_state: CanonicalInMemoryState<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
     /// Configuration settings.
-    config: TreeConfig,
+    pub config: TreeConfig,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
     /// An invalid block hook.
@@ -850,7 +850,7 @@ where
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
     #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine::tree")]
-    fn on_new_payload(
+    pub fn on_new_payload(
         &mut self,
         payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
@@ -969,7 +969,7 @@ where
     ///
     /// Note: This does not update the tracked state and instead returns the new chain based on the
     /// given head.
-    fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain<N>>> {
+    pub fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain<N>>> {
         // get the executed new head block
         let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
             return Ok(None)
@@ -1064,7 +1064,7 @@ where
     ///   extension of the canonical chain.
     /// * walking back from the current head to verify that the target hash is not already part of
     ///   the canonical chain.
-    fn is_fork(&self, target_hash: B256) -> ProviderResult<bool> {
+    pub fn is_fork(&self, target_hash: B256) -> ProviderResult<bool> {
         // verify that the given hash is not part of an extension of the canon chain.
         let canonical_head = self.state.tree_state.canonical_head();
         let mut current_hash = target_hash;
@@ -1263,7 +1263,7 @@ where
     ///
     /// Returns an error if the engine channel is disconnected.
     #[expect(clippy::type_complexity)]
-    fn try_recv_engine_message(
+    pub fn try_recv_engine_message(
         &self,
     ) -> Result<Option<FromEngine<EngineApiRequest<T, N>, N::Block>>, RecvError> {
         if self.persistence_state.in_progress() {
@@ -1318,7 +1318,7 @@ where
     ///
     /// If we're currently awaiting a response this will try to receive the response (non-blocking)
     /// or send a new persistence action if necessary.
-    fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
+    pub fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
         if self.persistence_state.in_progress() {
             let (mut rx, start_time, current_action) = self
                 .persistence_state
@@ -1365,7 +1365,7 @@ where
     }
 
     /// Handles a message from the engine.
-    fn on_engine_message(
+    pub fn on_engine_message(
         &mut self,
         msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
     ) -> Result<(), InsertBlockFatalError> {
@@ -1668,7 +1668,7 @@ where
     /// Returns a batch of consecutive canonical blocks to persist in the range
     /// `(last_persisted_number .. canonical_head - threshold]` . The expected
     /// order is oldest -> newest.
-    fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlockWithTrieUpdates<N>> {
+    pub fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlockWithTrieUpdates<N>> {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
@@ -2351,7 +2351,7 @@ where
         self.most_recent_cache.take_if(|cache| cache.executed_block_hash() == parent_hash)
     }
 
-    fn insert_block_without_senders(
+    pub fn insert_block_without_senders(
         &mut self,
         block: SealedBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
@@ -2361,7 +2361,7 @@ where
         }
     }
 
-    fn insert_block(
+    pub fn insert_block(
         &mut self,
         block: RecoveredBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {

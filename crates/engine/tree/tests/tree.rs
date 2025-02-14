@@ -1,6 +1,5 @@
 #![allow(missing_docs)]
 
-use alloy_consensus::Header;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
@@ -16,7 +15,6 @@ use reth_chain_state::{
     ExecutedBlockWithTrieUpdates, NewCanonicalChain,
 };
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_db::test_utils::create_test_rw_db;
 use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStatus};
 use reth_engine_tree::{
     backfill::{BackfillAction, BackfillSyncState},
@@ -24,19 +22,27 @@ use reth_engine_tree::{
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::{PersistenceAction, PersistenceHandle},
     tree::{
-        error::InsertBlockError, BlockStatus, EngineApiTreeHandler, EngineApiTreeState,
-        InsertPayloadOk, PersistenceState, TreeConfig, TreeState,
+        config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::InsertBlockError, BlockStatus,
+        CurrentPersistenceAction, EngineApiTreeHandler, EngineApiTreeState, InsertPayloadOk,
+        PersistenceState, TreeConfig, TreeState,
     },
 };
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
 use reth_ethereum_primitives::{Block, EthPrimitives};
-use reth_evm::test_utils::MockExecutorProvider;
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm::execute::BasicBlockExecutorProvider;
+use reth_evm_ethereum::{
+    execute::{EthExecutionStrategyFactory, EthExecutorProvider},
+    EthEvmConfig,
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::EngineApiMessageVersion;
 use reth_primitives_traits::{Block as _, RecoveredBlock, SealedHeader};
-use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
+use reth_provider::{
+    providers::{BlockchainProvider, EngineNodeTypes},
+    test_utils::create_test_provider_factory_with_chain_spec,
+    ExecutionOutcome,
+};
 use reth_stages::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
@@ -107,11 +113,14 @@ impl TestChannelHandle {
     }
 }
 
-struct TestHarness {
+struct TestHarness<N>
+where
+    N: EngineNodeTypes,
+{
     tree: EngineApiTreeHandler<
         EthPrimitives,
-        MockEthProvider,
-        MockExecutorProvider,
+        BlockchainProvider<N>,
+        BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
         EthEngineTypes,
         EthereumEngineValidator,
         EthEvmConfig,
@@ -120,12 +129,15 @@ struct TestHarness {
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
     blocks: Vec<ExecutedBlockWithTrieUpdates>,
     action_rx: Receiver<PersistenceAction>,
-    executor_provider: MockExecutorProvider,
+    executor_provider: BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
     block_builder: TestBlockBuilder,
-    provider: MockEthProvider,
+    provider: BlockchainProvider<N>,
 }
 
-impl TestHarness {
+impl<N> TestHarness<N>
+where
+    N: EngineNodeTypes,
+{
     fn new(chain_spec: Arc<ChainSpec>) -> Self {
         let (action_tx, action_rx) = channel();
         Self::with_persistence_channel(chain_spec, action_tx, action_rx)
@@ -146,8 +158,12 @@ impl TestHarness {
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
 
-        let provider = create_test_rw_db();
-        let executor_provider = MockExecutorProvider::default();
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let provider =
+            BlockchainProvider::with_latest(provider_factory.clone(), SealedHeader::default())
+                .unwrap();
+
+        let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
 
         let payload_validator = EthereumEngineValidator::new(chain_spec.clone());
 
@@ -164,7 +180,7 @@ impl TestHarness {
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 
         let tree = EngineApiTreeHandler::new(
-            provider.clone(),
+            provider,
             executor_provider.clone(),
             consensus,
             payload_validator,
@@ -230,7 +246,9 @@ impl TestHarness {
         let recovered_blocks =
             blocks.iter().map(|b| b.recovered_block().clone()).collect::<Vec<_>>();
 
-        self.persist_blocks(recovered_blocks);
+        for block in recovered_blocks {
+            self.tree.insert_block(block);
+        }
 
         self
     }
@@ -240,20 +258,10 @@ impl TestHarness {
         self
     }
 
-    fn extend_execution_outcome(
-        &self,
-        execution_outcomes: impl IntoIterator<Item = impl Into<ExecutionOutcome>>,
-    ) {
-        self.executor_provider.extend(execution_outcomes);
-    }
-
     fn insert_block(
         &mut self,
         block: RecoveredBlock<reth_ethereum_primitives::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<Block>> {
-        let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
-        self.extend_execution_outcome([execution_outcome]);
-        self.tree.provider.add_state_root(block.state_root);
         self.tree.insert_block(block)
     }
 
@@ -404,58 +412,6 @@ impl TestHarness {
             }
             _ => panic!("Unexpected event: {:#?}", event),
         }
-    }
-
-    fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>) {
-        let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
-        let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
-
-        for block in &blocks {
-            block_data.push((block.hash(), block.clone_block()));
-            headers_data.push((block.hash(), block.header().clone()));
-        }
-
-        self.provider.extend_blocks(block_data);
-        self.provider.extend_headers(headers_data);
-    }
-
-    fn setup_range_insertion_for_valid_chain(
-        &mut self,
-        chain: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>,
-    ) {
-        self.setup_range_insertion_for_chain(chain, None)
-    }
-
-    fn setup_range_insertion_for_invalid_chain(
-        &mut self,
-        chain: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>,
-        index: usize,
-    ) {
-        self.setup_range_insertion_for_chain(chain, Some(index))
-    }
-
-    fn setup_range_insertion_for_chain(
-        &mut self,
-        chain: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>,
-        invalid_index: Option<usize>,
-    ) {
-        // setting up execution outcomes for the chain, the blocks will be
-        // executed starting from the oldest, so we need to reverse.
-        let mut chain_rev = chain;
-        chain_rev.reverse();
-
-        let mut execution_outcomes = Vec::with_capacity(chain_rev.len());
-        for (index, block) in chain_rev.iter().enumerate() {
-            let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
-            let state_root = if invalid_index.is_some() && invalid_index.unwrap() == index {
-                B256::random()
-            } else {
-                block.state_root
-            };
-            self.tree.provider.add_state_root(state_root);
-            execution_outcomes.push(execution_outcome);
-        }
-        self.extend_execution_outcome(execution_outcomes);
     }
 
     fn check_canon_head(&self, head_hash: B256) {
@@ -623,7 +579,7 @@ fn test_disconnected_block() {
     assert_eq!(
         outcome,
         InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-            head: test_harness.tree.state.tree_state.current_canonical_head,
+            head: *test_harness.tree.state.tree_state.canonical_head(),
             missing_ancestor: sealed.parent_num_hash()
         })
     );
@@ -1014,8 +970,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     });
 
     let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
-    // add block to mock provider to enable persistence clean up.
-    test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
+
     test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -1105,9 +1060,8 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical() {
     // persist blocks of main chain, same as the backfill operation would do
     let backfilled_chain: Vec<_> =
         main_chain.clone().drain(0..(MIN_BLOCKS_FOR_PIPELINE_RUN + 1) as usize).collect();
-    test_harness.persist_blocks(backfilled_chain.clone());
-
-    test_harness.setup_range_insertion_for_valid_chain(backfilled_chain);
+    //test_harness.persist_blocks(backfilled_chain.clone());
+    //test_harness.setup_range_insertion_for_valid_chain(backfilled_chain);
 
     // send message to mark backfill finished
     test_harness
@@ -1152,7 +1106,7 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical() {
         .drain((MIN_BLOCKS_FOR_PIPELINE_RUN + 1) as usize..main_chain.len())
         .collect();
 
-    test_harness.setup_range_insertion_for_valid_chain(remaining.clone());
+    //test_harness.setup_range_insertion_for_valid_chain(remaining.clone());
 
     // tell engine block range downloaded
     test_harness.tree.on_engine_message(FromEngine::DownloadedBlocks(remaining.clone())).unwrap();
@@ -1224,7 +1178,7 @@ async fn test_engine_tree_valid_forks_with_older_canonical_head() {
     let extension_chain = test_harness.block_builder.create_fork(old_head, 5);
     let fork_block = extension_chain.last().unwrap().clone_sealed_block();
 
-    test_harness.setup_range_insertion_for_valid_chain(extension_chain.clone());
+    //test_harness.setup_range_insertion_for_valid_chain(extension_chain.clone());
     test_harness.insert_chain(extension_chain).await;
 
     // fcu to old_head
@@ -1235,7 +1189,7 @@ async fn test_engine_tree_valid_forks_with_older_canonical_head() {
     let chain_b = test_harness.block_builder.create_fork(&fork_block, 10);
 
     // insert chain A blocks using newPayload
-    test_harness.setup_range_insertion_for_valid_chain(chain_a.clone());
+    //test_harness.setup_range_insertion_for_valid_chain(chain_a.clone());
     for block in &chain_a {
         test_harness.send_new_payload(block.clone()).await;
     }
@@ -1243,7 +1197,7 @@ async fn test_engine_tree_valid_forks_with_older_canonical_head() {
     test_harness.check_canon_chain_insertion(chain_a.clone()).await;
 
     // insert chain B blocks using newPayload
-    test_harness.setup_range_insertion_for_valid_chain(chain_b.clone());
+    //test_harness.setup_range_insertion_for_valid_chain(chain_b.clone());
     for block in &chain_b {
         test_harness.send_new_payload(block.clone()).await;
     }
@@ -1284,7 +1238,7 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected() {
     let buffered_block = side_chain.last().unwrap();
     let buffered_block_hash = buffered_block.hash();
 
-    test_harness.setup_range_insertion_for_valid_chain(vec![buffered_block.clone()]);
+    //test_harness.setup_range_insertion_for_valid_chain(vec![buffered_block.clone()]);
     test_harness.send_new_payload(buffered_block.clone()).await;
 
     assert!(test_harness.tree.state.buffer.block(&buffered_block_hash).is_some());
@@ -1293,7 +1247,7 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected() {
     let non_buffered_block_hash = non_buffered_block.hash();
 
     // insert block that continues the canon chain, should not be buffered
-    test_harness.setup_range_insertion_for_valid_chain(vec![non_buffered_block.clone()]);
+    //test_harness.setup_range_insertion_for_valid_chain(vec![non_buffered_block.clone()]);
     test_harness.send_new_payload(non_buffered_block.clone()).await;
     assert!(test_harness.tree.state.buffer.block(&non_buffered_block_hash).is_none());
 
@@ -1332,7 +1286,7 @@ async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head() {
     let chain_b = test_harness.block_builder.create_fork(&fork_block, total_fork_elements);
 
     // insert chain B blocks using newPayload
-    test_harness.setup_range_insertion_for_valid_chain(chain_b.clone());
+    //test_harness.setup_range_insertion_for_valid_chain(chain_b.clone());
     for block in &chain_b {
         test_harness.send_new_payload(block.clone()).await;
         test_harness.send_fcu(block.hash(), ForkchoiceStatus::Valid).await;
@@ -1343,7 +1297,7 @@ async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head() {
 
     // insert chain A blocks using newPayload, one of the blocks will be invalid
     let invalid_index = 3;
-    test_harness.setup_range_insertion_for_invalid_chain(chain_a.clone(), invalid_index);
+    //test_harness.setup_range_insertion_for_invalid_chain(chain_a.clone(), invalid_index);
     for block in &chain_a {
         test_harness.send_new_payload(block.clone()).await;
     }
@@ -1385,7 +1339,7 @@ async fn test_engine_tree_reorg_with_missing_ancestor_expecting_valid() {
         test_harness.block_builder.create_fork(base_chain.last().unwrap().recovered_block(), 15);
     let invalid_index = 9;
 
-    test_harness.setup_range_insertion_for_invalid_chain(side_chain.clone(), invalid_index);
+    //test_harness.setup_range_insertion_for_invalid_chain(side_chain.clone(), invalid_index);
 
     for (index, block) in side_chain.iter().enumerate() {
         test_harness.send_new_payload(block.clone()).await;

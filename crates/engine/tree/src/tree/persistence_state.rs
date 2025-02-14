@@ -10,7 +10,7 @@ pub struct PersistenceState {
     /// Hash and number of the last block persisted.
     ///
     /// This tracks the chain height that is persisted on disk
-    pub(crate) last_persisted_block: BlockNumHash,
+    pub last_persisted_block: BlockNumHash,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
@@ -48,7 +48,7 @@ impl PersistenceState {
 
     /// Returns the current persistence action. If there is no persistence task in progress, then
     /// this returns `None`.
-    pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction> {
+    pub fn current_action(&self) -> Option<&CurrentPersistenceAction> {
         self.rx.as_ref().map(|rx| &rx.2)
     }
 
@@ -74,7 +74,7 @@ impl PersistenceState {
 
 /// The currently running persistence action.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CurrentPersistenceAction {
+pub enum CurrentPersistenceAction {
     /// The persistence task is saving blocks.
     SavingBlocks {
         /// The highest block being saved.
