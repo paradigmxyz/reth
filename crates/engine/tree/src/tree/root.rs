@@ -595,6 +595,8 @@ where
         let proof_targets = self.get_prefetch_proof_targets(targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
+        // TODO: chunk proof targets and spawn separate multiproof tasks
+
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
             hashed_state_update: Default::default(),
