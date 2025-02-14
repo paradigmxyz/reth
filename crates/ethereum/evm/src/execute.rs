@@ -14,16 +14,16 @@ use reth_evm::{
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError,
     },
     state_change::post_block_balance_increments,
-    system_calls::{OnStateHook, SystemCaller},
+    system_calls::{EvmWithHook, OnStateHook, SystemCaller},
     ConfigureEvm, ConfigureEvmEnv, Database, Evm,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{
-    EthPrimitives, NodePrimitives, Receipt, RecoveredBlock, SealedBlock, TransactionSigned,
+    EthPrimitives, NodePrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock,
+    TransactionSigned,
 };
-use reth_primitives_traits::SignedTransaction;
 use revm::db::State;
-use revm_primitives::{Address, Bytes, ResultAndState};
+use revm_primitives::ResultAndState;
 
 /// Factory for [`EthExecutionStrategy`].
 #[derive(Debug, Clone)]
@@ -83,12 +83,10 @@ where
 }
 
 /// Block execution strategy for Ethereum.
-#[allow(missing_debug_implementations)]
-#[derive(derive_more::Deref, derive_more::DerefMut)]
+#[derive(Debug, derive_more::Deref)]
 pub struct EthExecutionStrategy<'a, Evm, EvmConfig> {
     /// Reference to the parent factory providing access to [`SystemCaller`] and [`ChainSpec`].
     #[deref]
-    #[deref_mut]
     factory: &'a EthExecutionStrategyFactory<EvmConfig>,
 
     /// Block being executed.
@@ -129,34 +127,31 @@ where
         Ok(())
     }
 
-    fn execute_transactions(
+    fn execute_transactions<'a>(
         &mut self,
-        transactions: &[TransactionSigned],
-        senders: &[Address],
+        transactions: impl IntoIterator<Item = Recovered<&'a TransactionSigned>>,
     ) -> Result<(), Self::Error> {
         let mut cumulative_gas_used = 0;
-        for (sender, transaction) in senders.iter().zip(transactions) {
+        for tx in transactions {
             // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block's gasLimit.
             let block_available_gas = self.block.gas_limit() - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas {
+            if tx.gas_limit() > block_available_gas {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: transaction.gas_limit(),
+                    transaction_gas_limit: tx.gas_limit(),
                     block_available_gas,
                 }
                 .into())
             }
 
-            let tx_env = self.evm_config.tx_env(transaction, *sender);
+            let tx_env = self.evm_config.tx_env(tx.tx(), tx.signer());
+            let hash = tx.hash();
 
             // Execute transaction.
             let ResultAndState { result, state: _ } =
                 self.evm.transact_commit(tx_env).map_err(move |err| {
                     // Ensure hash is calculated for error log, if not already done
-                    BlockValidationError::EVM {
-                        hash: transaction.recalculate_hash(),
-                        error: Box::new(err),
-                    }
+                    BlockValidationError::EVM { hash: *hash, error: Box::new(err) }
                 })?;
 
             // append gas used
@@ -164,7 +159,7 @@ where
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             self.receipts.push(Receipt {
-                tx_type: transaction.tx_type(),
+                tx_type: tx.tx_type(),
                 // Success flag was added in `EIP-658: Embedding transaction status code in
                 // receipts`.
                 success: result.is_success(),
@@ -248,58 +243,6 @@ impl EthExecutorProvider {
     /// Returns a new provider for the mainnet.
     pub fn mainnet() -> BasicBlockExecutorProvider<EthExecutionStrategyFactory> {
         BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::mainnet())
-    }
-}
-
-/// Wrapper around [`Evm`], invoking [`OnStateHook`] on every [`Evm::transact`] call.
-#[derive(derive_more::Debug)]
-pub struct EvmWithHook<Evm> {
-    inner: Evm,
-    /// Configured [`OnStateHook`], if any.
-    #[debug(skip)]
-    pub hook: Option<Box<dyn OnStateHook>>,
-}
-
-impl<Evm> EvmWithHook<Evm> {
-    /// Creates a new instance.
-    pub fn new(inner: Evm) -> Self {
-        Self { inner, hook: None }
-    }
-}
-
-impl<E: Evm> Evm for EvmWithHook<E> {
-    type DB = E::DB;
-    type Error = E::Error;
-    type HaltReason = E::HaltReason;
-    type Tx = E::Tx;
-
-    fn block(&self) -> &revm_primitives::BlockEnv {
-        self.inner.block()
-    }
-
-    fn db_mut(&mut self) -> &mut Self::DB {
-        self.inner.db_mut()
-    }
-
-    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
-        let result = self.inner.transact(tx)?;
-        if let Some(hook) = &mut self.hook {
-            hook.on_state(&result.state);
-        }
-        Ok(result)
-    }
-
-    fn transact_system_call(
-        &mut self,
-        caller: revm_primitives::Address,
-        contract: revm_primitives::Address,
-        data: Bytes,
-    ) -> Result<ResultAndState, Self::Error> {
-        let result = self.inner.transact_system_call(caller, contract, data)?;
-        if let Some(hook) = &mut self.hook {
-            hook.on_state(&result.state);
-        }
-        Ok(result)
     }
 }
 

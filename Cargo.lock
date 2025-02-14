@@ -7639,6 +7639,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "auto_impl",
+ "derive_more",
  "futures-util",
  "metrics",
  "metrics-util",

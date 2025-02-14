@@ -11,7 +11,7 @@ use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
 use revm::DatabaseCommit;
-use revm_primitives::{EvmState, B256};
+use revm_primitives::{EvmState, ResultAndState, B256};
 
 mod eip2935;
 mod eip4788;
@@ -40,6 +40,58 @@ pub struct NoopHook;
 
 impl OnStateHook for NoopHook {
     fn on_state(&mut self, _state: &EvmState) {}
+}
+
+/// Wrapper around [`Evm`], invoking [`OnStateHook`] on every [`Evm::transact`] call.
+#[derive(derive_more::Debug)]
+pub struct EvmWithHook<Evm> {
+    inner: Evm,
+    /// Configured [`OnStateHook`], if any.
+    #[debug(skip)]
+    pub hook: Option<Box<dyn OnStateHook>>,
+}
+
+impl<Evm> EvmWithHook<Evm> {
+    /// Creates a new instance.
+    pub fn new(inner: Evm) -> Self {
+        Self { inner, hook: None }
+    }
+}
+
+impl<E: Evm> Evm for EvmWithHook<E> {
+    type DB = E::DB;
+    type Error = E::Error;
+    type HaltReason = E::HaltReason;
+    type Tx = E::Tx;
+
+    fn block(&self) -> &revm_primitives::BlockEnv {
+        self.inner.block()
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        self.inner.db_mut()
+    }
+
+    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
+        let result = self.inner.transact(tx)?;
+        if let Some(hook) = &mut self.hook {
+            hook.on_state(&result.state);
+        }
+        Ok(result)
+    }
+
+    fn transact_system_call(
+        &mut self,
+        caller: revm_primitives::Address,
+        contract: revm_primitives::Address,
+        data: Bytes,
+    ) -> Result<ResultAndState, Self::Error> {
+        let result = self.inner.transact_system_call(caller, contract, data)?;
+        if let Some(hook) = &mut self.hook {
+            hook.on_state(&result.state);
+        }
+        Ok(result)
+    }
 }
 
 /// An ephemeral helper type for executing system calls.
