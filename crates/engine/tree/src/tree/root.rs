@@ -2,6 +2,7 @@
 
 use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
+use itertools::Itertools;
 use metrics::Histogram;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
@@ -656,18 +657,51 @@ where
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(&mut self, update: EvmState, proof_sequence_number: u64) {
-        let hashed_state_update = evm_state_to_hashed_post_state(update);
-        let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+    fn on_state_update(&mut self, update: EvmState) {
+        let mut hashed_state_update = evm_state_to_hashed_post_state(update);
 
-        self.multiproof_manager.spawn_or_queue(MultiproofInput {
-            config: self.config.clone(),
-            hashed_state_update,
-            proof_targets,
-            proof_sequence_number,
-            state_root_message_sender: self.tx.clone(),
-        });
+        for chunk in &hashed_state_update.accounts.into_iter().chunks(5) {
+            let (accounts, storages) = chunk
+                .map(|(address, account)| {
+                    (
+                        (address, account),
+                        (
+                            address,
+                            hashed_state_update.storages.remove(&address).unwrap_or_default(),
+                        ),
+                    )
+                })
+                .unzip();
+            let account_hashed_state_update = HashedPostState { accounts, storages };
+
+            let proof_targets =
+                get_proof_targets(&account_hashed_state_update, &self.fetched_proof_targets);
+            extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+
+            self.multiproof_manager.spawn_or_queue(MultiproofInput {
+                config: self.config.clone(),
+                hashed_state_update: account_hashed_state_update,
+                proof_targets,
+                proof_sequence_number: self.proof_sequencer.next_sequence(),
+                state_root_message_sender: self.tx.clone(),
+            });
+        }
+
+        if !hashed_state_update.storages.is_empty() {
+            let storages_state_update =
+                HashedPostState { accounts: Default::default(), ..hashed_state_update };
+            let proof_targets =
+                get_proof_targets(&storages_state_update, &self.fetched_proof_targets);
+            extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+
+            self.multiproof_manager.spawn_or_queue(MultiproofInput {
+                config: self.config.clone(),
+                hashed_state_update: storages_state_update,
+                proof_targets,
+                proof_sequence_number: self.proof_sequencer.next_sequence(),
+                state_root_message_sender: self.tx.clone(),
+            });
+        }
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -775,8 +809,7 @@ where
                             total_updates = updates_received,
                             "Received new state update"
                         );
-                        let next_sequence = self.proof_sequencer.next_sequence();
-                        self.on_state_update(update, next_sequence);
+                        self.on_state_update(update);
                     }
                     StateRootMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
