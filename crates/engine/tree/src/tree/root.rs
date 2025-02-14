@@ -663,7 +663,7 @@ where
         let mut hashed_state_update = evm_state_to_hashed_post_state(update);
 
         for accounts_chunk in &hashed_state_update.accounts.into_iter().chunks(5) {
-            let mut chunks = Vec::<Vec<_>>::new();
+            let mut chunks = vec![vec![]; 1];
 
             for (address, account) in accounts_chunk {
                 let storages =
