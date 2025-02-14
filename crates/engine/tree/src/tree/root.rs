@@ -672,7 +672,7 @@ where
         let mut state_updates = Vec::new();
 
         for accounts_chunk in &hashed_state_update.accounts.into_iter().chunks(5) {
-            let mut chunks: Vec<Vec<_>> = Vec::new();
+            let mut chunks = BTreeMap::new();
 
             for (address, account) in accounts_chunk {
                 let storages = hashed_state_update
@@ -684,11 +684,7 @@ where
                     .chunks(5);
 
                 for (index, storage_chunk) in storages.into_iter().enumerate() {
-                    if chunks.len() <= index {
-                        chunks.push(Vec::new());
-                    }
-
-                    chunks[index].push((
+                    chunks.entry(index).or_insert_with(Vec::new).push((
                         address,
                         account,
                         HashedStorage::from_iter(false, storage_chunk),
@@ -696,7 +692,7 @@ where
                 }
             }
 
-            for chunk in chunks {
+            for chunk in chunks.into_values() {
                 let (accounts, storages) = chunk
                     .into_iter()
                     .map(|(address, account, storages)| ((address, account), (address, storages)))
@@ -705,7 +701,6 @@ where
                 state_updates.push(HashedPostState { accounts, storages });
             }
         }
-
         if !hashed_state_update.storages.is_empty() {
             state_updates
                 .push(HashedPostState { accounts: Default::default(), ..hashed_state_update });
