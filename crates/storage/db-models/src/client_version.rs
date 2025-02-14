@@ -1,7 +1,7 @@
 //! Client version model.
 
-use serde::{Deserialize, Serialize};
 use alloc::string::String;
+use serde::{Deserialize, Serialize};
 
 /// Client version that accessed the database.
 #[derive(Clone, Eq, PartialEq, Debug, Default, Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use alloy_primitives::{bytes::Buf, Address};
+use alloy_primitives::Address;
 use reth_primitives_traits::Account;
 
 /// Account as it is saved in the database.
@@ -36,6 +36,7 @@ impl reth_codecs::Compact for AccountBeforeTx {
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
         let address = Address::from_slice(&buf[..20]);
         buf.advance(20);
 

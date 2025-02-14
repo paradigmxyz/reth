@@ -1,6 +1,5 @@
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::TxNumber;
-use bytes::Buf;
 use core::ops::Range;
 use serde::{Deserialize, Serialize};
 
@@ -100,6 +99,7 @@ impl reth_codecs::Compact for StaticFileBlockWithdrawals {
         1
     }
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
         if buf.get_u8() == 1 {
             let (w, buf) = Withdrawals::from_compact(buf, buf.len());
             (Self { withdrawals: Some(w) }, buf)
