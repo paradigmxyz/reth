@@ -1,30 +1,55 @@
 #![allow(missing_docs)]
 
-use super::*;
-use crate::persistence::PersistenceAction;
 use alloy_consensus::Header;
-use alloy_primitives::Bytes;
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Bytes, B256,
+};
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3,
+    ExecutionPayloadV3, ForkchoiceState, PayloadStatusEnum,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
+use reth_chain_state::{
+    test_utils::TestBlockBuilder, BlockState, CanonicalInMemoryState, ExecutedBlock,
+    ExecutedBlockWithTrieUpdates, NewCanonicalChain,
+};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_db::test_utils::create_test_rw_db;
-use reth_engine_primitives::ForkchoiceStatus;
+use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStatus};
+use reth_engine_tree::{
+    backfill::{BackfillAction, BackfillSyncState},
+    chain::FromOrchestrator,
+    engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
+    persistence::{PersistenceAction, PersistenceHandle},
+    tree::{
+        error::InsertBlockError, BlockStatus, EngineApiTreeHandler, EngineApiTreeState,
+        InsertPayloadOk, PersistenceState, TreeConfig, TreeState,
+    },
+};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::Block as _;
-use reth_provider::test_utils::MockEthProvider;
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::EngineApiMessageVersion;
+use reth_primitives_traits::{Block as _, RecoveredBlock, SealedHeader};
+use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
+use reth_stages::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
+    collections::BTreeMap,
     str::FromStr,
-    sync::mpsc::{channel, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc,
+    },
+};
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedReceiver},
+    oneshot,
 };
 
 /// This is a test channel that allows you to `release` any value that is in the channel.
@@ -562,7 +587,7 @@ async fn test_engine_request_during_backfill() {
 
 #[test]
 fn test_disconnected_payload() {
-    let s = include_str!("../../test-data/holesky/2.rlp");
+    let s = include_str!("../test-data/holesky/2.rlp");
     let data = Bytes::from_str(s).unwrap();
     let block = Block::decode(&mut data.as_ref()).unwrap();
     let sealed = block.seal_slow();
@@ -587,7 +612,7 @@ fn test_disconnected_payload() {
 
 #[test]
 fn test_disconnected_block() {
-    let s = include_str!("../../test-data/holesky/2.rlp");
+    let s = include_str!("../test-data/holesky/2.rlp");
     let data = Bytes::from_str(s).unwrap();
     let block = Block::decode(&mut data.as_ref()).unwrap();
     let sealed = block.seal_slow();
@@ -606,7 +631,7 @@ fn test_disconnected_block() {
 
 #[tokio::test]
 async fn test_holesky_payload() {
-    let s = include_str!("../../test-data/holesky/1.rlp");
+    let s = include_str!("../test-data/holesky/1.rlp");
     let data = Bytes::from_str(s).unwrap();
     let block: Block = Block::decode(&mut data.as_ref()).unwrap();
     let sealed = block.seal_slow();
@@ -633,244 +658,6 @@ async fn test_holesky_payload() {
 
     let resp = rx.await.unwrap().unwrap();
     assert!(resp.is_syncing());
-}
-
-#[test]
-fn test_tree_state_normal_descendant() {
-    let mut tree_state = TreeState::new(BlockNumHash::default());
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-
-    tree_state.insert_executed(blocks[0].clone());
-    assert!(tree_state.is_descendant(
-        blocks[0].recovered_block().num_hash(),
-        blocks[1].recovered_block().header()
-    ));
-
-    tree_state.insert_executed(blocks[1].clone());
-
-    assert!(tree_state.is_descendant(
-        blocks[0].recovered_block().num_hash(),
-        blocks[2].recovered_block().header()
-    ));
-    assert!(tree_state.is_descendant(
-        blocks[1].recovered_block().num_hash(),
-        blocks[2].recovered_block().header()
-    ));
-}
-
-#[tokio::test]
-async fn test_tree_state_insert_executed() {
-    let mut tree_state = TreeState::new(BlockNumHash::default());
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
-
-    tree_state.insert_executed(blocks[0].clone());
-    tree_state.insert_executed(blocks[1].clone());
-
-    assert_eq!(
-        tree_state.parent_to_child.get(&blocks[0].recovered_block().hash()),
-        Some(&HashSet::from_iter([blocks[1].recovered_block().hash()]))
-    );
-
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
-
-    tree_state.insert_executed(blocks[2].clone());
-
-    assert_eq!(
-        tree_state.parent_to_child.get(&blocks[1].recovered_block().hash()),
-        Some(&HashSet::from_iter([blocks[2].recovered_block().hash()]))
-    );
-    assert!(tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
-
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[2].recovered_block().hash()));
-}
-
-#[tokio::test]
-async fn test_tree_state_insert_executed_with_reorg() {
-    let mut tree_state = TreeState::new(BlockNumHash::default());
-    let mut test_block_builder = TestBlockBuilder::eth();
-    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
-
-    for block in &blocks {
-        tree_state.insert_executed(block.clone());
-    }
-    assert_eq!(tree_state.blocks_by_hash.len(), 5);
-
-    let fork_block_3 =
-        test_block_builder.get_executed_block_with_number(3, blocks[1].recovered_block().hash());
-    let fork_block_4 =
-        test_block_builder.get_executed_block_with_number(4, fork_block_3.recovered_block().hash());
-    let fork_block_5 =
-        test_block_builder.get_executed_block_with_number(5, fork_block_4.recovered_block().hash());
-
-    tree_state.insert_executed(fork_block_3.clone());
-    tree_state.insert_executed(fork_block_4.clone());
-    tree_state.insert_executed(fork_block_5.clone());
-
-    assert_eq!(tree_state.blocks_by_hash.len(), 8);
-    assert_eq!(tree_state.blocks_by_number[&3].len(), 2); // two blocks at height 3 (original and fork)
-    assert_eq!(tree_state.parent_to_child[&blocks[1].recovered_block().hash()].len(), 2); // block 2 should have two children
-
-    // verify that we can insert the same block again without issues
-    tree_state.insert_executed(fork_block_4.clone());
-    assert_eq!(tree_state.blocks_by_hash.len(), 8);
-
-    assert!(tree_state.parent_to_child[&fork_block_3.recovered_block().hash()]
-        .contains(&fork_block_4.recovered_block().hash()));
-    assert!(tree_state.parent_to_child[&fork_block_4.recovered_block().hash()]
-        .contains(&fork_block_5.recovered_block().hash()));
-
-    assert_eq!(tree_state.blocks_by_number[&4].len(), 2);
-    assert_eq!(tree_state.blocks_by_number[&5].len(), 2);
-}
-
-#[tokio::test]
-async fn test_tree_state_remove_before() {
-    let start_num_hash = BlockNumHash::default();
-    let mut tree_state = TreeState::new(start_num_hash);
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
-
-    for block in &blocks {
-        tree_state.insert_executed(block.clone());
-    }
-
-    let last = blocks.last().unwrap();
-
-    // set the canonical head
-    tree_state.set_canonical_head(last.recovered_block().num_hash());
-
-    // inclusive bound, so we should remove anything up to and including 2
-    tree_state.remove_until(
-        BlockNumHash::new(2, blocks[1].recovered_block().hash()),
-        start_num_hash.hash,
-        Some(blocks[1].recovered_block().num_hash()),
-    );
-
-    assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].recovered_block().hash()));
-    assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
-    assert!(!tree_state.blocks_by_number.contains_key(&1));
-    assert!(!tree_state.blocks_by_number.contains_key(&2));
-
-    assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
-    assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].recovered_block().hash()));
-    assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].recovered_block().hash()));
-    assert!(tree_state.blocks_by_number.contains_key(&3));
-    assert!(tree_state.blocks_by_number.contains_key(&4));
-    assert!(tree_state.blocks_by_number.contains_key(&5));
-
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[0].recovered_block().hash()));
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
-    assert!(tree_state.parent_to_child.contains_key(&blocks[2].recovered_block().hash()));
-    assert!(tree_state.parent_to_child.contains_key(&blocks[3].recovered_block().hash()));
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[4].recovered_block().hash()));
-
-    assert_eq!(
-        tree_state.parent_to_child.get(&blocks[2].recovered_block().hash()),
-        Some(&HashSet::from_iter([blocks[3].recovered_block().hash()]))
-    );
-    assert_eq!(
-        tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
-        Some(&HashSet::from_iter([blocks[4].recovered_block().hash()]))
-    );
-}
-
-#[tokio::test]
-async fn test_tree_state_remove_before_finalized() {
-    let start_num_hash = BlockNumHash::default();
-    let mut tree_state = TreeState::new(start_num_hash);
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
-
-    for block in &blocks {
-        tree_state.insert_executed(block.clone());
-    }
-
-    let last = blocks.last().unwrap();
-
-    // set the canonical head
-    tree_state.set_canonical_head(last.recovered_block().num_hash());
-
-    // we should still remove everything up to and including 2
-    tree_state.remove_until(
-        BlockNumHash::new(2, blocks[1].recovered_block().hash()),
-        start_num_hash.hash,
-        None,
-    );
-
-    assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].recovered_block().hash()));
-    assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
-    assert!(!tree_state.blocks_by_number.contains_key(&1));
-    assert!(!tree_state.blocks_by_number.contains_key(&2));
-
-    assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
-    assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].recovered_block().hash()));
-    assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].recovered_block().hash()));
-    assert!(tree_state.blocks_by_number.contains_key(&3));
-    assert!(tree_state.blocks_by_number.contains_key(&4));
-    assert!(tree_state.blocks_by_number.contains_key(&5));
-
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[0].recovered_block().hash()));
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
-    assert!(tree_state.parent_to_child.contains_key(&blocks[2].recovered_block().hash()));
-    assert!(tree_state.parent_to_child.contains_key(&blocks[3].recovered_block().hash()));
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[4].recovered_block().hash()));
-
-    assert_eq!(
-        tree_state.parent_to_child.get(&blocks[2].recovered_block().hash()),
-        Some(&HashSet::from_iter([blocks[3].recovered_block().hash()]))
-    );
-    assert_eq!(
-        tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
-        Some(&HashSet::from_iter([blocks[4].recovered_block().hash()]))
-    );
-}
-
-#[tokio::test]
-async fn test_tree_state_remove_before_lower_finalized() {
-    let start_num_hash = BlockNumHash::default();
-    let mut tree_state = TreeState::new(start_num_hash);
-    let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
-
-    for block in &blocks {
-        tree_state.insert_executed(block.clone());
-    }
-
-    let last = blocks.last().unwrap();
-
-    // set the canonical head
-    tree_state.set_canonical_head(last.recovered_block().num_hash());
-
-    // we have no forks so we should still remove anything up to and including 2
-    tree_state.remove_until(
-        BlockNumHash::new(2, blocks[1].recovered_block().hash()),
-        start_num_hash.hash,
-        Some(blocks[0].recovered_block().num_hash()),
-    );
-
-    assert!(!tree_state.blocks_by_hash.contains_key(&blocks[0].recovered_block().hash()));
-    assert!(!tree_state.blocks_by_hash.contains_key(&blocks[1].recovered_block().hash()));
-    assert!(!tree_state.blocks_by_number.contains_key(&1));
-    assert!(!tree_state.blocks_by_number.contains_key(&2));
-
-    assert!(tree_state.blocks_by_hash.contains_key(&blocks[2].recovered_block().hash()));
-    assert!(tree_state.blocks_by_hash.contains_key(&blocks[3].recovered_block().hash()));
-    assert!(tree_state.blocks_by_hash.contains_key(&blocks[4].recovered_block().hash()));
-    assert!(tree_state.blocks_by_number.contains_key(&3));
-    assert!(tree_state.blocks_by_number.contains_key(&4));
-    assert!(tree_state.blocks_by_number.contains_key(&5));
-
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[0].recovered_block().hash()));
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[1].recovered_block().hash()));
-    assert!(tree_state.parent_to_child.contains_key(&blocks[2].recovered_block().hash()));
-    assert!(tree_state.parent_to_child.contains_key(&blocks[3].recovered_block().hash()));
-    assert!(!tree_state.parent_to_child.contains_key(&blocks[4].recovered_block().hash()));
-
-    assert_eq!(
-        tree_state.parent_to_child.get(&blocks[2].recovered_block().hash()),
-        Some(&HashSet::from_iter([blocks[3].recovered_block().hash()]))
-    );
-    assert_eq!(
-        tree_state.parent_to_child.get(&blocks[3].recovered_block().hash()),
-        Some(&HashSet::from_iter([blocks[4].recovered_block().hash()]))
-    );
 }
 
 #[tokio::test]
