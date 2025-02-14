@@ -442,6 +442,7 @@ where
 
             // 5. In case the exex is ahead of the new tip, we must skip it
             if let Some(committed) = notification.committed_chain() {
+                // inclusive check because we should start with `exex.head + 1`
                 if this.initial_exex_head.block.number >= committed.tip().number() {
                     continue
                 }
