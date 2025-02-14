@@ -65,6 +65,9 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Histogram for number of accounts selfdestructed when executing the latest block.
+    pub accounts_destroyed_histogram: Histogram,
 }
 
 impl ExecutorMetrics {
@@ -118,9 +121,15 @@ impl ExecutorMetrics {
             output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
         let bytecodes = output.state.contracts.len();
 
+        // Update the metrics for the number of accounts selfdestructed
+        let accounts_destroyed = output.state.state.values().filter(|account| {
+            account.status.was_destroyed()
+        }).count();
+
         self.accounts_updated_histogram.record(accounts as f64);
         self.storage_slots_updated_histogram.record(storage_slots as f64);
         self.bytecodes_updated_histogram.record(bytecodes as f64);
+        self.accounts_destroyed_histogram.record(accounts_destroyed as f64);
 
         Ok(output)
     }
