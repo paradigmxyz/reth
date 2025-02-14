@@ -9075,7 +9075,7 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "jsonrpsee-http-client",
- "reth-primitives",
+ "reth-ethereum-primitives",
  "reth-rpc-api",
  "reth-rpc-eth-api",
  "serde_json",
