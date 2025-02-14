@@ -124,7 +124,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push reproducible image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.reproducible
@@ -135,6 +135,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
 
   draft-release:
     name: draft release

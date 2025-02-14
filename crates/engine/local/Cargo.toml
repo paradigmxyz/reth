@@ -19,7 +19,6 @@ reth-node-types.workspace = true
 reth-evm.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder.workspace = true
-reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
@@ -28,7 +27,7 @@ reth-stages-api.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-rpc-types-engine.workspace = true
 
 # async
@@ -41,11 +40,14 @@ eyre.workspace = true
 tracing.workspace = true
 
 op-alloy-rpc-types-engine = { workspace = true, optional = true }
+reth-optimism-chainspec = { workspace = true, optional = true }
 
 [lints]
 workspace = true
 
 [features]
 op = [
-    "dep:op-alloy-rpc-types-engine"
+    "dep:op-alloy-rpc-types-engine",
+    "dep:reth-optimism-chainspec",
+    "reth-payload-primitives/op",
 ]

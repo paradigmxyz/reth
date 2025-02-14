@@ -28,9 +28,7 @@ revm-primitives.workspace = true
 op-alloy-consensus = { workspace = true, optional = true }
 
 # crypto
-secp256k1 = { workspace = true, features = [
-	"recovery",
-], optional = true }
+secp256k1 = { workspace = true, features = ["recovery"], optional = true }
 k256.workspace = true
 
 # misc
@@ -44,7 +42,7 @@ thiserror.workspace = true
 
 # required by reth-codecs
 modular-bitfield = { workspace = true, optional = true }
-serde = { workspace = true, optional = true}
+serde = { workspace = true, optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -60,11 +58,7 @@ alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
 alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
 
 arbitrary = { workspace = true, features = ["derive"] }
-secp256k1 = { workspace = true, features = [
-	"recovery",
-	"global-context",
-	"rand"
-] }
+secp256k1 = { workspace = true, features = ["recovery", "global-context", "rand"] }
 bincode.workspace = true
 byteorder.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -78,77 +72,78 @@ modular-bitfield.workspace = true
 [features]
 default = ["std"]
 std = [
-	"alloy-consensus/std",
-	"alloy-eips/std",
-	"alloy-genesis/std",
-	"alloy-primitives/std",
-	"revm-primitives/std",
-	"serde?/std",
-	"serde_with?/std",
-	"alloy-rlp/std",
-	"bytes/std",
-	"derive_more/std",
-	"k256/std",
-	"once_cell/std",
-	"secp256k1?/std",
-	"thiserror/std",
-	"alloy-trie/std",
-	"op-alloy-consensus?/std",
-	"serde_json/std",
-	"reth-chainspec/std"
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "revm-primitives/std",
+    "serde?/std",
+    "serde_with?/std",
+    "alloy-rlp/std",
+    "bytes/std",
+    "derive_more/std",
+    "k256/std",
+    "once_cell/std",
+    "secp256k1?/std",
+    "thiserror/std",
+    "alloy-trie/std",
+    "op-alloy-consensus?/std",
+    "serde_json/std",
+    "reth-chainspec/std",
 ]
 secp256k1 = ["dep:secp256k1"]
 test-utils = [
-	"arbitrary",
-	"reth-codecs?/test-utils",
-	"reth-chainspec/test-utils"
+    "arbitrary",
+    "reth-codecs?/test-utils",
+    "reth-chainspec/test-utils",
 ]
 arbitrary = [
-	"std",
-	"alloy-consensus/arbitrary",
-	"alloy-primitives/arbitrary",
-	"dep:arbitrary",
-	"dep:proptest",
-	"dep:proptest-arbitrary-interop",
-	"alloy-eips/arbitrary",
-	"revm-primitives/arbitrary",
-	"reth-codecs?/arbitrary",
-	"secp256k1?/global-context",
-	"secp256k1?/rand",
-	"op-alloy-consensus?/arbitrary",
-	"alloy-trie/arbitrary",
-	"reth-chainspec/arbitrary"
+    "std",
+    "alloy-consensus/arbitrary",
+    "alloy-primitives/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-arbitrary-interop",
+    "alloy-eips/arbitrary",
+    "revm-primitives/arbitrary",
+    "reth-codecs?/arbitrary",
+    "secp256k1?/global-context",
+    "secp256k1?/rand",
+    "op-alloy-consensus?/arbitrary",
+    "alloy-trie/arbitrary",
+    "reth-chainspec/arbitrary",
 ]
 serde-bincode-compat = [
-	"serde",
-	"serde_with",
-	"alloy-consensus/serde-bincode-compat",
-	"alloy-eips/serde-bincode-compat",
-	"op-alloy-consensus?/serde-bincode-compat"
+    "serde",
+    "serde_with",
+    "alloy-consensus/serde-bincode-compat",
+    "alloy-eips/serde-bincode-compat",
+    "op-alloy-consensus?/serde-bincode-compat",
 ]
 serde = [
-	"dep:serde",
-	"alloy-consensus/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"bytes/serde",
-	"rand/serde",
-	"reth-codecs?/serde",
-	"revm-primitives/serde",
-	"revm-primitives/serde",
-	"op-alloy-consensus?/serde",
-	"k256/serde",
-	"secp256k1?/serde",
-	"alloy-trie/serde"
+    "dep:serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "bytes/serde",
+    "rand/serde",
+    "reth-codecs?/serde",
+    "revm-primitives/serde",
+    "revm-primitives/serde",
+    "op-alloy-consensus?/serde",
+    "k256/serde",
+    "secp256k1?/serde",
+    "alloy-trie/serde",
 ]
 reth-codec = [
-	"dep:reth-codecs",
-	"dep:modular-bitfield",
-	"dep:byteorder",
+    "dep:reth-codecs",
+    "dep:modular-bitfield",
+    "dep:byteorder",
 ]
 op = [
-	"dep:op-alloy-consensus",
+    "dep:op-alloy-consensus",
+    "reth-codecs?/op",
 ]
 rayon = [
-	"dep:rayon",
+    "dep:rayon",
 ]

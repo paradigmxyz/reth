@@ -2,9 +2,11 @@
 
 use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
+use metrics::Histogram;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
-use reth_evm::system_calls::OnStateHook;
+use reth_evm::system_calls::{OnStateHook, StateChangeSource};
+use reth_metrics::Metrics;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
@@ -34,7 +36,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, trace_span};
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
@@ -67,13 +69,16 @@ pub struct StateRootComputeOutcome {
 pub struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
     state: HashedPostState,
-    /// The proof targets
-    targets: MultiProofTargets,
     /// The calculated multiproof
     multiproof: MultiProof,
 }
 
 impl SparseTrieUpdate {
+    /// Returns true if the update is empty.
+    pub fn is_empty(&self) -> bool {
+        self.state.is_empty() && self.multiproof.is_empty()
+    }
+
     /// Construct update from multiproof.
     pub fn from_multiproof(multiproof: MultiProof) -> Self {
         Self { multiproof, ..Default::default() }
@@ -82,7 +87,6 @@ impl SparseTrieUpdate {
     /// Extend update with contents of the other.
     pub fn extend(&mut self, other: Self) {
         self.state.extend(other.state);
-        extend_multi_proof_targets(&mut self.targets, other.targets);
         self.multiproof.extend(other.multiproof);
     }
 }
@@ -142,8 +146,15 @@ impl<Factory> StateRootConfig<Factory> {
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
-    /// New state update from transaction execution
-    StateUpdate(EvmState),
+    /// New state update from transaction execution with its source
+    StateUpdate(StateChangeSource, EvmState),
+    /// Empty proof for a specific state update
+    EmptyProof {
+        /// The index of this proof in the sequence of state updates
+        sequence_number: u64,
+        /// The state update that was used to calculate the proof
+        state: HashedPostState,
+    },
     /// Proof calculation completed for a specific state update
     ProofCalculated(Box<ProofCalculated>),
     /// Error during proof calculation
@@ -170,16 +181,12 @@ pub struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
-    /// The source of the proof fetch, whether it was requested as a prefetch or as a result of a
-    /// state update.
-    source: ProofFetchSource,
-}
-
-impl ProofCalculated {
-    /// Returns true if the proof was calculated as a result of a state update.
-    pub(crate) const fn is_from_state_update(&self) -> bool {
-        matches!(self.source, ProofFetchSource::StateUpdate)
-    }
+    /// Total number of account targets
+    account_targets: usize,
+    /// Total number of storage slot targets
+    storage_targets: usize,
+    /// The time taken to calculate the proof.
+    elapsed: Duration,
 }
 
 /// Whether or not a proof was fetched due to a state update, or due to a prefetch command.
@@ -274,7 +281,7 @@ impl Drop for StateHookSender {
 }
 
 fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::default();
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
         if account.is_touched() {
@@ -288,9 +295,8 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             let mut changed_storage_iter = account
                 .storage
                 .into_iter()
-                .filter_map(|(slot, value)| {
-                    value.is_changed().then(|| (keccak256(B256::from(slot)), value.present_value))
-                })
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
                 .peekable();
 
             if destroyed {
@@ -310,11 +316,11 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[derive(Debug)]
 struct MultiproofInput<Factory> {
     config: StateRootConfig<Factory>,
+    source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<StateRootMessage>,
-    source: ProofFetchSource,
 }
 
 /// Manages concurrent multiproof calculations.
@@ -335,12 +341,8 @@ struct MultiproofManager<Factory> {
 
 impl<Factory> MultiproofManager<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>
-        + StateCommitmentProvider
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    Factory:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
     fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
@@ -358,6 +360,19 @@ where
     /// Spawns a new multiproof calculation or enqueues it for later if
     /// `max_concurrent` are already inflight.
     fn spawn_or_queue(&mut self, input: MultiproofInput<Factory>) {
+        // If there are no proof targets, we can just send an empty multiproof back immediately
+        if input.proof_targets.is_empty() {
+            debug!(
+                sequence_number = input.proof_sequence_number,
+                "No proof targets, sending empty multiproof back immediately"
+            );
+            let _ = input.state_root_message_sender.send(StateRootMessage::EmptyProof {
+                sequence_number: input.proof_sequence_number,
+                state: input.hashed_state_update,
+            });
+            return
+        }
+
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
             return;
@@ -377,30 +392,41 @@ where
     }
 
     /// Spawns a multiproof calculation.
-    fn spawn_multiproof(&mut self, input: MultiproofInput<Factory>) {
-        let MultiproofInput {
+    fn spawn_multiproof(
+        &mut self,
+        MultiproofInput {
             config,
+            source,
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-            source,
-        } = input;
+        }: MultiproofInput<Factory>,
+    ) {
         let thread_pool = self.thread_pool.clone();
 
         self.thread_pool.spawn(move || {
+            let account_targets = proof_targets.len();
+            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum();
+
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
                 ?proof_targets,
+                account_targets,
+                storage_targets,
                 "Starting multiproof calculation",
             );
             let start = Instant::now();
-            let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
+            let result = calculate_multiproof(thread_pool, config, proof_targets);
+            let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
-                elapsed = ?start.elapsed(),
+                ?elapsed,
+                ?source,
+                account_targets,
+                storage_targets,
                 "Multiproof calculated",
             );
 
@@ -411,10 +437,11 @@ where
                             sequence_number: proof_sequence_number,
                             update: SparseTrieUpdate {
                                 state: hashed_state_update,
-                                targets: proof_targets,
                                 multiproof: proof,
                             },
-                            source,
+                            account_targets,
+                            storage_targets,
+                            elapsed,
                         }),
                     ));
                 }
@@ -427,6 +454,29 @@ where
 
         self.inflight += 1;
     }
+}
+
+#[derive(Metrics, Clone)]
+#[metrics(scope = "tree.root")]
+struct StateRootTaskMetrics {
+    /// Histogram of proof calculation durations.
+    pub proof_calculation_duration_histogram: Histogram,
+    /// Histogram of proof calculation account targets.
+    pub proof_calculation_account_targets_histogram: Histogram,
+    /// Histogram of proof calculation storage targets.
+    pub proof_calculation_storage_targets_histogram: Histogram,
+
+    /// Histogram of sparse trie update durations.
+    pub sparse_trie_update_duration_histogram: Histogram,
+    /// Histogram of sparse trie final update durations.
+    pub sparse_trie_final_update_duration_histogram: Histogram,
+
+    /// Histogram of state updates received.
+    pub state_updates_received_histogram: Histogram,
+    /// Histogram of proofs processed.
+    pub proofs_processed_histogram: Histogram,
+    /// Histogram of state root update iterations.
+    pub state_root_iterations_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -453,16 +503,14 @@ pub struct StateRootTask<Factory> {
     thread_pool: Arc<rayon::ThreadPool>,
     /// Manages calculation of multiproofs.
     multiproof_manager: MultiproofManager<Factory>,
+    /// State root task metrics
+    metrics: StateRootTaskMetrics,
 }
 
 impl<Factory> StateRootTask<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>
-        + StateCommitmentProvider
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    Factory:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new state root task with the unified message channel
     pub fn new(config: StateRootConfig<Factory>, thread_pool: Arc<rayon::ThreadPool>) -> Self {
@@ -475,7 +523,13 @@ where
             proof_sequencer: ProofSequencer::new(),
             thread_pool: thread_pool.clone(),
             multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
+            metrics: StateRootTaskMetrics::default(),
         }
+    }
+
+    /// Returns a [`Sender`] that can be used to send arbitrary [`StateRootMessage`]s to this task.
+    pub fn state_root_message_sender(&self) -> Sender<StateRootMessage> {
+        self.tx.clone()
     }
 
     /// Returns a [`StateHookSender`] that can be used to send state updates to this task.
@@ -487,8 +541,10 @@ where
     pub fn state_hook(&self) -> impl OnStateHook {
         let state_hook = self.state_hook_sender();
 
-        move |state: &EvmState| {
-            if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
+        move |source: StateChangeSource, state: &EvmState| {
+            if let Err(error) =
+                state_hook.send(StateRootMessage::StateUpdate(source, state.clone()))
+            {
                 error!(target: "engine::root", ?error, "Failed to send state update");
             }
         }
@@ -496,13 +552,17 @@ where
 
     /// Spawns the state root task and returns a handle to await its result.
     pub fn spawn(self) -> StateRootHandle {
-        let sparse_trie_tx =
-            Self::spawn_sparse_trie(self.thread_pool.clone(), self.config.clone(), self.tx.clone());
+        let sparse_trie_tx = Self::spawn_sparse_trie(
+            self.thread_pool.clone(),
+            self.config.clone(),
+            self.metrics.clone(),
+            self.tx.clone(),
+        );
         let (tx, rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("State Root Task".to_string())
             .spawn(move || {
-                debug!(target: "engine::tree", "Starting state root task");
+                debug!(target: "engine::tree", "State root task starting");
 
                 let result = self.run(sparse_trie_tx);
                 let _ = tx.send(result);
@@ -516,51 +576,110 @@ where
     fn spawn_sparse_trie(
         thread_pool: Arc<rayon::ThreadPool>,
         config: StateRootConfig<Factory>,
+        metrics: StateRootTaskMetrics,
         task_tx: Sender<StateRootMessage>,
     ) -> Sender<SparseTrieUpdate> {
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
-            debug!(target: "engine::tree", "Starting sparse trie task");
-            let result = match run_sparse_trie(config, rx) {
-                Ok((state_root, trie_updates, iterations)) => {
-                    StateRootMessage::RootCalculated { state_root, trie_updates, iterations }
-                }
-                Err(error) => StateRootMessage::RootCalculationError(error),
-            };
-            let _ = task_tx.send(result);
+            debug!(target: "engine::tree", "Sparse trie task starting");
+            // We clone the task sender here so that it can be used in case the sparse trie task
+            // succeeds, without blocking due to any `Drop` implementation.
+            //
+            // It's more important to make sure we capture any errors, than to make sure we send an
+            // error result without blocking, which is why we wait for `run_sparse_trie` to return
+            // before sending errors.
+            if let Err(err) = run_sparse_trie(config, metrics, rx, task_tx.clone()) {
+                let _ = task_tx.send(StateRootMessage::RootCalculationError(err));
+            }
         });
         tx
     }
 
     /// Handles request for proof prefetch.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &targets);
+        let proof_targets = self.get_prefetch_proof_targets(targets);
+        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
+            source: None,
             hashed_state_update: Default::default(),
-            proof_targets: targets,
+            proof_targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
-            source: ProofFetchSource::Prefetch,
         });
+    }
+
+    /// Calls `get_proof_targets` with existing proof targets for prefetching.
+    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
+        // Here we want to filter out any targets that are already fetched
+        //
+        // This means we need to remove any storage slots that have already been fetched
+        let mut duplicates = 0;
+
+        // First remove all storage targets that are subsets of already fetched storage slots
+        targets.retain(|hashed_address, target_storage| {
+            let keep = self
+                .fetched_proof_targets
+                .get(hashed_address)
+                // do NOT remove if None, because that means the account has not been fetched yet
+                .is_none_or(|fetched_storage| {
+                    // remove if a subset
+                    !target_storage.is_subset(fetched_storage)
+                });
+
+            if !keep {
+                duplicates += target_storage.len();
+            }
+
+            keep
+        });
+
+        // For all non-subset remaining targets, we have to calculate the difference
+        for (hashed_address, target_storage) in &mut targets {
+            let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
+                // this means the account has not been fetched yet, so we must fetch everything
+                // associated with this account
+                continue
+            };
+
+            let prev_target_storage_len = target_storage.len();
+
+            // keep only the storage slots that have not been fetched yet
+            //
+            // we already removed subsets, so this should only remove duplicates
+            target_storage.retain(|slot| !fetched_storage.contains(slot));
+
+            duplicates += prev_target_storage_len - target_storage.len();
+        }
+
+        if duplicates > 0 {
+            trace!(target: "engine::root", duplicates, "Removed duplicate prefetch proof targets");
+        }
+
+        targets
     }
 
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(&mut self, update: EvmState, proof_sequence_number: u64) {
+    fn on_state_update(
+        &mut self,
+        source: StateChangeSource,
+        update: EvmState,
+        proof_sequence_number: u64,
+    ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
+            source: Some(source),
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
             state_root_message_sender: self.tx.clone(),
-            source: ProofFetchSource::StateUpdate,
         });
     }
 
@@ -572,20 +691,62 @@ where
     ) -> Option<SparseTrieUpdate> {
         let ready_proofs = self.proof_sequencer.add_proof(sequence_number, update);
 
-        if ready_proofs.is_empty() {
-            None
-        } else {
+        ready_proofs
+            .into_iter()
             // Merge all ready proofs and state updates
-            ready_proofs.into_iter().reduce(|mut acc_update, update| {
+            .reduce(|mut acc_update, update| {
                 acc_update.extend(update);
                 acc_update
             })
-        }
+            // Return None if the resulting proof is empty
+            .filter(|proof| !proof.is_empty())
     }
 
+    /// Starts the main loop that handles all incoming messages, fetches proofs, applies them to the
+    /// sparse trie, updates the sparse trie, and eventually returns the state root.
+    ///
+    /// The lifecycle is the following:
+    /// 1. Either [`StateRootMessage::PrefetchProofs`] or [`StateRootMessage::StateUpdate`] is
+    ///    received from the engine.
+    ///    * For [`StateRootMessage::StateUpdate`], the state update is hashed with
+    ///      [`evm_state_to_hashed_post_state`], and then (proof targets)[`MultiProofTargets`] are
+    ///      extracted with [`get_proof_targets`].
+    ///    * For both messages, proof targets are deduplicated according to `fetched_proof_targets`,
+    ///      so that the proofs for accounts and storage slots that were already fetched are not
+    ///      requested again.
+    /// 2. Using the proof targets, a new multiproof is calculated using
+    ///    [`MultiproofManager::spawn_or_queue`].
+    ///    * If the list of proof targets is empty, the [`StateRootMessage::EmptyProof`] message is
+    ///      sent back to this task along with the original state update.
+    ///    * Otherwise, the multiproof is calculated and the [`StateRootMessage::ProofCalculated`]
+    ///      message is sent back to this task along with the resulting multiproof, proof targets
+    ///      and original state update.
+    /// 3. Either [`StateRootMessage::EmptyProof`] or [`StateRootMessage::ProofCalculated`] is
+    ///    received.
+    ///    * The multiproof is added to the (proof sequencer)[`ProofSequencer`].
+    ///    * If the proof sequencer has a contiguous sequence of multiproofs in the same order as
+    ///      state updates arrived (i.e. transaction order), such sequence is returned.
+    /// 4. Once there's a sequence of contiguous multiproofs along with the proof targets and state
+    ///    updates associated with them, a [`SparseTrieUpdate`] is generated and sent to the sparse
+    ///    trie task that's running in [`run_sparse_trie`].
+    ///    * Sparse trie task reveals the multiproof, updates the sparse trie, computes storage trie
+    ///      roots, and calculates RLP nodes of the state trie below
+    ///      [`SPARSE_TRIE_INCREMENTAL_LEVEL`].
+    /// 5. Steps above are repeated until this task receives a
+    ///    [`StateRootMessage::FinishedStateUpdates`].
+    ///    * Once this message is received, on every [`StateRootMessage::EmptyProof`] and
+    ///      [`StateRootMessage::ProofCalculated`] message, we check if there are any proofs are
+    ///      currently being calculated, or if there are any pending proofs in the proof sequencer
+    ///      left to be revealed using [`check_end_condition`].
+    ///    * If there are none left, we drop the sparse trie task sender channel, and it signals
+    ///      [`run_sparse_trie`] to calculate the state root of the full state trie, and send it
+    ///      back to this task via [`StateRootMessage::RootCalculated`] message.
+    /// 6. On [`StateRootMessage::RootCalculated`] message, the loop exits and the the state root is
+    ///    returned.
     fn run(mut self, sparse_trie_tx: Sender<SparseTrieUpdate>) -> StateRootResult {
         let mut sparse_trie_tx = Some(sparse_trie_tx);
 
+        let mut prefetch_proofs_received = 0;
         let mut updates_received = 0;
         let mut proofs_processed = 0;
 
@@ -602,14 +763,17 @@ where
                 Ok(message) => match message {
                     StateRootMessage::PrefetchProofs(targets) => {
                         trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
+                        prefetch_proofs_received += 1;
                         debug!(
                             target: "engine::root",
-                            len = targets.len(),
+                            targets = targets.len(),
+                            storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>(),
+                            total_prefetches = prefetch_proofs_received,
                             "Prefetching proofs"
                         );
                         self.on_prefetch_proof(targets);
                     }
-                    StateRootMessage::StateUpdate(update) => {
+                    StateRootMessage::StateUpdate(source, update) => {
                         trace!(target: "engine::root", "processing StateRootMessage::StateUpdate");
                         if updates_received == 0 {
                             first_update_time = Some(Instant::now());
@@ -620,22 +784,77 @@ where
                         updates_received += 1;
                         debug!(
                             target: "engine::root",
+                            ?source,
                             len = update.len(),
                             total_updates = updates_received,
                             "Received new state update"
                         );
                         let next_sequence = self.proof_sequencer.next_sequence();
-                        self.on_state_update(update, next_sequence);
+                        self.on_state_update(source, update, next_sequence);
                     }
                     StateRootMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
+
+                        if check_end_condition(CheckEndConditionParams {
+                            proofs_processed,
+                            updates_received,
+                            prefetch_proofs_received,
+                            updates_finished,
+                            proof_sequencer: &self.proof_sequencer,
+                        }) {
+                            sparse_trie_tx.take();
+                            debug!(
+                                target: "engine::root",
+                                "State updates finished and all proofs processed, ending calculation"
+                            );
+                        };
+                    }
+                    StateRootMessage::EmptyProof { sequence_number, state } => {
+                        trace!(target: "engine::root", "processing StateRootMessage::EmptyProof");
+
+                        proofs_processed += 1;
+
+                        if let Some(combined_update) = self.on_proof(
+                            sequence_number,
+                            SparseTrieUpdate { state, multiproof: MultiProof::default() },
+                        ) {
+                            let _ = sparse_trie_tx
+                                .as_ref()
+                                .expect("tx not dropped")
+                                .send(combined_update);
+                        }
+
+                        if check_end_condition(CheckEndConditionParams {
+                            proofs_processed,
+                            updates_received,
+                            prefetch_proofs_received,
+                            updates_finished,
+                            proof_sequencer: &self.proof_sequencer,
+                        }) {
+                            sparse_trie_tx.take();
+                            debug!(
+                                target: "engine::root",
+                                "State updates finished and all proofs processed, ending calculation"
+                            );
+                        };
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
-                        if proof_calculated.is_from_state_update() {
-                            proofs_processed += 1;
-                        }
+
+                        // we increment proofs_processed for both state updates and prefetches,
+                        // because both are used for the root termination condition.
+                        proofs_processed += 1;
+
+                        self.metrics
+                            .proof_calculation_duration_histogram
+                            .record(proof_calculated.elapsed);
+                        self.metrics
+                            .proof_calculation_account_targets_histogram
+                            .record(proof_calculated.account_targets as f64);
+                        self.metrics
+                            .proof_calculation_storage_targets_histogram
+                            .record(proof_calculated.storage_targets as f64);
 
                         debug!(
                             target: "engine::root",
@@ -655,13 +874,19 @@ where
                                 .send(combined_update);
                         }
 
-                        let all_proofs_received = proofs_processed >= updates_received;
-                        let no_pending = !self.proof_sequencer.has_pending();
-                        if all_proofs_received && no_pending && updates_finished {
-                            // drop the sender
+                        if check_end_condition(CheckEndConditionParams {
+                            proofs_processed,
+                            updates_received,
+                            prefetch_proofs_received,
+                            updates_finished,
+                            proof_sequencer: &self.proof_sequencer,
+                        }) {
                             sparse_trie_tx.take();
-                            debug!(target: "engine::root", total_updates = updates_received, total_proofs = proofs_processed, "All proofs processed, ending calculation");
-                        }
+                            debug!(
+                                target: "engine::root",
+                                "State updates finished and all proofs processed, ending calculation"
+                            );
+                        };
                     }
                     StateRootMessage::RootCalculated { state_root, trie_updates, iterations } => {
                         trace!(target: "engine::root", "processing StateRootMessage::RootCalculated");
@@ -678,6 +903,13 @@ where
                             ?time_from_last_update,
                             "All proofs processed, ending calculation"
                         );
+
+                        self.metrics
+                            .state_updates_received_histogram
+                            .record(updates_received as f64);
+                        self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
+                        self.metrics.state_root_iterations_histogram.record(iterations as f64);
+
                         return Ok(StateRootComputeOutcome {
                             state_root: (state_root, trie_updates),
                             total_time,
@@ -712,12 +944,52 @@ where
     }
 }
 
+/// Convenience params struct to pass to [`check_end_condition`].
+struct CheckEndConditionParams<'a> {
+    proofs_processed: u64,
+    updates_received: u64,
+    prefetch_proofs_received: u64,
+    updates_finished: bool,
+    proof_sequencer: &'a ProofSequencer,
+}
+
+// Returns true if all state updates finished and all profs processed.
+fn check_end_condition(
+    CheckEndConditionParams {
+        proofs_processed,
+        updates_received,
+        prefetch_proofs_received,
+        updates_finished,
+        proof_sequencer,
+    }: CheckEndConditionParams<'_>,
+) -> bool {
+    let all_proofs_received = proofs_processed >= updates_received + prefetch_proofs_received;
+    let no_pending = !proof_sequencer.has_pending();
+    debug!(
+        target: "engine::root",
+        proofs_processed,
+        updates_received,
+        prefetch_proofs_received,
+        no_pending,
+        updates_finished,
+        "Checking end condition"
+    );
+    all_proofs_received && no_pending && updates_finished
+}
+
 /// Listen to incoming sparse trie updates and update the sparse trie.
-/// Returns final state root, trie updates and the number of update iterations.
+///
+/// Once the updates receiver channel is dropped, this sends the final state root, trie updates and
+/// the number of update iterations to the `task_tx`.
+///
+/// This takes `task_tx` as an argument so that the state root result can be sent without blocking
+/// on any of the `Drop` implementations run at the end of this method.
 fn run_sparse_trie<Factory>(
     config: StateRootConfig<Factory>,
+    metrics: StateRootTaskMetrics,
     update_rx: mpsc::Receiver<SparseTrieUpdate>,
-) -> Result<(B256, TrieUpdates, u64), ParallelStateRootError>
+    task_tx: Sender<StateRootMessage>,
+) -> Result<(), ParallelStateRootError>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
 {
@@ -754,19 +1026,28 @@ where
             "Updating sparse trie"
         );
 
-        // TODO: alexey to remind me why we are doing this
-        update.targets = get_proof_targets(&update.state, &update.targets);
-
         let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
+        metrics.sparse_trie_update_duration_histogram.record(elapsed);
         trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
     }
 
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
-    let root = trie.root().expect("sparse trie should be revealed");
-    let trie_updates = trie.take_trie_updates().expect("retention must be enabled");
-    Ok((root, trie_updates, num_iterations))
+
+    let start = Instant::now();
+    let (state_root, trie_updates) = trie.root_with_updates().map_err(|e| {
+        ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+    })?;
+    let elapsed = start.elapsed();
+    metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
+
+    let _ = task_tx.send(StateRootMessage::RootCalculated {
+        state_root,
+        trie_updates,
+        iterations: num_iterations,
+    });
+    Ok(())
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
@@ -827,7 +1108,7 @@ where
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
-    SparseTrieUpdate { state, targets, multiproof }: SparseTrieUpdate,
+    SparseTrieUpdate { state, multiproof }: SparseTrieUpdate,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,
@@ -838,7 +1119,7 @@ where
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
-    trie.reveal_multiproof(targets, multiproof)?;
+    trie.reveal_multiproof(multiproof)?;
 
     // Update storage slots with new values and calculate storage roots.
     let (tx, rx) = mpsc::channel();
@@ -848,20 +1129,22 @@ where
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
-            trace!(target: "engine::root::sparse", ?address, "Updating storage");
+            let span = trace_span!(target: "engine::root::sparse", "Storage trie", ?address);
+            let _enter = span.enter();
+            trace!(target: "engine::root::sparse", "Updating storage");
             let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
 
             if storage.wiped {
-                trace!(target: "engine::root::sparse", ?address, "Wiping storage");
+                trace!(target: "engine::root::sparse", "Wiping storage");
                 storage_trie.wipe()?;
             }
             for (slot, value) in storage.storage {
                 let slot_nibbles = Nibbles::unpack(slot);
                 if value.is_zero() {
-                    trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
+                    trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
                     storage_trie.remove_leaf(&slot_nibbles)?;
                 } else {
-                    trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
+                    trace!(target: "engine::root::sparse", ?slot, "Updating storage slot");
                     storage_trie
                         .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
                 }
@@ -871,9 +1154,7 @@ where
 
             SparseStateTrieResult::Ok((address, storage_trie))
         })
-        .for_each_init(|| tx.clone(), |tx, result| {
-            tx.send(result).unwrap()
-        });
+        .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
     drop(tx);
     for result in rx {
         let (address, storage_trie) = result?;
@@ -892,12 +1173,6 @@ where
     Ok(elapsed)
 }
 
-fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProofTargets) {
-    for (address, slots) in other {
-        targets.entry(address).or_default().extend(slots);
-    }
-}
-
 fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
     for (address, slots) in other {
         targets.entry(*address).or_default().extend(slots);
@@ -907,7 +1182,9 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Account as RethAccount, StorageEntry};
+    use alloy_primitives::map::B256Set;
+    use reth_evm::system_calls::StateChangeSource;
+    use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
@@ -972,6 +1249,42 @@ mod tests {
         }
 
         updates
+    }
+
+    fn create_state_root_config<F>(factory: F, input: TrieInput) -> StateRootConfig<F>
+    where
+        F: DatabaseProviderFactory<Provider: BlockReader>
+            + StateCommitmentProvider
+            + Clone
+            + 'static,
+    {
+        let consistent_view = ConsistentDbView::new(factory, None);
+        let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
+        let state_sorted = Arc::new(input.state.clone().into_sorted());
+        let prefix_sets = Arc::new(input.prefix_sets);
+
+        StateRootConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
+    }
+
+    fn create_test_state_root_task<F>(factory: F) -> StateRootTask<F>
+    where
+        F: DatabaseProviderFactory<Provider: BlockReader>
+            + StateCommitmentProvider
+            + Clone
+            + 'static,
+    {
+        let num_threads = thread_pool_size();
+
+        let thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("test-worker-{}", i))
+            .build()
+            .expect("Failed to create test proof worker thread pool");
+
+        let thread_pool = Arc::new(thread_pool);
+        let config = create_state_root_config(factory, TrieInput::default());
+
+        StateRootTask::new(config, thread_pool)
     }
 
     #[test]
@@ -1047,8 +1360,8 @@ mod tests {
         let mut state_hook = task.state_hook();
         let handle = task.spawn();
 
-        for update in state_updates {
-            state_hook.on_state(&update);
+        for (i, update) in state_updates.into_iter().enumerate() {
+            state_hook.on_state(StateChangeSource::Transaction(i), &update);
         }
         drop(state_hook);
 
@@ -1303,5 +1616,86 @@ mod tests {
         assert_eq!(target_slots.len(), 2);
         assert!(target_slots.contains(&slot1));
         assert!(target_slots.contains(&slot2));
+    }
+
+    #[test]
+    fn test_get_prefetch_proof_targets_no_duplicates() {
+        let test_provider_factory = create_test_provider_factory();
+        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
+
+        // populate some targets
+        let mut targets = MultiProofTargets::default();
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        targets.insert(addr1, vec![slot1].into_iter().collect());
+        targets.insert(addr2, vec![slot2].into_iter().collect());
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets are the same because there are no fetched proof
+        // targets yet
+        assert_eq!(prefetch_proof_targets, targets);
+
+        // add a different addr and slot to fetched proof targets
+        let addr3 = B256::random();
+        let slot3 = B256::random();
+        test_state_root_task.fetched_proof_targets.insert(addr3, vec![slot3].into_iter().collect());
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets are the same because the fetched proof targets
+        // don't overlap with the prefetch targets
+        assert_eq!(prefetch_proof_targets, targets);
+    }
+
+    #[test]
+    fn test_get_prefetch_proof_targets_remove_subset() {
+        let test_provider_factory = create_test_provider_factory();
+        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
+
+        // populate some targe
+        let mut targets = MultiProofTargets::default();
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        targets.insert(addr1, vec![slot1].into_iter().collect());
+        targets.insert(addr2, vec![slot2].into_iter().collect());
+
+        // add a subset of the first target to fetched proof targets
+        test_state_root_task.fetched_proof_targets.insert(addr1, vec![slot1].into_iter().collect());
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets do not include the subset
+        assert_eq!(prefetch_proof_targets.len(), 1);
+        assert!(!prefetch_proof_targets.contains_key(&addr1));
+        assert!(prefetch_proof_targets.contains_key(&addr2));
+
+        // now add one more slot to the prefetch targets
+        let slot3 = B256::random();
+        targets.get_mut(&addr1).unwrap().insert(slot3);
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets do not include the subset
+        // but include the new slot
+        assert_eq!(prefetch_proof_targets.len(), 2);
+        assert!(prefetch_proof_targets.contains_key(&addr1));
+        assert_eq!(
+            *prefetch_proof_targets.get(&addr1).unwrap(),
+            vec![slot3].into_iter().collect::<B256Set>()
+        );
+        assert!(prefetch_proof_targets.contains_key(&addr2));
+        assert_eq!(
+            *prefetch_proof_targets.get(&addr2).unwrap(),
+            vec![slot2].into_iter().collect::<B256Set>()
+        );
     }
 }

@@ -15,15 +15,18 @@ use reth::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
-        primitives::{CfgEnvWithHandlerCfg, Env, HandlerCfg, PrecompileResult, SpecId, TxEnv},
-        ContextPrecompiles, Database, EvmBuilder, GetInspector,
+        primitives::{
+            CfgEnvWithHandlerCfg, EVMError, Env, HaltReason, HandlerCfg, PrecompileResult, SpecId,
+            TxEnv,
+        },
+        ContextPrecompiles, EvmBuilder, GetInspector,
     },
     rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::env::EvmEnv;
+use reth_evm::{env::EvmEnv, Database};
 use reth_evm_ethereum::{EthEvm, EthEvmConfig};
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
@@ -109,6 +112,8 @@ impl ConfigureEvmEnv for MyEvmConfig {
 
 impl ConfigureEvm for MyEvmConfig {
     type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
 
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
@@ -199,12 +204,15 @@ where
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
     >,
 {
-    async fn spawn_payload_service(
-        self,
+    type PayloadBuilder =
+        reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, MyEvmConfig>;
+
+    async fn build_payload_builder(
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<reth::payload::PayloadBuilderHandle<Types::Engine>> {
-        self.inner.spawn(MyEvmConfig::new(ctx.chain_spec()), ctx, pool)
+    ) -> eyre::Result<Self::PayloadBuilder> {
+        self.inner.build(MyEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
 #[tokio::main]

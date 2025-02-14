@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
@@ -45,7 +45,7 @@ serde = { workspace = true, optional = true }
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-primitives-traits = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-errors.workspace = true
@@ -66,23 +66,24 @@ similar-asserts.workspace = true
 [features]
 metrics = ["reth-metrics", "reth-trie/metrics", "dep:metrics"]
 serde = [
-	"dep:serde",
-	"similar-asserts/serde",
-	"revm/serde",
-	"alloy-consensus/serde",
-	"alloy-primitives/serde",
-	"reth-trie/serde",
-	"reth-trie-common/serde",
-	"reth-provider/serde",
+    "dep:serde",
+    "similar-asserts/serde",
+    "revm/serde",
+    "alloy-consensus/serde",
+    "alloy-primitives/serde",
+    "reth-trie/serde",
+    "reth-trie-common/serde",
+    "reth-provider/serde",
+    "reth-primitives-traits/serde",
 ]
 test-utils = [
-	"triehash",
-	"revm/test-utils",
-	"reth-trie-common/test-utils",
-	"reth-chainspec/test-utils",
-	"reth-primitives/test-utils",
-	"reth-db/test-utils",
-	"reth-db-api/test-utils",
-	"reth-provider/test-utils",
-	"reth-trie/test-utils",
+    "triehash",
+    "revm/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-chainspec/test-utils",
+    "reth-db/test-utils",
+    "reth-db-api/test-utils",
+    "reth-provider/test-utils",
+    "reth-trie/test-utils",
 ]

@@ -58,7 +58,7 @@ pub fn validate_payload_timestamp(
     timestamp: u64,
 ) -> Result<(), EngineObjectValidationError> {
     let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
-    if version == EngineApiMessageVersion::V2 && is_cancun {
+    if version.is_v2() && is_cancun {
         // From the Engine API spec:
         //
         // ### Update the methods of previous forks
@@ -79,7 +79,7 @@ pub fn validate_payload_timestamp(
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
-    if version == EngineApiMessageVersion::V3 && !is_cancun {
+    if version.is_v3() && !is_cancun {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/ff43500e653abde45aec0f545564abfb648317af/src/engine/cancun.md#specification-2>
         //
@@ -102,7 +102,7 @@ pub fn validate_payload_timestamp(
     }
 
     let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
-    if version == EngineApiMessageVersion::V4 && !is_prague {
+    if version.is_v4() && !is_prague {
         // From the Engine API spec:
         // <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#specification-1>
         //
@@ -347,6 +347,28 @@ pub enum EngineApiMessageVersion {
     V4 = 4,
 }
 
+impl EngineApiMessageVersion {
+    /// Returns true if the version is V1.
+    pub const fn is_v1(&self) -> bool {
+        matches!(self, Self::V1)
+    }
+
+    /// Returns true if the version is V2.
+    pub const fn is_v2(&self) -> bool {
+        matches!(self, Self::V2)
+    }
+
+    /// Returns true if the version is V3.
+    pub const fn is_v3(&self) -> bool {
+        matches!(self, Self::V3)
+    }
+
+    /// Returns true if the version is V4.
+    pub const fn is_v4(&self) -> bool {
+        matches!(self, Self::V4)
+    }
+}
+
 /// Determines how we should choose the payload to return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PayloadKind {
@@ -376,8 +398,8 @@ pub enum PayloadKind {
 /// The first byte of each element is the `request_type` and the remaining bytes are the
 /// `request_data`. Elements of the list **MUST** be ordered by `request_type` in ascending order.
 /// Elements with empty `request_data` **MUST** be excluded from the list. If any element is out of
-/// order or has a length of 1-byte or shorter, client software **MUST** return `-32602: Invalid
-/// params` error.
+/// order, has a length of 1-byte or shorter, or more than one element has the same type byte,
+/// client software **MUST** return `-32602: Invalid params` error.
 pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjectValidationError> {
     let mut last_request_type = None;
     for request in requests {
@@ -391,6 +413,12 @@ pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjec
         if Some(request_type) < last_request_type {
             return Err(EngineObjectValidationError::InvalidParams(
                 "OutOfOrderExecutionRequest".to_string().into(),
+            ))
+        }
+
+        if Some(request_type) == last_request_type {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "DuplicatedExecutionRequestType".to_string().into(),
             ))
         }
 
@@ -447,6 +475,17 @@ mod tests {
         ];
         assert_matches!(
             validate_execution_requests(&requests_out_of_order),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+
+        let duplicate_request_types = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([3, 3]),
+            Bytes::from_iter([4, 5]),
+            Bytes::from_iter([4, 4]),
+        ];
+        assert_matches!(
+            validate_execution_requests(&duplicate_request_types),
             Err(EngineObjectValidationError::InvalidParams(_))
         );
     }

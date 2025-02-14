@@ -13,8 +13,8 @@ workspace = true
 [dependencies]
 # reth
 reth-network-types = { workspace = true, features = ["serde"] }
-reth-prune-types.workspace = true
-reth-stages-types.workspace = true
+reth-prune-types = { workspace = true, features = ["serde"] }
+reth-stages-types = { workspace = true, features = ["serde"] }
 
 # serde
 serde.workspace = true

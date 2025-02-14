@@ -282,7 +282,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 
     /// Returns the type identifier of the transaction
     pub fn tx_type(&self) -> u8 {
-        self.transaction.tx_type()
+        self.transaction.ty()
     }
 
     /// Returns the address of the sender

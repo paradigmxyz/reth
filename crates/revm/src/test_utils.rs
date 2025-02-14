@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
     keccak256,
-    map::{B256HashMap, HashMap},
+    map::{B256Map, HashMap},
     Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
-use reth_primitives::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
     StateRootProvider, StorageRootProvider,
@@ -145,7 +145,7 @@ impl StateProofProvider for StateProviderTest {
         &self,
         _input: TrieInput,
         _target: HashedPostState,
-    ) -> ProviderResult<B256HashMap<Bytes>> {
+    ) -> ProviderResult<B256Map<Bytes>> {
         unimplemented!("witness generation is not supported")
     }
 }

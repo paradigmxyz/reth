@@ -7,7 +7,6 @@ use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
 use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
 };
@@ -208,13 +207,8 @@ where
         let block = payload.block();
 
         let (tx, rx) = oneshot::channel();
-        let (payload, sidecar) = EngineT::block_to_payload(payload.block().clone());
-        self.to_engine.send(BeaconEngineMessage::NewPayload {
-            payload,
-            // todo: prague support
-            sidecar,
-            tx,
-        })?;
+        let payload = EngineT::block_to_payload(payload.block().clone());
+        self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx })?;
 
         let res = rx.await??;
 

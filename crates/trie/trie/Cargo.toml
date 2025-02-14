@@ -14,11 +14,11 @@ workspace = true
 [dependencies]
 # reth
 reth-execution-errors.workspace = true
-reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-sparse.workspace = true
-reth-trie-common.workspace = true
+reth-trie-common = { workspace = true, features = ["rayon"] }
 
 revm.workspace = true
 
@@ -33,7 +33,6 @@ alloy-trie.workspace = true
 tracing.workspace = true
 
 # misc
-rayon.workspace = true
 auto_impl.workspace = true
 itertools.workspace = true
 
@@ -46,7 +45,8 @@ triehash = { version = "0.8", optional = true }
 
 [dev-dependencies]
 # reth
-reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
+reth-ethereum-primitives = { workspace = true, features = ["arbitrary", "std"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
 # trie
@@ -67,12 +67,15 @@ serde = [
     "alloy-eips/serde",
     "revm/serde",
     "reth-trie-common/serde",
+    "reth-primitives-traits/serde",
+    "reth-stages-types/serde",
 ]
 test-utils = [
     "triehash",
     "revm/test-utils",
-    "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
+    "reth-ethereum-primitives/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
 ]

@@ -6,19 +6,17 @@ use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv, TransactionEnv};
+use reth_errors::ProviderError;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv, Database, TransactionEnv};
 use reth_provider::StateProvider;
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::CacheDB,
-    primitives::{ExecutionResult, HaltReason},
-};
+use reth_revm::{database::StateProviderDatabase, db::CacheDB, primitives::ExecutionResult};
 use reth_rpc_eth_types::{
+    error::api::FromEvmHalt,
     revm_utils::{apply_state_overrides, caller_gas_allowance},
     EthApiError, RevertError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
-use revm_primitives::{db::Database, TxKind};
+use revm_primitives::TxKind;
 use tracing::trace;
 
 /// Gas execution estimates
@@ -141,16 +139,26 @@ pub trait EstimateCall: Call {
                         &mut db,
                     ))
                 }
+                Err(err) if err.is_gas_too_low() => {
+                    // This failed because the configured gas cost of the tx was lower than what
+                    // actually consumed by the tx This can happen if the
+                    // request provided fee values manually and the resulting gas cost exceeds the
+                    // sender's allowance, so we return the appropriate error here
+                    return Err(RpcInvalidTransactionError::GasRequiredExceedsAllowance {
+                        gas_limit: tx_env.gas_limit(),
+                    }
+                    .into_eth_err())
+                }
                 // Propagate other results (successful or other errors).
                 ethres => ethres?,
             };
 
         let gas_refund = match res.result {
             ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
-            ExecutionResult::Halt { reason, gas_used } => {
+            ExecutionResult::Halt { reason, .. } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
-                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into_eth_err())
+                return Err(Self::Error::from_evm_halt(reason, tx_env.gas_limit()))
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -286,7 +294,7 @@ pub trait EstimateCall: Call {
         db: &mut DB,
     ) -> Self::Error
     where
-        DB: Database,
+        DB: Database<Error = ProviderError>,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();
@@ -329,31 +337,16 @@ pub fn update_estimated_gas_range(
             // Cap the highest gas limit with the succeeding gas limit.
             *highest_gas_limit = tx_gas_limit;
         }
-        ExecutionResult::Revert { .. } => {
-            // Increase the lowest gas limit.
+        ExecutionResult::Revert { .. } | ExecutionResult::Halt { .. } => {
+            // We know that transaction succeeded with a higher gas limit before, so any failure
+            // means that we need to increase it.
+            //
+            // We are ignoring all halts here, and not just OOG errors because there are cases when
+            // non-OOG halt might flag insufficient gas limit as well.
+            //
+            // Common usage of invalid opcode in OpenZeppelin:
+            // <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
             *lowest_gas_limit = tx_gas_limit;
-        }
-        ExecutionResult::Halt { reason, .. } => {
-            match reason {
-                HaltReason::OutOfGas(_) | HaltReason::InvalidFEOpcode => {
-                    // Both `OutOfGas` and `InvalidEFOpcode` can occur dynamically if the gas
-                    // left is too low. Treat this as an out of gas
-                    // condition, knowing that the call succeeds with a
-                    // higher gas limit.
-                    //
-                    // Common usage of invalid opcode in OpenZeppelin:
-                    // <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
-
-                    // Increase the lowest gas limit.
-                    *lowest_gas_limit = tx_gas_limit;
-                }
-                err => {
-                    // These cases should be unreachable because we know the transaction
-                    // succeeds, but if they occur, treat them as an
-                    // error.
-                    return Err(RpcInvalidTransactionError::EvmHalt(err).into_eth_err())
-                }
-            }
         }
     };
 

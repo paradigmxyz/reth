@@ -24,6 +24,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
@@ -45,7 +46,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{EthPrimitives, Head, RecoveredBlock, TransactionSigned};
+use reth_primitives::{EthPrimitives, RecoveredBlock, TransactionSigned};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
@@ -287,7 +288,14 @@ pub async fn test_exex_context_with_chain_spec(
     let task_executor = tasks.executor();
     tasks.executor().spawn(network_manager);
 
-    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
+    let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+        provider.clone(),
+        transaction_pool.clone(),
+        evm_config.clone(),
+        EthereumBuilderConfig::new(Default::default()),
+    );
+
+    let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
     let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
         components: Components {
@@ -297,6 +305,7 @@ pub async fn test_exex_context_with_chain_spec(
             consensus,
             network,
             payload_builder,
+            payload_builder_handle,
         },
         task_executor,
         provider,
@@ -308,13 +317,7 @@ pub async fn test_exex_context_with_chain_spec(
         .seal_slow()
         .try_recover()?;
 
-    let head = Head {
-        number: genesis.number,
-        hash: genesis_hash,
-        difficulty: genesis.difficulty,
-        timestamp: genesis.timestamp,
-        total_difficulty: Default::default(),
-    };
+    let head = genesis.num_hash();
 
     let wal_directory = tempfile::tempdir()?;
     let wal = Wal::new(wal_directory.path())?;

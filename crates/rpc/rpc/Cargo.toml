@@ -20,6 +20,7 @@ reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
+reth-metrics.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network-api.workspace = true
@@ -35,6 +36,7 @@ reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
 reth-consensus.workspace = true
+reth-node-api.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
@@ -56,11 +58,7 @@ alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-admin.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-serde.workspace = true
-revm = { workspace = true, features = [
-    "optional_block_gas_limit",
-    "optional_eip3607",
-    "optional_no_base_fee",
-] }
+revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc

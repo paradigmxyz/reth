@@ -1,12 +1,12 @@
 //! RPC errors specific to OP.
 
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
-use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
+use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_rpc_eth_api::AsEthApiError;
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
-use revm::primitives::{InvalidTransaction, OptimismInvalidTransaction};
+use revm::primitives::{EVMError, HaltReason, InvalidTransaction, OptimismInvalidTransaction};
 
 /// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]
@@ -62,6 +62,9 @@ pub enum OpInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
+    /// Transaction conditional errors.
+    #[error(transparent)]
+    TxConditionalErr(#[from] TxConditionalErr),
 }
 
 impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
@@ -71,6 +74,7 @@ impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'st
             OpInvalidTransactionError::HaltedDepositPostRegolith => {
                 rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
+            OpInvalidTransactionError::TxConditionalErr(_) => err.into(),
         }
     }
 }
@@ -90,6 +94,27 @@ impl TryFrom<InvalidTransaction> for OpInvalidTransactionError {
             },
             _ => Err(err),
         }
+    }
+}
+
+/// Transaction conditional related error type
+#[derive(Debug, thiserror::Error)]
+pub enum TxConditionalErr {
+    /// Transaction conditional cost exceeded maximum allowed
+    #[error("conditional cost exceeded maximum allowed")]
+    ConditionalCostExceeded,
+    /// Invalid conditional parameters
+    #[error("invalid conditional parameters")]
+    InvalidCondition,
+}
+
+impl From<TxConditionalErr> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(err: TxConditionalErr) -> Self {
+        jsonrpsee_types::error::ErrorObject::owned(
+            INVALID_PARAMS_CODE,
+            err.to_string(),
+            None::<String>,
+        )
     }
 }
 
@@ -117,5 +142,20 @@ impl From<SequencerClientError> for jsonrpsee_types::error::ErrorObject<'static>
 impl From<BlockError> for OpEthApiError {
     fn from(error: BlockError) -> Self {
         Self::Eth(error.into())
+    }
+}
+
+impl<DB> From<EVMError<DB>> for OpEthApiError
+where
+    EthApiError: From<EVMError<DB>>,
+{
+    fn from(error: EVMError<DB>) -> Self {
+        Self::Eth(error.into())
+    }
+}
+
+impl FromEvmHalt for OpEthApiError {
+    fn from_evm_halt(halt: HaltReason, gas_limit: u64) -> Self {
+        EthApiError::from_evm_halt(halt, gas_limit).into()
     }
 }

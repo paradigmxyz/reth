@@ -21,18 +21,18 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{Address, U256};
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::ChainSpec;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
+use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;
-use reth_revm::{inspector_handle_register, Database, EvmBuilder};
+use revm::{inspector_handle_register, EvmBuilder};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, EVMError,
-    HandlerCfg, ResultAndState, SpecId, TxEnv, TxKind,
+    HaltReason, HandlerCfg, ResultAndState, SpecId, TxEnv, TxKind,
 };
 
 mod config;
-use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7840::BlobParams};
+use alloy_eips::eip1559::INITIAL_BASE_FEE;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::EthereumHardfork;
 
@@ -47,12 +47,13 @@ pub mod eip6110;
 /// Ethereum EVM implementation.
 #[derive(derive_more::Debug, derive_more::Deref, derive_more::DerefMut, derive_more::From)]
 #[debug(bound(DB::Error: Debug))]
-pub struct EthEvm<'a, EXT, DB: Database>(reth_revm::Evm<'a, EXT, DB>);
+pub struct EthEvm<'a, EXT, DB: Database>(revm::Evm<'a, EXT, DB>);
 
 impl<EXT, DB: Database> Evm for EthEvm<'_, EXT, DB> {
     type DB = DB;
     type Tx = TxEnv;
     type Error = EVMError<DB::Error>;
+    type HaltReason = HaltReason;
 
     fn block(&self) -> &BlockEnv {
         self.0.block()
@@ -129,6 +130,11 @@ impl EthEvmConfig {
         Self { chain_spec }
     }
 
+    /// Creates a new Ethereum EVM configuration for the ethereum mainnet.
+    pub fn mainnet() -> Self {
+        Self::new(MAINNET.clone())
+    }
+
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
@@ -187,13 +193,12 @@ impl ConfigureEvmEnv for EthEvmConfig {
             parent.number() + 1,
         );
 
-        let blob_params =
-            if spec_id >= SpecId::PRAGUE { BlobParams::prague() } else { BlobParams::cancun() };
-
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas(blob_params)
+            .maybe_next_block_excess_blob_gas(
+                self.chain_spec.blob_params_at_timestamp(attributes.timestamp),
+            )
             .or_else(|| (spec_id == SpecId::CANCUN).then_some(0))
             .map(|gas| BlobExcessGasAndPrice::new(gas, spec_id >= SpecId::PRAGUE));
 
@@ -237,6 +242,8 @@ impl ConfigureEvmEnv for EthEvmConfig {
 
 impl ConfigureEvm for EthEvmConfig {
     type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
 
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
@@ -260,7 +267,7 @@ impl ConfigureEvm for EthEvmConfig {
     ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
-        I: reth_revm::GetInspector<DB>,
+        I: revm::GetInspector<DB>,
     {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
             cfg_env: evm_env.cfg_env,
@@ -286,7 +293,7 @@ mod tests {
     use alloy_primitives::U256;
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::{env::EvmEnv, execute::ProviderError};
-    use reth_revm::{
+    use revm::{
         db::{CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
         primitives::{BlockEnv, CfgEnv, SpecId},

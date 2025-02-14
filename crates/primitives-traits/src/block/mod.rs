@@ -11,7 +11,6 @@ pub mod error;
 pub mod header;
 
 use alloc::{fmt, vec::Vec};
-use alloy_consensus::Header;
 use alloy_primitives::{Address, B256};
 use alloy_rlp::{Decodable, Encodable};
 
@@ -85,6 +84,11 @@ pub trait Block:
         SealedBlock::new_unchecked(self, hash)
     }
 
+    /// Creates the [`SealedBlock`] from the block's parts without calculating the hash upfront.
+    fn seal(self) -> SealedBlock<Self> {
+        SealedBlock::new_unhashed(self)
+    }
+
     /// Calculate the header hash and seal the block so that it can't be changed.
     fn seal_slow(self) -> SealedBlock<Self> {
         SealedBlock::seal_slow(self)
@@ -115,10 +119,7 @@ pub trait Block:
     }
 
     /// Returns the rlp length of the block with the given header and body.
-    fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize {
-        // TODO(mattsse): replace default impl with <https://github.com/alloy-rs/alloy/pull/1906>
-        header.length() + body.length()
-    }
+    fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize;
 
     /// Expensive operation that recovers transaction signer.
     fn recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
@@ -178,12 +179,13 @@ pub trait Block:
     }
 }
 
-impl<T> Block for alloy_consensus::Block<T>
+impl<T, H> Block for alloy_consensus::Block<T, H>
 where
     T: SignedTransaction,
+    H: BlockHeader,
 {
-    type Header = Header;
-    type Body = alloy_consensus::BlockBody<T>;
+    type Header = H;
+    type Body = alloy_consensus::BlockBody<T, H>;
 
     fn new(header: Self::Header, body: Self::Body) -> Self {
         Self { header, body }
@@ -199,6 +201,10 @@ where
 
     fn split(self) -> (Self::Header, Self::Body) {
         (self.header, self.body)
+    }
+
+    fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize {
+        Self::rlp_length_for(header, body)
     }
 }
 
@@ -238,9 +244,10 @@ pub trait TestBlock: Block<Header: crate::test_utils::TestHeader> {
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-impl<T> TestBlock for alloy_consensus::Block<T>
+impl<T, H> TestBlock for alloy_consensus::Block<T, H>
 where
     T: SignedTransaction,
+    H: crate::test_utils::TestHeader,
 {
     fn body_mut(&mut self) -> &mut Self::Body {
         &mut self.body

@@ -245,7 +245,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -269,7 +269,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -381,7 +381,7 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-envs <MAX_HEADERS>
+      --rpc-cache.max-headers <MAX_HEADERS>
           Max number of headers in cache
 
           [default: 1000]
@@ -440,6 +440,16 @@ TxPool:
 
       --txpool.queued-max-size <QUEUED_MAX_SIZE>
           Max size of the queued sub-pool in megabytes
+
+          [default: 20]
+
+      --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
+          Max number of transaction in the blobpool
+
+          [default: 10000]
+
+      --txpool.blobpool-max-size <BLOBPOOL_MAX_SIZE>
+          Max size of the blobpool in megabytes
 
           [default: 20]
 
@@ -507,6 +517,11 @@ TxPool:
 
           [default: 200]
 
+      --txpool.lifetime <DURATION>
+          Maximum amount of time non-executable transaction are queued
+
+          [default: 10800]
+
 Builder:
       --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder
@@ -516,7 +531,7 @@ Builder:
       --builder.gaslimit <GAS_LIMIT>
           Target gas limit for built blocks
 
-          [default: 30000000]
+          [default: 36000000]
 
       --builder.interval <DURATION>
           The interval at which the job should build a new payload after the last.
@@ -692,8 +707,16 @@ Engine:
 
           [default: 2]
 
-      --engine.state-root-task
-          Enable state root task
+      --engine.legacy-state-root
+          Enable legacy state root
+
+      --engine.caching-and-prewarming
+          Enable cross-block caching and parallel prewarming
+
+      --engine.cross-block-cache-size <CROSS_BLOCK_CACHE_SIZE>
+          Configure the size of cross-block cache in megabytes
+
+          [default: 4096]
 
       --engine.state-root-task-compare-updates
           Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation

@@ -1,4 +1,4 @@
-use crate::{sync::OnceLock, InMemorySize};
+use crate::{sync::OnceLock, InMemorySize, NodePrimitives};
 pub use alloy_consensus::Header;
 use alloy_consensus::Sealed;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
@@ -7,6 +7,9 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
+
+/// Type alias for [`SealedHeader`] generic over the `BlockHeader` type of [`NodePrimitives`].
+pub type SealedHeaderFor<N> = SealedHeader<<N as NodePrimitives>::BlockHeader>;
 
 /// Seals the header with the block hash.
 ///
@@ -265,7 +268,7 @@ pub(super) mod serde_bincode_compat {
         for SealedHeader<'a, H>
     {
         fn from(value: &'a super::SealedHeader<H>) -> Self {
-            Self { hash: value.hash(), header: (&value.header).into() }
+            Self { hash: value.hash(), header: value.header.as_repr() }
         }
     }
 
@@ -295,6 +298,9 @@ pub(super) mod serde_bincode_compat {
 
     impl<H: Sealable + SerdeBincodeCompat> SerdeBincodeCompat for super::SealedHeader<H> {
         type BincodeRepr<'a> = SealedHeader<'a, H>;
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 
     #[cfg(test)]

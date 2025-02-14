@@ -1,0 +1,35 @@
+flowchart TD
+    classDef revealed stroke:green,stroke-width:4px
+
+    subgraph Reveal2[0x00010 revealed]
+        R[Root Branch Node<br/>0x]
+        B1[Branch Node<br/>0x0]:::revealed
+        E1[Extension Node<br/>0x00]:::revealed
+        E2[Extension Node<br/>0x1]
+        B2[Branch Node<br/>0x0001]:::revealed
+        L1[Leaf Node<br/>0x00010]:::revealed
+        L2[Leaf Node<br/>0x10010]
+        H1[Hash<br/>0x01]:::revealed
+        H2[Hash<br/>0x00011]:::revealed
+
+        R -->|0| B1
+        R -->|1| E2
+        B1 -->|0| E1
+        B1 -->|1| H1
+        E1 -->|01| B2
+        B2 -->|0| L1
+        B2 -->|1| H2
+        E2 -->|0010| L2
+    end
+
+    subgraph Reveal1[0x10010 revealed]
+        R1R[Root Branch Node<br/>0x]
+        R1E2[Extension Node<br/>0x1]:::revealed
+        R1L2[Leaf Node<br/>0x10010]:::revealed
+        R1R -->|1| R1E2
+        R1E2 -->|0010| R1L2
+    end
+
+    subgraph Empty
+        ER[Root Branch Node<br/>0x]
+    end
