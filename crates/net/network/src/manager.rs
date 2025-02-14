@@ -162,7 +162,7 @@ impl NetworkManager {
     }
 }
 
-impl<N: NetworkPrimitives, P: ProtocolHandler<N>> NetworkManager<N, P> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkManager<N, P> {
     /// Sets the dedicated channel for events intended for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn with_transactions(
