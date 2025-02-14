@@ -317,6 +317,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[derive(Debug)]
 struct MultiproofInput<Factory> {
     config: StateRootConfig<Factory>,
+    source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
@@ -392,14 +393,17 @@ where
     }
 
     /// Spawns a multiproof calculation.
-    fn spawn_multiproof(&mut self, input: MultiproofInput<Factory>) {
-        let MultiproofInput {
+    fn spawn_multiproof(
+        &mut self,
+        MultiproofInput {
             config,
+            source,
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-        } = input;
+        }: MultiproofInput<Factory>,
+    ) {
         let thread_pool = self.thread_pool.clone();
 
         self.thread_pool.spawn(move || {
@@ -421,6 +425,7 @@ where
                 target: "engine::root",
                 proof_sequence_number,
                 ?elapsed,
+                ?source,
                 ?account_targets,
                 ?storage_targets,
                 "Multiproof calculated",
@@ -598,6 +603,7 @@ where
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
+            source: None,
             hashed_state_update: Default::default(),
             proof_targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
@@ -658,13 +664,19 @@ where
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(&mut self, update: EvmState, proof_sequence_number: u64) {
+    fn on_state_update(
+        &mut self,
+        source: StateChangeSource,
+        update: EvmState,
+        proof_sequence_number: u64,
+    ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
+            source: Some(source),
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
@@ -779,7 +791,7 @@ where
                             "Received new state update"
                         );
                         let next_sequence = self.proof_sequencer.next_sequence();
-                        self.on_state_update(update, next_sequence);
+                        self.on_state_update(source, update, next_sequence);
                     }
                     StateRootMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
