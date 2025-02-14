@@ -5,7 +5,7 @@ use derive_more::derive::Deref;
 use metrics::Histogram;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
-use reth_evm::system_calls::OnStateHook;
+use reth_evm::system_calls::{OnStateHook, StateChangeSource};
 use reth_metrics::Metrics;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -147,7 +147,7 @@ pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution
-    StateUpdate(EvmState),
+    StateUpdate(StateChangeSource, EvmState),
     /// Empty proof for a specific state update
     EmptyProof {
         /// The index of this proof in the sequence of state updates
@@ -537,8 +537,10 @@ where
     pub fn state_hook(&self) -> impl OnStateHook {
         let state_hook = self.state_hook_sender();
 
-        move |state: &EvmState| {
-            if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
+        move |source: StateChangeSource, state: &EvmState| {
+            if let Err(error) =
+                state_hook.send(StateRootMessage::StateUpdate(source, state.clone()))
+            {
                 error!(target: "engine::root", ?error, "Failed to send state update");
             }
         }
@@ -760,7 +762,7 @@ where
                         );
                         self.on_prefetch_proof(targets);
                     }
-                    StateRootMessage::StateUpdate(update) => {
+                    StateRootMessage::StateUpdate(source, update) => {
                         trace!(target: "engine::root", "processing StateRootMessage::StateUpdate");
                         if updates_received == 0 {
                             first_update_time = Some(Instant::now());
@@ -771,6 +773,7 @@ where
                         updates_received += 1;
                         debug!(
                             target: "engine::root",
+                            ?source,
                             len = update.len(),
                             total_updates = updates_received,
                             "Received new state update"
@@ -1169,6 +1172,7 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
+    use reth_evm::system_calls::StateChangeSource;
     use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
@@ -1345,8 +1349,8 @@ mod tests {
         let mut state_hook = task.state_hook();
         let handle = task.spawn();
 
-        for update in state_updates {
-            state_hook.on_state(&update);
+        for (i, update) in state_updates.into_iter().enumerate() {
+            state_hook.on_state(StateChangeSource::Transaction(i), &update);
         }
         drop(state_hook);
 
