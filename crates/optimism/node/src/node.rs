@@ -446,7 +446,7 @@ impl<T> Default for OpPoolBuilder<T> {
 impl<Node, T> PoolBuilder<Node> for OpPoolBuilder<T>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
-    T: EthPoolTransaction<Consensus = TxTy<Node::Types>>,
+    T: EthPoolTransaction<Consensus = TxTy<Node::Types>> + MaybeConditionalTransaction,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
@@ -481,7 +481,7 @@ where
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 
-        // spawn txpool maintenance task
+        // spawn txpool maintenance tasks
         {
             let pool = transaction_pool.clone();
             let chain_events = ctx.provider().canonical_state_stream();
@@ -500,18 +500,29 @@ where
                 },
             );
 
-            // spawn the maintenance task
+            // spawn the main maintenance task
             ctx.task_executor().spawn_critical(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
-                    pool,
+                    pool.clone(),
                     chain_events,
                     ctx.task_executor().clone(),
                     Default::default(),
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
+
+            // spawn the Op txpool maintenance task
+            let chain_events = ctx.provider().canonical_state_stream();
+            ctx.task_executor().spawn_critical(
+                "Op txpool maintenance task",
+                reth_optimism_txpool::maintain::maintain_transaction_pool_future(
+                    pool,
+                    chain_events,
+                ),
+            );
+            debug!(target: "reth::cli", "Spawned Op extension txpool maintenance task");
         }
 
         Ok(transaction_pool)
