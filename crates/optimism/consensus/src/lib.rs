@@ -29,7 +29,6 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::{Block, BlockBody, BlockHeader, SealedBlock};
-use tracing::trace;
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
@@ -105,14 +104,8 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
         // Check empty shanghai-withdrawals
         if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
             shanghai::ensure_empty_shanghai_withdrawals(block.body()).map_err(|err| {
-                trace!(target: "op::consensus",
-                    block_number=block.number(),
-                    %err,
-                    "block failed validation",
-                );
-
-                ConsensusError::Other
-            })?;
+                ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
+            })?
         } else {
             return Ok(())
         }
@@ -127,13 +120,7 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
         if self.chain_spec.is_isthmus_active_at_timestamp(block.timestamp()) {
             // storage root of withdrawals pre-deploy is verified post-execution
             isthmus::ensure_withdrawals_storage_root_is_some(block.header()).map_err(|err| {
-                trace!(target: "op::consensus",
-                    block_number=block.number(),
-                    %err,
-                    "block failed validation",
-                );
-
-                ConsensusError::Other
+                ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
             })?
         } else {
             // canyon is active, else would have returned already

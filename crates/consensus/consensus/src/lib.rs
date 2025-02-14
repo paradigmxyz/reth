@@ -433,9 +433,9 @@ pub enum ConsensusError {
         /// The block's timestamp.
         timestamp: u64,
     },
-    /// Other, likely an L2 error.
-    #[display("other, search logs for l2 error")]
-    Other,
+    /// Other, likely an injected L2 error.
+    #[error("{0}")]
+    Other(String),
 }
 
 impl ConsensusError {
