@@ -20,16 +20,49 @@ mod eip7251;
 
 /// A hook that is called after each state change.
 pub trait OnStateHook {
-    /// Invoked with the state after each system call.
-    fn on_state(&mut self, state: &EvmState);
+    /// Invoked with the source of the change and the state after each system call.
+    fn on_state(&mut self, source: StateChangeSource, state: &EvmState);
+}
+
+/// Source of the state change
+#[derive(Debug, Clone, Copy)]
+pub enum StateChangeSource {
+    /// Transaction with its index
+    Transaction(usize),
+    /// Pre-block state transition
+    PreBlock(StateChangePreBlockSource),
+    /// Post-block state transition
+    PostBlock(StateChangePostBlockSource),
+}
+
+/// Source of the pre-block state change
+#[derive(Debug, Clone, Copy)]
+pub enum StateChangePreBlockSource {
+    /// EIP-2935 blockhashes contract
+    BlockHashesContract,
+    /// EIP-4788 beacon root contract
+    BeaconRootContract,
+    /// EIP-7002 withdrawal requests contract
+    WithdrawalRequestsContract,
+}
+
+/// Source of the post-block state change
+#[derive(Debug, Clone, Copy)]
+pub enum StateChangePostBlockSource {
+    /// Balance increments from block rewards and withdrawals
+    BalanceIncrements,
+    /// EIP-7002 withdrawal requests contract
+    WithdrawalRequestsContract,
+    /// EIP-7251 consolidation requests contract
+    ConsolidationRequestsContract,
 }
 
 impl<F> OnStateHook for F
 where
-    F: FnMut(&EvmState),
+    F: FnMut(StateChangeSource, &EvmState),
 {
-    fn on_state(&mut self, state: &EvmState) {
-        self(state)
+    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
+        self(source, state)
     }
 }
 
@@ -39,7 +72,7 @@ where
 pub struct NoopHook;
 
 impl OnStateHook for NoopHook {
-    fn on_state(&mut self, _state: &EvmState) {}
+    fn on_state(&mut self, _source: StateChangeSource, _state: &EvmState) {}
 }
 
 /// An ephemeral helper type for executing system calls.
@@ -161,7 +194,10 @@ where
 
         if let Some(res) = result_and_state {
             if let Some(ref mut hook) = self.hook {
-                hook.on_state(&res.state);
+                hook.on_state(
+                    StateChangeSource::PreBlock(StateChangePreBlockSource::BlockHashesContract),
+                    &res.state,
+                );
             }
             evm.db_mut().commit(res.state);
         }
@@ -211,7 +247,10 @@ where
 
         if let Some(res) = result_and_state {
             if let Some(ref mut hook) = self.hook {
-                hook.on_state(&res.state);
+                hook.on_state(
+                    StateChangeSource::PreBlock(StateChangePreBlockSource::BeaconRootContract),
+                    &res.state,
+                );
             }
             evm.db_mut().commit(res.state);
         }
@@ -245,7 +284,12 @@ where
         let result_and_state = eip7002::transact_withdrawal_requests_contract_call(evm)?;
 
         if let Some(ref mut hook) = self.hook {
-            hook.on_state(&result_and_state.state);
+            hook.on_state(
+                StateChangeSource::PostBlock(
+                    StateChangePostBlockSource::WithdrawalRequestsContract,
+                ),
+                &result_and_state.state,
+            );
         }
         evm.db_mut().commit(result_and_state.state);
 
@@ -277,7 +321,12 @@ where
         let result_and_state = eip7251::transact_consolidation_requests_contract_call(evm)?;
 
         if let Some(ref mut hook) = self.hook {
-            hook.on_state(&result_and_state.state);
+            hook.on_state(
+                StateChangeSource::PostBlock(
+                    StateChangePostBlockSource::ConsolidationRequestsContract,
+                ),
+                &result_and_state.state,
+            );
         }
         evm.db_mut().commit(result_and_state.state);
 
@@ -285,9 +334,9 @@ where
     }
 
     /// Delegate to stored `OnStateHook`, noop if hook is `None`.
-    pub fn on_state(&mut self, state: &EvmState) {
+    pub fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
         if let Some(ref mut hook) = &mut self.hook {
-            hook.on_state(state);
+            hook.on_state(source, state);
         }
     }
 }

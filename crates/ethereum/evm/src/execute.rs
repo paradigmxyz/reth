@@ -16,7 +16,7 @@ use reth_evm::{
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
     },
     state_change::post_block_balance_increments,
-    system_calls::{OnStateHook, SystemCaller},
+    system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
     ConfigureEvm, Database, Evm,
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
@@ -140,7 +140,7 @@ where
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body().transaction_count());
-        for (sender, transaction) in block.transactions_with_sender() {
+        for (tx_index, (sender, transaction)) in block.transactions_with_sender().enumerate() {
             // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block's gasLimit.
             let block_available_gas = block.gas_limit() - cumulative_gas_used;
@@ -162,7 +162,8 @@ where
                     error: Box::new(err),
                 }
             })?;
-            self.system_caller.on_state(&result_and_state.state);
+            self.system_caller
+                .on_state(StateChangeSource::Transaction(tx_index), &result_and_state.state);
             let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
@@ -228,7 +229,10 @@ where
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
         // call state hook with changes due to balance increments.
         let balance_state = balance_increment_state(&balance_increments, &mut self.state)?;
-        self.system_caller.on_state(&balance_state);
+        self.system_caller.on_state(
+            StateChangeSource::PostBlock(StateChangePostBlockSource::BalanceIncrements),
+            &balance_state,
+        );
 
         Ok(requests)
     }
@@ -1131,7 +1135,7 @@ mod tests {
         let tx_clone = tx.clone();
 
         let _output = executor
-            .execute_with_state_hook(block, move |state: &EvmState| {
+            .execute_with_state_hook(block, move |_, state: &EvmState| {
                 if let Some(account) = state.get(&withdrawal_recipient) {
                     let _ = tx_clone.send(account.info.balance);
                 }
