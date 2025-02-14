@@ -7,7 +7,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
 use reth_engine_tree::tree::root::{StateRootConfig, StateRootTask};
-use reth_evm::system_calls::OnStateHook;
+use reth_evm::system_calls::{OnStateHook, StateChangeSource};
 use reth_primitives_traits::{Account as RethAccount, StorageEntry};
 use reth_provider::{
     providers::ConsistentDbView,
@@ -225,8 +225,8 @@ fn bench_state_root(c: &mut Criterion) {
                             let mut hook = task.state_hook();
                             let handle = task.spawn();
 
-                            for update in state_updates {
-                                hook.on_state(&update)
+                            for (i, update) in state_updates.into_iter().enumerate() {
+                                hook.on_state(StateChangeSource::Transaction(i), &update)
                             }
                             drop(hook);
 

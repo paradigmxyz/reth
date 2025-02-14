@@ -5,7 +5,7 @@ use derive_more::derive::Deref;
 use metrics::Histogram;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
-use reth_evm::system_calls::OnStateHook;
+use reth_evm::system_calls::{OnStateHook, StateChangeSource};
 use reth_metrics::Metrics;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -146,8 +146,8 @@ impl<Factory> StateRootConfig<Factory> {
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
-    /// New state update from transaction execution
-    StateUpdate(EvmState),
+    /// New state update from transaction execution with its source
+    StateUpdate(StateChangeSource, EvmState),
     /// Empty proof for a specific state update
     EmptyProof {
         /// The index of this proof in the sequence of state updates
@@ -316,6 +316,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[derive(Debug)]
 struct MultiproofInput<Factory> {
     config: StateRootConfig<Factory>,
+    source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
@@ -391,14 +392,17 @@ where
     }
 
     /// Spawns a multiproof calculation.
-    fn spawn_multiproof(&mut self, input: MultiproofInput<Factory>) {
-        let MultiproofInput {
+    fn spawn_multiproof(
+        &mut self,
+        MultiproofInput {
             config,
+            source,
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-        } = input;
+        }: MultiproofInput<Factory>,
+    ) {
         let thread_pool = self.thread_pool.clone();
 
         self.thread_pool.spawn(move || {
@@ -420,6 +424,7 @@ where
                 target: "engine::root",
                 proof_sequence_number,
                 ?elapsed,
+                ?source,
                 account_targets,
                 storage_targets,
                 "Multiproof calculated",
@@ -536,8 +541,10 @@ where
     pub fn state_hook(&self) -> impl OnStateHook {
         let state_hook = self.state_hook_sender();
 
-        move |state: &EvmState| {
-            if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
+        move |source: StateChangeSource, state: &EvmState| {
+            if let Err(error) =
+                state_hook.send(StateRootMessage::StateUpdate(source, state.clone()))
+            {
                 error!(target: "engine::root", ?error, "Failed to send state update");
             }
         }
@@ -595,6 +602,7 @@ where
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
+            source: None,
             hashed_state_update: Default::default(),
             proof_targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
@@ -655,13 +663,19 @@ where
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(&mut self, update: EvmState, proof_sequence_number: u64) {
+    fn on_state_update(
+        &mut self,
+        source: StateChangeSource,
+        update: EvmState,
+        proof_sequence_number: u64,
+    ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
+            source: Some(source),
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
@@ -759,7 +773,7 @@ where
                         );
                         self.on_prefetch_proof(targets);
                     }
-                    StateRootMessage::StateUpdate(update) => {
+                    StateRootMessage::StateUpdate(source, update) => {
                         trace!(target: "engine::root", "processing StateRootMessage::StateUpdate");
                         if updates_received == 0 {
                             first_update_time = Some(Instant::now());
@@ -770,12 +784,13 @@ where
                         updates_received += 1;
                         debug!(
                             target: "engine::root",
+                            ?source,
                             len = update.len(),
                             total_updates = updates_received,
                             "Received new state update"
                         );
                         let next_sequence = self.proof_sequencer.next_sequence();
-                        self.on_state_update(update, next_sequence);
+                        self.on_state_update(source, update, next_sequence);
                     }
                     StateRootMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
@@ -1168,6 +1183,7 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
+    use reth_evm::system_calls::StateChangeSource;
     use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
@@ -1344,8 +1360,8 @@ mod tests {
         let mut state_hook = task.state_hook();
         let handle = task.spawn();
 
-        for update in state_updates {
-            state_hook.on_state(&update);
+        for (i, update) in state_updates.into_iter().enumerate() {
+            state_hook.on_state(StateChangeSource::Transaction(i), &update);
         }
         drop(state_hook);
 
