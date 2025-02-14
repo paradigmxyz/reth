@@ -57,7 +57,7 @@ pub trait Evm {
     type Tx;
     /// Error type returned by EVM. Contains either errors related to invalid transactions or
     /// internal irrecoverable execution errors.
-    type Error;
+    type Error: EvmError;
     /// Halt reason. Enum over all possible reasons for halting the execution. When execution halts,
     /// it means that transaction is valid, however, it's execution was interrupted (e.g because of
     /// running out of gas or overflowing stack).

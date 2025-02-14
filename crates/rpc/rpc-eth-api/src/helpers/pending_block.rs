@@ -31,7 +31,7 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
     TransactionPool,
 };
-use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
+use revm::{db::states::bundle_state::BundleRetention, State};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::debug;
@@ -271,10 +271,11 @@ pub trait LoadPendingBlock:
 
         let chain_spec = self.provider().chain_spec();
 
-        let mut system_caller = SystemCaller::new(self.evm_config().clone(), chain_spec.clone());
+        let system_caller = SystemCaller::new(chain_spec.clone());
+        let mut evm = self.evm_config().evm_with_env(&mut db, evm_env.clone());
 
         system_caller
-            .pre_block_blockhashes_contract_call(&mut db, &evm_env, parent_hash)
+            .apply_blockhashes_contract_call(parent_hash, &mut evm)
             .map_err(|err| EthApiError::Internal(err.into()))?;
 
         let mut results = Vec::new();
@@ -331,9 +332,8 @@ pub trait LoadPendingBlock:
             }
 
             let tx_env = self.evm_config().tx_env(tx.tx(), tx.signer());
-            let mut evm = self.evm_config().evm_with_env(&mut db, evm_env.clone());
 
-            let ResultAndState { result, state } = match evm.transact(tx_env) {
+            let ResultAndState { result, state: _ } = match evm.transact_commit(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     if let Some(err) = err.as_invalid_tx_err() {
@@ -355,10 +355,6 @@ pub trait LoadPendingBlock:
                     return Err(Self::Error::from_evm_err(err));
                 }
             };
-            // drop evm to release db reference.
-            drop(evm);
-            // commit changes
-            db.commit(state);
 
             // add to the total blob gas used if the transaction successfully executed
             if let Some(tx_blob_gas) = tx.blob_gas_used() {
@@ -388,6 +384,9 @@ pub trait LoadPendingBlock:
             evm_env.block_env.timestamp.try_into().unwrap_or(u64::MAX),
             &[],
         );
+
+        // release db
+        drop(evm);
 
         // increment account balances for withdrawals
         db.increment_balances(balance_increments).map_err(Self::Error::from_eth_err)?;
