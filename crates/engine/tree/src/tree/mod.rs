@@ -58,7 +58,6 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::ResultAndState;
 use root::{
     StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
 };
@@ -2730,7 +2729,11 @@ where
     ) -> Result<(), InsertBlockErrorKind> {
         // Get the builder once, outside the thread
         let Some(state_provider_builder) = self.state_provider_builder(block.parent_hash())? else {
-            trace!(target: "engine::tree", parent=%block.parent_hash(), "Could not get state provider builder for prewarm");
+            trace!(
+                target: "engine::tree",
+                parent=%block.parent_hash(),
+                "Could not get state provider builder for prewarm",
+            );
             return Ok(())
         };
 
@@ -2746,17 +2749,18 @@ where
             let state_provider = match state_provider_builder.build() {
                 Ok(provider) => provider,
                 Err(err) => {
-                    trace!(target: "engine::tree", %err, "Failed to build state provider in prewarm thread");
+                    trace!(
+                        target: "engine::tree",
+                        %err,
+                        "Failed to build state provider in prewarm thread"
+                    );
                     return
                 }
             };
 
             // Use the caches to create a new provider with caching
-            let state_provider = CachedStateProvider::new_with_caches(
-                state_provider,
-                caches,
-                cache_metrics,
-            );
+            let state_provider =
+                CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
             let state_provider = StateProviderDatabase::new(&state_provider);
 
@@ -2773,10 +2777,16 @@ where
             }
 
             let execution_start = Instant::now();
-            let ResultAndState { state, .. } = match evm.transact(tx_env) {
+            let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    trace!(target: "engine::tree", %err, tx_hash=%tx.tx_hash(), sender=%tx.signer(), "Error when executing prewarm transaction");
+                    trace!(
+                        target: "engine::tree",
+                        %err,
+                        tx_hash=%tx.tx_hash(),
+                        sender=%tx.signer(),
+                        "Error when executing prewarm transaction",
+                    );
                     return
                 }
             };
@@ -2790,18 +2800,19 @@ where
                 return
             }
 
-            let Some(state_root_sender) = state_root_sender else {
-                return
-            };
+            let Some(state_root_sender) = state_root_sender else { return };
 
-            let mut targets = MultiProofTargets::default();
-            for (addr, account) in state {
+            let mut targets =
+                MultiProofTargets::with_capacity_and_hasher(res.state.len(), Default::default());
+            let mut storage_targets = 0;
+            for (addr, account) in res.state {
                 // if account was not touched, do not fetch for it
                 if !account.is_touched() {
                     continue
                 }
 
-                let mut storage_set = B256Set::default();
+                let mut storage_set =
+                    B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
                 for (key, slot) in account.storage {
                     // do nothing if unchanged
                     if !slot.is_changed() {
@@ -2811,10 +2822,10 @@ where
                     storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
                 }
 
+                storage_targets += storage_set.len();
                 targets.insert(keccak256(addr), storage_set);
             }
 
-            let storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>();
             debug!(
                 target: "engine::tree",
                 tx_hash = ?tx.tx_hash(),
@@ -2851,7 +2862,13 @@ where
         // If the error was due to an invalid payload, the payload is added to the
         // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
         // returned.
-        warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number(), %validation_err, "Invalid block error on new payload");
+        warn!(
+            target: "engine::tree",
+            invalid_hash=%block.hash(),
+            invalid_number=block.number(),
+            %validation_err,
+            "Invalid block error on new payload",
+        );
         let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
 
         // keep track of the invalid header
@@ -2916,7 +2933,9 @@ where
                             return Ok((regular_root, regular_updates, time_from_last_update));
                         }
                     } else {
-                        debug!(target: "engine::tree", "Regular state root does not match block state root");
+                        debug!(target: "engine::tree",
+                            "Regular state root does not match block state root"
+                        );
                     }
                 }
 
