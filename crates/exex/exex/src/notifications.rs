@@ -315,11 +315,6 @@ where
     /// we're not on the canonical chain and we need to revert the notification with the ExEx
     /// head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification<E::Primitives>>> {
-        if self.initial_exex_head.block.number > self.initial_local_head.number {
-            debug!(target: "exex::notifications", "ExEx head is ahead of the canonical chain");
-            return Ok(None);
-        }
-
         if self.provider.is_known(&self.initial_exex_head.block.hash)? &&
             self.initial_exex_head.block.number <= self.initial_local_head.number
         {
@@ -336,6 +331,12 @@ where
             .wal_handle
             .get_committed_notification_by_block_hash(&self.initial_exex_head.block.hash)?
         else {
+            // it's possible that the exex head is further ahead
+            if self.initial_exex_head.block.number > self.initial_local_head.number {
+                debug!(target: "exex::notifications", "ExEx head is ahead of the canonical chain");
+                return Ok(None);
+            }
+
             return Err(eyre::eyre!(
                 "Could not find notification for block hash {:?} in the WAL",
                 self.initial_exex_head.block.hash
