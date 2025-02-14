@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn parse_instance() {
         let mut cmd: NodeCommand = NodeCommand::parse_from(["reth"]);
-        cmd.rpc.adjust_instance_ports(cmd.instance);
+        cmd.rpc.adjust_instance_ports(Some(cmd.instance));
         cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8551);
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(cmd.network.port, 30303);
 
         let mut cmd: NodeCommand = NodeCommand::parse_from(["reth", "--instance", "2"]);
-        cmd.rpc.adjust_instance_ports(cmd.instance);
+        cmd.rpc.adjust_instance_ports(Some(cmd.instance));
         cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8651);
@@ -343,7 +343,7 @@ mod tests {
         assert_eq!(cmd.network.port, 30304);
 
         let mut cmd: NodeCommand = NodeCommand::parse_from(["reth", "--instance", "3"]);
-        cmd.rpc.adjust_instance_ports(cmd.instance);
+        cmd.rpc.adjust_instance_ports(Some(cmd.instance));
         cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8751);
