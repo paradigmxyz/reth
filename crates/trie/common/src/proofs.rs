@@ -144,6 +144,119 @@ impl MultiProof {
     }
 }
 
+/// This is a type of [`MultiProof`] that uses decoded proofs, meaning these proofs are stored as a
+/// collection of [`TrieNode`]s instead of RLP-encoded bytes.
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct DecodedMultiProof {
+    /// State trie multiproof for requested accounts.
+    pub account_subtree: DecodedProofNodes,
+    /// The hash masks of the branch nodes in the account proof.
+    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+    /// The tree masks of the branch nodes in the account proof.
+    pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// Storage trie multiproofs.
+    pub storages: B256Map<DecodedStorageMultiProof>,
+}
+
+impl DecodedMultiProof {
+    /// Return the account proof nodes for the given account path.
+    pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, TrieNode)> {
+        self.account_subtree.matching_nodes_sorted(path)
+    }
+
+    /// Return the storage proof nodes for the given storage slots of the account path.
+    pub fn storage_proof_nodes(
+        &self,
+        hashed_address: B256,
+        slots: impl IntoIterator<Item = B256>,
+    ) -> Vec<(B256, Vec<(Nibbles, TrieNode)>)> {
+        self.storages
+            .get(&hashed_address)
+            .map(|storage_mp| {
+                slots
+                    .into_iter()
+                    .map(|slot| {
+                        let nibbles = Nibbles::unpack(slot);
+                        (slot, storage_mp.subtree.matching_nodes_sorted(&nibbles))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Construct the account proof from the multiproof.
+    pub fn account_proof(
+        &self,
+        address: Address,
+        slots: &[B256],
+    ) -> Result<DecodedAccountProof, alloy_rlp::Error> {
+        let hashed_address = keccak256(address);
+        let nibbles = Nibbles::unpack(hashed_address);
+
+        // Retrieve the account proof.
+        let proof = self
+            .account_proof_nodes(&nibbles)
+            .into_iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+
+        // Inspect the last node in the proof. If it's a leaf node with matching suffix,
+        // then the node contains the encoded trie account.
+        let info = 'info: {
+            if let Some(TrieNode::Leaf(leaf)) = proof.last() {
+                if nibbles.ends_with(&leaf.key) {
+                    let account = TrieAccount::decode(&mut &leaf.value[..])?;
+                    break 'info Some(Account {
+                        balance: account.balance,
+                        nonce: account.nonce,
+                        bytecode_hash: (account.code_hash != KECCAK_EMPTY)
+                            .then_some(account.code_hash),
+                    })
+                }
+            }
+            None
+        };
+
+        // Retrieve proofs for requested storage slots.
+        let storage_multiproof = self.storages.get(&hashed_address);
+        let storage_root = storage_multiproof.map(|m| m.root).unwrap_or(EMPTY_ROOT_HASH);
+        let mut storage_proofs = Vec::with_capacity(slots.len());
+        for slot in slots {
+            let proof = if let Some(multiproof) = &storage_multiproof {
+                multiproof.storage_proof(*slot)?
+            } else {
+                DecodedStorageProof::new(*slot)
+            };
+            storage_proofs.push(proof);
+        }
+        Ok(DecodedAccountProof { address, info, proof, storage_root, storage_proofs })
+    }
+
+    /// Extends this multiproof with another one, merging both account and storage
+    /// proofs.
+    pub fn extend(&mut self, other: Self) {
+        self.account_subtree.extend_from(other.account_subtree);
+
+        self.branch_node_hash_masks.extend(other.branch_node_hash_masks);
+        self.branch_node_tree_masks.extend(other.branch_node_tree_masks);
+
+        for (hashed_address, storage) in other.storages {
+            match self.storages.entry(hashed_address) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    debug_assert_eq!(entry.get().root, storage.root);
+                    let entry = entry.get_mut();
+                    entry.subtree.extend_from(storage.subtree);
+                    entry.branch_node_hash_masks.extend(storage.branch_node_hash_masks);
+                    entry.branch_node_tree_masks.extend(storage.branch_node_tree_masks);
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(storage);
+                }
+            }
+        }
+    }
+}
+
 /// The merkle multiproof of storage trie.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StorageMultiProof {
@@ -331,6 +444,41 @@ impl AccountProof {
         };
         let nibbles = Nibbles::unpack(keccak256(self.address));
         verify_proof(root, nibbles, expected, &self.proof)
+    }
+}
+
+/// The merkle proof with the relevant account info.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DecodedAccountProof {
+    /// The address associated with the account.
+    pub address: Address,
+    /// Account info.
+    pub info: Option<Account>,
+    /// Array of merkle trie nodes which starting from the root node and following the path of the
+    /// hashed address as key.
+    pub proof: Vec<TrieNode>,
+    /// The storage trie root.
+    pub storage_root: B256,
+    /// Array of storage proofs as requested.
+    pub storage_proofs: Vec<DecodedStorageProof>,
+}
+
+impl Default for DecodedAccountProof {
+    fn default() -> Self {
+        Self::new(Address::default())
+    }
+}
+
+impl DecodedAccountProof {
+    /// Create new account proof entity.
+    pub const fn new(address: Address) -> Self {
+        Self {
+            address,
+            info: None,
+            proof: Vec::new(),
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: Vec::new(),
+        }
     }
 }
 
