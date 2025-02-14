@@ -12,7 +12,7 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
+use alloc::{format, sync::Arc};
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
 use core::fmt::Debug;
