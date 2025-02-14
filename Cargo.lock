@@ -6900,9 +6900,9 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "auto_impl",
- "derive_more",
  "reth-execution-types",
  "reth-primitives-traits",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
