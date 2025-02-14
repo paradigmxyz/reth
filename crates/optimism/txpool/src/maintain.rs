@@ -38,21 +38,22 @@ where
     loop {
         let Some(event) = events.next().await else { break };
         if let CanonStateNotification::Commit { new } = event {
-            if !new.is_empty() {
-                let header = new.tip().clone().into_header();
-                let mut to_remove = Vec::new();
-                for tx in &pool.pooled_transactions() {
-                    if let Some(conditional) = tx.transaction.conditional() {
-                        if conditional.has_exceeded_block_attributes(&BlockConditionalAttributes {
-                            number: header.number(),
-                            timestamp: header.timestamp(),
-                        }) {
-                            to_remove.push(*tx.hash());
-                        }
+            if new.is_empty() {
+                continue;
+            }
+            let header = new.tip().clone_header();
+            let mut to_remove = Vec::new();
+            for tx in &pool.pooled_transactions() {
+                if let Some(conditional) = tx.transaction.conditional() {
+                    if conditional.has_exceeded_block_attributes(&BlockConditionalAttributes {
+                        number: header.number(),
+                        timestamp: header.timestamp(),
+                    }) {
+                        to_remove.push(*tx.hash());
                     }
                 }
-                let _ = pool.remove_transactions(to_remove);
             }
+            let _ = pool.remove_transactions(to_remove);
         }
     }
 }
