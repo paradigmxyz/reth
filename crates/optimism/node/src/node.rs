@@ -107,7 +107,10 @@ impl OpNode {
             self.args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(OpPoolBuilder::default())
+            .pool(
+                OpPoolBuilder::default()
+                    .with_enable_tx_conditional(self.args.enable_tx_conditional),
+            )
             .payload(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
             )
@@ -433,13 +436,26 @@ where
 pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
+    /// Enable transaction conditionals.
+    pub enable_tx_conditional: bool,
     /// Marker for the pooled transaction type.
     _pd: core::marker::PhantomData<T>,
 }
 
 impl<T> Default for OpPoolBuilder<T> {
     fn default() -> Self {
-        Self { pool_config_overrides: Default::default(), _pd: Default::default() }
+        Self {
+            pool_config_overrides: Default::default(),
+            enable_tx_conditional: false,
+            _pd: Default::default(),
+        }
+    }
+}
+
+impl<T> OpPoolBuilder<T> {
+    fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+        self.enable_tx_conditional = enable_tx_conditional;
+        self
     }
 }
 
@@ -513,16 +529,18 @@ where
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
 
-            // spawn the Op txpool maintenance task
-            let chain_events = ctx.provider().canonical_state_stream();
-            ctx.task_executor().spawn_critical(
-                "Op txpool maintenance task",
-                reth_optimism_txpool::maintain::maintain_transaction_pool_future(
-                    pool,
-                    chain_events,
-                ),
-            );
-            debug!(target: "reth::cli", "Spawned Op extension txpool maintenance task");
+            if self.enable_tx_conditional {
+                // spawn the Op txpool maintenance task
+                let chain_events = ctx.provider().canonical_state_stream();
+                ctx.task_executor().spawn_critical(
+                    "Op txpool maintenance task",
+                    reth_optimism_txpool::maintain::maintain_transaction_pool_future(
+                        pool,
+                        chain_events,
+                    ),
+                );
+                debug!(target: "reth::cli", "Spawned Op extension txpool maintenance task");
+            }
         }
 
         Ok(transaction_pool)
