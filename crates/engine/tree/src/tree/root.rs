@@ -669,59 +669,83 @@ where
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let mut hashed_state_update = evm_state_to_hashed_post_state(update);
 
-        let mut state_updates = Vec::new();
+        let mut total_updates = 0;
 
         for accounts_chunk in &hashed_state_update.accounts.into_iter().chunks(5) {
-            let mut chunks = BTreeMap::new();
+            let mut chunks = vec![vec![]; 1];
 
             for (address, account) in accounts_chunk {
-                let storages = hashed_state_update
-                    .storages
-                    .remove(&address)
-                    .unwrap_or_default()
-                    .storage
-                    .into_iter()
-                    .chunks(5);
+                let storages =
+                    hashed_state_update.storages.remove(&address).unwrap_or_default().storage;
+                let chunks_num = storages.len().div_ceil(5);
+                if chunks.len() < chunks_num {
+                    chunks.resize(chunks_num, Vec::new());
+                }
 
-                for (index, storage_chunk) in storages.into_iter().enumerate() {
-                    chunks.entry(index).or_insert_with(Vec::new).push((
+                let storages = storages.into_iter().chunks(5);
+                let mut storages_iter = storages.into_iter();
+
+                chunks[0].push((
+                    address,
+                    account,
+                    if let Some(storages) = storages_iter.next() {
+                        HashedStorage::from_iter(false, storages)
+                    } else {
+                        HashedStorage::new(false)
+                    },
+                ));
+
+                for (i, storages_chunk) in storages_iter.enumerate() {
+                    chunks[i + 1].push((
                         address,
                         account,
-                        HashedStorage::from_iter(false, storage_chunk),
+                        HashedStorage::from_iter(false, storages_chunk),
                     ));
                 }
             }
 
-            for chunk in chunks.into_values() {
+            for chunk in chunks {
                 let (accounts, storages) = chunk
                     .into_iter()
                     .map(|(address, account, storages)| ((address, account), (address, storages)))
                     .unzip();
+                let account_hashed_state_update = HashedPostState { accounts, storages };
 
-                state_updates.push(HashedPostState { accounts, storages });
+                let proof_targets =
+                    get_proof_targets(&account_hashed_state_update, &self.fetched_proof_targets);
+                extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+
+                self.multiproof_manager.spawn_or_queue(MultiproofInput {
+                    config: self.config.clone(),
+                    source: Some(source),
+                    hashed_state_update: account_hashed_state_update,
+                    proof_targets,
+                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    state_root_message_sender: self.tx.clone(),
+                });
+                total_updates += 1;
             }
         }
-        if !hashed_state_update.storages.is_empty() {
-            state_updates
-                .push(HashedPostState { accounts: Default::default(), ..hashed_state_update });
-        }
 
-        let total_updates = state_updates.len();
-        for state_update in state_updates {
-            let proof_targets = get_proof_targets(&state_update, &self.fetched_proof_targets);
+        if !hashed_state_update.storages.is_empty() {
+            let storages_state_update =
+                HashedPostState { accounts: Default::default(), ..hashed_state_update };
+            let proof_targets =
+                get_proof_targets(&storages_state_update, &self.fetched_proof_targets);
             extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
                 config: self.config.clone(),
                 source: Some(source),
-                hashed_state_update: state_update,
+                hashed_state_update: storages_state_update,
                 proof_targets,
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
             });
+            total_updates += 1;
         }
 
-        total_updates as u64
+        total_updates
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
