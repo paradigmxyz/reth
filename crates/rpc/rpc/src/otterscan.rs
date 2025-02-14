@@ -542,7 +542,7 @@ where
         };
 
         let matcher = Arc::new(filter.matcher());
-        let mut cur_block = block_number;
+        let mut cur_block = if block_number == 0 { 0 } else { block_number + 1 };
 
         // iterate over the blocks until `page_size` transactions are found or the tip is reached
         while txs_with_receipts.txs.len() < page_size {
@@ -591,9 +591,18 @@ where
                     .flat_map(|traces| traces.into_iter().flatten())
                     .collect::<Vec<_>>();
 
+                let mut prev_tx_hash = FixedBytes::default();
+
                 // iterate over the traces and fetch the corresponding transactions and receipts
                 for trace in &traces {
                     let tx_hash = trace.transaction_hash.ok_or(EthApiError::TransactionNotFound)?;
+
+                    // If intermediate traces of the same transaction are matched, skip them
+                    if tx_hash == prev_tx_hash {
+                        continue;
+                    }
+                    prev_tx_hash = tx_hash;
+
                     let tx = EthApiServer::transaction_by_hash(&self.eth, tx_hash);
                     let receipt = EthApiServer::transaction_receipt(&self.eth, tx_hash);
                     let (tx, receipt) = futures::try_join!(tx, receipt)?;
