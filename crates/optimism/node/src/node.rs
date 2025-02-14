@@ -539,7 +539,7 @@ where
                         chain_events,
                     ),
                 );
-                debug!(target: "reth::cli", "Spawned Op extension txpool maintenance task");
+                debug!(target: "reth::cli", "Spawned Op txpool maintenance task");
             }
         }
 
