@@ -669,7 +669,7 @@ where
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let max = update.iter().max_by_key(|(_, account)| account.storage.len());
         if let Some((address, account)) = max {
-            if account.storage.len() > 100 {
+            if account.storage.len() > 500 {
                 info!(target: "engine::root", ?source, ?address, ?account, "Max storage slot len");
             }
         }
