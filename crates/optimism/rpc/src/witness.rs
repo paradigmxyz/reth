@@ -5,7 +5,7 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use jsonrpsee_core::{async_trait, RpcResult};
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::ConfigureEvmFor;
+use reth_evm::{ConfigureEvm, ConfigureEvmFor};
 use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_payload_builder::{OpPayloadBuilder, OpPayloadPrimitives};
@@ -21,11 +21,11 @@ use std::{fmt::Debug, sync::Arc};
 use tokio::sync::{oneshot, Semaphore};
 
 /// An extension to the `debug_` namespace of the RPC API.
-pub struct OpDebugWitnessApi<Pool, Provider: NodePrimitivesProvider, EvmConfig> {
+pub struct OpDebugWitnessApi<Pool, Provider: NodePrimitivesProvider, EvmConfig: ConfigureEvm> {
     inner: Arc<OpDebugWitnessApiInner<Pool, Provider, EvmConfig>>,
 }
 
-impl<Pool, Provider: NodePrimitivesProvider, EvmConfig>
+impl<Pool, Provider: NodePrimitivesProvider, EvmConfig: ConfigureEvm>
     OpDebugWitnessApi<Pool, Provider, EvmConfig>
 {
     /// Creates a new instance of the `OpDebugWitnessApi`.
@@ -42,6 +42,7 @@ impl<Pool, Provider: NodePrimitivesProvider, EvmConfig>
 
 impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
+    EvmConfig: ConfigureEvm,
     Provider: NodePrimitivesProvider + BlockReaderIdExt<Header = reth_primitives::Header>,
 {
     /// Fetches the parent header by hash.
@@ -94,6 +95,7 @@ where
 
 impl<Pool, Provider, EvmConfig> Clone for OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
+    EvmConfig: ConfigureEvm,
     Provider: NodePrimitivesProvider,
 {
     fn clone(&self) -> Self {
@@ -102,6 +104,7 @@ where
 }
 impl<Pool, Provider, EvmConfig> Debug for OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
+    EvmConfig: ConfigureEvm,
     Provider: NodePrimitivesProvider,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -109,7 +112,7 @@ where
     }
 }
 
-struct OpDebugWitnessApiInner<Pool, Provider: NodePrimitivesProvider, EvmConfig> {
+struct OpDebugWitnessApiInner<Pool, Provider: NodePrimitivesProvider, EvmConfig: ConfigureEvm> {
     provider: Provider,
     builder: OpPayloadBuilder<Pool, Provider, EvmConfig, Provider::Primitives>,
     task_spawner: Box<dyn TaskSpawner>,

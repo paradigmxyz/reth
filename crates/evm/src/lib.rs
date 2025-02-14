@@ -26,8 +26,6 @@ use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{
     context::TxEnv,
     handler::{Inspector, NoOpInspector},
-    interpreter::interpreter::EthInterpreter,
-    specification::hardfork::SpecId,
 };
 
 pub mod batch;
@@ -49,16 +47,16 @@ pub mod test_utils;
 
 pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, InvalidTxError};
 
-/// Helper trait to bound [`revm_inspector::Inspector`] for a [`ConfigureEvm`].
+/// Helper trait to bound [`Inspector`] for a [`ConfigureEvm`].
 pub trait InspectorFor<DB: Database, Evm: ConfigureEvm>:
-    Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>, EthInterpreter>
+    Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>
 {
 }
 impl<T, DB, Evm> InspectorFor<DB, Evm> for T
 where
     DB: Database,
     Evm: ConfigureEvm,
-    T: Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>, EthInterpreter>,
+    T: Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>,
 {
 }
 
@@ -178,7 +176,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     type Error: core::error::Error + Send + Sync;
 
     /// Identifier of the EVM specification.
-    type Spec: Into<SpecId> + Debug + Copy + Send + Sync + 'static;
+    type Spec: Debug + Copy + Send + Sync + 'static;
 
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
     fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv;
@@ -222,7 +220,7 @@ pub struct NextBlockEnvAttributes {
 
 /// Abstraction over transaction environment.
 pub trait TransactionEnv:
-    revm::context_interface::Transaction + Debug + Default + Clone + Send + Sync + 'static
+    revm::context_interface::Transaction + Debug + Clone + Send + Sync + 'static
 {
     /// Set the gas limit.
     fn set_gas_limit(&mut self, gas_limit: u64);
@@ -273,7 +271,25 @@ impl TransactionEnv for TxEnv {
     }
 
     fn set_access_list(&mut self, access_list: AccessList) {
-        self.access_list =
-            access_list.0.into_iter().map(|item| (item.address, item.storage_keys)).collect();
+        self.access_list = access_list;
+    }
+}
+
+#[cfg(feature = "op")]
+impl<T: TransactionEnv> TransactionEnv for revm_optimism::OpTransaction<T> {
+    fn set_gas_limit(&mut self, gas_limit: u64) {
+        self.base.set_gas_limit(gas_limit);
+    }
+
+    fn nonce(&self) -> u64 {
+        TransactionEnv::nonce(&self.base)
+    }
+
+    fn set_nonce(&mut self, nonce: u64) {
+        self.base.set_nonce(nonce);
+    }
+
+    fn set_access_list(&mut self, access_list: AccessList) {
+        self.base.set_access_list(access_list);
     }
 }

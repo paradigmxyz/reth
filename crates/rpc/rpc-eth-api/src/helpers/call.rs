@@ -18,7 +18,8 @@ use futures::Future;
 use reth_chainspec::EthChainSpec;
 use reth_errors::ProviderError;
 use reth_evm::{
-    ConfigureEvm, ConfigureEvmEnv, Evm, EvmEnv, HaltReasonFor, InspectorFor, TransactionEnv,
+    ConfigureEvm, ConfigureEvmEnv, Evm, EvmEnv, HaltReasonFor, InspectorFor, SpecFor,
+    TransactionEnv,
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::SignedTransaction;
@@ -32,7 +33,6 @@ use reth_rpc_eth_types::{
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
 use revm::{
-    context::BlockEnv,
     context_interface::{
         result::{ExecutionResult, ResultAndState},
         Transaction,
@@ -402,7 +402,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let state = self.state_at_block_id(at)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-        let mut tx_env = self.create_txn_env(&evm_env.block_env, request.clone(), &mut db)?;
+        let mut tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
 
         // we want to disable this in eth_createAccessList, since this is common practice used by
         // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
@@ -723,10 +723,10 @@ pub trait Call:
     /// Configures a new `TxEnv`  for the [`TransactionRequest`]
     ///
     /// All `TxEnv` fields are derived from the given [`TransactionRequest`], if fields are
-    /// `None`, they fall back to the [`BlockEnv`]'s settings.
+    /// `None`, they fall back to the [`EvmEnv`]'s settings.
     fn create_txn_env(
         &self,
-        block_env: &BlockEnv,
+        evm_env: &EvmEnv<SpecFor<Self::Evm>>,
         request: TransactionRequest,
         db: impl Database<Error: Into<EthApiError>>,
     ) -> Result<<Self::Evm as ConfigureEvmEnv>::TxEnv, Self::Error>;
@@ -789,7 +789,7 @@ pub trait Call:
         }
 
         let request_gas = request.gas;
-        let mut tx_env = self.create_txn_env(&evm_env.block_env, request, &mut *db)?;
+        let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
 
         if request_gas.is_none() {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit

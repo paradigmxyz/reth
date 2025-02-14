@@ -11,8 +11,7 @@ use reth_primitives_traits::{
     transaction::signed::SignedTransactionIntoRecoveredExt, Block, BlockBody, NodePrimitives,
     RecoveredBlock, SealedHeader, SignedTransaction,
 };
-use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SignedTransaction};
-use reth_trie::updates::TrieUpdates;
+use reth_trie_common::updates::TrieUpdates;
 use revm_database::BundleState;
 
 /// A chain of blocks and their final state.

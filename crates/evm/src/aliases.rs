@@ -40,3 +40,6 @@ pub type EvmErrorFor<Evm, DB> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory
 pub type HaltReasonFor<Evm> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory<
     EvmEnv<<Evm as ConfigureEvmEnv>::Spec>,
 >>::HaltReason;
+
+/// Helper to access [`ConfigureEvmEnv::Spec`] for a given [`ConfigureEvmEnv`].
+pub type SpecFor<Evm> = <Evm as ConfigureEvmEnv>::Spec;

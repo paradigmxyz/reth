@@ -2,13 +2,12 @@ use alloy_consensus::Header;
 use reth_optimism_forks::OpHardforks;
 use revm_optimism::OpSpecId;
 
-/// Map the latest active hardfork at the given header to a revm
-/// [`SpecId`](revm_primitives::SpecId).
+/// Map the latest active hardfork at the given header to a revm [`OpSpecId`].
 pub fn revm_spec(chain_spec: impl OpHardforks, header: &Header) -> OpSpecId {
     revm_spec_by_timestamp_after_bedrock(chain_spec, header.timestamp)
 }
 
-/// Returns the revm [`SpecId`](revm_primitives::SpecId) at the given timestamp.
+/// Returns the revm [`OpSpecId`] at the given timestamp.
 ///
 /// # Note
 ///

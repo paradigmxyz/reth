@@ -273,6 +273,15 @@ impl From<reth_errors::ProviderError> for EthApiError {
     }
 }
 
+impl From<InvalidHeader> for EthApiError {
+    fn from(value: InvalidHeader) -> Self {
+        match value {
+            InvalidHeader::ExcessBlobGasNotSet => Self::ExcessBlobGasNotSet,
+            InvalidHeader::PrevrandaoNotSet => Self::PrevrandaoNotSet,
+        }
+    }
+}
+
 impl<T> From<EVMError<T, InvalidTransaction>> for EthApiError
 where
     T: Into<Self>,
@@ -285,8 +294,7 @@ where
                 }
                 _ => RpcInvalidTransactionError::from(invalid_tx).into(),
             },
-            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Self::PrevrandaoNotSet,
-            EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Self::ExcessBlobGasNotSet,
+            EVMError::Header(err) => err.into(),
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
             EVMError::Precompile(err) => Self::EvmPrecompile(err),

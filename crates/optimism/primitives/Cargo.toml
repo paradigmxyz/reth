@@ -21,7 +21,7 @@ reth-zstd-compressors = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["k256"] }
 revm-context.workspace = true
 revm-optimism.workspace = true
 secp256k1 = { workspace = true, optional = true }

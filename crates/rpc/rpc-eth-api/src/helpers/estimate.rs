@@ -75,7 +75,7 @@ pub trait EstimateCall: Call {
 
         // Configure the evm env
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
-        let mut tx_env = self.create_txn_env(&evm_env.block_env, request, &mut db)?;
+        let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
         // Apply any state overrides if specified.
         if let Some(state_override) = state_override {

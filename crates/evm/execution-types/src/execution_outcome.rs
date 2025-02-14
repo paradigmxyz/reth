@@ -3,7 +3,7 @@ use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
-use reth_trie::{HashedPostState, KeyHasher};
+use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::state::AccountInfo;
 use revm_database::{states::BundleState, BundleAccount};
 
