@@ -1,11 +1,11 @@
 //! OP-Reth `eth_` endpoint implementation.
 
+pub mod ext;
 pub mod receipt;
 pub mod transaction;
 
 mod block;
 mod call;
-mod ext;
 mod pending_block;
 
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
