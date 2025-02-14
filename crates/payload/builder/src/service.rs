@@ -471,6 +471,8 @@ where
     }
 }
 
+type BoxedStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
+
 /// Message type for the [`PayloadBuilderService`].
 pub enum PayloadServiceCommand<T: PayloadTypes> {
     /// Start building a new payload.
@@ -496,7 +498,7 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     /// Subscribe to the best payloads
     SubscribeBestPayloads(
         PayloadId,
-        oneshot::Sender<Option<Pin<Box<dyn Stream<Item = T::BuiltPayload> + Send>>>>,
+        oneshot::Sender<Option<BoxedStream<T::BuiltPayload>>>,
     ),
 }
 
