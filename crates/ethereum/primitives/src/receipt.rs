@@ -6,9 +6,7 @@ use alloy_consensus::{
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
-use reth_primitives_traits::{
-    proofs::ordered_trie_root_with_encoder, serde_bincode_compat::SerdeBincodeCompat, InMemorySize,
-};
+use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
 use serde::{Deserialize, Serialize};
 
 /// Typed ethereum transaction receipt.
@@ -193,16 +191,16 @@ impl InMemorySize for Receipt {
     }
 }
 
+impl reth_primitives_traits::Receipt for Receipt {}
+
 #[cfg(feature = "serde-bincode-compat")]
-impl SerdeBincodeCompat for Receipt {
-    type BincodeRepr<'a> = Receipt;
+impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for Receipt {
+    type BincodeRepr<'a> = Self;
 
     fn as_repr(&self) -> Self::BincodeRepr<'_> {
         self.clone()
     }
 }
-
-impl reth_primitives_traits::Receipt for Receipt {}
 
 #[cfg(test)]
 mod tests {

@@ -5,7 +5,7 @@ use alloy_consensus::{
 use alloy_primitives::{Bloom, Log};
 use alloy_rlp::{BufMut, Decodable, Header};
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
-use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
+use reth_primitives_traits::InMemorySize;
 
 /// Typed ethereum transaction receipt.
 /// Receipt containing result of transaction execution.
@@ -209,16 +209,16 @@ impl InMemorySize for OpReceipt {
     }
 }
 
+impl reth_primitives_traits::Receipt for OpReceipt {}
+
 #[cfg(feature = "serde-bincode-compat")]
-impl SerdeBincodeCompat for OpReceipt {
-    type BincodeRepr<'a> = OpReceipt;
+impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for OpReceipt {
+    type BincodeRepr<'a> = Self;
 
     fn as_repr(&self) -> Self::BincodeRepr<'_> {
         self.clone()
     }
 }
-
-impl reth_primitives_traits::Receipt for OpReceipt {}
 
 /// Trait for deposit receipt.
 pub trait DepositReceipt: reth_primitives_traits::Receipt {
