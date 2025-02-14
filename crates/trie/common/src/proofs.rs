@@ -155,7 +155,7 @@ pub struct DecodedMultiProof {
     /// The tree masks of the branch nodes in the account proof.
     pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     /// Storage trie multiproofs.
-    pub storages: B256HashMap<DecodedStorageMultiProof>,
+    pub storages: B256Map<DecodedStorageMultiProof>,
 }
 
 impl DecodedMultiProof {
