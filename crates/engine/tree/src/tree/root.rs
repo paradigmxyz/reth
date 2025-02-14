@@ -556,7 +556,7 @@ where
         std::thread::Builder::new()
             .name("State Root Task".to_string())
             .spawn(move || {
-                debug!(target: "engine::tree", "Starting state root task");
+                debug!(target: "engine::tree", "State root task starting");
 
                 let result = self.run(sparse_trie_tx);
                 let _ = tx.send(result);
@@ -575,7 +575,7 @@ where
     ) -> Sender<SparseTrieUpdate> {
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
-            debug!(target: "engine::tree", "Starting sparse trie task");
+            debug!(target: "engine::tree", "Sparse trie task starting");
             // We clone the task sender here so that it can be used in case the sparse trie task
             // succeeds, without blocking due to any `Drop` implementation.
             //
