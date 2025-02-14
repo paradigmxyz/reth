@@ -1,7 +1,7 @@
 /* mdbx_load.c - memory-mapped database load tool */
 
 /*
- * Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -22,7 +22,7 @@
 
 #define xMDBX_TOOLS /* Avoid using internal eASSERT() */
 /*
- * Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -161,7 +161,7 @@
 
 #include "mdbx.h"
 /*
- * Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -1015,7 +1015,7 @@ extern "C" {
 /* https://en.wikipedia.org/wiki/Operating_system_abstraction_layer */
 
 /*
- * Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
