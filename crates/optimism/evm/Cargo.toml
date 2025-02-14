@@ -14,7 +14,7 @@ workspace = true
 # Reth
 reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["op"] }
 reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
@@ -37,7 +37,9 @@ reth-optimism-primitives.workspace = true
 
 # revm
 revm.workspace = true
+revm-database.workspace = true
 revm-primitives.workspace = true
+revm-optimism.workspace = true
 
 # misc
 derive_more.workspace = true
@@ -78,12 +80,11 @@ std = [
     "reth-execution-types/std",
     "alloy-evm/std",
     "alloy-op-evm/std",
+    "revm-database/std",
+    "revm-optimism/std",
 ]
 optimism = [
     "reth-execution-types/optimism",
     "reth-optimism-consensus/optimism",
-    "revm/optimism",
-    "revm-primitives/optimism",
     "reth-optimism-primitives/optimism",
-    "alloy-op-evm/optimism",
 ]

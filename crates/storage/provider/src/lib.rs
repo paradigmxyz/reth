@@ -36,7 +36,7 @@ pub use reth_execution_types::*;
 pub mod bundle_state;
 
 /// Re-export `OriginalValuesKnown`
-pub use revm::db::states::OriginalValuesKnown;
+pub use revm_database::states::OriginalValuesKnown;
 
 /// Writer standalone type.
 pub mod writer;

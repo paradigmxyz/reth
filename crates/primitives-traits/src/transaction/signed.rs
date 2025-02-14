@@ -2,7 +2,7 @@
 
 use crate::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-    FillTxEnv, InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat,
+    InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat,
 };
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::{
@@ -14,15 +14,8 @@ use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHa
 use core::hash::Hash;
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullSignedTx:
-    SignedTransaction + FillTxEnv + MaybeCompact + MaybeSerdeBincodeCompat
-{
-}
-
-impl<T> FullSignedTx for T where
-    T: SignedTransaction + FillTxEnv + MaybeCompact + MaybeSerdeBincodeCompat
-{
-}
+pub trait FullSignedTx: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
+impl<T> FullSignedTx for T where T: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
 
 /// A signed transaction.
 #[auto_impl::auto_impl(&, Arc)]

@@ -1,6 +1,6 @@
 use alloy_primitives::{keccak256, map::B256Map, Bytes, B256};
 use reth_trie::{HashedPostState, HashedStorage};
-use revm::State;
+use revm_database::State;
 
 /// Tracks state changes during execution.
 #[derive(Debug, Clone, Default)]

@@ -17,6 +17,7 @@ reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
+revm-database.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
@@ -36,7 +37,7 @@ reth-ethereum-primitives.workspace = true
 
 [features]
 default = ["std"]
-optimism = ["revm/optimism"]
+optimism = []
 serde = [
     "dep:serde",
     "rand/serde",
@@ -45,6 +46,7 @@ serde = [
     "alloy-primitives/serde",
     "reth-primitives-traits/serde",
     "alloy-consensus/serde",
+    "revm-database/serde",
     "reth-trie-common/serde",
 ]
 serde-bincode-compat = [
@@ -64,8 +66,9 @@ std = [
     "reth-primitives-traits/std",
     "alloy-consensus/std",
     "serde_with?/std",
-    "reth-trie-common/std",
+    "derive_more/std",
     "reth-ethereum-primitives/std",
     "reth-execution-errors/std",
-    "derive_more/std",
+    "reth-trie-common/std",
+    "revm-database/std",
 ]

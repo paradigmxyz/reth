@@ -2,7 +2,7 @@
 
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
-use alloy_rpc_types_eth::{BlockId, BlockOverrides};
+use alloy_rpc_types_eth::BlockId;
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, Privacy, RefundConfig, SendBundleRequest, SimBundleLogs,
     SimBundleOverrides, SimBundleResponse, Validity,
@@ -10,20 +10,19 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_provider::ProviderTx;
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::{
+    revm_utils::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
+};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{
-    db::CacheDB,
-    primitives::{Address, ResultAndState},
-    DatabaseCommit, DatabaseRef,
-};
+use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm_primitives::Address;
 use std::{sync::Arc, time::Duration};
 use tracing::info;
 
@@ -228,7 +227,6 @@ where
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
         let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
-        let BlockOverrides { number, coinbase, time, gas_limit, base_fee, .. } = block_overrides;
 
         // Parse and validate bundle
         // Also, flatten the bundle here so that its easier to process
@@ -236,27 +234,6 @@ where
 
         let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
         let (mut evm_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
-
-        // apply overrides
-        if let Some(block_number) = number {
-            evm_env.block_env.number = U256::from(block_number);
-        }
-
-        if let Some(coinbase) = coinbase {
-            evm_env.block_env.coinbase = coinbase;
-        }
-
-        if let Some(timestamp) = time {
-            evm_env.block_env.timestamp = U256::from(timestamp);
-        }
-
-        if let Some(gas_limit) = gas_limit {
-            evm_env.block_env.gas_limit = U256::from(gas_limit);
-        }
-
-        if let Some(base_fee) = base_fee {
-            evm_env.block_env.basefee = U256::from(base_fee);
-        }
 
         let eth_api = self.inner.eth_api.clone();
 
@@ -266,9 +243,12 @@ where
             .spawn_with_state_at_block(current_block, move |state| {
                 // Setup environment
                 let current_block_number = current_block.as_u64().unwrap();
-                let coinbase = evm_env.block_env.coinbase;
+                let coinbase = evm_env.block_env.beneficiary;
                 let basefee = evm_env.block_env.basefee;
-                let db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                // apply overrides
+                apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
                     .map_err(EthApiError::from_eth_err)?
@@ -351,7 +331,7 @@ where
                         });
 
                         // Calculate payout transaction fee
-                        let payout_tx_fee = basefee *
+                        let payout_tx_fee = U256::from(basefee) *
                             U256::from(SBUNDLE_PAYOUT_MAX_COST) *
                             U256::from(refund_configs.len() as u64);
 

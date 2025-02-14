@@ -11,7 +11,7 @@ use reth_primitives_traits::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::StateCommitment;
-use revm::db::states::BundleState;
+use revm_database::BundleState;
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;

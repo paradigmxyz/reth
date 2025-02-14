@@ -729,10 +729,10 @@ impl<T: Transaction, ChainSpec: EthChainSpec> StateProofProvider for MockEthProv
     }
 }
 
-impl<T: Transaction, ChainSpec: EthChainSpec> HashedPostStateProvider
+impl<T: Transaction, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider
     for MockEthProvider<T, ChainSpec>
 {
-    fn hashed_post_state(&self, _state: &revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }

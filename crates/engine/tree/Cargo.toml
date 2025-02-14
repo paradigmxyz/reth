@@ -86,6 +86,7 @@ reth-trie-db.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
+revm-state.workspace = true
 
 assert_matches.workspace = true
 criterion.workspace = true

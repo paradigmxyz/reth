@@ -6,10 +6,8 @@ use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
 use reth_execution_errors::BlockExecutionError;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::BlockBody;
-use revm::{
-    primitives::{Bytecode, HashMap, SpecId},
-    DatabaseCommit, L1BlockInfo,
-};
+use revm::{primitives::HashMap, state::Bytecode, DatabaseCommit};
+use revm_optimism::{L1BlockInfo, OpSpecId};
 use tracing::trace;
 
 /// The address of the create2 deployer
@@ -272,13 +270,13 @@ impl RethL1BlockInfo for L1BlockInfo {
         }
 
         let spec_id = if chain_spec.is_fjord_active_at_timestamp(timestamp) {
-            SpecId::FJORD
+            OpSpecId::FJORD
         } else if chain_spec.is_ecotone_active_at_timestamp(timestamp) {
-            SpecId::ECOTONE
+            OpSpecId::ECOTONE
         } else if chain_spec.is_regolith_active_at_timestamp(timestamp) {
-            SpecId::REGOLITH
+            OpSpecId::REGOLITH
         } else if chain_spec.is_bedrock_active_at_block(block_number) {
-            SpecId::BEDROCK
+            OpSpecId::BEDROCK
         } else {
             return Err(
                 OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::HardforksNotActive).into()
@@ -295,11 +293,11 @@ impl RethL1BlockInfo for L1BlockInfo {
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
         let spec_id = if chain_spec.is_fjord_active_at_timestamp(timestamp) {
-            SpecId::FJORD
+            OpSpecId::FJORD
         } else if chain_spec.is_regolith_active_at_timestamp(timestamp) {
-            SpecId::REGOLITH
+            OpSpecId::REGOLITH
         } else if chain_spec.is_bedrock_active_at_block(block_number) {
-            SpecId::BEDROCK
+            OpSpecId::BEDROCK
         } else {
             return Err(
                 OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::HardforksNotActive).into()
@@ -315,7 +313,7 @@ impl RethL1BlockInfo for L1BlockInfo {
 pub fn ensure_create2_deployer<DB>(
     chain_spec: impl OpHardforks,
     timestamp: u64,
-    db: &mut revm::State<DB>,
+    db: &mut revm_database::State<DB>,
 ) -> Result<(), DB::Error>
 where
     DB: revm::Database,
@@ -337,7 +335,7 @@ where
         acc_info.code = Some(Bytecode::new_raw(Bytes::from_static(&CREATE_2_DEPLOYER_BYTECODE)));
 
         // Convert the cache account back into a revm account and mark it as touched.
-        let mut revm_acc: revm::primitives::Account = acc_info.into();
+        let mut revm_acc: revm::state::Account = acc_info.into();
         revm_acc.mark_touch();
 
         // Commit the create2 deployer account to the database.

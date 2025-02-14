@@ -3,9 +3,9 @@ use crate::Evm;
 use alloc::format;
 use alloy_eips::eip7251::CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS;
 use alloy_primitives::Bytes;
-use core::fmt::Display;
+use core::fmt::{Debug, Display};
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use revm_primitives::{ExecutionResult, ResultAndState};
+use revm::context_interface::result::{ExecutionResult, ResultAndState};
 
 /// Applies the post-block call to the EIP-7251 consolidation requests contract.
 ///
@@ -14,9 +14,9 @@ use revm_primitives::{ExecutionResult, ResultAndState};
 ///
 /// Note: this does not commit the state changes to the database, it only transact the call.
 #[inline]
-pub(crate) fn transact_consolidation_requests_contract_call(
-    evm: &mut impl Evm<Error: Display>,
-) -> Result<ResultAndState, BlockExecutionError> {
+pub(crate) fn transact_consolidation_requests_contract_call<Halt>(
+    evm: &mut impl Evm<Error: Display, HaltReason = Halt>,
+) -> Result<ResultAndState<Halt>, BlockExecutionError> {
     // Execute EIP-7251 consolidation requests contract message data.
     //
     // This requirement for the consolidation requests contract call defined by
@@ -46,7 +46,7 @@ pub(crate) fn transact_consolidation_requests_contract_call(
     // There should be no state changes to these addresses anyways as a result of this system call,
     // so we can just remove them from the state returned.
     res.state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
-    res.state.remove(&evm.block().coinbase);
+    res.state.remove(&evm.block().beneficiary);
 
     Ok(res)
 }
@@ -54,7 +54,9 @@ pub(crate) fn transact_consolidation_requests_contract_call(
 /// Calls the consolidation requests system contract, and returns the requests from the execution
 /// output.
 #[inline]
-pub(crate) fn post_commit(result: ExecutionResult) -> Result<Bytes, BlockExecutionError> {
+pub(crate) fn post_commit<Halt: Debug>(
+    result: ExecutionResult<Halt>,
+) -> Result<Bytes, BlockExecutionError> {
     match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {

@@ -25,7 +25,7 @@ reth-storage-api.workspace = true
 reth-transaction-pool.workspace = true
 
 # revm
-revm.workspace = true
+revm-optimism.workspace = true
 
 # optimism
 op-alloy-consensus.workspace = true
@@ -47,5 +47,5 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 optimism = [
     "reth-optimism-evm/optimism",
     "reth-optimism-primitives/optimism",
-    "revm/optimism",
+    "reth-provider/optimism",
 ]

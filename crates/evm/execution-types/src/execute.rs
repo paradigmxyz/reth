@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use alloy_eips::eip7685::Requests;
-use revm::db::BundleState;
+use revm_database::BundleState;
 
 /// The result of executing a block.
 #[derive(Debug, Clone, PartialEq, Eq)]
