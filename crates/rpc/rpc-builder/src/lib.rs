@@ -415,7 +415,7 @@ where
     ///
     /// Caution: This will configure a pool API that does absolutely nothing.
     /// This is only intended for allow easier setup of namespaces that depend on the
-    /// [`EthApi`](reth_rpc::eth::EthApi) which requires a [`TransactionPool`] implementation.
+    /// [`EthApi`] which requires a [`TransactionPool`] implementation.
     pub fn with_noop_pool(
         self,
     ) -> RpcModuleBuilder<
@@ -484,7 +484,7 @@ where
     ///
     /// Caution: This will configure a network API that does absolutely nothing.
     /// This is only intended for allow easier setup of namespaces that depend on the
-    /// [`EthApi`](reth_rpc::eth::EthApi) which requires a [`NetworkInfo`] implementation.
+    /// [`EthApi`] which requires a [`NetworkInfo`] implementation.
     pub fn with_noop_network(
         self,
     ) -> RpcModuleBuilder<N, Provider, Pool, NoopNetwork, Tasks, EvmConfig, BlockExecutor, Consensus>
@@ -660,11 +660,11 @@ where
         )
     }
 
-    /// Initializes a new [`EthApi`] with the configured components and default settings.
+    /// Initializes a new [`EthApiServer`] with the configured components and default settings.
     ///
     /// Note: This spawns all necessary tasks.
     ///
-    /// See also [`EthApi::with_spawner`]
+    /// See also [`EthApiBuilder`].
     pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
     where
         Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
@@ -1014,7 +1014,7 @@ where
     Provider: BlockReader,
     EthApi: EthApiTypes,
 {
-    /// Returns a reference to the installed [`EthApi`](reth_rpc::eth::EthApi).
+    /// Returns a reference to the installed [`EthApi`].
     pub const fn eth_api(&self) -> &EthApi {
         &self.eth.api
     }
