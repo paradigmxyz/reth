@@ -87,6 +87,13 @@ pub mod node {
     pub use reth_optimism_node::*;
 }
 
+/// Re-exported reth trie types
+#[cfg(feature = "trie")]
+pub mod trie {
+    #[doc(inline)]
+    pub use reth_trie::*;
+}
+
 /// Re-exported rpc types
 #[cfg(feature = "rpc")]
 pub mod rpc {
