@@ -22,10 +22,7 @@ pub mod simulate;
 pub mod transaction;
 pub mod utils;
 
-pub use builder::{
-    config::{EthConfig, EthFilterConfig},
-    ctx::EthApiBuilderCtx,
-};
+pub use builder::config::{EthConfig, EthFilterConfig};
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
     EthStateCache,

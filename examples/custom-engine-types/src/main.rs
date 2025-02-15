@@ -36,14 +36,10 @@ use reth::{
         rpc::{EngineValidatorBuilder, RpcAddOns},
         BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
     },
-    network::NetworkHandle,
     payload::ExecutionPayloadValidator,
     primitives::{Block, EthPrimitives, SealedBlock, TransactionSigned},
     providers::{EthStorage, StateProviderFactory},
-    rpc::{
-        eth::EthApi,
-        types::engine::{ExecutionPayload, PayloadError},
-    },
+    rpc::types::engine::{ExecutionPayload, PayloadError},
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
     version::default_extra_data_bytes,
@@ -63,7 +59,7 @@ use reth_node_ethereum::{
         EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
         EthereumPoolBuilder,
     },
-    EthEvmConfig,
+    EthEvmConfig, EthereumEthApiBuilder,
 };
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
@@ -291,16 +287,7 @@ impl NodeTypesWithEngine for MyCustomNode {
 }
 
 /// Custom addons configuring RPC types
-pub type MyNodeAddOns<N> = RpcAddOns<
-    N,
-    EthApi<
-        <N as FullNodeTypes>::Provider,
-        <N as FullNodeComponents>::Pool,
-        NetworkHandle,
-        <N as FullNodeComponents>::Evm,
-    >,
-    CustomEngineValidatorBuilder,
->;
+pub type MyNodeAddOns<N> = RpcAddOns<N, EthereumEthApiBuilder, CustomEngineValidatorBuilder>;
 
 /// Implement the Node trait for the custom node
 ///
