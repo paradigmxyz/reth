@@ -13,7 +13,7 @@ use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network::{
-    protocol::{OnNotSupported, ProtocolHandler, ConnectionHandler},
+    protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
     test_utils::Testnet,
 };
 use reth_network_api::{Direction, PeerId};
