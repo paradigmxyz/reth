@@ -16,7 +16,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodePrimitives};
-use reth_node_builder::{rpc::EthApiBuilder, EthApiBuilderCtx};
+use reth_node_builder::rpc::EthApiBuilder;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
@@ -304,7 +304,7 @@ pub struct OpEthApiBuilder {
 }
 
 impl OpEthApiBuilder {
-    /// Creates a [`OpEthApiBuilder`] instance from [`EthApiBuilderCtx`].
+    /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new() -> Self {
         Self { sequencer_client: None }
     }
@@ -316,20 +316,28 @@ impl OpEthApiBuilder {
     }
 }
 
-impl<N: FullNodeComponents> EthApiBuilder<N> for OpEthApiBuilder {
-    /// Builds an instance of [`OpEthApi`]
-    fn build(self, ctx: &EthApiBuilderCtx<N>) -> OpEthApi<N>
-    where
-        N: FullNodeTypes<
-            Provider: BlockReaderIdExt<
-                Block = <<N::Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::Block,
-                Receipt = <<N::Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::Receipt,
-            > + ChainSpecProvider
-                          + CanonStateSubscriptions
-                          + Clone
-                          + 'static,
-        >,
-    {
+impl<N: FullNodeComponents> EthApiBuilder<N> for OpEthApiBuilder
+where N: FullNodeTypes<
+Provider: BlockReaderIdExt<
+    Block = <<N::Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::Block,
+    Receipt = <<N::Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::Receipt,
+> + ChainSpecProvider
+              + CanonStateSubscriptions
+              + Clone
+              + 'static,
+>,{
+    type EthApi = OpEthApi<N>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        self,
+        provider: N::Provider,
+        pool: N::Pool,
+        network: N::Network,
+        evm: N::Evm,
+        config: EthConfig,
+        executor: TaskExecutor,
+        cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,) -> Self::EthApi {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
 

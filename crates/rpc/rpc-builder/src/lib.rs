@@ -667,7 +667,13 @@ where
     /// See also [`EthApi::with_spawner`]
     pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
     where
-        Provider: BlockReaderIdExt + StateProviderFactory + Clone + Unpin + 'static,
+        Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
+            + StateProviderFactory
+            + CanonStateSubscriptions<Primitives = N>
+            + ChainSpecProvider
+            + Clone
+            + Unpin
+            + 'static,
         Pool: Clone,
         EvmConfig: Clone,
         Network: Clone,

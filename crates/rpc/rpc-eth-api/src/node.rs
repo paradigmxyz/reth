@@ -45,9 +45,9 @@ where
 {
     type Provider = T::Provider;
     type Pool = T::Pool;
-    type Evm = <T as FullNodeComponents>::Evm;
-    type Network = <T as FullNodeComponents>::Network;
-    type PayloadBuilder = <T as FullNodeComponents>::PayloadBuilder;
+    type Evm = T::Evm;
+    type Network = T::Network;
+    type PayloadBuilder = T::PayloadBuilder;
 
     #[inline]
     fn pool(&self) -> &Self::Pool {

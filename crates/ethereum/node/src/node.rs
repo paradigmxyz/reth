@@ -13,21 +13,25 @@ use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
+use reth_node_api::{AddOnsContext, BlockTy, FullNodeComponents, NodeAddOns, ReceiptTy, TxTy};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
+    rpc::{
+        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns, RpcAddOns,
+        RpcHandle,
+    },
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
-use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
+use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
 use reth_rpc_builder::config::RethRpcServerConfig;
-use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
+use reth_rpc_eth_types::{error::FromEvmError, EthApiError, EthConfig, EthStateCache};
 use reth_rpc_server_types::RethRpcModule;
+use reth_tasks::TaskSpawner;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,
@@ -116,13 +120,52 @@ impl NodeTypesWithEngine for EthereumNode {
     type Engine = EthEngineTypes;
 }
 
-/// Add-ons w.r.t. l1 ethereum.
-#[derive(Debug)]
-pub struct EthereumAddOns<N: FullNodeComponents> {
-    inner: RpcAddOns<N, EthApiFor<N>, EthereumEngineValidatorBuilder>,
+/// Builds [`EthApi`](reth_rpc::EthApi) for Ethereum.
+#[derive(Debug, Default)]
+pub struct EthereumEthApiBuilder;
+
+impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
+where
+    N: FullNodeComponents,
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
+    type EthApi = EthApiFor<N>;
+
+    fn build(
+        self,
+        provider: N::Provider,
+        pool: N::Pool,
+        network: N::Network,
+        evm: N::Evm,
+        config: EthConfig,
+        executor: impl TaskSpawner + 'static,
+        cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
+    ) -> Self::EthApi {
+        reth_rpc::EthApiBuilder::new(provider, pool, network, evm)
+            .eth_cache(cache)
+            .task_spawner(executor)
+            .gas_cap(config.rpc_gas_cap.into())
+            .max_simulate_blocks(config.rpc_max_simulate_blocks)
+            .eth_proof_window(config.eth_proof_window)
+            .fee_history_cache_config(config.fee_history_cache)
+            .proof_permits(config.proof_permits)
+            .build()
+    }
 }
 
-impl<N: FullNodeComponents> Default for EthereumAddOns<N> {
+/// Add-ons w.r.t. l1 ethereum.
+#[derive(Debug)]
+pub struct EthereumAddOns<N: FullNodeComponents>
+where
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
+    inner: RpcAddOns<N, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>,
+}
+
+impl<N: FullNodeComponents> Default for EthereumAddOns<N>
+where
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
     fn default() -> Self {
         Self { inner: Default::default() }
     }
@@ -196,6 +239,7 @@ where
             Engine = EthEngineTypes,
         >,
     >,
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
 {
     type Validator = EthereumEngineValidator;
 

@@ -26,19 +26,6 @@ where
     where
         Tasks: TaskSpawner + Clone + 'static,
     {
-        // let cache = EthStateCache::spawn_with(provider.clone(), config.cache, executor.clone());
-        //
-        // let new_canonical_blocks = provider.canonical_state_stream();
-        // let c = cache.clone();
-        // executor.spawn_critical(
-        //     "cache canonical blocks task",
-        //     Box::pin(async move {
-        //         cache_new_blocks_task(c, new_canonical_blocks).await;
-        //     }),
-        // );
-        // let ctx = EthApiBuilderCtx { provider, pool, network, evm_config, config, executor, cache
-        // };
-
         let filter =
             EthFilter::new(eth_api.clone(), config.filter_config(), Box::new(executor.clone()));
 

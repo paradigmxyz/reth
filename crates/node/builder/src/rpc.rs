@@ -1,13 +1,13 @@
 //! Builder support for rpc components.
 
-use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
+use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use alloy_rpc_types::engine::{ClientVersionV1, ExecutionData};
 use futures::TryFutureExt;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, NodeTypesWithEngine,
+    NodeAddOns, NodeTypes, NodeTypesWithEngine, ReceiptTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -22,8 +22,8 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthStateCache};
-use reth_tasks::TaskExecutor;
+use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
+use reth_tasks::{TaskExecutor, TaskSpawner};
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{
@@ -432,7 +432,7 @@ where
 impl<N, EthB, EV, EB> RpcAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents,
-    <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -468,18 +468,16 @@ where
                 cache_new_blocks_task(c, new_canonical_blocks).await;
             }),
         );
-        // TODO: phase out EthApiBuilderCtx generics and use componets istead
-        let ctx: EthApiBuilderCtx<N> = EthApiBuilderCtx {
-            provider: node.provider().clone(),
-            pool: node.pool().clone(),
-            network: node.network().clone(),
-            evm_config: node.evm_config().clone(),
-            config: config.rpc.eth_config(),
-            executor: node.task_executor().clone(),
-            cache,
-        };
 
-        let eth_api = eth_api_builder.build(&ctx);
+        let eth_api = eth_api_builder.build(
+            node.provider().clone(),
+            node.pool().clone(),
+            node.network().clone(),
+            node.evm_config().clone(),
+            config.rpc.eth_config(),
+            node.task_executor().clone(),
+            cache,
+        );
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
@@ -602,31 +600,27 @@ where
     }
 }
 
-/// A `EthApi` that knows how to build `eth` namespace API from [`EthApiBuilderCtx`].
+/// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].
 pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
     type EthApi: EthApiTypes
-        + FullEthApiServer<Provider = N::Provider>
+        + FullEthApiServer<Provider = N::Provider, Pool = N::Pool>
         + AddDevSigners
         + Unpin
         + 'static;
 
     /// Builds the `EthApi` from the given context.
-    fn build(self, ctx: &EthApiBuilderCtx<N>) -> Self::EthApi;
-}
-
-impl<N, F, EthApi> EthApiBuilder<N> for F
-where
-    N: FullNodeComponents,
-    EthApi:
-        EthApiTypes + FullEthApiServer<Provider = N::Provider> + AddDevSigners + Unpin + 'static,
-    F: FnOnce(&EthApiBuilderCtx<N>) -> EthApi + Default + Send + 'static,
-{
-    type EthApi = EthApi;
-
-    fn build(self, ctx: &EthApiBuilderCtx<N>) -> Self::EthApi {
-        self(ctx)
-    }
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        self,
+        provider: N::Provider,
+        pool: N::Pool,
+        network: N::Network,
+        evm: N::Evm,
+        config: EthConfig,
+        executor: impl TaskSpawner + 'static,
+        cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
+    ) -> Self::EthApi;
 }
 
 /// Helper trait that provides the validator for the engine API

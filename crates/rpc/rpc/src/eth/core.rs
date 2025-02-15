@@ -10,19 +10,14 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_primitives::NodePrimitives;
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ProviderBlock,
-    ProviderReceipt,
-};
+use reth_provider::{BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
-    PendingBlock,
+    EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -34,6 +29,14 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
 pub type EthApiFor<N> = EthApi<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Network,
+    <N as FullNodeComponents>::Evm,
+>;
+
+/// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
+pub type EthApiBuilderFor<N> = EthApiBuilder<
     <N as FullNodeTypes>::Provider,
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Network,
@@ -140,48 +143,6 @@ where
             evm_config,
             TokioTaskExecutor::default().boxed(),
             proof_permits,
-        );
-
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
-    }
-}
-
-impl<N, Provider, Pool, EvmConfig, Network> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    N: NodePrimitives,
-    Provider: ChainSpecProvider
-        + BlockReaderIdExt<Block = N::Block, Receipt = N::Receipt>
-        + CanonStateSubscriptions<Primitives = N>
-        + Clone
-        + 'static,
-    Pool: Clone,
-    EvmConfig: Clone,
-    Network: Clone,
-{
-    /// Creates a new, shareable instance.
-    pub fn with_spawner<Tasks>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks>,
-    ) -> Self
-    where
-        Tasks: TaskSpawner + Clone + 'static,
-    {
-        let blocking_task_pool =
-            BlockingTaskPool::build().expect("failed to build blocking task pool");
-
-        let inner = EthApiInner::new(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.network.clone(),
-            ctx.cache.clone(),
-            ctx.new_gas_price_oracle(),
-            ctx.config.rpc_gas_cap,
-            ctx.config.rpc_max_simulate_blocks,
-            ctx.config.eth_proof_window,
-            blocking_task_pool,
-            ctx.new_fee_history_cache(),
-            ctx.evm_config.clone(),
-            Box::new(ctx.executor.clone()),
-            ctx.config.proof_permits,
         );
 
         Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
@@ -510,7 +471,8 @@ mod tests {
     use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
-        BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory,
+        BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+        StateProviderFactory,
     };
     use reth_rpc_eth_api::EthApiServer;
     use reth_testing_utils::{generators, generators::Rng};
@@ -524,6 +486,7 @@ mod tests {
             > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + StateProviderFactory
+            + CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives>
             + Unpin
             + Clone
             + 'static,
