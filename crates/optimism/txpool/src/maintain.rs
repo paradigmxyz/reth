@@ -47,10 +47,8 @@ where
             };
             let mut to_remove = Vec::new();
             for tx in &pool.pooled_transactions() {
-                if let Some(conditional) = tx.transaction.conditional() {
-                    if conditional.has_exceeded_block_attributes(&block_attr) {
-                        to_remove.push(*tx.hash());
-                    }
+                if tx.transaction.has_exceeded_block_attributes(&block_attr) {
+                    to_remove.push(*tx.hash());
                 }
             }
             let _ = pool.remove_transactions(to_remove);
