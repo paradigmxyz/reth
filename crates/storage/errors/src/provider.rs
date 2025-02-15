@@ -202,19 +202,20 @@ pub struct RootMismatch {
 }
 
 /// A Static File Write Error.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
 pub struct StaticFileWriterError {
     /// The error message.
     pub message: String,
 }
 
-impl core::fmt::Display for StaticFileWriterError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.message)
+impl StaticFileWriterError {
+    /// Creates a new [`StaticFileWriterError`] with the given message.
+    #[allow(dead_code)]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self { message: message.into() }
     }
 }
-
-impl core::error::Error for StaticFileWriterError {}
 
 /// Consistent database view error.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]

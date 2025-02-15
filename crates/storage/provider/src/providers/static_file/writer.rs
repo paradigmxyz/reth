@@ -753,10 +753,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns Error if there is a pruning instruction that needs to be applied.
     fn ensure_no_queued_prune(&self) -> ProviderResult<()> {
         if self.prune_on_commit.is_some() {
-            return Err(ProviderError::other(StaticFileWriterError {
-                message: "Pruning should be committed before appending or pruning more data"
-                    .to_string(),
-            }));
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "Pruning should be committed before appending or pruning more data",
+            )));
         }
         Ok(())
     }
