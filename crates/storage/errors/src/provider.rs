@@ -1,4 +1,6 @@
-use crate::{db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError};
+use crate::{
+    any::AnyError, db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError,
+};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
@@ -22,9 +24,6 @@ pub enum ProviderError {
     /// RLP error.
     #[error("{_0}")]
     Rlp(alloy_rlp::Error),
-    /// Filesystem path error.
-    #[error("{_0}")]
-    FsPathError(String),
     /// Nippy jar error.
     #[error("nippy jar error: {_0}")]
     NippyJar(String),
@@ -143,6 +142,42 @@ pub enum ProviderError {
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,
+    /// Any other error type wrapped into a clonable [`AnyError`].
+    #[error(transparent)]
+    Other(#[from] AnyError),
+}
+
+impl ProviderError {
+    /// Creates a new [`ProviderError::Other`] variant by wrapping the given error into an
+    /// [`AnyError`]
+    pub fn other<E>(error: E) -> Self
+    where
+        E: core::error::Error + Send + Sync + 'static,
+    {
+        Self::Other(AnyError::new(error))
+    }
+
+    /// Returns the arbitrary error if it is [`ProviderError::Other`]
+    pub fn as_other(&self) -> Option<&(dyn core::error::Error + Send + Sync + 'static)> {
+        match self {
+            Self::Other(err) => Some(err.as_error()),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the [`ProviderError::Other`] value if this type is a
+    /// [`ProviderError::Other`] and the [`AnyError`] wraps an error of that type. Returns None
+    /// otherwise.
+    pub fn downcast_other_ref<T: core::error::Error + 'static>(&self) -> Option<&T> {
+        let other = self.as_other()?;
+        other.downcast_ref()
+    }
+
+    /// Returns true if the this type is a [`ProviderError::Other`] of that error
+    /// type. Returns false otherwise.
+    pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
+        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+    }
 }
 
 impl From<alloy_rlp::Error> for ProviderError {
@@ -184,10 +219,32 @@ pub enum ConsistentViewError {
         /// The tip diff.
         tip: GotExpected<Option<B256>>,
     },
+    /// Error thrown when the database does not contain a block from the previous database view.
+    #[display("database view no longer contains block: {block:?}")]
+    Reorged {
+        /// The previous block
+        block: B256,
+    },
 }
 
 impl From<ConsistentViewError> for ProviderError {
     fn from(error: ConsistentViewError) -> Self {
         Self::ConsistentView(Box::new(error))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("E")]
+    struct E;
+
+    #[test]
+    fn other_err() {
+        let err = ProviderError::other(E);
+        assert!(err.is_other::<E>());
+        assert!(err.downcast_other_ref::<E>().is_some());
     }
 }

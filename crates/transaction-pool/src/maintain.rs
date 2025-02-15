@@ -8,7 +8,7 @@ use crate::{
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
 use alloy_consensus::{BlockHeader, Typed2718};
-use alloy_eips::{eip7840::BlobParams, BlockNumberOrTag};
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::Encodable;
 use futures_util::{
@@ -30,8 +30,14 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::oneshot;
+use tokio::{
+    sync::oneshot,
+    time::{self, Duration},
+};
 use tracing::{debug, error, info, trace, warn};
+
+/// Maximum amount of time non-executable transaction are queued.
+pub const MAX_QUEUED_TRANSACTION_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
 
 /// Additional settings for maintaining the transaction pool
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,11 +51,19 @@ pub struct MaintainPoolConfig {
     ///
     /// Default: 100
     pub max_reload_accounts: usize,
+
+    /// Maximum amount of time non-executable, non local transactions are queued.
+    /// Default: 3 hours
+    pub max_tx_lifetime: Duration,
 }
 
 impl Default for MaintainPoolConfig {
     fn default() -> Self {
-        Self { max_update_depth: 64, max_reload_accounts: 100 }
+        Self {
+            max_update_depth: 64,
+            max_reload_accounts: 100,
+            max_tx_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+        }
     }
 }
 
@@ -115,11 +129,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number(),
             pending_basefee: latest
-                .next_block_base_fee(
-                    chain_spec.base_fee_params_at_timestamp(latest.timestamp() + 12),
-                )
+                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp()))
                 .unwrap_or_default(),
-            pending_blob_fee: latest.next_block_blob_fee(BlobParams::cancun()),
+            pending_blob_fee: latest
+                .maybe_next_block_blob_fee(chain_spec.blob_params_at_timestamp(latest.timestamp())),
         };
         pool.set_block_info(info);
     }
@@ -139,6 +152,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
     // the future that reloads accounts from state
     let mut reload_accounts_fut = Fuse::terminated();
+
+    // eviction interval for stale non local txs
+    let mut stale_eviction_interval = time::interval(config.max_tx_lifetime);
+
+    // toggle for the first notification
+    let mut first_event = true;
 
     // The update loop that waits for new blocks and reorgs and performs pool updated
     // Listen for new chain events and derive the update action for the pool
@@ -214,7 +233,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
         let mut reloaded = None;
 
         // select of account reloads and new canonical state updates which should arrive at the rate
-        // of the block time (12s)
+        // of the block time
         tokio::select! {
             res = &mut reload_accounts_fut =>  {
                 reloaded = Some(res);
@@ -225,9 +244,27 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     break;
                 }
                 event = ev;
+                // on receiving the first event on start up, mark the pool as drifted to explicitly
+                // trigger revalidation and clear out outdated txs.
+                if first_event {
+                    maintained_state = MaintainedPoolState::Drifted;
+                    first_event = false
+                }
+            }
+            _ = stale_eviction_interval.tick() => {
+                let stale_txs: Vec<_> = pool
+                    .queued_transactions()
+                    .into_iter()
+                    .filter(|tx| {
+                        // filter stale external txs
+                        tx.origin.is_external() && tx.timestamp.elapsed() > config.max_tx_lifetime
+                    })
+                    .map(|tx| *tx.hash())
+                    .collect();
+                debug!(target: "txpool", count=%stale_txs.len(), "removing stale transactions");
+                pool.remove_transactions(stale_txs);
             }
         }
-
         // handle the result of the account reload
         match reloaded {
             Some(Ok(Ok(LoadedAccounts { accounts, failed_to_load }))) => {
@@ -274,11 +311,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let pending_block_base_fee = new_tip
                     .header()
                     .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp() + 12),
+                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp()),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee =
-                    new_tip.header().next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
+                    chain_spec.blob_params_at_timestamp(new_tip.timestamp()),
+                );
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -378,11 +416,11 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 // fees for the next block: `tip+1`
                 let pending_block_base_fee = tip
                     .header()
-                    .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(tip.timestamp() + 12),
-                    )
+                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(tip.timestamp()))
                     .unwrap_or_default();
-                let pending_block_blob_fee = tip.header().next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(
+                    chain_spec.blob_params_at_timestamp(tip.timestamp()),
+                );
 
                 let first_block = blocks.first();
                 trace!(
@@ -671,7 +709,6 @@ mod tests {
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_chainspec::MAINNET;
     use reth_fs_util as fs;
     use reth_primitives::{PooledTransaction, TransactionSigned};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
@@ -695,13 +732,12 @@ mod tests {
         let tx_bytes = hex!("02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507");
         let tx = PooledTransaction::decode_2718(&mut &tx_bytes[..]).unwrap();
         let provider = MockEthProvider::default();
-        let transaction: EthPooledTransaction = tx.try_into_recovered().unwrap().into();
+        let transaction = EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap());
         let tx_to_cmp = transaction.clone();
         let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
-            .build(provider, blob_store.clone());
+        let validator = EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
 
         let txpool = Pool::new(
             validator.clone(),

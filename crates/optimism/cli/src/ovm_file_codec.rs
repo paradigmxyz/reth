@@ -5,6 +5,7 @@ use alloy_consensus::{
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip4895::Withdrawals,
+    Typed2718,
 };
 use alloy_primitives::{
     bytes::{Buf, BytesMut},
@@ -23,7 +24,7 @@ use tokio_util::codec::Decoder;
 pub(crate) struct OvmBlockFileCodec;
 
 impl Decoder for OvmBlockFileCodec {
-    type Item = Block;
+    type Item = OvmBlock;
     type Error = FileClientError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -33,7 +34,7 @@ impl Decoder for OvmBlockFileCodec {
 
         let buf_slice = &mut src.as_ref();
         let body =
-            Block::decode(buf_slice).map_err(|err| FileClientError::Rlp(err, src.to_vec()))?;
+            OvmBlock::decode(buf_slice).map_err(|err| FileClientError::Rlp(err, src.to_vec()))?;
         src.advance(src.len() - buf_slice.len());
 
         Ok(Some(body))
@@ -44,18 +45,18 @@ impl Decoder for OvmBlockFileCodec {
 /// Pre-bedrock system transactions on Optimism were sent from the zero address
 /// with an empty signature,
 #[derive(Debug, Clone, PartialEq, Eq, RlpDecodable)]
-pub struct Block {
+pub struct OvmBlock {
     /// Block header
     pub header: Header,
     /// Block body
-    pub body: BlockBody,
+    pub body: OvmBlockBody,
 }
 
-impl Block {
+impl OvmBlock {
     /// Decodes a `Block` from the given byte slice.
     pub fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let header = Header::decode(buf)?;
-        let body = BlockBody::decode(buf)?;
+        let body = OvmBlockBody::decode(buf)?;
         Ok(Self { header, body })
     }
 }
@@ -63,18 +64,18 @@ impl Block {
 /// The body of a block for OVM
 #[derive(Debug, Clone, PartialEq, Eq, Default, RlpDecodable)]
 #[rlp(trailing)]
-pub struct BlockBody {
+pub struct OvmBlockBody {
     /// Transactions in the block
-    pub transactions: Vec<TransactionSigned>,
+    pub transactions: Vec<OvmTransactionSigned>,
     /// Uncle headers for the given block
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
 }
 
-/// Signed transaction.
+/// Signed transaction pre bedrock.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Serialize, Deserialize)]
-pub struct TransactionSigned {
+pub struct OvmTransactionSigned {
     /// Transaction hash
     pub hash: TxHash,
     /// The transaction signature values
@@ -85,14 +86,13 @@ pub struct TransactionSigned {
     pub transaction: OpTypedTransaction,
 }
 
-impl AsRef<Self> for TransactionSigned {
+impl AsRef<Self> for OvmTransactionSigned {
     fn as_ref(&self) -> &Self {
         self
     }
 }
 
-// === impl TransactionSigned ===
-impl TransactionSigned {
+impl OvmTransactionSigned {
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     pub fn recalculate_hash(&self) -> B256 {
@@ -187,7 +187,7 @@ impl TransactionSigned {
     }
 }
 
-impl Decodable for TransactionSigned {
+impl Decodable for OvmTransactionSigned {
     /// This `Decodable` implementation only supports decoding rlp encoded transactions as it's used
     /// by p2p.
     ///
@@ -203,7 +203,7 @@ impl Decodable for TransactionSigned {
     /// This can be used for decoding all signed transactions in p2p `BlockBodies` responses.
     ///
     /// This cannot be used for decoding EIP-4844 transactions in p2p `PooledTransactions`, since
-    /// the EIP-4844 variant of [`TransactionSigned`] does not include the blob sidecar.
+    /// the EIP-4844 variant of [`OvmTransactionSigned`] does not include the blob sidecar.
     ///
     /// For a method suitable for decoding pooled transactions, see \[`PooledTransaction`\].
     ///
@@ -218,7 +218,13 @@ impl Decodable for TransactionSigned {
     }
 }
 
-impl Encodable2718 for TransactionSigned {
+impl Typed2718 for OvmTransactionSigned {
+    fn ty(&self) -> u8 {
+        self.transaction.tx_type() as u8
+    }
+}
+
+impl Encodable2718 for OvmTransactionSigned {
     fn type_flag(&self) -> Option<u8> {
         match self.transaction.tx_type() {
             OpTxType::Legacy => None,
@@ -255,7 +261,7 @@ impl Encodable2718 for TransactionSigned {
     }
 }
 
-impl Decodable2718 for TransactionSigned {
+impl Decodable2718 for OvmTransactionSigned {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
         match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
             OpTxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
@@ -285,7 +291,7 @@ impl Decodable2718 for TransactionSigned {
 
 #[cfg(test)]
 mod tests {
-    use crate::ovm_file_codec::TransactionSigned;
+    use crate::ovm_file_codec::OvmTransactionSigned;
     use alloy_consensus::Typed2718;
     use alloy_primitives::{address, hex, TxKind, B256, U256};
     use op_alloy_consensus::OpTypedTransaction;
@@ -297,7 +303,7 @@ mod tests {
         // Test Case 1: contract deposit - regular L2 transaction calling deposit() function
         // tx: https://optimistic.etherscan.io/getRawTx?tx=0x7860252963a2df21113344f323035ef59648638a571eef742e33d789602c7a1c
         let deposit_tx_bytes = hex!("f88881f0830f481c830c6e4594a75127121d28a9bf848f3b70e7eea26570aa770080a4b6b55f2500000000000000000000000000000000000000000000000000000000000710b238a0d5c622d92ddf37f9c18a3465a572f74d8b1aeaf50c1cfb10b3833242781fd45fa02c4f1d5819bf8b70bf651e7a063b7db63c55bd336799c6ae3e5bc72ad6ef3def");
-        let deposit_decoded = TransactionSigned::decode(&mut &deposit_tx_bytes[..]).unwrap();
+        let deposit_decoded = OvmTransactionSigned::decode(&mut &deposit_tx_bytes[..]).unwrap();
 
         // Verify deposit transaction
         let deposit_tx = match &deposit_decoded.transaction {
@@ -335,7 +341,7 @@ mod tests {
         // Test Case 2: pre-bedrock system transaction from block 105235052
         // tx: https://optimistic.etherscan.io/getRawTx?tx=0xe20b11349681dd049f8df32f5cdbb4c68d46b537685defcd86c7fa42cfe75b9e
         let system_tx_bytes = hex!("f9026c830d899383124f808302a77e94a0cc33dd6f4819d473226257792afe230ec3c67f80b902046c459a280000000000000000000000004d73adb72bc3dd368966edd0f0b2148401a178e2000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000647fac7f00000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000084704316e5000000000000000000000000000000000000000000000000000000000000006e10975631049de3c008989b0d8c19fc720dc556ca01abfbd794c6eb5075dd000d000000000000000000000000000000000000000000000000000000000000001410975631049de3c008989b0d8c19fc720dc556ca01abfbd794c6eb5075dd000d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000082a39325251d44e11f3b6d92f9382438eb6c8b5068d4a488d4f177b26f2ca20db34ae53467322852afcc779f25eafd124c5586f54b9026497ba934403d4c578e3c1b5aa754c918ee2ecd25402df656c2419717e4017a7aecb84af3914fd3c7bf6930369c4e6ff76950246b98e354821775f02d33cdbee5ef6aed06c15b75691692d31c00000000000000000000000000000000000000000000000000000000000038a0e8991e95e66d809f4b6fb0af27c31368ca0f30e657165c428aa681ec5ea25bbea013ed325bd97365087ec713e9817d252b59113ea18430b71a5890c4eeb6b9efc4");
-        let system_decoded = TransactionSigned::decode(&mut &system_tx_bytes[..]).unwrap();
+        let system_decoded = OvmTransactionSigned::decode(&mut &system_tx_bytes[..]).unwrap();
 
         // Verify system transaction
         assert!(system_decoded.is_legacy());

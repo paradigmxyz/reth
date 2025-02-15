@@ -1,5 +1,5 @@
 //! Database debugging tool
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -9,7 +9,6 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_db_common::DbTool;
-use reth_evm::execute::BlockExecutorProvider;
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::{
     args::DatadirArgs,
@@ -80,29 +79,31 @@ macro_rules! handle_stage {
         $stage_fn($tool, *from, *to, output_datadir, *dry_run).await?
     }};
 
-    ($stage_fn:ident, $tool:expr, $command:expr, $executor:expr) => {{
+    ($stage_fn:ident, $tool:expr, $command:expr, $executor:expr, $consensus:expr) => {{
         let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
         let output_datadir =
             output_datadir.with_chain($tool.chain().chain(), DatadirArgs::default());
-        $stage_fn($tool, *from, *to, output_datadir, *dry_run, $executor).await?
+        $stage_fn($tool, *from, *to, output_datadir, *dry_run, $executor, $consensus).await?
     }};
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `dump-stage` command
-    pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
+    pub async fn execute<N, Comp, F>(self, components: F) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
-        E: BlockExecutorProvider<Primitives = N::Primitives>,
-        F: FnOnce(Arc<C::ChainSpec>) -> E,
+        Comp: CliNodeComponents<N>,
+        F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
         let tool = DbTool::new(provider_factory)?;
 
         match &self.command {
             Stages::Execution(cmd) => {
-                let executor = executor(tool.chain());
-                handle_stage!(dump_execution_stage, &tool, cmd, executor)
+                let components = components(tool.chain());
+                let executor = components.executor().clone();
+                let consensus = components.consensus().clone();
+                handle_stage!(dump_execution_stage, &tool, cmd, executor, consensus)
             }
             Stages::StorageHashing(cmd) => handle_stage!(dump_hashing_storage_stage, &tool, cmd),
             Stages::AccountHashing(cmd) => handle_stage!(dump_hashing_account_stage, &tool, cmd),

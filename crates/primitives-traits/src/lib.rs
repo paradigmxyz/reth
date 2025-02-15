@@ -17,6 +17,7 @@
 //! - `secp256k1`: Adds secp256k1 support for transaction signing/recovery. (By default the no-std
 //!   friendly `k256` is used)
 //! - `rayon`: Uses `rayon` for parallel transaction sender recovery in [`BlockBody`] by default.
+//! - `serde-bincode-compat` provides helpers for dealing with the `bincode` crate.
 //!
 //! ## Overview
 //!
@@ -43,6 +44,23 @@
 //! upgraded to a [`RecoveredBlock`] by recovering the sender addresses:
 //! [`SealedBlock::try_recover`]. A [`RecoveredBlock`] can be downgraded to a [`SealedBlock`] by
 //! removing the sender addresses: [`RecoveredBlock::into_sealed_block`].
+//!
+//! #### Naming
+//!
+//! The types in this crate support multiple recovery functions, e.g.
+//! [`SealedBlock::try_recover_unchecked`] and [`SealedBlock::try_recover_unchecked`]. The `_unchecked` suffix indicates that this function recovers the signer _without ensuring that the signature has a low `s` value_, in other words this rule introduced in [EIP-2](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md) is ignored.
+//! Hence this function is necessary when dealing with pre EIP-2 transactions on the ethereum
+//! mainnet. Newer transactions must always be recovered with the regular `recover` functions, see
+//! also [`recover_signer`](crypto::secp256k1::recover_signer).
+//!
+//! ## Bincode serde compatibility
+//!
+//! The [bincode-crate](https://github.com/bincode-org/bincode) is often used by additional tools when sending data over the network.
+//! `bincode` crate doesn't work well with optionally serializable serde fields, but some of the consensus types require optional serialization for RPC compatibility. Read more: <https://github.com/bincode-org/bincode/issues/326>
+//!
+//! As a workaround this crate introduces the
+//! [`SerdeBincodeCompat`](serde_bincode_compat::SerdeBincodeCompat) trait used to a bincode
+//! compatible serde representation.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -77,7 +95,7 @@ pub use transaction::{
 pub mod block;
 pub use block::{
     body::{BlockBody, FullBlockBody},
-    header::{BlockHeader, FullBlockHeader},
+    header::{AlloyBlockHeader, BlockHeader, FullBlockHeader},
     Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
@@ -102,7 +120,7 @@ pub mod sync;
 
 /// Common header types
 pub mod header;
-pub use header::{Header, HeaderError, SealedHeader};
+pub use header::{Header, HeaderError, SealedHeader, SealedHeaderFor};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///

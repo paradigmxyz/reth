@@ -1,0 +1,26 @@
+flowchart TD
+    subgraph MultiProofManager
+        ParallelProof@{ shape: processes, label: "Start thread with ParallelProof::spawn" }
+        PendingProofRequests[List of pending proof requests]
+
+        subgraph MultiProofManagerCompletion[on_calculation_complete]
+            HasPendingProofs{{Has pending multiproof requests?}}
+        end
+
+        subgraph MultiProofManagerSpawn[spawn_or_queue]
+            ProofTargetsCondition{{Proof targets not empty?}}
+                -->|Not empty, MultiProofTargets| MultiProofManagerLimitReached{{Max in-flight proofs limit reached?}}
+        end
+    end
+
+    subgraph StateRootTask[StateRootTask]
+        StateRootMessage::EmptyProof
+        StateRootMessage::ProofCalculated
+    end
+
+    MultiProofManagerLimitReached -->|Yes, push to pending requests| PendingProofRequests
+    MultiProofManagerLimitReached -->|No| ParallelProof
+    HasPendingProofs <--> PendingProofRequests
+    HasPendingProofs -->|Yes| ParallelProof
+    ParallelProof --> StateRootMessage::ProofCalculated
+    ProofTargetsCondition -->|Empty| StateRootMessage::EmptyProof

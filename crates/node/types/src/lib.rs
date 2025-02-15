@@ -15,10 +15,7 @@ pub use reth_primitives_traits::{
 };
 
 use reth_chainspec::EthChainSpec;
-use reth_db_api::{
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-    Database,
-};
+use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::BuiltPayload;
 use reth_trie_db::StateCommitment;
@@ -51,7 +48,7 @@ pub trait NodeTypesWithEngine: NodeTypes {
 /// Its types are configured by node internally and are not intended to be user configurable.
 pub trait NodeTypesWithDB: NodeTypes {
     /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
+    type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
 }
 
 /// An adapter type combining [`NodeTypes`] and db into [`NodeTypesWithDB`].
@@ -102,7 +99,7 @@ where
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
 where
     Types: NodeTypes,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     type DB = DB;
 }

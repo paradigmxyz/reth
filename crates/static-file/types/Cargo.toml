@@ -23,4 +23,11 @@ strum = { workspace = true, features = ["derive"] }
 reth-nippy-jar.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "derive_more/std",
+    "serde/std",
+    "strum/std",
+]
 clap = ["dep:clap"]

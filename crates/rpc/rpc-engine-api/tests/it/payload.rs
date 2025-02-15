@@ -8,25 +8,21 @@ use alloy_rpc_types_engine::{
     PayloadError,
 };
 use assert_matches::assert_matches;
-use reth_primitives::{Block, SealedBlock, SealedHeader, TransactionSigned};
-use reth_primitives_traits::proofs;
-use reth_rpc_types_compat::engine::payload::{block_to_payload, block_to_payload_v1};
+use reth_ethereum_primitives::{Block, TransactionSigned};
+use reth_primitives_traits::{proofs, SealedBlock};
 use reth_testing_utils::generators::{
     self, random_block, random_block_range, BlockParams, BlockRangeParams, Rng,
 };
 
-fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
+fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock<Block>, f: F) -> ExecutionPayload {
     let unsealed = src.into_block();
     let mut transformed: Block = f(unsealed);
     // Recalculate roots
     transformed.header.transactions_root =
         proofs::calculate_transaction_root(&transformed.body.transactions);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
-    block_to_payload(SealedBlock::from_sealed_parts(
-        SealedHeader::seal_slow(transformed.header),
-        transformed.body,
-    ))
-    .0
+
+    ExecutionPayload::from_block_slow(&transformed).0
 }
 
 #[test]
@@ -102,7 +98,8 @@ fn payload_validation_conversion() {
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayloadV1 = block_to_payload_v1(block);
+    let mut payload_with_invalid_txs =
+        ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block());
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new();

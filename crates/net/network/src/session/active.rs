@@ -875,11 +875,12 @@ pub trait TryFromPeerMessage<N: NetworkPrimitives> {
         Self: Sized;
 }
 
+/// Default implementation for [`TryFromPeerMessage`] for [`EthMessage`]
 impl<N: NetworkPrimitives> TryFromPeerMessage<N> for EthMessage<N> {
     fn try_from_peer_message(msg: PeerMessage<N>) -> Option<Self> {
         match msg {
-            PeerMessage::NewBlockHashes(msg) => Some(Self::NewBlockHashes(msg)),
-            PeerMessage::PooledTransactions(msg) => Some(Self::from(msg)),
+            PeerMessage::NewBlockHashes(msg) => Some(EthMessage::NewBlockHashes(msg.into())),
+            PeerMessage::PooledTransactions(msg) => Some(EthMessage::from(msg).into()),
             _ => None,
         }
     }

@@ -13,13 +13,12 @@ extern crate alloc;
 
 use alloc::{fmt::Debug, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
-use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
-use reth_primitives::{
-    EthPrimitives, GotExpected, GotExpectedBoxed, InvalidTransactionError, NodePrimitives, Receipt,
-    RecoveredBlock, SealedBlock, SealedHeader,
+use reth_execution_types::BlockExecutionResult;
+use reth_primitives_traits::{
+    constants::MINIMUM_GAS_LIMIT, transaction::error::InvalidTransactionError, Block, GotExpected,
+    GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
-use reth_primitives_traits::{constants::MINIMUM_GAS_LIMIT, Block};
 
 /// A consensus implementation that does nothing.
 pub mod noop;
@@ -28,26 +27,10 @@ pub mod noop;
 /// test helpers for mocking consensus
 pub mod test_utils;
 
-/// Post execution input passed to [`FullConsensus::validate_block_post_execution`].
-#[derive(Debug)]
-pub struct PostExecutionInput<'a, R = Receipt> {
-    /// Receipts of the block.
-    pub receipts: &'a [R],
-    /// EIP-7685 requests of the block.
-    pub requests: &'a Requests,
-}
-
-impl<'a, R> PostExecutionInput<'a, R> {
-    /// Creates a new instance of `PostExecutionInput`.
-    pub const fn new(receipts: &'a [R], requests: &'a Requests) -> Self {
-        Self { receipts, requests }
-    }
-}
-
 /// [`Consensus`] implementation which knows full node primitives and is able to validation block's
 /// execution outcome.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait FullConsensus<N: NodePrimitives = EthPrimitives>: AsConsensus<N::Block> {
+pub trait FullConsensus<N: NodePrimitives>: AsConsensus<N::Block> {
     /// Validate a block considering world state, i.e. things that can not be checked before
     /// execution.
     ///
@@ -57,7 +40,7 @@ pub trait FullConsensus<N: NodePrimitives = EthPrimitives>: AsConsensus<N::Block
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
-        input: PostExecutionInput<'_, N::Receipt>,
+        result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError>;
 }
 

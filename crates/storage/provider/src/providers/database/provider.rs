@@ -23,7 +23,7 @@ use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Header, TxRecei
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256HashMap, HashMap, HashSet},
+    map::{hash_map, B256Map, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
@@ -291,7 +291,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
         // sets.
-        let mut storage_prefix_sets = B256HashMap::<PrefixSet>::default();
+        let mut storage_prefix_sets = B256Map::<PrefixSet>::default();
         let storage_entries = self.unwind_storage_hashing(changed_storages.iter().copied())?;
         for (hashed_address, hashed_slots) in storage_entries {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
@@ -1810,8 +1810,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        let has_receipts_pruning = self.prune_modes.has_receipts_pruning() ||
-            execution_outcome.receipts.iter().flatten().any(|receipt| receipt.is_none());
+        let has_receipts_pruning = self.prune_modes.has_receipts_pruning();
 
         // Prepare receipts cursor if we are going to write receipts to the database
         //
@@ -1869,26 +1868,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
-                if let Some(receipt) = receipt {
-                    // Skip writing receipt if log filter is active and it does not have any logs to
-                    // retain
-                    if prunable_receipts &&
-                        has_contract_log_filter &&
-                        !receipt
-                            .logs()
-                            .iter()
-                            .any(|log| allowed_addresses.contains(&log.address))
-                    {
-                        continue
-                    }
+                // Skip writing receipt if log filter is active and it does not have any logs to
+                // retain
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue
+                }
 
-                    if let Some(writer) = &mut receipts_static_writer {
-                        writer.append_receipt(receipt_idx, receipt)?;
-                    }
+                if let Some(writer) = &mut receipts_static_writer {
+                    writer.append_receipt(receipt_idx, receipt)?;
+                }
 
-                    if let Some(cursor) = &mut receipts_cursor {
-                        cursor.append(receipt_idx, receipt)?;
-                    }
+                if let Some(cursor) = &mut receipts_cursor {
+                    cursor.append(receipt_idx, receipt)?;
                 }
             }
         }
@@ -2283,9 +2277,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for num in block_body.tx_num_range() {
                 if receipts_iter.peek().is_some_and(|(n, _)| *n == num) {
-                    block_receipts.push(receipts_iter.next().map(|(_, r)| r));
-                } else {
-                    block_receipts.push(None);
+                    block_receipts.push(receipts_iter.next().unwrap().1);
                 }
             }
             receipts.push(block_receipts);
@@ -2297,7 +2289,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             state,
             reverts,
             Vec::new(),
-            receipts.into(),
+            receipts,
             start_block_number,
             Vec::new(),
         ))
@@ -2359,7 +2351,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
     /// updates by the hashed address, writing in sorted order.
     fn write_storage_trie_updates(
         &self,
-        storage_tries: &B256HashMap<StorageTrieUpdates>,
+        storage_tries: &B256Map<StorageTrieUpdates>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
         let mut storage_tries = Vec::from_iter(storage_tries);

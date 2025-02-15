@@ -12,7 +12,6 @@ use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_core::args::NetworkArgs;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainStateBlockReader,
     ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory, StorageLocation,
@@ -32,9 +31,6 @@ use tracing::info;
 pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
-
-    #[command(flatten)]
-    network: NetworkArgs,
 
     #[command(subcommand)]
     command: Subcommands,
@@ -119,9 +115,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let builder = if self.offline {
             Pipeline::<N>::builder().add_stages(
-                OfflineStages::new(executor, config.stages, prune_modes.clone())
-                    .builder()
-                    .disable(reth_stages::StageId::SenderRecovery),
+                OfflineStages::new(
+                    executor,
+                    NoopConsensus::arc(),
+                    config.stages,
+                    prune_modes.clone(),
+                )
+                .builder()
+                .disable(reth_stages::StageId::SenderRecovery),
             )
         } else {
             Pipeline::<N>::builder().with_tip_sender(tip_tx).add_stages(
@@ -137,6 +138,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 )
                 .set(ExecutionStage::new(
                     executor,
+                    Arc::new(NoopConsensus::default()),
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,
@@ -144,7 +146,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                         max_duration: None,
                     },
                     stage_conf.execution_external_clean_threshold(),
-                    prune_modes.clone(),
                     ExExManagerHandle::empty(),
                 )),
             )

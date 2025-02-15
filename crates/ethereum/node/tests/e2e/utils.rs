@@ -11,10 +11,10 @@ use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use rand::{seq::SliceRandom, Rng};
 use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType, TmpDB};
+use reth_ethereum_engine_primitives::EthPayloadBuilderAttributes;
+use reth_ethereum_primitives::TxType;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
-use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::TxType;
 use reth_provider::FullProvider;
 use revm::primitives::{AccessListItem, Authorization};
 
@@ -40,7 +40,7 @@ pub(crate) async fn advance_with_random_transactions<Provider>(
 where
     Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
 {
-    let provider = ProviderBuilder::new().with_recommended_fillers().on_http(node.rpc_url());
+    let provider = ProviderBuilder::new().on_http(node.rpc_url());
     let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).gen();
 
     // simple contract which writes to storage on any call

@@ -12,19 +12,22 @@ use reth_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::block::Block as _;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_layer::JwtSecret;
-use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
 
 #[allow(unused_must_use)]
 async fn test_basic_engine_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync + EngineApiClient<EthEngineTypes>,
 {
-    let block = Block::default().seal_slow();
-    EngineApiClient::new_payload_v1(client, block_to_payload_v1(block.clone())).await;
+    let block = Block::<_>::default().seal_slow();
+    EngineApiClient::new_payload_v1(
+        client,
+        ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.clone().into_block()),
+    )
+    .await;
     EngineApiClient::new_payload_v2(
         client,
         ExecutionPayloadInputV2 {
-            execution_payload: ExecutionPayloadV1::from_block_slow::<TransactionSigned>(
+            execution_payload: ExecutionPayloadV1::from_block_slow::<TransactionSigned, _>(
                 &block.into_block(),
             ),
             withdrawals: None,

@@ -217,7 +217,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         hash: Some(*tx.tx_hash()),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
-                        base_fee: base_fee_per_gas.map(u128::from),
+                        base_fee: base_fee_per_gas,
                         index: Some(index as u64),
                     };
 
@@ -296,7 +296,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                                 hash: Some(*tx.tx_hash()),
                                 block_hash: Some(block_hash),
                                 block_number: Some(block_number),
-                                base_fee: base_fee_per_gas.map(u128::from),
+                                base_fee: base_fee_per_gas,
                                 index: Some(index as u64),
                             };
                             self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)

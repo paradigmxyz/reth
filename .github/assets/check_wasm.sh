@@ -28,6 +28,7 @@ exclude_crates=(
   reth-ethereum-cli
   reth-ethereum-payload-builder
   reth-etl
+  reth-evm
   reth-exex
   reth-exex-test-utils
   reth-ipc
@@ -43,6 +44,7 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
+  reth-optimism-chain-registry
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -58,14 +60,16 @@ exclude_crates=(
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
-  reth-payload-builder # reth-metrics 
+  reth-payload-builder # reth-metrics
   reth-provider # tokio
   reth-prune # tokio
   reth-stages-api # reth-provider, reth-prune
   reth-static-file # tokio
   reth-transaction-pool # c-kzg
+  reth-payload-util # reth-transaction-pool
   reth-trie-parallel # tokio
   reth-testing-utils
+  reth-optimism-txpool # reth-transaction-pool
 )
 
 # Array to hold the results

@@ -8,6 +8,14 @@ crates_to_check=(
     reth-network-peers
     reth-trie-common
     reth-chainspec
+    reth-consensus
+    reth-consensus-common
+    reth-prune-types
+    reth-static-file-types
+    reth-storage-errors
+    reth-execution-errors
+    reth-execution-types
+    reth-db-models
 
     ## ethereum
     reth-ethereum-forks

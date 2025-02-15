@@ -3,17 +3,18 @@ use crate::{
     prefix_set::TriePrefixSetsMut,
     proof::{Proof, ProofBlindedProviderFactory},
     trie_cursor::TrieCursorFactory,
-    HashedPostState,
 };
+use reth_trie_common::HashedPostState;
+
 use alloy_primitives::{
     keccak256,
-    map::{B256HashMap, B256HashSet, Entry, HashMap},
+    map::{B256Map, B256Set, Entry, HashMap},
     Bytes, B256,
 };
 use itertools::Itertools;
 use reth_execution_errors::{
-    SparseStateTrieError, SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind,
-    StateProofError, TrieWitnessError,
+    SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind, StateProofError,
+    TrieWitnessError,
 };
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
@@ -32,7 +33,7 @@ pub struct TrieWitness<T, H> {
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
     /// Recorded witness.
-    witness: B256HashMap<Bytes>,
+    witness: B256Map<Bytes>,
 }
 
 impl<T, H> TrieWitness<T, H> {
@@ -84,10 +85,7 @@ where
     /// # Arguments
     ///
     /// `state` - state transition containing both modified and touched accounts and storage slots.
-    pub fn compute(
-        mut self,
-        state: HashedPostState,
-    ) -> Result<B256HashMap<Bytes>, TrieWitnessError> {
+    pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
         if state.is_empty() {
             return Ok(self.witness)
         }
@@ -118,7 +116,7 @@ where
         );
         let mut sparse_trie =
             SparseStateTrie::new(WitnessBlindedProviderFactory::new(proof_provider_factory, tx));
-        sparse_trie.reveal_multiproof(proof_targets.clone(), multiproof)?;
+        sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
         for (hashed_address, hashed_slots) in
@@ -126,9 +124,12 @@ where
         {
             // Update storage trie first.
             let storage = state.storages.get(&hashed_address);
-            let storage_trie = sparse_trie
-                .storage_trie_mut(&hashed_address)
-                .ok_or(SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind))?;
+            let storage_trie = sparse_trie.storage_trie_mut(&hashed_address).ok_or(
+                SparseStateTrieErrorKind::SparseStorageTrie(
+                    hashed_address,
+                    SparseTrieErrorKind::Blind,
+                ),
+            )?;
             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
                 let storage_nibbles = Nibbles::unpack(hashed_slot);
                 let maybe_leaf_value = storage
@@ -137,13 +138,13 @@ where
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
 
                 if let Some(value) = maybe_leaf_value {
-                    storage_trie
-                        .update_leaf(storage_nibbles, value)
-                        .map_err(SparseStateTrieError::from)?;
+                    storage_trie.update_leaf(storage_nibbles, value).map_err(|err| {
+                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+                    })?;
                 } else {
-                    storage_trie
-                        .remove_leaf(&storage_nibbles)
-                        .map_err(SparseStateTrieError::from)?;
+                    storage_trie.remove_leaf(&storage_nibbles).map_err(|err| {
+                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+                    })?;
                 }
             }
 
@@ -174,10 +175,10 @@ where
     ) -> Result<MultiProofTargets, StateProofError> {
         let mut proof_targets = MultiProofTargets::default();
         for hashed_address in state.accounts.keys() {
-            proof_targets.insert(*hashed_address, B256HashSet::default());
+            proof_targets.insert(*hashed_address, B256Set::default());
         }
         for (hashed_address, storage) in &state.storages {
-            let mut storage_keys = storage.storage.keys().copied().collect::<B256HashSet>();
+            let mut storage_keys = storage.storage.keys().copied().collect::<B256Set>();
             if storage.wiped {
                 // storage for this account was destroyed, gather all slots from the current state
                 let mut storage_cursor =

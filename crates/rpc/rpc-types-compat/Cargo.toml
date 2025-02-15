@@ -17,16 +17,10 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 
 # ethereum
-alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth = { workspace = true, default-features = false, features = ["serde"] }
-alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 
 # io
 serde.workspace = true
 jsonrpsee-types.workspace = true
-
-[dev-dependencies]
-alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
-serde_json.workspace = true

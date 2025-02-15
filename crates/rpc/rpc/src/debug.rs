@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
+use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -14,7 +15,7 @@ use alloy_rpc_types_trace::geth::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
     env::EvmEnv,
     execute::{BlockExecutorProvider, Executor},
@@ -596,10 +597,26 @@ where
             .await
     }
 
+    /// Generates an execution witness for the given block hash. see
+    /// [`Self::debug_execution_witness`] for more info.
+    pub async fn debug_execution_witness_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> Result<ExecutionWitness, Eth::Error> {
+        let this = self.clone();
+        let block = this
+            .eth_api()
+            .block_with_senders(hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+
+        self.debug_execution_witness_for_block(block).await
+    }
+
     /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
-    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
-    /// to their preimages that were required during the execution of the block, including during
-    /// state root recomputation.
+    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes to
+    /// their preimages that were required during the execution of the block, including during state
+    /// root recomputation.
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
@@ -611,6 +628,15 @@ where
             .await?
             .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
+        self.debug_execution_witness_for_block(block).await
+    }
+
+    /// Generates an execution witness, using the given recovered block.
+    pub async fn debug_execution_witness_for_block(
+        &self,
+        block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
+    ) -> Result<ExecutionWitness, Eth::Error> {
+        let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
@@ -626,8 +652,9 @@ where
 
                 let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;
 
-                let state =
-                    state_provider.witness(Default::default(), hashed_state).map_err(Into::into)?;
+                let state = state_provider
+                    .witness(Default::default(), hashed_state)
+                    .map_err(EthApiError::from)?;
                 Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
             })
             .await
@@ -976,6 +1003,15 @@ where
         Self::debug_execution_witness(self, block).await.map_err(Into::into)
     }
 
+    /// Handler for `debug_executionWitnessByBlockHash`
+    async fn debug_execution_witness_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<ExecutionWitness> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
+    }
+
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
         Ok(())
     }
@@ -998,6 +1034,10 @@ where
 
     async fn debug_chaindb_compact(&self) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn debug_chain_config(&self) -> RpcResult<ChainConfig> {
+        Ok(self.provider().chain_spec().genesis().config.clone())
     }
 
     async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {

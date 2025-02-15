@@ -43,7 +43,7 @@ pub struct PendingPool<T: TransactionOrdering> {
     independent_transactions: FxHashMap<SenderId, PendingTransaction<T>>,
     /// Keeps track of the size of this pool.
     ///
-    /// See also [`PoolTransaction::size`](crate::traits::PoolTransaction::size).
+    /// See also [`reth_primitives_traits::InMemorySize::size`].
     size_of: SizeTracker,
     /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
     /// `static_files` of this pool.
@@ -98,7 +98,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// provides a way to mark transactions that the consumer of this iterator considers invalid. In
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
-    pub(crate) fn best(&self) -> BestTransactions<T> {
+    pub fn best(&self) -> BestTransactions<T> {
         BestTransactions {
             all: self.by_id.clone(),
             independent: self.independent_transactions.values().cloned().collect(),
@@ -613,6 +613,7 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
+    use alloy_consensus::Transaction;
     use alloy_primitives::address;
     use reth_primitives::TxType;
     use std::collections::HashSet;

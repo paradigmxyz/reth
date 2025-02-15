@@ -126,6 +126,7 @@ impl TransactionTestContext {
     }
 
     /// Validates the sidecar of a given tx envelope and returns the versioned hashes
+    #[track_caller]
     pub fn validate_sidecar(tx: TxEnvelope) -> Vec<B256> {
         let proof_setting = EnvKzgSettings::Default;
 

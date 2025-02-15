@@ -6,7 +6,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -25,3 +24,17 @@ pub type Block = alloy_consensus::Block<TransactionSigned>;
 
 /// Type alias for the ethereum blockbody
 pub type BlockBody = alloy_consensus::BlockBody<TransactionSigned>;
+
+/// Helper struct that specifies the ethereum
+/// [`NodePrimitives`](reth_primitives_traits::NodePrimitives) types.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct EthPrimitives;
+
+impl reth_primitives_traits::NodePrimitives for EthPrimitives {
+    type Block = crate::Block;
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = crate::BlockBody;
+    type SignedTx = crate::TransactionSigned;
+    type Receipt = crate::Receipt;
+}

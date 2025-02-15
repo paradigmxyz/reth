@@ -22,12 +22,16 @@ use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
-use revm::{Database, DatabaseCommit, GetInspector};
-use revm_primitives::{BlockEnv, EVMError, ResultAndState, TxEnv, TxKind};
+use revm::{DatabaseCommit, GetInspector};
+use revm_primitives::{BlockEnv, ResultAndState, TxEnv, TxKind};
 
+pub mod batch;
 pub mod either;
 /// EVM environment configuration.
 pub mod env;
+/// EVM error types.
+mod error;
+pub use error::*;
 pub mod execute;
 pub use env::EvmEnv;
 
@@ -51,8 +55,13 @@ pub trait Evm {
     type DB;
     /// Transaction environment
     type Tx;
-    /// Error type.
+    /// Error type returned by EVM. Contains either errors related to invalid transactions or
+    /// internal irrecoverable execution errors.
     type Error;
+    /// Halt reason. Enum over all possible reasons for halting the execution. When execution halts,
+    /// it means that transaction is valid, however, it's execution was interrupted (e.g because of
+    /// running out of gas or overflowing stack).
+    type HaltReason;
 
     /// Reference to [`BlockEnv`].
     fn block(&self) -> &BlockEnv;
@@ -82,6 +91,9 @@ pub trait Evm {
         Ok(result)
     }
 }
+/// Helper trait to bound [`revm::Database::Error`] with common requirements.
+pub trait Database: revm::Database<Error: core::error::Error + Send + Sync + 'static> {}
+impl<T> Database for T where T: revm::Database<Error: core::error::Error + Send + Sync + 'static> {}
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
@@ -89,8 +101,15 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     type Evm<'a, DB: Database + 'a, I: 'a>: Evm<
         Tx = Self::TxEnv,
         DB = DB,
-        Error = EVMError<DB::Error>,
+        Error = Self::EvmError<DB::Error>,
+        HaltReason = Self::HaltReason,
     >;
+
+    /// The error type returned by the EVM. See [`Evm::Error`].
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static>: EvmError;
+
+    /// Halt reason type returned by the EVM. See [`Evm::HaltReason`].
+    type HaltReason;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
@@ -137,6 +156,8 @@ where
     &'b T: ConfigureEvmEnv<Header = T::Header, TxEnv = T::TxEnv, Spec = T::Spec>,
 {
     type Evm<'a, DB: Database + 'a, I: 'a> = T::Evm<'a, DB, I>;
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = T::EvmError<DBError>;
+    type HaltReason = T::HaltReason;
 
     fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<'_, DB, ()> {
         (*self).evm_for_block(db, header)
@@ -241,6 +262,36 @@ pub trait TransactionEnv:
         self
     }
 
+    /// Returns the configured nonce.
+    ///
+    /// This may return `None`, if the nonce has been intentionally unset in the environment. This
+    /// is useful in optimizations like transaction prewarming, where nonce checks should be
+    /// ignored.
+    fn nonce(&self) -> Option<u64>;
+
+    /// Sets the nonce.
+    fn set_nonce(&mut self, nonce: u64);
+
+    /// Sets the nonce.
+    fn with_nonce(mut self, nonce: u64) -> Self {
+        self.set_nonce(nonce);
+        self
+    }
+
+    /// Unsets the nonce. This should be used when nonce checks for the transaction should be
+    /// ignored.
+    ///
+    /// See [`TransactionEnv::nonce`] for applications where this may be desired.
+    fn unset_nonce(&mut self);
+
+    /// Constructs a version of this [`TransactionEnv`] that has the nonce unset.
+    ///
+    /// See [`TransactionEnv::nonce`] for applications where this may be desired.
+    fn without_nonce(mut self) -> Self {
+        self.unset_nonce();
+        self
+    }
+
     /// Returns configured gas price.
     fn gas_price(&self) -> U256;
 
@@ -277,6 +328,18 @@ impl TransactionEnv for TxEnv {
 
     fn gas_price(&self) -> U256 {
         self.gas_price.to()
+    }
+
+    fn nonce(&self) -> Option<u64> {
+        self.nonce
+    }
+
+    fn set_nonce(&mut self, nonce: u64) {
+        self.nonce = Some(nonce);
+    }
+
+    fn unset_nonce(&mut self) {
+        self.nonce = None;
     }
 
     fn value(&self) -> U256 {

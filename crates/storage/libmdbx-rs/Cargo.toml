@@ -31,11 +31,7 @@ return-borrowed = []
 read-tx-timeouts = ["dep:dashmap"]
 
 [dev-dependencies]
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
 rand.workspace = true
 rand_xorshift = "0.3"

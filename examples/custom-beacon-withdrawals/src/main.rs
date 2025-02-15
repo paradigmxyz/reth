@@ -11,10 +11,9 @@ use reth::{
     api::{ConfigureEvm, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
-    providers::ProviderError,
     revm::{
         primitives::{address, Address},
-        Database, DatabaseCommit, State,
+        DatabaseCommit, State,
     },
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -23,7 +22,7 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
         InternalBlockExecutionError,
     },
-    Evm,
+    Database, Evm,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
@@ -90,11 +89,11 @@ pub struct CustomExecutorStrategyFactory {
 
 impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
     type Primitives = EthPrimitives;
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> = CustomExecutorStrategy<DB>;
+    type Strategy<DB: Database> = CustomExecutorStrategy<DB>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         let state =
             State::builder().with_database(db).with_bundle_update().without_state_clear().build();
@@ -108,7 +107,7 @@ impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
 
 pub struct CustomExecutorStrategy<DB>
 where
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
 {
     /// The chainspec
     chain_spec: Arc<ChainSpec>,
@@ -120,7 +119,7 @@ where
 
 impl<DB> BlockExecutionStrategy for CustomExecutorStrategy<DB>
 where
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
 {
     type DB = DB;
     type Primitives = EthPrimitives;
@@ -165,6 +164,10 @@ where
 
     fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
+    }
+
+    fn into_state(self) -> reth::revm::db::State<Self::DB> {
+        self.state
     }
 }
 

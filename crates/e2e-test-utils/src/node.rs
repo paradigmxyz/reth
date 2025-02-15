@@ -60,11 +60,13 @@ where
         node: FullNode<Node, AddOns>,
         attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + 'static,
     ) -> eyre::Result<Self> {
-        let builder = node.payload_builder.clone();
-
         Ok(Self {
             inner: node.clone(),
-            payload: PayloadTestContext::new(builder, attributes_generator).await?,
+            payload: PayloadTestContext::new(
+                node.payload_builder_handle.clone(),
+                attributes_generator,
+            )
+            .await?,
             network: NetworkTestContext::new(node.network.clone()),
             engine_api: EngineApiTestContext {
                 chain_spec: node.chain_spec(),
@@ -264,8 +266,6 @@ where
 
     /// Sends FCU and waits for the node to sync to the given block.
     pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
-        self.engine_api.update_forkchoice(block, block).await?;
-
         let start = std::time::Instant::now();
 
         while self
@@ -275,8 +275,9 @@ where
             .is_none_or(|h| h.hash() != block)
         {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            self.engine_api.update_forkchoice(block, block).await?;
 
-            assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
+            assert!(start.elapsed() <= std::time::Duration::from_secs(40), "timed out");
         }
 
         // Hack to make sure that all components have time to process canonical state update.

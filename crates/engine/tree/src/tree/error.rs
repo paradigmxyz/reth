@@ -4,8 +4,7 @@ use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_evm::execute::InternalBlockExecutionError;
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::{Block, BlockBody, SealedBlock};
 use tokio::sync::oneshot::error::TryRecvError;
 
 /// This is an error that can come from advancing persistence. Either this can be a
@@ -151,9 +150,6 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::Validation(err) => {
                         Ok(InsertBlockValidationError::Validation(err))
                     }
-                    BlockExecutionError::Consensus(err) => {
-                        Ok(InsertBlockValidationError::Consensus(err))
-                    }
                     // these are internal errors, not caused by an invalid block
                     BlockExecutionError::Internal(error) => {
                         Err(InsertBlockFatalError::BlockExecutionError(error))
@@ -189,11 +185,4 @@ pub enum InsertBlockValidationError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-}
-
-impl InsertBlockValidationError {
-    /// Returns true if this is a block pre merge error.
-    pub const fn is_block_pre_merge(&self) -> bool {
-        matches!(self, Self::Validation(BlockValidationError::BlockPreMerge { .. }))
-    }
 }

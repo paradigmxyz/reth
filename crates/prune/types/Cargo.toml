@@ -12,16 +12,22 @@ description = "Commonly used types for prune usage in reth."
 workspace = true
 
 [dependencies]
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, optional = true }
 
 alloy-primitives.workspace = true
 derive_more.workspace = true
-modular-bitfield.workspace = true
-serde.workspace = true
 thiserror.workspace = true
+
+modular-bitfield = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
+reth-codecs.workspace = true
+
+alloy-primitives = { workspace = true, features = ["serde"] }
+serde.workspace = true
+modular-bitfield.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 assert_matches.workspace = true
 proptest.workspace = true
@@ -31,11 +37,28 @@ test-fuzz.workspace = true
 toml.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "derive_more/std",
+    "serde?/std",
+    "serde_json/std",
+    "thiserror/std",
+]
 test-utils = [
-	"dep:arbitrary",
-	"reth-codecs/test-utils"
+    "dep:arbitrary",
+    "reth-codecs?/test-utils",
 ]
 arbitrary = [
-	"alloy-primitives/arbitrary",
-	"reth-codecs/arbitrary"
+    "alloy-primitives/arbitrary",
+    "reth-codecs?/arbitrary",
+]
+reth-codec = [
+    "dep:reth-codecs",
+    "dep:modular-bitfield",
+]
+serde = [
+    "dep:serde",
+    "alloy-primitives/serde",
+    "reth-codecs?/serde",
 ]

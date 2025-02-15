@@ -9,19 +9,18 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::{eip7840::BlobParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS};
+use alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_consensus::{
-    Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
-};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
-use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_execution_types::BlockExecutionResult;
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
     Block, BlockHeader,
@@ -99,14 +98,14 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
 impl<ChainSpec, N> FullConsensus<N> for EthBeaconConsensus<ChainSpec>
 where
     ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
-    N: NodePrimitives<Receipt = Receipt>,
+    N: NodePrimitives,
 {
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
-        input: PostExecutionInput<'_>,
+        result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
+        validate_block_post_execution(block, &self.chain_spec, &result.receipts, &result.requests)
     }
 }
 
@@ -192,13 +191,7 @@ where
         )?;
 
         // ensure that the blob gas fields for this block
-        if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
-            let blob_params = if self.chain_spec.is_prague_active_at_timestamp(header.timestamp()) {
-                BlobParams::prague()
-            } else {
-                BlobParams::cancun()
-            };
-
+        if let Some(blob_params) = self.chain_spec.blob_params_at_timestamp(header.timestamp()) {
             validate_against_parent_4844(header.header(), parent.header(), blob_params)?;
         }
 
@@ -214,12 +207,10 @@ where
             self.chain_spec.is_paris_active_at_block(header.number()).is_some_and(|active| active);
 
         if is_post_merge {
-            // TODO: add `is_zero_difficulty` to `alloy_consensus::BlockHeader` trait
             if !header.difficulty().is_zero() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
-            // TODO: helper fn in `alloy_consensus::BlockHeader` trait
             if !header.nonce().is_some_and(|nonce| nonce.is_zero()) {
                 return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
@@ -242,15 +233,14 @@ where
             // mixHash is used instead of difficulty inside EVM
             // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
         } else {
-            // TODO Consensus checks for old blocks:
-            //  * difficulty, mix_hash & nonce aka PoW stuff
-            // low priority as syncing is done in reverse order
+            // Note: This does not perform any pre merge checks for difficulty, mix_hash & nonce
+            // because those are deprecated and the expectation is that a reth node syncs in reverse
+            // order, making those checks obsolete.
 
             // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
             let present_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
-            // TODO: move this to `alloy_consensus::BlockHeader`
             if header.timestamp() > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS {
                 return Err(ConsensusError::TimestampIsInFuture {
                     timestamp: header.timestamp(),

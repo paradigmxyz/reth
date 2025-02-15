@@ -17,10 +17,7 @@ reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-evm.workspace = true
-reth-exex-types = { workspace = true, features = [
-    "serde",
-    "serde-bincode-compat",
-] }
+reth-exex-types = { workspace = true, features = ["serde", "serde-bincode-compat"] }
 reth-fs-util.workspace = true
 reth-metrics.workspace = true
 reth-node-api.workspace = true
@@ -50,6 +47,7 @@ itertools = { workspace = true, features = ["use_std"] }
 metrics.workspace = true
 parking_lot.workspace = true
 rmp-serde = "1.3"
+thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
@@ -70,14 +68,15 @@ tempfile.workspace = true
 [features]
 default = []
 serde = [
-	"reth-provider/serde",
-	"reth-exex-types/serde",
-	"reth-revm/serde",
-	"alloy-consensus/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"parking_lot/serde",
-	"rand/serde",
-	"secp256k1/serde",
-	"reth-primitives-traits/serde",
+    "reth-provider/serde",
+    "reth-exex-types/serde",
+    "reth-revm/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "parking_lot/serde",
+    "rand/serde",
+    "secp256k1/serde",
+    "reth-primitives-traits/serde",
+    "reth-prune-types/serde",
 ]

@@ -13,10 +13,7 @@ use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
-use reth_db_api::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-};
+use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_engine_tree::tree::TreeConfig;
 use reth_exex::ExExContext;
 use reth_network::{
@@ -236,7 +233,7 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
 
 impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec>
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
     /// Configures the types of the node.
@@ -297,7 +294,7 @@ impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>> {
 
 impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>>
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
     /// Configures the types of the node.
@@ -548,7 +545,7 @@ where
 
 impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     T: NodeTypesWithEngine + NodeTypesForProvider,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
@@ -567,9 +564,11 @@ where
         let engine_tree_config = TreeConfig::default()
             .with_persistence_threshold(builder.config.engine.persistence_threshold)
             .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
-            .with_state_root_task(builder.config.engine.state_root_task_enabled)
-            .with_always_compare_trie_updates(
-                builder.config.engine.state_root_task_compare_updates,
+            .with_legacy_state_root(builder.config.engine.legacy_state_root_task_enabled)
+            .with_caching_and_prewarming(builder.config.engine.caching_and_prewarming_enabled)
+            .with_always_compare_trie_updates(builder.config.engine.state_root_task_compare_updates)
+            .with_cross_block_cache_size(
+                builder.config.engine.cross_block_cache_size * 1024 * 1024,
             );
 
         let launcher =
