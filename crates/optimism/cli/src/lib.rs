@@ -209,7 +209,7 @@ mod test {
         let cmd = NodeCommand::<OpChainSpecParser, NoArgs>::parse_from(["op-reth", "--dev"]);
         let chain = OP_DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
-        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+        assert_eq!(cmd.chain.genesis_hash(), chain.genesis_hash());
         assert_eq!(
             cmd.chain.paris_block_and_final_difficulty,
             chain.paris_block_and_final_difficulty
