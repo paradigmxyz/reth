@@ -18,6 +18,7 @@ use reth_provider::{
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
+use std::sync::Arc;
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
@@ -159,6 +160,11 @@ impl<C: ChainSpecParser> Command<C> {
         UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
         Ok(())
+    }
+
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
     }
 }
 
