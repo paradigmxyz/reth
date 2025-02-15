@@ -10,7 +10,6 @@ use reth_evm_ethereum::{execute::EthExecutionStrategyFactory, EthEvmConfig};
 use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_provider::test_utils::NoopProvider;
-use reth_rpc::EthApi;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
     RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
@@ -60,8 +59,8 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
 /// Launches a new server with http only with the given modules
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
-    let server =
-        builder.build(TransportRpcModuleConfig::set_http(modules), Box::new(EthApi::with_spawner));
+    let eth_api = builder.bootstrap_eth_api();
+    let server = builder.build(TransportRpcModuleConfig::set_http(modules), eth_api);
     RpcServerConfig::http(Default::default())
         .with_http_address(test_address())
         .start(&server)
@@ -72,8 +71,8 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
 /// Launches a new server with ws only with the given modules
 pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
-    let server =
-        builder.build(TransportRpcModuleConfig::set_ws(modules), Box::new(EthApi::with_spawner));
+    let eth_api = builder.bootstrap_eth_api();
+    let server = builder.build(TransportRpcModuleConfig::set_ws(modules), eth_api);
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
         .start(&server)
@@ -84,11 +83,10 @@ pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandl
 /// Launches a new server with http and ws and with the given modules
 pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
+    let eth_api = builder.bootstrap_eth_api();
     let modules = modules.into();
-    let server = builder.build(
-        TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
-        Box::new(EthApi::with_spawner),
-    );
+    let server = builder
+        .build(TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules), eth_api);
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
         .with_ws_address(test_address())
@@ -103,10 +101,9 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
 pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let modules = modules.into();
-    let server = builder.build(
-        TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
-        Box::new(EthApi::with_spawner),
-    );
+    let eth_api = builder.bootstrap_eth_api();
+    let server = builder
+        .build(TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules), eth_api);
     let addr = test_address();
     RpcServerConfig::ws(Default::default())
         .with_ws_address(addr)

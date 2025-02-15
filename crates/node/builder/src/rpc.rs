@@ -3,10 +3,11 @@
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
 use alloy_rpc_types::engine::{ClientVersionV1, ExecutionData};
 use futures::TryFutureExt;
-use reth_chainspec::EthereumHardforks;
+use reth_chain_state::CanonStateSubscriptions;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, NodeAddOns,
-    NodeTypes, NodeTypesWithEngine,
+    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
+    NodeAddOns, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -21,6 +22,7 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
+use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthStateCache};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
@@ -430,6 +432,7 @@ where
 impl<N, EthB, EV, EB> RpcAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents,
+    <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -451,6 +454,33 @@ where
 
         info!(target: "reth::cli", "Engine API handler initialized");
 
+        let cache = EthStateCache::spawn_with(
+            node.provider().clone(),
+            config.rpc.eth_config().cache,
+            node.task_executor().clone(),
+        );
+
+        let new_canonical_blocks = node.provider().canonical_state_stream();
+        let c = cache.clone();
+        node.task_executor().spawn_critical(
+            "cache canonical blocks task",
+            Box::pin(async move {
+                cache_new_blocks_task(c, new_canonical_blocks).await;
+            }),
+        );
+        // TODO: phase out EthApiBuilderCtx generics and use componets istead
+        let ctx: EthApiBuilderCtx<N> = EthApiBuilderCtx {
+            provider: node.provider().clone(),
+            pool: node.pool().clone(),
+            network: node.network().clone(),
+            evm_config: node.evm_config().clone(),
+            config: config.rpc.eth_config(),
+            executor: node.task_executor().clone(),
+            cache,
+        };
+
+        let eth_api = eth_api_builder.build(&ctx);
+
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
@@ -463,11 +493,7 @@ where
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server::<EthB::EthApi>(
-                module_config,
-                engine_api,
-                Box::new(eth_api_builder),
-            );
+            .build_with_auth_server(module_config, engine_api, eth_api);
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -540,6 +566,7 @@ where
 impl<N, EthB, EV, EB> NodeAddOns<N> for RpcAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents,
+    <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -577,7 +604,12 @@ where
 
 /// A `EthApi` that knows how to build `eth` namespace API from [`EthApiBuilderCtx`].
 pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
-    type EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static;
+    /// The Ethapi implementation this builder will build.
+    type EthApi: EthApiTypes
+        + FullEthApiServer<Provider = N::Provider>
+        + AddDevSigners
+        + Unpin
+        + 'static;
 
     /// Builds the `EthApi` from the given context.
     fn build(self, ctx: &EthApiBuilderCtx<N>) -> Self::EthApi;
@@ -586,7 +618,8 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
 impl<N, F, EthApi> EthApiBuilder<N> for F
 where
     N: FullNodeComponents,
-    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    EthApi:
+        EthApiTypes + FullEthApiServer<Provider = N::Provider> + AddDevSigners + Unpin + 'static,
     F: FnOnce(&EthApiBuilderCtx<N>) -> EthApi + Default + Send + 'static,
 {
     type EthApi = EthApi;

@@ -23,7 +23,6 @@
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
-//! use reth_rpc::EthApi;
 //! use reth_rpc_builder::{
 //!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 //! };
@@ -65,7 +64,7 @@
 //!         RethRpcModule::Eth,
 //!         RethRpcModule::Web3,
 //!     ]);
-//!     let transport_modules = RpcModuleBuilder::new(
+//!     let module_builder = RpcModuleBuilder::new(
 //!         provider,
 //!         pool,
 //!         network,
@@ -73,8 +72,9 @@
 //!         evm_config,
 //!         block_executor,
 //!         consensus,
-//!     )
-//!     .build(transports, Box::new(EthApi::with_spawner));
+//!     );
+//!     let eth_api = module_builder.bootstrap_eth_api();
+//!     let transport_modules = module_builder.build(transports, eth_api);
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(&transport_modules)
@@ -93,7 +93,6 @@
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
-//! use reth_rpc::EthApi;
 //! use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 //! use reth_rpc_builder::{
 //!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
@@ -149,10 +148,10 @@
 //!         block_executor,
 //!         consensus,
 //!     );
-//!
+//!     let eth_api = builder.bootstrap_eth_api();
 //!     // configure the server modules
 //!     let (modules, auth_module, _registry) =
-//!         builder.build_with_auth_server(transports, engine_api, Box::new(EthApi::with_spawner));
+//!         builder.build_with_auth_server(transports, engine_api, eth_api);
 //!
 //!     // start the servers
 //!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -182,7 +181,6 @@ use std::{
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use error::{ConflictingModules, RpcError, ServerKind};
-use eth::DynEthApiBuilder;
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
@@ -198,19 +196,20 @@ use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
-    AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    FullRpcProvider, ProviderBlock, ProviderHeader, ProviderReceipt, StateProviderFactory,
+    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+    ChangeSetReader, FullRpcProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
+    StateProviderFactory,
 };
 use reth_rpc::{
-    AdminApi, DebugApi, EngineEthApi, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi,
-    TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
+    AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
+    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
     helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
     EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
-use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
+use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
@@ -262,7 +261,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, EvmConfig, EthApi, BlockExec
     server_config: impl Into<RpcServerConfig>,
     executor: Tasks,
     evm_config: EvmConfig,
-    eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
+    eth: EthApi,
     block_executor: BlockExecutor,
     consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives, Error = ConsensusError>>,
 ) -> Result<RpcServerHandle, RpcError>
@@ -560,6 +559,37 @@ impl<Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
             consensus,
         }
     }
+
+    /// Instantiates a new [`EthApiBuilder`] from the configured components.
+    pub fn eth_api_builder(&self) -> EthApiBuilder<Provider, Pool, Network, EvmConfig>
+    where
+        Provider: BlockReaderIdExt + Clone,
+        Pool: Clone,
+        Network: Clone,
+        EvmConfig: Clone,
+    {
+        EthApiBuilder::new(
+            self.provider.clone(),
+            self.pool.clone(),
+            self.network.clone(),
+            self.evm_config.clone(),
+        )
+    }
+
+    /// Initializes a new [`EthApi`] with the configured components and default settings.
+    ///
+    /// Note: This spawns all necessary tasks.
+    ///
+    /// See also [`EthApi::with_spawner`]
+    pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
+    where
+        Provider: BlockReaderIdExt + StateProviderFactory + Clone + Unpin + 'static,
+        Pool: Clone,
+        EvmConfig: Clone,
+        Network: Clone,
+    {
+        self.eth_api_builder().build()
+    }
 }
 
 impl<Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
@@ -593,7 +623,7 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         engine: impl IntoEngineApiRpcModule,
-        eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
+        eth: EthApi,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
@@ -657,15 +687,17 @@ where
     /// where
     ///     Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
     /// {
-    ///     let mut registry = RpcModuleBuilder::default()
+    ///     let builder = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
     ///         .with_pool(NoopTransactionPool::default())
     ///         .with_network(NoopNetwork::default())
     ///         .with_executor(TokioTaskExecutor::default())
     ///         .with_evm_config(evm)
     ///         .with_block_executor(EthExecutorProvider::mainnet())
-    ///         .with_consensus(NoopConsensus::default())
-    ///         .into_registry(Default::default(), Box::new(EthApi::with_spawner));
+    ///         .with_consensus(NoopConsensus::default());
+    ///
+    ///     let eth_api = builder.bootstrap_eth_api();
+    ///     let registry = builder.into_registry(Default::default(), eth_api);
     ///
     ///     let eth_api = registry.eth_api();
     /// }
@@ -673,7 +705,7 @@ where
     pub fn into_registry<EthApi>(
         self,
         config: RpcModuleConfig,
-        eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
+        eth: EthApi,
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
@@ -698,7 +730,7 @@ where
     pub fn build<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
-        eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
+        eth: EthApi,
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<
@@ -842,7 +874,7 @@ pub struct RpcRegistryInner<
     block_executor: BlockExecutor,
     consensus: Consensus,
     /// Holds a all `eth_` namespace handlers
-    eth: EthHandlers<Provider, EthApi>,
+    eth: EthHandlers<EthApi>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
@@ -876,8 +908,8 @@ where
         executor: Tasks,
         consensus: Consensus,
         config: RpcModuleConfig,
-        evm_config: EvmConfig,
-        eth_api_builder: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
+        _evm_config: EvmConfig,
+        eth_api: EthApi,
         block_executor: BlockExecutor,
     ) -> Self
     where
@@ -885,15 +917,7 @@ where
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
-        let eth = EthHandlers::bootstrap(
-            provider.clone(),
-            pool.clone(),
-            network.clone(),
-            evm_config,
-            config.eth,
-            executor.clone(),
-            eth_api_builder,
-        );
+        let eth = EthHandlers::bootstrap(config.eth, executor.clone(), eth_api);
 
         Self {
             provider,
@@ -921,16 +945,8 @@ where
     }
 
     /// Returns a reference to the installed [`EthHandlers`].
-    pub const fn eth_handlers(&self) -> &EthHandlers<Provider, EthApi> {
+    pub const fn eth_handlers(&self) -> &EthHandlers<EthApi> {
         &self.eth
-    }
-
-    /// Returns the [`EthStateCache`] frontend
-    ///
-    /// This will spawn exactly one [`EthStateCache`] service if this is the first time the cache is
-    /// requested.
-    pub const fn eth_cache(&self) -> &EthStateCache<Provider::Block, Provider::Receipt> {
-        &self.eth.cache
     }
 
     /// Returns a reference to the pool
