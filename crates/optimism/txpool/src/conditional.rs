@@ -10,6 +10,9 @@ pub trait MaybeConditionalTransaction {
     /// Get attached [`TransactionConditional`] if any.
     fn conditional(&self) -> Option<&TransactionConditional>;
 
+    /// Check if the conditional has exceeded the block attributes.
+    fn has_exceeded_block_attributes(&self, block_attr: &BlockConditionalAttributes) -> bool;
+
     /// Helper that sets the conditional and returns the instance again
     fn with_conditional(mut self, conditional: TransactionConditional) -> Self
     where
