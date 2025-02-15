@@ -7523,6 +7523,7 @@ dependencies = [
  "reth-rpc-builder",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-trie",
 ]
 
 [[package]]
@@ -8368,6 +8369,7 @@ dependencies = [
  "reth-rpc-builder",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-trie",
 ]
 
 [[package]]
