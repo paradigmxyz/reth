@@ -150,9 +150,6 @@ impl InsertBlockErrorKind {
                     BlockExecutionError::Validation(err) => {
                         Ok(InsertBlockValidationError::Validation(err))
                     }
-                    BlockExecutionError::Consensus(err) => {
-                        Ok(InsertBlockValidationError::Consensus(err))
-                    }
                     // these are internal errors, not caused by an invalid block
                     BlockExecutionError::Internal(error) => {
                         Err(InsertBlockFatalError::BlockExecutionError(error))

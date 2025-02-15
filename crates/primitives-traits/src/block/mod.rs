@@ -84,6 +84,11 @@ pub trait Block:
         SealedBlock::new_unchecked(self, hash)
     }
 
+    /// Creates the [`SealedBlock`] from the block's parts without calculating the hash upfront.
+    fn seal(self) -> SealedBlock<Self> {
+        SealedBlock::new_unhashed(self)
+    }
+
     /// Calculate the header hash and seal the block so that it can't be changed.
     fn seal_slow(self) -> SealedBlock<Self> {
         SealedBlock::seal_slow(self)

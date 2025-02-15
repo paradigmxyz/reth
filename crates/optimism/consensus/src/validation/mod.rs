@@ -1,3 +1,9 @@
+//! Verification of blocks w.r.t. Optimism hardforks.
+
+pub mod canyon;
+pub mod isthmus;
+pub mod shanghai;
+
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
 use alloy_consensus::{BlockHeader, TxReceipt};
@@ -154,7 +160,7 @@ mod tests {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,
                 genesis: BASE_SEPOLIA.inner.genesis.clone(),
-                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
+                genesis_header: BASE_SEPOLIA.inner.genesis_header.clone(),
                 paris_block_and_final_difficulty: Some((0, U256::from(0))),
                 hardforks,
                 base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),

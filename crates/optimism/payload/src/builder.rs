@@ -46,6 +46,7 @@ use reth_revm::{
     cancelled::CancelOnDrop, database::StateProviderDatabase, witness::ExecutionWitnessRecord,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
+use reth_trie::HashedStorage;
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
     primitives::{ExecutionResult, ResultAndState},
@@ -377,14 +378,22 @@ impl<Txs> OpBuilder<'_, Txs> {
         state.merge_transitions(BundleRetention::Reverts);
 
         let withdrawals_root = if ctx.is_isthmus_active() {
+            let hashed_storage_updates =
+                state.bundle_state.state().get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER).map(|account| {
+                    // block contained withdrawals transactions, use predeploy storage updates from
+                    // execution
+                    HashedStorage::from_plain_storage(
+                        account.status,
+                        account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    )
+                });
+
             // withdrawals root field in block header is used for storage root of L2 predeploy
             // `l2tol1-message-passer`
-            Some(
-                state
-                    .database
-                    .as_ref()
-                    .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())?,
-            )
+            Some(state.database.as_ref().storage_root(
+                ADDRESS_L2_TO_L1_MESSAGE_PASSER,
+                hashed_storage_updates.unwrap_or_default(),
+            )?)
         } else if ctx.is_canyon_active() {
             Some(EMPTY_WITHDRAWALS)
         } else {

@@ -12,9 +12,6 @@ use reth_network_peers::NodeRecord;
 /// Trait representing type configuring a chain spec.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthChainSpec: Send + Sync + Unpin + Debug {
-    // todo: make chain spec type generic over hardfork
-    //type Hardfork: Clone + Copy + 'static;
-
     /// The header type of the network.
     type Header;
 

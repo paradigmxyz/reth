@@ -33,6 +33,10 @@ pub struct RollupArgs {
     /// enables discovery v4 if provided
     #[arg(long = "rollup.discovery.v4", default_value = "false")]
     pub discovery_v4: bool,
+
+    /// Enable transaction conditional support on sequencer
+    #[arg(long = "rollup.enable-tx-conditional", default_value = "false")]
+    pub enable_tx_conditional: bool,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -44,6 +48,7 @@ impl Default for RollupArgs {
             enable_genesis_walkback: false,
             compute_pending_block: false,
             discovery_v4: false,
+            enable_tx_conditional: false,
         }
     }
 }
@@ -115,11 +120,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_optimism_enable_tx_conditional() {
+        let expected_args = RollupArgs { enable_tx_conditional: true, ..Default::default() };
+        let args =
+            CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.enable-tx-conditional"])
+                .args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
     fn test_parse_optimism_many_args() {
         let expected_args = RollupArgs {
             disable_txpool_gossip: true,
             compute_pending_block: true,
             enable_genesis_walkback: true,
+            enable_tx_conditional: true,
             sequencer_http: Some("http://host:port".into()),
             ..Default::default()
         };
@@ -128,6 +143,7 @@ mod tests {
             "--rollup.disable-tx-pool-gossip",
             "--rollup.compute-pending-block",
             "--rollup.enable-genesis-walkback",
+            "--rollup.enable-tx-conditional",
             "--rollup.sequencer-http",
             "http://host:port",
         ])
