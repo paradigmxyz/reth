@@ -208,13 +208,13 @@ pub struct StaticFileWriterError {
     pub message: String,
 }
 
-impl std::fmt::Display for StaticFileWriterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for StaticFileWriterError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
-impl std::error::Error for StaticFileWriterError {}
+impl core::error::Error for StaticFileWriterError {}
 
 /// Consistent database view error.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]
