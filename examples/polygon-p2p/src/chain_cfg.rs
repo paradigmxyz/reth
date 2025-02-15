@@ -8,7 +8,7 @@ use reth_primitives::Head;
 
 use std::sync::Arc;
 
-const SHANGAI_BLOCK: u64 = 50523000;
+const SHANGHAI_BLOCK: u64 = 50523000;
 
 pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
     const GENESIS: B256 = b256!("a9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b");
@@ -26,7 +26,7 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
             (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(3395000)),
             (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(14750000)),
             (EthereumHardfork::London.boxed(), ForkCondition::Block(23850000)),
-            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Block(SHANGAI_BLOCK)),
+            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Block(SHANGHAI_BLOCK)),
         ]),
         deposit_contract: None,
         base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
@@ -45,7 +45,7 @@ static BOOTNODES : [&str; 4] = [
 ];
 
 pub(crate) fn head() -> Head {
-    Head { number: SHANGAI_BLOCK, ..Default::default() }
+    Head { number: SHANGHAI_BLOCK, ..Default::default() }
 }
 
 pub(crate) fn boot_nodes() -> Vec<NodeRecord> {

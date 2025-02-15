@@ -245,7 +245,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -269,7 +269,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -531,7 +531,7 @@ Builder:
       --builder.gaslimit <GAS_LIMIT>
           Target gas limit for built blocks
 
-          [default: 30000000]
+          [default: 36000000]
 
       --builder.interval <DURATION>
           The interval at which the job should build a new payload after the last.

@@ -1,5 +1,6 @@
 //! `Eth` Sim bundle implementation and helpers.
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockId, BlockOverrides};
@@ -13,7 +14,7 @@ use reth_provider::ProviderTx;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthTransactions, LoadPendingBlock},
+    helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
@@ -83,7 +84,7 @@ impl<Eth> EthSimBundle<Eth> {
 
 impl<Eth> EthSimBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions + LoadBlock + Call + 'static,
 {
     /// Flattens a potentially nested bundle into a list of individual transactions in a
     /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
@@ -221,7 +222,7 @@ where
         Ok(items)
     }
 
-    async fn sim_bundle(
+    async fn sim_bundle_inner(
         &self,
         request: SendBundleRequest,
         overrides: SimBundleOverrides,
@@ -234,8 +235,10 @@ where
         // Also, flatten the bundle here so that its easier to process
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
 
-        let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
-        let (mut evm_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
+        let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let (mut evm_env, current_block_id) = self.eth_api().evm_env_at(block_id).await?;
+        let current_block = self.eth_api().block_with_senders(current_block_id).await?;
+        let current_block = current_block.ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         // apply overrides
         if let Some(block_number) = number {
@@ -263,9 +266,9 @@ where
         let sim_response = self
             .inner
             .eth_api
-            .spawn_with_state_at_block(current_block, move |state| {
+            .spawn_with_state_at_block(current_block_id, move |state| {
                 // Setup environment
-                let current_block_number = current_block.as_u64().unwrap();
+                let current_block_number = current_block.number();
                 let coinbase = evm_env.block_env.coinbase;
                 let basefee = evm_env.block_env.basefee;
                 let db = CacheDB::new(StateProviderDatabase::new(state));
@@ -405,10 +408,7 @@ where
                     revert: None,
                 })
             })
-            .await
-            .map_err(|_| {
-                EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string())
-            })?;
+            .await?;
 
         Ok(sim_response)
     }
@@ -417,7 +417,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> MevSimApiServer for EthSimBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions + LoadBlock + Call + 'static,
 {
     async fn sim_bundle(
         &self,
@@ -434,11 +434,11 @@ where
             .unwrap_or(DEFAULT_SIM_TIMEOUT);
 
         let bundle_res =
-            tokio::time::timeout(timeout, Self::sim_bundle(self, request, overrides, true))
+            tokio::time::timeout(timeout, Self::sim_bundle_inner(self, request, overrides, true))
                 .await
                 .map_err(|_| {
-                EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string())
-            })?;
+                    EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string())
+                })?;
 
         bundle_res.map_err(Into::into)
     }
