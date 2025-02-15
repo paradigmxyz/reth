@@ -218,6 +218,10 @@ impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for OpRece
     fn as_repr(&self) -> Self::BincodeRepr<'_> {
         self.clone()
     }
+
+    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+        repr
+    }
 }
 
 /// Trait for deposit receipt.
