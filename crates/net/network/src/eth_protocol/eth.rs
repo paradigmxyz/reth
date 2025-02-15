@@ -14,13 +14,14 @@ use tokio::net::TcpStream;
 
 /// The Ethereum protocol handler.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct EthNetworkProtocol;
+pub struct EthNetworkProtocol;
 
 impl<N: NetworkPrimitives> NetworkProtocolHandler<N> for EthNetworkProtocol {
     type ConnectionHandler = EthConnection;
 }
 
-pub(crate) struct EthConnection;
+#[derive(Debug)]
+pub struct EthConnection;
 
 impl<N: NetworkPrimitives> ConnectionHandler<N> for EthConnection {
     type ConnectionFut = ConnectionFut<N, EthRlpxConnection<N>>;

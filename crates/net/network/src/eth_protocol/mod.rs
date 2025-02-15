@@ -10,7 +10,7 @@ use reth_eth_wire::{
     capability::RawCapabilityMessage,
     errors::{EthStreamError, P2PStreamError},
     message::EthBroadcastMessage,
-    DisconnectReason, EthVersion, NetworkPrimitives, P2PStream,
+    DisconnectReason, EthMessage, EthVersion, NetworkPrimitives, P2PStream,
 };
 use reth_network_api::{message::NetworkMessage, Direction, PeerId};
 use std::{fmt, future::Future, pin::Pin};
@@ -19,13 +19,11 @@ use tokio::net::TcpStream;
 pub(crate) mod eth;
 
 /// A type alias for a future that resolves to a `PendingSessionEvent`.
-pub(crate) type ConnectionFut<N: NetworkPrimitives, C> =
+pub(crate) type ConnectionFut<N, C> =
     Pin<Box<dyn Future<Output = PendingSessionEvent<N, C>> + Send>>;
 
 /// This trait is responsible for handling the protocol negotiation and authentication.
-pub trait NetworkProtocolHandler<N: NetworkPrimitives>:
-    fmt::Debug + derive_more::Debug + Send + Sync + 'static
-{
+pub trait NetworkProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + 'static {
     /// The type responsible for negotiating the protocol with the remote.
     type ConnectionHandler: ConnectionHandler<N>;
 
@@ -95,7 +93,7 @@ pub trait NetworkStream<N: NetworkPrimitives>:
     Stream<Item = Result<Self::Message, EthStreamError>> + Debug + Send + Unpin + 'static
 {
     /// The network message.
-    type Message: NetworkMessage<N> + TryFromPeerMessage<N>;
+    type Message: NetworkMessage<N> + TryFromPeerMessage<N> + Into<EthMessage<N>>;
 
     /// Returns the negotiated ETH version.
     fn version(&self) -> EthVersion;

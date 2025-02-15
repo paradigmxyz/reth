@@ -182,6 +182,7 @@ pub enum PendingSessionEvent<N: NetworkPrimitives, C: NetworkStream<N>> {
         direction: Direction,
         /// The remote node's user agent, usually containing the client name and version
         client_id: String,
+        #[allow(missing_docs)]
         _phantom: PhantomData<N>,
     },
     /// Handshake unsuccessful, session was disconnected.

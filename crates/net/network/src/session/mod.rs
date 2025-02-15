@@ -268,6 +268,7 @@ impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> SessionManager<N, P> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_outgoing_session(
         eth_protocol_handler: Arc<P>,
         disconnect_rx: oneshot::Receiver<()>,

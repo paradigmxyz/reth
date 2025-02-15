@@ -27,7 +27,10 @@ use reth_db_common::init::init_genesis;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
-use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
+use reth_network::{
+    config::SecretKey, EthNetworkPrimitives, EthNetworkProtocol, NetworkConfigBuilder,
+    NetworkManager,
+};
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
     NodeTypesWithEngine,
@@ -276,10 +279,12 @@ pub async fn test_exex_context_with_chain_spec(
     let provider = BlockchainProvider::new(provider_factory.clone())?;
 
     let network_manager = NetworkManager::new(
-        NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))
-            .with_unused_discovery_port()
-            .with_unused_listener_port()
-            .build(provider_factory.clone()),
+        NetworkConfigBuilder::<EthNetworkPrimitives, EthNetworkProtocol>::new(SecretKey::new(
+            &mut rand::thread_rng(),
+        ))
+        .with_unused_discovery_port()
+        .with_unused_listener_port()
+        .build(provider_factory.clone()),
     )
     .await?;
     let network = network_manager.handle().clone();

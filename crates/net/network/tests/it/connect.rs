@@ -10,8 +10,8 @@ use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, HeadersDirection};
 use reth_net_banlist::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
-    BlockDownloaderProvider, NetworkConfigBuilder, NetworkEvent, NetworkEventListenerProvider,
-    NetworkManager, PeersConfig,
+    BlockDownloaderProvider, EthNetworkProtocol, NetworkConfigBuilder, NetworkEvent,
+    NetworkEventListenerProvider, NetworkManager, PeersConfig,
 };
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
@@ -341,11 +341,12 @@ async fn test_incoming_node_id_blacklist() {
         let ban_list = BanList::new(vec![geth_peer_id], vec![]);
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
 
-        let config = NetworkConfigBuilder::new(secret_key)
-            .listener_port(0)
-            .disable_discovery()
-            .peer_config(peer_config)
-            .build(NoopProvider::default());
+        let config =
+            NetworkConfigBuilder::<EthNetworkPrimitives, EthNetworkProtocol>::new(secret_key)
+                .listener_port(0)
+                .disable_discovery()
+                .peer_config(peer_config)
+                .build(NoopProvider::default());
 
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -392,10 +393,11 @@ async fn test_incoming_connect_with_single_geth() {
         let enr = provider.node_info().await.unwrap().enr;
         let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
-        let config = NetworkConfigBuilder::new(secret_key)
-            .listener_port(0)
-            .disable_discovery()
-            .build(NoopProvider::default());
+        let config =
+            NetworkConfigBuilder::<EthNetworkPrimitives, EthNetworkProtocol>::new(secret_key)
+                .listener_port(0)
+                .disable_discovery()
+                .build(NoopProvider::default());
 
         let network = NetworkManager::new(config).await.unwrap();
 
@@ -426,10 +428,11 @@ async fn test_outgoing_connect_with_single_geth() {
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let config = NetworkConfigBuilder::new(secret_key)
-            .listener_port(0)
-            .disable_discovery()
-            .build(NoopProvider::default());
+        let config =
+            NetworkConfigBuilder::<EthNetworkPrimitives, EthNetworkProtocol>::new(secret_key)
+                .listener_port(0)
+                .disable_discovery()
+                .build(NoopProvider::default());
         let network = NetworkManager::new(config).await.unwrap();
 
         let handle = network.handle().clone();
