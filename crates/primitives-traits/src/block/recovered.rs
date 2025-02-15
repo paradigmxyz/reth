@@ -606,5 +606,9 @@ pub(super) mod serde_bincode_compat {
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             self.into()
         }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
     }
 }

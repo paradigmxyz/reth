@@ -9,6 +9,7 @@ use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::{execute::EthExecutionStrategyFactory, EthEvmConfig};
 use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
+use reth_primitives::EthPrimitives;
 use reth_provider::test_utils::NoopProvider;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
@@ -116,6 +117,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
 
 /// Returns an [`RpcModuleBuilder`] with testing components.
 pub fn test_rpc_builder() -> RpcModuleBuilder<
+    EthPrimitives,
     NoopProvider,
     TestPool,
     NoopNetwork,
