@@ -1,5 +1,6 @@
 //! Additional support for pooled transactions with [`TransactionConditional`]
 
+use alloy_consensus::conditional::BlockConditionalAttributes;
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 
 /// Helper trait that allows attaching a [`TransactionConditional`].
