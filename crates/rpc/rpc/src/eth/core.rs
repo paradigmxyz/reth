@@ -10,7 +10,9 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_provider::{BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt};
+use reth_provider::{
+    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
+};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -165,11 +167,12 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + Clone + Unpin,
+    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
 {
+    type Primitives = Provider::Primitives;
     type Provider = Provider;
     type Pool = Pool;
     type Evm = EvmConfig;
@@ -200,7 +203,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + Clone + Unpin,
+    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
