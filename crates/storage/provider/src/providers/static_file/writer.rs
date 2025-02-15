@@ -14,7 +14,7 @@ use reth_primitives::{
     static_file::{SegmentHeader, SegmentRangeInclusive},
     StaticFileSegment,
 };
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{
     borrow::Borrow,
     fmt::Debug,
@@ -163,8 +163,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             None,
         ) {
             Ok(provider) => (
-                NippyJar::load(provider.data_path())
-                    .map_err(|e| ProviderError::NippyJar(e.to_string()))?,
+                NippyJar::load(provider.data_path()).map_err(ProviderError::other)?,
                 provider.data_path().into(),
             ),
             Err(ProviderError::MissingStaticFileBlock(_, _)) => {
@@ -180,7 +179,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 // This static file has been frozen, so we should
                 Err(ProviderError::FinalizedStaticFile(segment, block))
             }
-            Err(e) => Err(ProviderError::NippyJar(e.to_string())),
+            Err(e) => Err(ProviderError::other(e)),
         }?;
 
         if let Some(metrics) = &metrics {
@@ -214,7 +213,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             self.user_header_mut().prune(pruned_rows);
         }
 
-        self.writer.commit().map_err(|error| ProviderError::NippyJar(error.to_string()))?;
+        self.writer.commit().map_err(ProviderError::other)?;
 
         // Updates the [SnapshotProvider] manager
         self.update_index()?;
@@ -240,7 +239,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         if self.writer.is_dirty() {
             // Commits offsets and new user_header to disk
-            self.writer.commit().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+            self.writer.commit().map_err(ProviderError::other)?;
 
             if let Some(metrics) = &self.metrics {
                 metrics.record_segment_operation(
@@ -272,9 +271,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let start = Instant::now();
 
         // Commits offsets and new user_header to disk
-        self.writer
-            .commit_without_sync_all()
-            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        self.writer.commit_without_sync_all().map_err(ProviderError::other)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -421,9 +418,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 } else {
                     // Update `SegmentHeader`
                     self.writer.user_header_mut().prune(len);
-                    self.writer
-                        .prune_rows(len as usize)
-                        .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+                    self.writer.prune_rows(len as usize).map_err(ProviderError::other)?;
                     break
                 }
 
@@ -433,9 +428,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 self.writer.user_header_mut().prune(remaining_rows);
 
                 // Truncate data
-                self.writer
-                    .prune_rows(remaining_rows as usize)
-                    .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+                self.writer.prune_rows(remaining_rows as usize).map_err(ProviderError::other)?;
                 remaining_rows = 0;
             }
         }
@@ -476,9 +469,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.writer.set_dirty();
         self.data_path = data_path;
         NippyJar::<SegmentHeader>::load(&current_path)
-            .map_err(|e| ProviderError::NippyJar(e.to_string()))?
+            .map_err(ProviderError::other)?
             .delete()
-            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+            .map_err(ProviderError::other)?;
         Ok(())
     }
 
@@ -487,9 +480,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.buf.clear();
         column.to_compact(&mut self.buf);
 
-        self.writer
-            .append_column(Some(Ok(&self.buf)))
-            .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        self.writer.append_column(Some(Ok(&self.buf))).map_err(ProviderError::other)?;
         Ok(())
     }
 
@@ -762,9 +753,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns Error if there is a pruning instruction that needs to be applied.
     fn ensure_no_queued_prune(&self) -> ProviderResult<()> {
         if self.prune_on_commit.is_some() {
-            return Err(ProviderError::NippyJar(
-                "Pruning should be committed before appending or pruning more data".to_string(),
-            ))
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "Pruning should be committed before appending or pruning more data",
+            )));
         }
         Ok(())
     }
