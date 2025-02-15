@@ -232,7 +232,7 @@ mod test {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,
                 genesis: BASE_SEPOLIA.inner.genesis.clone(),
-                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
+                genesis_header: BASE_SEPOLIA.inner.genesis_header.clone(),
                 paris_block_and_final_difficulty: BASE_SEPOLIA
                     .inner
                     .paris_block_and_final_difficulty,

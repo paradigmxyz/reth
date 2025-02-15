@@ -2983,6 +2983,7 @@ dependencies = [
 name = "example-bsc-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "reth-chainspec",
  "reth-discv4",
@@ -3224,6 +3225,7 @@ dependencies = [
 name = "example-polygon-p2p"
 version = "0.0.0"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "reth-chainspec",
  "reth-discv4",
