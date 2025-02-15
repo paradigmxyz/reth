@@ -41,14 +41,14 @@ where
             if new.is_empty() {
                 continue;
             }
-            let header = new.tip().clone_header();
+            let block_attr = BlockConditionalAttributes {
+                number: new.tip().number(),
+                timestamp: new.tip().timestamp(),
+            };
             let mut to_remove = Vec::new();
             for tx in &pool.pooled_transactions() {
                 if let Some(conditional) = tx.transaction.conditional() {
-                    if conditional.has_exceeded_block_attributes(&BlockConditionalAttributes {
-                        number: header.number(),
-                        timestamp: header.timestamp(),
-                    }) {
+                    if conditional.has_exceeded_block_attributes(&block_attr) {
                         to_remove.push(*tx.hash());
                     }
                 }
