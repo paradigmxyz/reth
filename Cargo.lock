@@ -8711,6 +8711,7 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-flz",
  "parking_lot",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-optimism-chainspec",
  "reth-optimism-evm",

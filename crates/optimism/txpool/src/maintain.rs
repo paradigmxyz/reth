@@ -2,8 +2,8 @@
 
 use alloy_consensus::{conditional::BlockConditionalAttributes, BlockHeader};
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
+use reth_chain_state::CanonStateNotification;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::CanonStateNotification;
 use reth_transaction_pool::TransactionPool;
 
 use crate::conditional::MaybeConditionalTransaction;
