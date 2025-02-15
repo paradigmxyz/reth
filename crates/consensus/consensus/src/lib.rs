@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use alloc::{fmt::Debug, sync::Arc, vec::Vec};
+use alloc::{fmt::Debug, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_execution_types::BlockExecutionResult;
@@ -433,6 +433,9 @@ pub enum ConsensusError {
         /// The block's timestamp.
         timestamp: u64,
     },
+    /// Other, likely an injected L2 error.
+    #[error("{0}")]
+    Other(String),
 }
 
 impl ConsensusError {

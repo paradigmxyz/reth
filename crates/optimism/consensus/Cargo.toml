@@ -19,6 +19,9 @@ reth-consensus-common.workspace = true
 reth-consensus.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
+reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
@@ -31,13 +34,24 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-trie.workspace = true
+revm.workspace = true
 op-alloy-consensus.workspace = true
 
+# misc
 tracing.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-trie-db.workspace = true
+reth-db-common.workspace = true
+reth-optimism-node.workspace = true
+reth-revm.workspace = true
+op-alloy-consensus.workspace = true
+alloy-chains.workspace = true
 alloy-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
+reth-trie.workspace = true
 
 [features]
 default = ["std"]
@@ -50,14 +64,24 @@ std = [
     "reth-optimism-forks/std",
     "reth-optimism-chainspec/std",
     "reth-optimism-primitives/std",
+    "reth-storage-api/std",
+    "reth-storage-errors/std",
+    "reth-trie-common/std",
+    "alloy-chains/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-trie/std",
     "op-alloy-consensus/std",
+    "reth-revm/std",
+    "revm/std",
+    "tracing/std",
+    "thiserror/std",
     "reth-execution-types/std",
 ]
 optimism = [
     "reth-optimism-primitives/optimism",
+    "revm/optimism",
     "reth-execution-types/optimism",
+    "reth-optimism-node/optimism",
 ]
