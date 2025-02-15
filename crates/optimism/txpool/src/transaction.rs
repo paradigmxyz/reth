@@ -1,7 +1,6 @@
 use crate::conditional::MaybeConditionalTransaction;
 use alloy_consensus::{
-    conditional::BlockConditionalAttributes, transaction::Recovered, BlobTransactionSidecar,
-    BlobTransactionValidationError, Typed2718,
+    transaction::Recovered, BlobTransactionSidecar, BlobTransactionValidationError, Typed2718,
 };
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
@@ -70,10 +69,6 @@ impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Poo
 
     fn conditional(&self) -> Option<&TransactionConditional> {
         self.conditional.as_deref()
-    }
-
-    fn has_exceeded_block_attributes(&self, block_attr: &BlockConditionalAttributes) -> bool {
-        self.conditional().map(|tc| tc.has_exceeded_block_attributes(block_attr)).unwrap_or(false)
     }
 }
 
