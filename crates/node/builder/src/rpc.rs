@@ -431,7 +431,7 @@ where
 
 impl<N, EthB, EV, EB> RpcAddOns<N, EthB, EV, EB>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<>,
     EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
@@ -603,7 +603,7 @@ where
 /// A `EthApi` that knows how to build `eth` namespace API from [`EthApiBuilderCtx`].
 pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
-    type EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static;
+    type EthApi: EthApiTypes + FullEthApiServer<Provider= N::Provider> + AddDevSigners + Unpin + 'static;
 
     /// Builds the `EthApi` from the given context.
     fn build(self, ctx: &EthApiBuilderCtx<N>) -> Self::EthApi;
@@ -612,7 +612,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
 impl<N, F, EthApi> EthApiBuilder<N> for F
 where
     N: FullNodeComponents,
-    EthApi: EthApiTypes + FullEthApiServer + AddDevSigners + Unpin + 'static,
+    EthApi: EthApiTypes + FullEthApiServer<Provider=N::Provider> + AddDevSigners + Unpin + 'static,
     F: FnOnce(&EthApiBuilderCtx<N>) -> EthApi + Default + Send + 'static,
 {
     type EthApi = EthApi;
