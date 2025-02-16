@@ -22,6 +22,7 @@ use std::{
     task::{ready, Context, Poll},
     time::Duration,
 };
+use tokio::sync::oneshot;
 use tokio_stream::Stream;
 use tracing::{debug, trace};
 
@@ -251,6 +252,9 @@ pub struct P2PStream<S> {
     /// Whether this stream is currently in the process of disconnecting by sending a disconnect
     /// message.
     disconnecting: bool,
+
+    /// Used to notify ping subcommand.
+    pong_notifier: Option<oneshot::Sender<()>>,
 }
 
 impl<S> P2PStream<S> {
@@ -267,6 +271,7 @@ impl<S> P2PStream<S> {
             outgoing_messages: VecDeque::new(),
             outgoing_message_buffer_capacity: MAX_P2P_CAPACITY,
             disconnecting: false,
+            pong_notifier: None,
         }
     }
 
@@ -305,6 +310,15 @@ impl<S> P2PStream<S> {
     /// Queues in a _snappy_ encoded [`P2PMessage::Ping`] message.
     pub fn send_ping(&mut self) {
         self.outgoing_messages.push_back(Bytes::from(alloy_rlp::encode(P2PMessage::Ping)));
+    }
+
+    /// Subscribes [`P2PMessage::Pong`] message.
+    pub fn subscribe_pong(&mut self) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+
+        self.pong_notifier = Some(tx);
+
+        rx
     }
 }
 
@@ -470,6 +484,12 @@ where
                     ))))
                 }
                 _ if id == P2PMessageID::Pong as u8 => {
+                    if let Some(tx) = this.pong_notifier.take() {
+                        // Only used to notify the ping subcommand.
+                        tx.send(()).unwrap();
+
+                        return Poll::Ready(Some(Ok(BytesMut::default())));
+                    }
                     // if we were waiting for a pong, this will reset the pinger state
                     this.pinger.on_pong()?
                 }
