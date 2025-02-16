@@ -195,6 +195,10 @@ pub trait DebugApi {
     #[method(name = "chaindbProperty")]
     async fn debug_chaindb_property(&self, property: String) -> RpcResult<()>;
 
+    /// Returns code identified by a given hash
+    #[method(name = "codeByHash")]
+    async fn debug_code_by_hash(&self, hash: B256) -> RpcResult<Bytes>;
+
     /// Turns on CPU profiling for the given duration and writes profile data to disk.
     #[method(name = "cpuProfile")]
     async fn debug_cpu_profile(&self, file: String, seconds: u64) -> RpcResult<()>;
