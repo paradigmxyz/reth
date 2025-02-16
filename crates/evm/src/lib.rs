@@ -25,6 +25,7 @@ use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{DatabaseCommit, GetInspector};
 use revm_primitives::{BlockEnv, ResultAndState, TxEnv, TxKind};
 
+pub mod batch;
 pub mod either;
 /// EVM environment configuration.
 pub mod env;

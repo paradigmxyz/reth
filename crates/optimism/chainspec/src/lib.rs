@@ -19,10 +19,10 @@ mod op_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::{proofs::storage_root_unhashed, Header};
+use alloy_consensus::Header;
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, Address, B256, U256};
+use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
@@ -37,10 +37,6 @@ use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardf
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_primitives_traits::sync::LazyLock;
-
-/// The L2 contract `L2ToL1MessagePasser`, stores commitments to withdrawal transactions.
-pub const ADDRESS_L2_TO_L1_MESSAGE_PASSER: Address =
-    address!("4200000000000000000000000000000000000016");
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -182,8 +178,7 @@ impl OpChainSpecBuilder {
     /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
     /// [`Self::genesis`])
     pub fn build(self) -> OpChainSpec {
-        let inner = self.inner.build();
-        OpChainSpec::from(inner)
+        OpChainSpec { inner: self.inner.build() }
     }
 }
 
@@ -191,8 +186,7 @@ impl OpChainSpecBuilder {
 #[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
 pub struct OpChainSpec {
     /// [`ChainSpec`].
-    #[deref]
-    inner: ChainSpec,
+    pub inner: ChainSpec,
 }
 
 impl OpChainSpec {
@@ -238,8 +232,7 @@ impl EthChainSpec for OpChainSpec {
     }
 
     fn genesis_header(&self) -> &Self::Header {
-        // header is set in construction of `OpChainSpec` from `ChainSpec`
-        self.inner.genesis_header.get().expect("header is set")
+        self.inner.genesis_header()
     }
 
     fn genesis(&self) -> &Genesis {
@@ -375,51 +368,18 @@ impl From<Genesis> for OpChainSpec {
         // append the remaining unknown hardforks to ensure we don't filter any out
         ordered_hardforks.append(&mut block_hardforks);
 
-        Self::from(ChainSpec {
-            chain: genesis.config.chain_id.into(),
-            genesis,
-            hardforks: ChainHardforks::new(ordered_hardforks),
-            // We assume no OP network merges, and set the paris block and total difficulty to
-            // zero
-            paris_block_and_final_difficulty: Some((0, U256::ZERO)),
-            base_fee_params: optimism_genesis_info.base_fee_params,
-            ..Default::default()
-        })
-    }
-}
-
-impl From<ChainSpec> for OpChainSpec {
-    fn from(mut inner: ChainSpec) -> Self {
-        // under the hood makes header, if not yet init
-        let header = inner.genesis_header();
-        // fill once lock with a value, if not yet init
-        _ = inner.genesis_hash.get_or_init(|| header.hash_slow());
-
-        if inner.hardforks.is_fork_active_at_timestamp(OpHardfork::Isthmus, inner.genesis.timestamp)
-        {
-            match inner.genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
-                Some(predeploy) => {
-                    let header = inner.genesis_header.get_mut().expect("header is set");
-                    // update withdrawals root in header
-                    header.withdrawals_root = predeploy.storage.as_ref().map(|s| {
-                        storage_root_unhashed(s.clone().into_iter().map(|(k, v)| (k, v.into())))
-                    });
-
-                    let hash = inner.genesis_hash.get_mut().expect("hash is set");
-                    // update header hash
-                    *hash = header.hash_slow()
-                }
-                None => (), // Predeploy L2ToL1MessagePasser.sol not found in genesis alloc
-            }
+        Self {
+            inner: ChainSpec {
+                chain: genesis.config.chain_id.into(),
+                genesis,
+                hardforks: ChainHardforks::new(ordered_hardforks),
+                // We assume no OP network merges, and set the paris block and total difficulty to
+                // zero
+                paris_block_and_final_difficulty: Some((0, U256::ZERO)),
+                base_fee_params: optimism_genesis_info.base_fee_params,
+                ..Default::default()
+            },
         }
-
-        if inner.is_optimism_mainnet() {
-            // for OP mainnet we have to do this because the genesis header can't be properly
-            // computed from the genesis.json file
-            let _ = inner.genesis_hash.set(OP_MAINNET.genesis_hash());
-        }
-
-        Self { inner }
     }
 }
 
@@ -483,8 +443,8 @@ mod tests {
 
     #[test]
     fn base_mainnet_forkids() {
-        let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
-        let _ = base_mainnet.genesis_hash.set(BASE_MAINNET.genesis_hash.get().copied().unwrap());
+        let mut base_mainnet = OpChainSpecBuilder::base_mainnet().build();
+        base_mainnet.inner.genesis_header.set_hash(BASE_MAINNET.genesis_hash());
         test_fork_ids(
             &BASE_MAINNET,
             &[
@@ -579,7 +539,10 @@ mod tests {
 
     #[test]
     fn op_mainnet_forkids() {
-        let op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
+        let mut op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
+        // for OP mainnet we have to do this because the genesis header can't be properly computed
+        // from the genesis.json file
+        op_mainnet.inner.genesis_header.set_hash(OP_MAINNET.genesis_hash());
         test_fork_ids(
             &op_mainnet,
             &[

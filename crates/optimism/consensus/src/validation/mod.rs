@@ -1,3 +1,9 @@
+//! Verification of blocks w.r.t. Optimism hardforks.
+
+pub mod canyon;
+pub mod isthmus;
+pub mod shanghai;
+
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
 use alloy_consensus::{BlockHeader, TxReceipt};
@@ -150,16 +156,18 @@ mod tests {
     fn holocene_chainspec() -> Arc<OpChainSpec> {
         let mut hardforks = OpHardfork::base_sepolia();
         hardforks.insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
-        Arc::new(OpChainSpec::from(ChainSpec {
-            chain: BASE_SEPOLIA.chain,
-            genesis: BASE_SEPOLIA.genesis.clone(),
-            genesis_hash: BASE_SEPOLIA.genesis_hash.clone(),
-            paris_block_and_final_difficulty: Some((0, U256::from(0))),
-            hardforks,
-            base_fee_params: BASE_SEPOLIA.base_fee_params.clone(),
-            prune_delete_limit: 10000,
-            ..Default::default()
-        }))
+        Arc::new(OpChainSpec {
+            inner: ChainSpec {
+                chain: BASE_SEPOLIA.inner.chain,
+                genesis: BASE_SEPOLIA.inner.genesis.clone(),
+                genesis_header: BASE_SEPOLIA.inner.genesis_header.clone(),
+                paris_block_and_final_difficulty: Some((0, U256::from(0))),
+                hardforks,
+                base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
+                prune_delete_limit: 10000,
+                ..Default::default()
+            },
+        })
     }
 
     #[test]

@@ -4,6 +4,7 @@ use super::setup;
 use alloy_primitives::BlockNumber;
 use eyre::Result;
 use reth_config::config::EtlConfig;
+use reth_consensus::noop::NoopConsensus;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
@@ -96,6 +97,7 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
         NoopBlockExecutorProvider::<N::Primitives>::default(), // Not necessary for unwinding.
+        NoopConsensus::arc(),
         ExecutionStageThresholds {
             max_blocks: Some(u64::MAX),
             max_changes: None,

@@ -1,6 +1,6 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
 use alloy_primitives::{
-    map::{AddressHashMap, B256HashMap},
+    map::{AddressMap, B256Map},
     Address, BlockNumber, B256, U256,
 };
 use reth_db::tables;
@@ -230,7 +230,7 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
         }
 
         // Iterate over storage changesets and record value before first occurring storage change.
-        let mut storages = AddressHashMap::<B256HashMap<U256>>::default();
+        let mut storages = AddressMap::<B256Map<U256>>::default();
         let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
         for entry in
             storage_changesets_cursor.walk_range(BlockNumberAddress((from, Address::ZERO))..)?

@@ -10,7 +10,7 @@ use core::{
     time::Duration,
 };
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_primitives::EthPrimitives;
+use reth_primitives::{EthPrimitives, SealedBlock};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 
 /// Events emitted by the consensus engine.
@@ -24,6 +24,8 @@ pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     CanonicalBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
+    /// The consensus engine processed an invalid block.
+    InvalidBlock(Box<SealedBlock<N::Block>>),
     /// The consensus engine is involved in live sync, and has specific progress
     LiveSyncProgress(ConsensusEngineLiveSyncProgress),
 }
@@ -60,6 +62,9 @@ where
             }
             Self::CanonicalChainCommitted(block, duration) => {
                 write!(f, "CanonicalChainCommitted({:?}, {duration:?})", block.num_hash())
+            }
+            Self::InvalidBlock(block) => {
+                write!(f, "InvalidBlock({:?})", block.num_hash())
             }
             Self::LiveSyncProgress(progress) => {
                 write!(f, "LiveSyncProgress({progress:?})")

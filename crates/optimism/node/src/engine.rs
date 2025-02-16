@@ -1,5 +1,5 @@
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
+    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
 };
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
@@ -11,8 +11,8 @@ use reth_node_api::{
         EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
         VersionSpecificValidationError,
     },
-    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, ExecutionData,
-    NodePrimitives, PayloadValidator,
+    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
+    PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
@@ -228,16 +228,20 @@ mod test {
 
     fn get_chainspec() -> Arc<OpChainSpec> {
         let hardforks = OpHardfork::base_sepolia();
-        Arc::new(OpChainSpec::from(ChainSpec {
-            chain: BASE_SEPOLIA.chain,
-            genesis: BASE_SEPOLIA.genesis.clone(),
-            genesis_hash: BASE_SEPOLIA.genesis_hash.clone(),
-            paris_block_and_final_difficulty: BASE_SEPOLIA.paris_block_and_final_difficulty,
-            hardforks,
-            base_fee_params: BASE_SEPOLIA.base_fee_params.clone(),
-            prune_delete_limit: 10000,
-            ..Default::default()
-        }))
+        Arc::new(OpChainSpec {
+            inner: ChainSpec {
+                chain: BASE_SEPOLIA.inner.chain,
+                genesis: BASE_SEPOLIA.inner.genesis.clone(),
+                genesis_header: BASE_SEPOLIA.inner.genesis_header.clone(),
+                paris_block_and_final_difficulty: BASE_SEPOLIA
+                    .inner
+                    .paris_block_and_final_difficulty,
+                hardforks,
+                base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
+                prune_delete_limit: 10000,
+                ..Default::default()
+            },
+        })
     }
 
     const fn get_attributes(eip_1559_params: Option<B64>, timestamp: u64) -> OpPayloadAttributes {

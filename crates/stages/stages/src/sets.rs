@@ -21,15 +21,17 @@
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
 //! # use reth_primitives::EthPrimitives;
+//! # use std::sync::Arc;
+//! # use reth_consensus::{FullConsensus, ConsensusError};
 //!
-//! # fn create(exec: impl BlockExecutorProvider<Primitives = EthPrimitives>) {
+//! # fn create(exec: impl BlockExecutorProvider<Primitives = EthPrimitives>, consensus: impl FullConsensus<EthPrimitives, Error = ConsensusError> + 'static) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =
 //!     StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 //! // Build a pipeline with all offline stages.
 //! let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
-//!     .add_stages(OfflineStages::new(exec, StageConfig::default(), PruneModes::default()))
+//!     .add_stages(OfflineStages::new(exec, Arc::new(consensus), StageConfig::default(), PruneModes::default()))
 //!     .build(provider_factory, static_file_producer);
 //!
 //! # }
@@ -44,9 +46,10 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_config::config::StageConfig;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
+use reth_primitives::NodePrimitives;
 use reth_primitives_traits::Block;
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
@@ -78,15 +81,18 @@ use tokio::sync::watch;
 /// - [`PruneStage`] (execute)
 /// - [`FinishStage`]
 #[derive(Debug)]
-pub struct DefaultStages<Provider, H, B, EF>
+pub struct DefaultStages<Provider, H, B, E>
 where
     H: HeaderDownloader,
     B: BodyDownloader,
+    E: BlockExecutorProvider,
 {
     /// Configuration for the online stages
     online: OnlineStages<Provider, H, B>,
     /// Executor factory needs for execution stage
-    executor_factory: EF,
+    executor_provider: E,
+    /// Consensus instance
+    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
     /// Prune configuration for every segment that can be pruned
@@ -97,32 +103,31 @@ impl<Provider, H, B, E> DefaultStages<Provider, H, B, E>
 where
     H: HeaderDownloader,
     B: BodyDownloader,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<BlockHeader = H::Header, Block = B::Block>>,
 {
     /// Create a new set of default stages with default values.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         header_downloader: H,
         body_downloader: B,
-        executor_factory: E,
+        executor_provider: E,
         stages_config: StageConfig,
         prune_modes: PruneModes,
-    ) -> Self
-    where
-        E: BlockExecutorProvider,
-    {
+    ) -> Self {
         Self {
             online: OnlineStages::new(
                 provider,
                 tip,
-                consensus,
+                consensus.clone().as_consensus(),
                 header_downloader,
                 body_downloader,
                 stages_config.clone(),
             ),
-            executor_factory,
+            executor_provider,
+            consensus,
             stages_config,
             prune_modes,
         }
@@ -138,7 +143,8 @@ where
     /// Appends the default offline stages and default finish stage to the given builder.
     pub fn add_offline_stages<Provider>(
         default_offline: StageSetBuilder<Provider>,
-        executor_factory: E,
+        executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         stages_config: StageConfig,
         prune_modes: PruneModes,
     ) -> StageSetBuilder<Provider>
@@ -147,7 +153,7 @@ where
     {
         StageSetBuilder::default()
             .add_set(default_offline)
-            .add_set(OfflineStages::new(executor_factory, stages_config, prune_modes))
+            .add_set(OfflineStages::new(executor_provider, consensus, stages_config, prune_modes))
             .add_stage(FinishStage)
     }
 }
@@ -164,7 +170,8 @@ where
     fn builder(self) -> StageSetBuilder<Provider> {
         Self::add_offline_stages(
             self.online.builder(),
-            self.executor_factory,
+            self.executor_provider,
+            self.consensus,
             self.stages_config.clone(),
             self.prune_modes,
         )
@@ -286,25 +293,28 @@ where
 /// - [`HashingStages`]
 /// - [`HistoryIndexingStages`]
 /// - [`PruneStage`]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[non_exhaustive]
-pub struct OfflineStages<EF> {
+pub struct OfflineStages<E: BlockExecutorProvider> {
     /// Executor factory needs for execution stage
-    executor_factory: EF,
+    executor_provider: E,
+    /// Consensus instance for validating blocks.
+    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
     /// Prune configuration for every segment that can be pruned
     prune_modes: PruneModes,
 }
 
-impl<EF> OfflineStages<EF> {
+impl<E: BlockExecutorProvider> OfflineStages<E> {
     /// Create a new set of offline stages with default values.
     pub const fn new(
-        executor_factory: EF,
+        executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         stages_config: StageConfig,
         prune_modes: PruneModes,
     ) -> Self {
-        Self { executor_factory, stages_config, prune_modes }
+        Self { executor_provider, consensus, stages_config, prune_modes }
     }
 }
 
@@ -318,7 +328,7 @@ where
     PruneStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        ExecutionStages::new(self.executor_factory, self.stages_config.clone())
+        ExecutionStages::new(self.executor_provider, self.consensus, self.stages_config.clone())
             .builder()
             // If sender recovery prune mode is set, add the prune sender recovery stage.
             .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
@@ -341,17 +351,23 @@ where
 /// A set containing all stages that are required to execute pre-existing block data.
 #[derive(Debug)]
 #[non_exhaustive]
-pub struct ExecutionStages<E> {
+pub struct ExecutionStages<E: BlockExecutorProvider> {
     /// Executor factory that will create executors.
-    executor_factory: E,
+    executor_provider: E,
+    /// Consensus instance for validating blocks.
+    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
 }
 
-impl<E> ExecutionStages<E> {
+impl<E: BlockExecutorProvider> ExecutionStages<E> {
     /// Create a new set of execution stages with default values.
-    pub const fn new(executor_factory: E, stages_config: StageConfig) -> Self {
-        Self { executor_factory, stages_config }
+    pub const fn new(
+        executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        stages_config: StageConfig,
+    ) -> Self {
+        Self { executor_provider, consensus, stages_config }
     }
 }
 
@@ -365,7 +381,8 @@ where
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::new(self.stages_config.sender_recovery))
             .add_stage(ExecutionStage::from_config(
-                self.executor_factory,
+                self.executor_provider,
+                self.consensus,
                 self.stages_config.execution,
                 self.stages_config.execution_external_clean_threshold(),
             ))

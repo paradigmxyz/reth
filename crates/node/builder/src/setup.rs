@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::BlockTy;
 use alloy_primitives::{BlockNumber, B256};
 use reth_config::{config::StageConfig, PruneConfig};
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -28,7 +28,7 @@ use tokio::sync::watch;
 pub fn build_networked_pipeline<N, Client, Executor>(
     config: &StageConfig,
     client: Client,
-    consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
     provider_factory: ProviderFactory<N>,
     task_executor: &TaskExecutor,
     metrics_tx: reth_stages::MetricEventsSender,
@@ -49,7 +49,7 @@ where
         .into_task_with(task_executor);
 
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
-        .build(client, Arc::clone(&consensus), provider_factory.clone())
+        .build(client, consensus.clone().as_consensus(), provider_factory.clone())
         .into_task_with(task_executor);
 
     let pipeline = build_pipeline(
@@ -76,7 +76,7 @@ pub fn build_pipeline<N, H, B, Executor>(
     stage_config: &StageConfig,
     header_downloader: H,
     body_downloader: B,
-    consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
     max_block: Option<u64>,
     metrics_tx: reth_stages::MetricEventsSender,
     prune_config: Option<PruneConfig>,
@@ -117,6 +117,7 @@ where
             )
             .set(ExecutionStage::new(
                 executor,
+                consensus,
                 stage_config.execution.into(),
                 stage_config.execution_external_clean_threshold(),
                 exex_manager_handle,
