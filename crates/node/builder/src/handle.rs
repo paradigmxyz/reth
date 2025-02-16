@@ -37,3 +37,19 @@ where
             .finish()
     }
 }
+
+pub trait HasNodeHandle {
+    type Node: FullNodeComponents;
+    type AddOns: RethRpcAddOns<Self::Node>;
+
+    fn into_node_handle(self) -> NodeHandle<Self::Node, Self::AddOns>;
+}
+
+impl<N: FullNodeComponents, AO: RethRpcAddOns<N>> HasNodeHandle for NodeHandle<N, AO> {
+    type Node = N;
+    type AddOns = AO;
+
+    fn into_node_handle(self) -> Self {
+        self
+    }
+}

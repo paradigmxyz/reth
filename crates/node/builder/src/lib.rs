@@ -26,7 +26,7 @@ mod builder;
 pub use builder::{add_ons::AddOns, *};
 
 mod launch;
-pub use launch::{engine::EngineNodeLauncher, *};
+pub use launch::{engine::EngineNodeLauncher, local::LocalEngineNodeLauncher, *};
 
 /// Temporarily re-export engine tree config.
 pub use reth_engine_tree::tree::config as engine_tree_config;

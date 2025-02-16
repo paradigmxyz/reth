@@ -7,10 +7,9 @@ use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
-    NodeConfig, NodeHandle, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
-    PayloadTypes,
+    rpc::{EngineValidatorAddOn, PayloadAttributesBuilderAddOn, RethRpcAddOns},
+    FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents, NodeConfig, NodeHandle,
+    NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
@@ -56,7 +55,7 @@ where
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
-    N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
+    N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>> + PayloadAttributesBuilderAddOn<Adapter<N>, PayloadAttributes = <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes>,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
@@ -81,9 +80,12 @@ where
 
         let span = span!(Level::INFO, "node", idx);
         let _enter = span.enter();
+        let node = N::default();
         let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .node(Default::default())
+            .with_types_and_provider::<N, BlockchainProvider<_>>()
+            .with_components(node.components_builder())
+            .with_add_ons(node.add_ons())
             .launch()
             .await?;
 
@@ -131,7 +133,8 @@ where
         >,
     >,
     N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
+        + PayloadAttributesBuilderAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>, PayloadAttributes = <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes>,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
@@ -167,16 +170,8 @@ where
             .with_types_and_provider::<N, BlockchainProvider<_>>()
             .with_components(node.components_builder())
             .with_add_ons(node.add_ons())
-            .launch_with_fn(|builder| {
-                let launcher = EngineNodeLauncher::new(
-                    builder.task_executor().clone(),
-                    builder.config().datadir(),
-                    Default::default(),
-                );
-                builder.launch_with(launcher)
-            })
+            .launch()
             .await?;
-
         let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
         let genesis = node.block_hash(0);

@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
@@ -125,4 +125,10 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
     /// Return a new payload attribute from the builder.
     fn build(&self, timestamp: u64) -> Attributes;
+}
+
+impl<T: 'static> PayloadAttributesBuilder<T> for Box<dyn PayloadAttributesBuilder<T>> {
+    fn build(&self, timestamp: u64) -> T {
+        (**self).build(timestamp)
+    }
 }

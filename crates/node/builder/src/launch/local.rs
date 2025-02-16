@@ -1,15 +1,12 @@
-//! Engine node related functionality.
-
+use crate::{rpc::PayloadAttributesBuilderAddOn, PayloadTypes};
 use alloy_consensus::BlockHeader;
-use futures::{future::Either, stream, stream_select, StreamExt};
+use futures::{stream, stream_select, StreamExt};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
-use reth_engine_service::service::{ChainEvent, EngineService};
-use reth_engine_tree::{
-    engine::{EngineApiRequest, EngineRequestHandler},
-    tree::TreeConfig,
-};
+use reth_engine_local::LocalEngineService;
+use reth_engine_service::service::ChainEvent;
+use reth_engine_tree::tree::TreeConfig;
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
@@ -23,7 +20,7 @@ use reth_node_core::{
     exit::NodeExitFuture,
     primitives::Head,
 };
-use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
+use reth_node_events::node;
 use reth_primitives::EthereumHardforks;
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_tasks::TaskExecutor;
@@ -42,19 +39,18 @@ use crate::{
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 
-/// The engine node launcher.
+/// The local engine node launcher.
 #[derive(Debug)]
-pub struct EngineNodeLauncher {
+pub struct LocalEngineNodeLauncher {
     /// The task executor for the node.
     pub ctx: LaunchContext,
 
-    /// Temporary configuration for engine tree.
-    /// After engine is stabilized, this should be configured through node builder.
+    /// The engine tree config.
     pub engine_tree_config: TreeConfig,
 }
 
-impl EngineNodeLauncher {
-    /// Create a new instance of the ethereum node launcher.
+impl LocalEngineNodeLauncher {
+    /// Create a new instance of the local engine node launcher.
     pub const fn new(
         task_executor: TaskExecutor,
         data_dir: ChainPath<DataDirPath>,
@@ -64,7 +60,8 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>>
+    for LocalEngineNodeLauncher
 where
     Types: NodeTypesForProvider + NodeTypesWithEngine,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
@@ -75,7 +72,8 @@ where
     >,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+        + PayloadAttributesBuilderAddOn<NodeAdapter<T, CB::Components>, PayloadAttributes = <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -194,7 +192,6 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         let event_sender = EventSender::default();
-
         let beacon_engine_handle = BeaconConsensusEngineHandle::new(consensus_engine_tx.clone());
 
         // extract the jwt secret from the args if possible
@@ -208,15 +205,11 @@ where
             engine_events: event_sender.clone(),
         };
         let engine_payload_validator = add_ons.engine_validator(&add_ons_ctx).await?;
+        let payload_attributes_builder = add_ons.payload_attributes_builder(&add_ons_ctx)?;
 
-        let mut engine_service = EngineService::new(
+        let mut engine_service = LocalEngineService::new(
             consensus.clone(),
             ctx.components().block_executor().clone(),
-            ctx.chain_spec(),
-            network_client.clone(),
-            Box::pin(consensus_engine_stream),
-            pipeline,
-            Box::new(ctx.task_executor().clone()),
             ctx.provider_factory().clone(),
             ctx.blockchain_db().clone(),
             pruner,
@@ -225,6 +218,10 @@ where
             engine_tree_config,
             ctx.invalid_block_hook()?,
             ctx.sync_metrics_tx(),
+            consensus_engine_tx.clone(),
+            Box::pin(consensus_engine_stream),
+            ctx.dev_mining_mode(ctx.components().pool()),
+            payload_attributes_builder,
             ctx.components().evm_config().clone(),
         );
 
@@ -233,14 +230,7 @@ where
         let events = stream_select!(
             event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
-            if ctx.node_config().debug.tip.is_none() {
-                Either::Left(
-                    ConsensusLayerHealthEvents::new(Box::new(ctx.blockchain_db().clone()))
-                        .map(Into::into),
-                )
-            } else {
-                Either::Right(stream::empty())
-            },
+            stream::empty(),
             pruner_events.map(Into::into),
             static_file_producer_events.map(Into::into),
         );
@@ -306,7 +296,6 @@ where
         ctx.task_executor().spawn_critical("consensus engine", async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
-                engine_service.orchestrator_mut().start_backfill_sync(initial_target);
             }
 
             let mut res = Ok(());
@@ -317,7 +306,6 @@ where
                     payload = built_payloads.select_next_some() => {
                         if let Some(executed_block) = payload.executed_block() {
                             debug!(target: "reth::cli", block=?executed_block.recovered_block().num_hash(),  "inserting built payload");
-                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block).into());
                         }
                     }
                     event = engine_service.next() => {
