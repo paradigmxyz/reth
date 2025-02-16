@@ -12,4 +12,4 @@ In this chapter we'll go through a few different topics you'll encounter when ru
 1. [Ports](./ports.md)
 1. [Troubleshooting](./troubleshooting.md)
 
-In the future, we also intend to support the [OP Stack](https://stack.optimism.io/docs/understand/explainer/), which will allow you to run Reth as a Layer 2 client. More there soon!
+In the future, we also intend to support the [OP Stack](https://docs.optimism.io/get-started/superchain), which will allow you to run Reth as a Layer 2 client. More there soon!
