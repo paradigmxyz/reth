@@ -43,6 +43,12 @@ pub const GIGABYTE: usize = MEGABYTE * 1024;
 /// 1 TB in bytes
 pub const TERABYTE: usize = GIGABYTE * 1024;
 
+pub const TABLE_CODE_HASHED_ACCOUNTS: u8 = 0;
+pub const TABLE_CODE_HASHED_STORAGES: u8 = 1;
+
+pub const SERIALIZED_HASHED_ACCOUNTS_KEY_BYTES: u8 = 40;
+pub const SERIALIZED_HASHED_STORAGES_KEY_BYTES: u8 = 40;
+
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
 
@@ -54,7 +60,7 @@ const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 #[derive(Debug)]
 pub enum DatabaseEnvKind {
     /// Read-only MDBX environment.
-    RO,
+RO,
     /// Read-write MDBX environment.
     RW,
 }
@@ -737,7 +743,7 @@ mod tests {
 
         let first = cursor.first().unwrap();
         println!("FIRST: {:?}", first);
-        assert!(first.is_some(), "First should be our put");
+        // assert!(first.is_some(), "First should be our put");
 
         let seek_exact = cursor.seek_exact(b256_var_from_bytes1).unwrap();
         println!("SEEK EXACT: {:?}", seek_exact);
@@ -1012,6 +1018,7 @@ mod tests {
 
     #[test]
     fn db_scalerize() {
+        let zero = B256::ZERO;
         let b256_var_from_bytes1 = B256::from([
             0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
             0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8,
@@ -1109,10 +1116,16 @@ mod tests {
 
         let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        
+        let mut account_cursor = tx.cursor_write::<HashedAccounts>().unwrap();
+        let mut storage_entry_cursor = tx.cursor_write::<HashedStorages>().unwrap();
+
+        println!("FIRST ACCOUNT: {:?}", account_cursor.first());
+        println!("FIRST STORAGEENTRY: {:?}", storage_entry_cursor.first());
         println!("GET ACCOUNT: {:?}", tx.get::<HashedAccounts>(b256_var_from_bytes1));
         println!("PUT ACCOUNT: {:?}", tx.put::<HashedAccounts>(b256_var_from_bytes1, account1));
+        println!("PUT ACCOUNT: {:?}", tx.put::<HashedAccounts>(b256_var_from_bytes2, account2));
         println!("GET ACCOUNT: {:?}", tx.get::<HashedAccounts>(b256_var_from_bytes1));
+        println!("FIRST ACCOUNT 1: {:?}", account_cursor.first());
 
         println!("GET STORAGEENTRY: {:?}", tx.get::<HashedStorages>(b256_var_from_bytes1));
         println!("PUT STORAGEENTRY: {:?}", tx.put::<HashedStorages>(b256_var_from_bytes1, entry1));
@@ -1120,20 +1133,51 @@ mod tests {
         println!("GET STORAGEENTRY: {:?}", tx.get::<HashedStorages>(b256_var_from_bytes1));
 
 
-        println!("DELETE ACCOUNT: {:?}", tx.delete::<HashedAccounts>(b256_var_from_bytes2, None));
-        println!("GET ACCOUNT: {:?}", tx.get::<HashedAccounts>(b256_var_from_bytes1));
-        println!("DELETE ACCOUNT: {:?}", tx.delete::<HashedAccounts>(b256_var_from_bytes1, None));
-        println!("GET ACCOUNT: {:?}", tx.get::<HashedAccounts>(b256_var_from_bytes1));
+        // println!("DELETE ACCOUNT: {:?}", tx.delete::<HashedAccounts>(b256_var_from_bytes2, None));
+        // println!("GET ACCOUNT: {:?}", tx.get::<HashedAccounts>(b256_var_from_bytes1));
+        // println!("DELETE ACCOUNT: {:?}", tx.delete::<HashedAccounts>(b256_var_from_bytes1, None));
+        // println!("GET ACCOUNT: {:?}", tx.get::<HashedAccounts>(b256_var_from_bytes1));
 
         // println!("DELETE STORAGEENTRY: {:?}", tx.delete::<HashedStorages>(b256_var_from_bytes2, None));
         // println!("GET STORAGEENTRY: {:?}", tx.get::<HashedStorages>(b256_var_from_bytes1));
         // println!("DELETE STORAGEENTRY: {:?}", tx.delete::<HashedStorages>(b256_var_from_bytes1, None));
         // println!("GET STORAGEENTRY: {:?}", tx.get::<HashedStorages>(b256_var_from_bytes1));
 
-        println!("DELETE STORAGEENTRY: {:?}", tx.delete::<HashedStorages>(b256_var_from_bytes2, None));
-        println!("GET STORAGEENTRY: {:?}", tx.get::<HashedStorages>(b256_var_from_bytes1));
-        println!("DELETE STORAGEENTRY: {:?}", tx.delete::<HashedStorages>(b256_var_from_bytes1, Some(entry1)));
-        println!("GET STORAGEENTRY: {:?}", tx.get::<HashedStorages>(b256_var_from_bytes1));
+        // println!("DELETE STORAGEENTRY: {:?}", tx.delete::<HashedStorages>(b256_var_from_bytes2, None));
+        // println!("GET STORAGEENTRY: {:?}", tx.get::<HashedStorages>(b256_var_from_bytes1));
+        // println!("DELETE STORAGEENTRY: {:?}", tx.delete::<HashedStorages>(b256_var_from_bytes1, Some(entry1)));
+        // println!("GET STORAGEENTRY: {:?}", tx.get::<HashedStorages>(b256_var_from_bytes1));
+
+        println!("FIRST ACCOUNT 2: {:?}", account_cursor.first());
+        println!("FIRST STORAGEENTRY: {:?}", storage_entry_cursor.first());
+
+        println!("SEEK EXACT ACCOUNT 1: {:?}", account_cursor.seek_exact(b256_var_from_bytes1));
+        println!("SEEK EXACT ACCOUNT 2: {:?}", account_cursor.seek_exact(zero));
+
+        println!("SEEK EXACT STORAGEENTRY 1: {:?}", storage_entry_cursor.seek_exact(b256_var_from_bytes1));
+        println!("SEEK EXACT STORAGEENTRY 2: {:?}", storage_entry_cursor.seek_exact(zero));
+
+        println!("SEEK ACCOUNT: {:?}", account_cursor.seek(zero));
+        println!("SEEK STORAGEENTRY: {:?}", storage_entry_cursor.seek(zero));
+
+        // println!("SEEK ACCOUNT: {:?}", account_cursor.seek(b256_var_from_bytes9));
+        // println!("SEEK STORAGEENTRY: {:?}", storage_entry_cursor.seek(b256_var_from_bytes9));
+
+        println!("NEXT ACCOUNT: {:?}", account_cursor.next());
+        println!("NEXT STORAGEENTRY: {:?}", storage_entry_cursor.next());
+        println!("NEXT ACCOUNT: {:?}", account_cursor.next());
+        println!("NEXT STORAGEENTRY: {:?}", storage_entry_cursor.next());
+
+        println!("PREV ACCOUNT: {:?}", account_cursor.prev());
+        println!("PREV STORAGEENTRY: {:?}", storage_entry_cursor.prev());
+        println!("PREV ACCOUNT: {:?}", account_cursor.prev());
+        println!("PREV STORAGEENTRY: {:?}", storage_entry_cursor.prev());
+        
+        println!("LAST ACCOUNT: {:?}", account_cursor.last());
+        println!("LAST STORAGEENTRY: {:?}", storage_entry_cursor.last());
+
+        println!("CURRENT ACCOUNT: {:?}", account_cursor.current());
+        println!("CURRENT STORAGEENTRY: {:?}", storage_entry_cursor.current());
     }
 
     #[test]

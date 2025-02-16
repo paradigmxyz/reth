@@ -58,6 +58,7 @@ parking_lot = { workspace = true, optional = true }
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }
 bincode.workspace = true
+uuid = { version = "1.13.1", features = ["v4"] }
 
 [dev-dependencies]
 # reth libs with arbitrary

@@ -1,5 +1,11 @@
+use super::{SERIALIZED_HASHED_ACCOUNTS_KEY_BYTES, SERIALIZED_HASHED_STORAGES_KEY_BYTES, TABLE_CODE_HASHED_ACCOUNTS, TABLE_CODE_HASHED_STORAGES};
 use rand::{thread_rng, Rng};
 use reth_storage_errors::db::DatabaseError;
+use reth_primitives::{Account, StorageEntry};
+use reth_db_api::{
+    table::{Compress, DupSort, Encode, Table, TableImporter},
+    transaction::{DbTx, DbTxMut},
+};
 use std::{
     fmt,
     io::{Read, Write},
@@ -142,7 +148,7 @@ impl ScalerizeClient {
         Ok(response)
     }
 
-	pub fn get(&mut self, table_code: u8, key: &[u8]) -> Result<Vec<u8>, ClientError> {
+	pub fn get(&mut self, table_code: u8, key: &[u8]) -> Result<Option<(Vec<u8>)>, ClientError> {
         println!("KEY FOR GET: {:?}", key);
         let mut request = vec![OP_GET];
         request.extend_from_slice(&table_code.to_be_bytes());
@@ -154,12 +160,14 @@ impl ScalerizeClient {
 
         let response = self.read_full_response()?;
         println!("RESPONSE FOR GET: {:?}", response);
-        // Ok(response)
         let status = response[0];
         let data = response[1..].to_vec();
-
+        if data.is_empty() {
+            return Ok(None)
+        }
+        
         match status {
-            STATUS_SUCCESS => Ok(data),
+            STATUS_SUCCESS => Ok(Some(data)),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
             _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
         }
@@ -233,7 +241,7 @@ impl ScalerizeClient {
         }
     }
 
-    pub fn first(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+    pub fn first(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u8) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
         let mut request = vec![OP_FIRST];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
@@ -245,15 +253,18 @@ impl ScalerizeClient {
         let response = self.read_full_response()?;
         let status = response[0];
         let data = &response[1..];
+        if data.is_empty() {
+            return Ok(None)
+        }
 
         match status {
-            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len).map(Some),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
             _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
         }
     }
 
-    pub fn seek_exact(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8]) -> Result<Vec<u8>, ClientError> {
+    pub fn seek_exact(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8]) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
         let mut request = vec![OP_SEEK_EXACT];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
@@ -264,17 +275,21 @@ impl ScalerizeClient {
         self.stream.flush()?;
 
         let response = self.read_full_response()?;
+        println!("RESPONSE: {:?}", response);
         let status = response[0];
         let data = &response[1..];
+        if data.is_empty() {
+            return Ok(None)
+        }
 
         match status {
-            STATUS_SUCCESS => Ok(data.to_vec()),
+            STATUS_SUCCESS => self.parse_key_value_response(data, key.len().try_into().unwrap()).map(Some),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
             _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
         }
     }
 
-    pub fn seek(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8]) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+    pub fn seek(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8]) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
         let mut request = vec![OP_SEEK];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
@@ -287,15 +302,18 @@ impl ScalerizeClient {
         let response = self.read_full_response()?;
         let status = response[0];
         let data = &response[1..];
+        if data.is_empty() {
+            return Ok(None)
+        }
 
         match status {
-            STATUS_SUCCESS => self.parse_key_value_response(data, key.len().try_into().unwrap()),
+            STATUS_SUCCESS => self.parse_key_value_response(data, key.len().try_into().unwrap()).map(Some),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
             _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
         }
     }
 
-    pub fn next(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+    pub fn next(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u8) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
         let mut request = vec![OP_NEXT];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
@@ -307,15 +325,18 @@ impl ScalerizeClient {
         let response = self.read_full_response()?;
         let status = response[0];
         let data = &response[1..];
+        if data.is_empty() {
+            return Ok(None)
+        }
 
         match status {
-            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len).map(Some),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
             _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
         }
     }
 
-    pub fn prev(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+    pub fn prev(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u8) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
         let mut request = vec![OP_PREV];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
@@ -327,15 +348,18 @@ impl ScalerizeClient {
         let response = self.read_full_response()?;
         let status = response[0];
         let data = &response[1..];
+        if data.is_empty() {
+            return Ok(None)
+        }
 
         match status {
-            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len).map(Some),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
             _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
         }
     }
 
-    pub fn last(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+    pub fn last(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u8) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
         let mut request = vec![OP_LAST];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
@@ -347,15 +371,18 @@ impl ScalerizeClient {
         let response = self.read_full_response()?;
         let status = response[0];
         let data = &response[1..];
+        if data.is_empty() {
+            return Ok(None)
+        }
 
         match status {
-            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len).map(Some),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
             _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
         }
     }
 
-    pub fn current(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+    pub fn current(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u8) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
         let mut request = vec![OP_CURRENT];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
@@ -367,23 +394,21 @@ impl ScalerizeClient {
         let response = self.read_full_response()?;
         let status = response[0];
         let data = &response[1..];
+        if data.is_empty() {
+            return Ok(None)
+        }
 
         match status {
-            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len).map(Some),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
             _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
         }
     }
 
-    pub fn upsert(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], subkey: Option<&[u8]>, value: &[u8]) -> Result<(), ClientError> {
+    pub fn upsert(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], value: &[u8]) -> Result<(), ClientError> {
         let mut request = vec![OP_UPSERT, table_code];
         request.extend_from_slice(&cursor_id);
-        
-        request.extend_from_slice(key);
-        if let Some(subkey) = subkey {
-            request.extend_from_slice(subkey);
-        }           
-        
+        request.extend_from_slice(key);        
         request.extend_from_slice(value);
         
         println!("UPSERT REQUEST: {:?}", request);
@@ -475,7 +500,7 @@ impl ScalerizeClient {
         }
     }
 
-    pub fn next_dup(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
+    pub fn next_dup(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u8) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
         let mut request = vec![OP_NEXT_DUP];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
@@ -498,7 +523,7 @@ impl ScalerizeClient {
         }
     }
 
-    pub fn next_no_dup(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
+    pub fn next_no_dup(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u8) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
         let mut request = vec![OP_NEXT_NO_DUP];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
@@ -648,7 +673,13 @@ impl ScalerizeClient {
         self.stream.set_nonblocking(false).unwrap_or_else(|e| println!("Failed to set blocking mode: {}", e));
     }
 
-    fn parse_key_value_response(&self, data: &[u8], key_len_in_bytes: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+    fn parse_key_value_response(&self, data: &[u8], key_len_in_bytes: u8) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+        println!("KEY LEN: {:?}", key_len_in_bytes);
+
+        if data.is_empty() {
+            return Ok((vec![], vec![]));
+        }
+
         if data.len() < key_len_in_bytes.try_into().unwrap() {
             return Err(ClientError::InvalidResponse("Response too short for key length".to_string()));
         }

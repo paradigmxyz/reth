@@ -1,6 +1,6 @@
 //! Transaction wrapper for libmdbx-sys.
 
-use super::{cursor::Cursor, scalerize_client::ScalerizeClient};
+use super::{cursor::Cursor, scalerize_client::ScalerizeClient, TABLE_CODE_HASHED_ACCOUNTS, TABLE_CODE_HASHED_STORAGES};
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
     tables::utils::decode_one,
@@ -13,10 +13,6 @@ use reth_db_api::{
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
 use reth_primitives::{Account, StorageEntry};
 use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-
-const TABLE_CODE_HASHED_ACCOUNTS: u8 = 0;
-const TABLE_CODE_HASHED_STORAGES: u8 = 1;
-
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
@@ -108,6 +104,7 @@ impl<K: TransactionKind> Tx<K> {
         Ok(Cursor::new_with_metrics(
             inner,
             self.metrics_handler.as_ref().map(|h| h.env_metrics.clone()),
+            self.scalerize_client.clone(),
         ))
     }
 
@@ -310,35 +307,32 @@ impl<K: TransactionKind> DbTx for Tx<K> {
 
         if let Some(code) = table_code {
             let mut client = self.scalerize_client.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
-            let key = bincode::serialize(&key).map_err(|_| {
-                DatabaseError::Other("Failed to serialize key".to_string())
-            })?;
-            let response = client.get(code, key.as_slice()).map_err(DatabaseError::from)?;
+            let key_bytes = bincode::serialize(&key).map_err(|_| DatabaseError::Other("Failed to serialize key".to_string()))?;
+            let response = client.get(code, key_bytes.as_slice()).map_err(DatabaseError::from)?;
+    
+            if response.is_none() {
+                return Ok(None)
+            }
+            
             match code {
                 TABLE_CODE_HASHED_ACCOUNTS => {
-                    let account: Account = bincode::deserialize(&response).map_err(|_| {
-                        DatabaseError::Other("Failed to deserialize Account".to_string())
-                    })?;
+                    let account: Account = bincode::deserialize(response.as_ref().unwrap()).map_err(|_| {DatabaseError::Other("Failed to deserialize Account".to_string())})?;
                     unsafe {
                         let ptr = &account as *const Account as *const <T as Table>::Value;
-                        return Ok(Some(ptr.read()))
+                        return Ok(Some(ptr.read()))                        
                     }
                 }
                 TABLE_CODE_HASHED_STORAGES => {
-                    let storage_entry: StorageEntry =
-                        bincode::deserialize(&response).map_err(|_| {
-                            DatabaseError::Other("Failed to deserialize StorageEntry".to_string())
-                        })?;
+                    let storage_entry: StorageEntry = bincode::deserialize(response.as_ref().unwrap()).map_err(|_| {DatabaseError::Other("Failed to deserialize StorageEntry".to_string())})?;
                     unsafe {
-                        let ptr =
-                            &storage_entry as *const StorageEntry as *const <T as Table>::Value;
-                        return Ok(Some(ptr.read()))
+                        let ptr = &storage_entry as *const StorageEntry as *const <T as Table>::Value;
+                        return Ok(Some(ptr.read()))                        
                     }
                 }
-                _ => unreachable!(),
+                 _ => unreachable!(),
             }
         }
-
+        
         self.get_by_encoded_key::<T>(&key.encode())
     }
 
@@ -411,30 +405,12 @@ impl DbTxMut for Tx<RW> {
         };
 
         if let Some(code) = table_code {
-            let mut client =
-                self.scalerize_client.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
-            let key = bincode::serialize(&key)
-                .map_err(|_| DatabaseError::Other("Failed to serialize Key".to_string()))?;
-
-            match code {
-                TABLE_CODE_HASHED_ACCOUNTS => {
-                    let account = bincode::serialize(&value).map_err(|_| {
-                        DatabaseError::Other("Failed to serialize Account".to_string())
-                    })?;
-                    client.put(code, key.as_slice(), &account).map_err(DatabaseError::from)?;
-                    return client.write().map_err(DatabaseError::from)
-                }
-                TABLE_CODE_HASHED_STORAGES => {
-                    let storage_entry = bincode::serialize(&value).map_err(|_| {
-                        DatabaseError::Other("Failed to serialize StorageEntry".to_string())
-                    })?;
-                    client
-                        .put(code, key.as_slice(), &storage_entry)
-                        .map_err(DatabaseError::from)?;
-                    return client.write().map_err(DatabaseError::from)
-                }
-                _ => unreachable!(),
-            }
+            let mut client = self.scalerize_client.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
+            let key = bincode::serialize(&key).map_err(|_| DatabaseError::Other("Failed to serialize Key".to_string()))?;
+            let value = bincode::serialize(&value).map_err(|_| {DatabaseError::Other("Failed to serialize Value".to_string())})?;
+            
+            client.put(code, key.as_slice(), &value).map_err(DatabaseError::from)?;
+            return client.write().map_err(DatabaseError::from)
         }
 
         let key = key.encode();
