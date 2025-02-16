@@ -59,6 +59,14 @@ use tracing::{debug, trace};
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
 
+/// Type alias for the connection type of a protocol handler
+type ProtocolHandlerConnection<N, P> =
+    <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection;
+
+/// Type alias for the pending session event sender
+type PendingSessionEventSender<N, P> =
+    mpsc::Sender<PendingSessionEvent<N, ProtocolHandlerConnection<N, P>>>;
+
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
 #[derive(Debug)]
@@ -98,19 +106,9 @@ pub struct SessionManager<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> {
     ///
     /// When a new (pending) session is created, the corresponding [`PendingSessionHandle`] will
     /// get a clone of this sender half.
-    pending_sessions_tx: mpsc::Sender<
-        PendingSessionEvent<
-            N,
-            <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
-        >,
-    >,
+    pending_sessions_tx: PendingSessionEventSender<N, P>,
     /// Receiver half that listens for [`PendingSessionEvent`] produced by pending sessions.
-    pending_session_rx: ReceiverStream<
-        PendingSessionEvent<
-            N,
-            <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
-        >,
-    >,
+    pending_session_rx: ReceiverStream<PendingSessionEvent<N, ProtocolHandlerConnection<N, P>>>,
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
     active_session_tx: MeteredPollSender<ActiveSessionMessage<N>>,
@@ -238,12 +236,7 @@ impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> SessionManager<N, P> {
     pub(crate) async fn handle_incoming_session(
         eth_protocol_handler: Arc<P>,
         disconnect_rx: oneshot::Receiver<()>,
-        events: mpsc::Sender<
-            PendingSessionEvent<
-                N,
-                <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
-            >,
-        >,
+        events: PendingSessionEventSender<N, P>,
         stream: TcpStream,
         session_info: SessionInfo,
         handshake_info: HandshakeInfo,
@@ -272,12 +265,7 @@ impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> SessionManager<N, P> {
     pub(crate) async fn handle_outgoing_session(
         eth_protocol_handler: Arc<P>,
         disconnect_rx: oneshot::Receiver<()>,
-        events: mpsc::Sender<
-            PendingSessionEvent<
-                N,
-                <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection,
-            >,
-        >,
+        events: PendingSessionEventSender<N, P>,
         handshake_info: HandshakeInfo,
         session_id: SessionId,
         remote_addr: SocketAddr,

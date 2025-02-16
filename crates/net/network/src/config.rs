@@ -180,7 +180,7 @@ pub struct NetworkConfigBuilder<
     P: NetworkProtocolHandler<N> = EthNetworkProtocol,
 > {
     /// The Ethereum protocol handler
-    eth_protocol_handler: Option<Arc<P>>,
+    eth_protocol_handler: Arc<P>,
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
     /// How to configure discovery over DNS.
@@ -252,7 +252,7 @@ impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkConfigBuilder<N,
             executor: None,
             hello_message: None,
             extra_protocols: Default::default(),
-            eth_protocol_handler: None,
+            eth_protocol_handler: Arc::new(P::default()),
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
@@ -517,7 +517,7 @@ impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkConfigBuilder<N,
 
     /// Overrides the eth protocol used by the network to handle outgoing and incoming connections.
     pub fn eth_protocol(mut self, protocol: P) -> Self {
-        self.eth_protocol_handler = Some(Arc::new(protocol));
+        self.eth_protocol_handler = Arc::new(protocol);
         self
     }
 
@@ -627,8 +627,6 @@ impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkConfigBuilder<N,
                 }
             }
         }
-
-        let eth_protocol_handler = eth_protocol_handler.expect("eth protocol handler is required");
 
         NetworkConfig {
             client,

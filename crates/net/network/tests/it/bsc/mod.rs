@@ -2,8 +2,7 @@ use chainspec::{boot_nodes, bsc_chain_spec};
 use futures::StreamExt;
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
-    EthNetworkPrimitives, EthNetworkProtocol, NetworkConfig, NetworkEvent,
-    NetworkEventListenerProvider, NetworkManager, PeersInfo,
+    NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager, PeersInfo,
 };
 use reth_network_api::events::{PeerEvent, SessionInfo};
 use reth_primitives::{ForkHash, ForkId};
@@ -34,18 +33,16 @@ async fn test_bsc_network() {
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-    let mut net_cfg =
-        NetworkConfig::<_, EthNetworkPrimitives, EthNetworkProtocol>::builder(secret_key)
-            .listener_addr(local_addr)
-            .with_pow()
-            .eth_protocol(EthNetworkProtocol)
-            .build_with_noop_provider(bsc_chain_spec())
-            .set_discovery_v4(
-                Discv4ConfigBuilder::default()
-                    .add_boot_nodes(boot_nodes())
-                    .lookup_interval(Duration::from_secs(1))
-                    .build(),
-            );
+    let mut net_cfg = NetworkConfig::builder(secret_key)
+        .listener_addr(local_addr)
+        .with_pow()
+        .build_with_noop_provider(bsc_chain_spec())
+        .set_discovery_v4(
+            Discv4ConfigBuilder::default()
+                .add_boot_nodes(boot_nodes())
+                .lookup_interval(Duration::from_secs(1))
+                .build(),
+        );
 
     let fork_id = ForkId { hash: ForkHash([0x07, 0xb5, 0x43, 0x28]), next: 0 };
     net_cfg.fork_filter.set_current_fork_id(fork_id);
