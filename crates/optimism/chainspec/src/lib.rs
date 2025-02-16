@@ -102,17 +102,14 @@ impl OpChainSpecBuilder {
     /// Enable Bedrock at genesis
     pub fn bedrock_activated(mut self) -> Self {
         self.inner = self.inner.paris_activated();
-        self.inner =
-            self.inner.with_fork(OpHardfork::Bedrock, ForkCondition::Block(0));
+        self.inner = self.inner.with_fork(OpHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
     /// Enable Regolith at genesis
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.inner = self
-            .inner
-            .with_fork(OpHardfork::Regolith, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -121,9 +118,7 @@ impl OpChainSpecBuilder {
         self = self.regolith_activated();
         // Canyon also activates changes from L1's Shanghai hardfork
         self.inner = self.inner.with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
-        self.inner = self
-            .inner
-            .with_fork(OpHardfork::Canyon, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -131,36 +126,28 @@ impl OpChainSpecBuilder {
     pub fn ecotone_activated(mut self) -> Self {
         self = self.canyon_activated();
         self.inner = self.inner.with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
-        self.inner = self
-            .inner
-            .with_fork(OpHardfork::Ecotone, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Fjord at genesis
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
-        self.inner = self
-            .inner
-            .with_fork(OpHardfork::Fjord, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Granite at genesis
     pub fn granite_activated(mut self) -> Self {
         self = self.fjord_activated();
-        self.inner = self
-            .inner
-            .with_fork(OpHardfork::Granite, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Holocene at genesis
     pub fn holocene_activated(mut self) -> Self {
         self = self.granite_activated();
-        self.inner = self
-            .inner
-            .with_fork(OpHardfork::Holocene, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Holocene, ForkCondition::Timestamp(0));
         self
     }
 
@@ -253,9 +240,7 @@ impl Hardforks for OpChainSpec {
         self.inner.fork(fork)
     }
 
-    fn forks_iter(
-        &self,
-    ) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.inner.forks_iter()
     }
 
