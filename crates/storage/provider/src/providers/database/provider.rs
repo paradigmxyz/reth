@@ -23,7 +23,7 @@ use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Header, TxRecei
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256HashMap, HashMap, HashSet},
+    map::{hash_map, B256Map, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
@@ -291,7 +291,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
         // sets.
-        let mut storage_prefix_sets = B256HashMap::<PrefixSet>::default();
+        let mut storage_prefix_sets = B256Map::<PrefixSet>::default();
         let storage_entries = self.unwind_storage_hashing(changed_storages.iter().copied())?;
         for (hashed_address, hashed_slots) in storage_entries {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
@@ -2351,7 +2351,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
     /// updates by the hashed address, writing in sorted order.
     fn write_storage_trie_updates(
         &self,
-        storage_tries: &B256HashMap<StorageTrieUpdates>,
+        storage_tries: &B256Map<StorageTrieUpdates>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
         let mut storage_tries = Vec::from_iter(storage_tries);

@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, map::B256HashMap, Bytes, B256};
+use alloy_primitives::{keccak256, map::B256Map, Bytes, B256};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::State;
 
@@ -11,13 +11,13 @@ pub struct ExecutionWitnessRecord {
     /// the execution of the block, including during state root recomputation.
     ///
     /// `keccak(bytecodes) => bytecodes`
-    pub codes: B256HashMap<Bytes>,
+    pub codes: B256Map<Bytes>,
     /// Map of all hashed account and storage keys (addresses and slots) to their preimages
     /// (unhashed account addresses and storage slots, respectively) that were required during
     /// the execution of the block. during the execution of the block.
     ///
     /// `keccak(address|slot) => address|slot`
-    pub keys: B256HashMap<Bytes>,
+    pub keys: B256Map<Bytes>,
 }
 
 impl ExecutionWitnessRecord {

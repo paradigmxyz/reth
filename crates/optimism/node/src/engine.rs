@@ -1,5 +1,5 @@
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
+    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
 };
 use core::fmt;
 use op_alloy_rpc_types_engine::{
@@ -12,8 +12,8 @@ use reth_node_api::{
         EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
         VersionSpecificValidationError,
     },
-    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, ExecutionData,
-    NodePrimitives, PayloadValidator,
+    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
+    PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
@@ -238,7 +238,7 @@ mod test {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,
                 genesis: BASE_SEPOLIA.inner.genesis.clone(),
-                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
+                genesis_header: BASE_SEPOLIA.inner.genesis_header.clone(),
                 paris_block_and_final_difficulty: BASE_SEPOLIA
                     .inner
                     .paris_block_and_final_difficulty,

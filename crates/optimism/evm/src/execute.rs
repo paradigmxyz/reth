@@ -15,15 +15,14 @@ use reth_evm::{
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
     },
     state_change::post_block_balance_increments,
-    system_calls::{OnStateHook, SystemCaller},
+    system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
     ConfigureEvmFor, Database, Evm,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt, OpPrimitives};
-use reth_primitives::{NodePrimitives, RecoveredBlock};
-use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_primitives_traits::{BlockBody, NodePrimitives, RecoveredBlock, SignedTransaction};
 use revm::State;
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use tracing::trace;
@@ -176,7 +175,7 @@ where
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body().transaction_count());
-        for (sender, transaction) in block.transactions_with_sender() {
+        for (tx_index, (sender, transaction)) in block.transactions_with_sender().enumerate() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.gas_limit() - cumulative_gas_used;
@@ -220,7 +219,8 @@ where
                 ?transaction,
                 "Executed transaction"
             );
-            self.system_caller.on_state(&result_and_state.state);
+            self.system_caller
+                .on_state(StateChangeSource::Transaction(tx_index), &result_and_state.state);
             let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
@@ -276,7 +276,10 @@ where
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
         // call state hook with changes due to balance increments.
         let balance_state = balance_increment_state(&balance_increments, &mut self.state)?;
-        self.system_caller.on_state(&balance_state);
+        self.system_caller.on_state(
+            StateChangeSource::PostBlock(StateChangePostBlockSource::BalanceIncrements),
+            &balance_state,
+        );
 
         Ok(Requests::default())
     }
@@ -287,6 +290,10 @@ where
 
     fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
+    }
+
+    fn into_state(self) -> revm::db::State<Self::DB> {
+        self.state
     }
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
@@ -320,16 +327,16 @@ impl OpExecutorProvider {
 mod tests {
     use super::*;
     use crate::OpChainSpec;
-    use alloy_consensus::{Header, TxEip1559};
+    use alloy_consensus::{Block, BlockBody, Header, TxEip1559};
     use alloy_primitives::{
         b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256,
     };
     use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
+    use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-    use reth_primitives::{Account, Block, BlockBody};
+    use reth_primitives_traits::Account;
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
@@ -413,7 +420,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {
@@ -421,8 +428,8 @@ mod tests {
         });
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
-        executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+        let output = executor
+            .execute(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
@@ -431,9 +438,9 @@ mod tests {
             ))
             .unwrap();
 
-        let receipts = executor.receipts();
-        let tx_receipt = &receipts[0][0];
-        let deposit_receipt = &receipts[0][1];
+        let receipts = &output.receipts;
+        let tx_receipt = &receipts[0];
+        let deposit_receipt = &receipts[1];
 
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
         // deposit_nonce is present only in deposit transactions
@@ -489,7 +496,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {
@@ -497,8 +504,8 @@ mod tests {
         });
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
-        executor
-            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
+        let output = executor
+            .execute(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
@@ -507,9 +514,9 @@ mod tests {
             ))
             .expect("Executing a block while canyon is active should not fail");
 
-        let receipts = executor.receipts();
-        let tx_receipt = &receipts[0][0];
-        let deposit_receipt = &receipts[0][1];
+        let receipts = &output.receipts;
+        let tx_receipt = &receipts[0];
+        let deposit_receipt = &receipts[1];
 
         // deposit_receipt_version is set to 1 for post canyon deposit transactions
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));

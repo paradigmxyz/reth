@@ -19,6 +19,10 @@ pub mod primitives {
     pub use reth_primitives_traits::*;
 }
 
+/// Re-exported cli types
+#[cfg(feature = "cli")]
+pub use reth_ethereum_cli as cli;
+
 /// Re-exported consensus types
 #[cfg(feature = "consensus")]
 pub mod consensus {
@@ -43,6 +47,10 @@ pub mod evm {
     #[doc(inline)]
     pub use reth_evm as primitives;
 }
+
+/// Re-exported exex types
+#[cfg(feature = "exex")]
+pub use reth_exex as exex;
 
 /// Re-exported reth network types
 #[cfg(feature = "network")]
@@ -77,6 +85,13 @@ pub mod node {
     pub use reth_node_ethereum::*;
 }
 
+/// Re-exported reth trie types
+#[cfg(feature = "trie")]
+pub mod trie {
+    #[doc(inline)]
+    pub use reth_trie::*;
+}
+
 /// Re-exported rpc types
 #[cfg(feature = "rpc")]
 pub mod rpc {
@@ -87,6 +102,12 @@ pub mod rpc {
     pub use reth_rpc_api as api;
     #[doc(inline)]
     pub use reth_rpc_builder as builder;
-    #[doc(inline)]
-    pub use reth_rpc_eth_types as eth;
+
+    /// Re-exported eth types
+    pub mod eth {
+        #[doc(inline)]
+        pub use alloy_rpc_types_eth as primitives;
+        #[doc(inline)]
+        pub use reth_rpc_eth_types::*;
+    }
 }

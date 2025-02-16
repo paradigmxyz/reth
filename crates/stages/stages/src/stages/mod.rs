@@ -57,6 +57,7 @@ mod tests {
         table::Table,
         transaction::{DbTx, DbTxMut},
     };
+    use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
     use reth_primitives::{Account, Bytecode, SealedBlock, StaticFileSegment};
@@ -152,6 +153,9 @@ mod tests {
                 EthExecutorProvider::ethereum(Arc::new(
                     ChainSpecBuilder::mainnet().berlin_activated().build(),
                 )),
+                Arc::new(EthBeaconConsensus::new(Arc::new(
+                    ChainSpecBuilder::mainnet().berlin_activated().build(),
+                ))),
                 ExecutionStageThresholds {
                     max_blocks: Some(100),
                     max_changes: None,

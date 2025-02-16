@@ -51,6 +51,7 @@ use reth_node_core::{
     args::LogArgs,
     version::{LONG_VERSION, SHORT_VERSION},
 };
+use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::OpExecutorProvider;
 use reth_optimism_node::{OpNetworkPrimitives, OpNode};
 use reth_tracing::FileWorkerGuard;
@@ -147,7 +148,11 @@ where
 
         let runner = CliRunner::default();
         match self.command {
-            Commands::Node(command) => {
+            Commands::Node(mut command) => {
+                // TODO: remove when we're ready to roll out State Root Task on OP-Reth
+                if !command.engine.state_root_task_enabled {
+                    command.engine.legacy_state_root_task_enabled = true;
+                }
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => {
@@ -165,8 +170,9 @@ where
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command
-                    .execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, OpExecutorProvider::optimism)
+                command.execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, |spec| {
+                    (OpExecutorProvider::optimism(spec.clone()), OpBeaconConsensus::new(spec))
+                })
             }),
             Commands::P2P(command) => {
                 runner.run_until_ctrl_c(command.execute::<OpNetworkPrimitives>())
@@ -203,7 +209,7 @@ mod test {
         let cmd = NodeCommand::<OpChainSpecParser, NoArgs>::parse_from(["op-reth", "--dev"]);
         let chain = OP_DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
-        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+        assert_eq!(cmd.chain.genesis_hash(), chain.genesis_hash());
         assert_eq!(
             cmd.chain.paris_block_and_final_difficulty,
             chain.paris_block_and_final_difficulty

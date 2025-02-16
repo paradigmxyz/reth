@@ -13,14 +13,14 @@ extern crate alloc;
 
 mod payload;
 use alloc::sync::Arc;
-use alloy_rpc_types_engine::{ExecutionPayload, PayloadError};
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, PayloadError};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_chainspec::ChainSpec;
-use reth_engine_primitives::{EngineTypes, EngineValidator, ExecutionData, PayloadValidator};
+use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
 use reth_payload_primitives::{
     validate_version_specific_fields, BuiltPayload, EngineApiMessageVersion,
     EngineObjectValidationError, PayloadOrAttributes, PayloadTypes,
