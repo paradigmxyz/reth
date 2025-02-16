@@ -1,28 +1,12 @@
-# reth
+# reth download
 
-Reth
+Downloads and extracts node snapshots
 
 ```bash
-$ reth --help
+$ reth download --help
 ```
 ```txt
-Usage: reth [OPTIONS] <COMMAND>
-
-Commands:
-  node          Start the node
-  init          Initialize the database from a genesis file
-  init-state    Initialize the database from a state dump file
-  import        This syncs RLP encoded blocks from a file
-  dump-genesis  Dumps genesis block JSON configuration to stdout
-  db            Database debugging utilities
-  download      Downloads and extracts node snapshots
-  stage         Manipulate individual stages
-  p2p           P2P Debugging utilities
-  config        Write config to stdout
-  debug         Various debug routines
-  recover       Scripts for node recovery
-  prune         Prune according to the configuration without any limits
-  help          Print this message or the help of the given subcommand(s)
+Usage: reth download [OPTIONS]
 
 Options:
       --chain <CHAIN_OR_PATH>
@@ -48,8 +32,30 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
-  -V, --version
-          Print version
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static-files <PATH>
+          The absolute path to store static files in.
+
+  -u, --url <URL>
+          Specify a snapshot URL or let the command propose a default one.
+
+          Available snapshot sources:
+          - https://downloads.merkle.io (default, mainnet archive)
+          - https://publicnode.com/snapshots (full nodes & testnets)
+
+          If no URL is provided, the latest mainnet archive snapshot
+          will be proposed for download from merkle.io
 
 Logging:
       --log.stdout.format <FORMAT>
