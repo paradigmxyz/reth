@@ -94,7 +94,7 @@ impl OpChainSpecBuilder {
     }
 
     /// Remove the given fork from the spec.
-    pub fn without_fork(mut self, fork: reth_optimism_forks::OpHardfork) -> Self {
+    pub fn without_fork(mut self, fork: OpHardfork) -> Self {
         self.inner = self.inner.without_fork(fork);
         self
     }
@@ -103,7 +103,7 @@ impl OpChainSpecBuilder {
     pub fn bedrock_activated(mut self) -> Self {
         self.inner = self.inner.paris_activated();
         self.inner =
-            self.inner.with_fork(reth_optimism_forks::OpHardfork::Bedrock, ForkCondition::Block(0));
+            self.inner.with_fork(OpHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
@@ -112,7 +112,7 @@ impl OpChainSpecBuilder {
         self = self.bedrock_activated();
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Regolith, ForkCondition::Timestamp(0));
+            .with_fork(OpHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -123,7 +123,7 @@ impl OpChainSpecBuilder {
         self.inner = self.inner.with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Canyon, ForkCondition::Timestamp(0));
+            .with_fork(OpHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -133,7 +133,7 @@ impl OpChainSpecBuilder {
         self.inner = self.inner.with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Ecotone, ForkCondition::Timestamp(0));
+            .with_fork(OpHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
@@ -142,7 +142,7 @@ impl OpChainSpecBuilder {
         self = self.ecotone_activated();
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Fjord, ForkCondition::Timestamp(0));
+            .with_fork(OpHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
@@ -151,7 +151,7 @@ impl OpChainSpecBuilder {
         self = self.fjord_activated();
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Granite, ForkCondition::Timestamp(0));
+            .with_fork(OpHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
@@ -160,7 +160,7 @@ impl OpChainSpecBuilder {
         self = self.granite_activated();
         self.inner = self
             .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Holocene, ForkCondition::Timestamp(0));
+            .with_fork(OpHardfork::Holocene, ForkCondition::Timestamp(0));
         self
     }
 
@@ -199,7 +199,7 @@ impl OpChainSpec {
 impl EthChainSpec for OpChainSpec {
     type Header = Header;
 
-    fn chain(&self) -> alloy_chains::Chain {
+    fn chain(&self) -> Chain {
         self.inner.chain()
     }
 
@@ -249,13 +249,13 @@ impl EthChainSpec for OpChainSpec {
 }
 
 impl Hardforks for OpChainSpec {
-    fn fork<H: reth_chainspec::Hardfork>(&self, fork: H) -> reth_chainspec::ForkCondition {
+    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
         self.inner.fork(fork)
     }
 
     fn forks_iter(
         &self,
-    ) -> impl Iterator<Item = (&dyn reth_chainspec::Hardfork, reth_chainspec::ForkCondition)> {
+    ) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.inner.forks_iter()
     }
 
@@ -413,7 +413,7 @@ impl OpGenesisInfo {
                                 BaseFeeParams::new(denominator as u128, elasticity as u128),
                             ),
                             (
-                                reth_optimism_forks::OpHardfork::Canyon.boxed(),
+                                OpHardfork::Canyon.boxed(),
                                 BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
                             ),
                         ]
