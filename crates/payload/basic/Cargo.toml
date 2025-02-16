@@ -34,6 +34,7 @@ alloy-eips.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "time"] }
+tokio-stream.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
 

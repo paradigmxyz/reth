@@ -12,8 +12,8 @@ use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_eips::{eip4895::Withdrawals, merge::SLOT_DURATION};
 use alloy_primitives::{B256, U256};
-use futures_core::ready;
-use futures_util::FutureExt;
+use futures_core::{ready, Stream};
+use futures_util::{FutureExt, StreamExt};
 use reth_chainspec::EthereumHardforks;
 use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
@@ -35,9 +35,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    sync::{oneshot, Semaphore},
+    sync::{broadcast, oneshot, Semaphore},
     time::{Interval, Sleep},
 };
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::{debug, trace, warn};
 
 mod metrics;
@@ -167,6 +168,8 @@ where
 
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
+        let (best_tx, best_rx) = broadcast::channel(1000);
+
         let mut job = BasicPayloadJob {
             config,
             executor: self.executor.clone(),
@@ -174,6 +177,8 @@ where
             // ticks immediately
             interval: tokio::time::interval(self.config.interval),
             best_payload: PayloadState::Missing,
+            best_payload_tx: best_tx,
+            best_payload_rx: best_rx,
             pending_block: None,
             cached_reads,
             payload_task_guard: self.payload_task_guard.clone(),
@@ -315,6 +320,8 @@ where
     interval: Interval,
     /// The best payload so far and its state.
     best_payload: PayloadState<Builder::BuiltPayload>,
+    best_payload_tx: broadcast::Sender<Builder::BuiltPayload>,
+    best_payload_rx: broadcast::Receiver<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pending_block: Option<PendingPayload<Builder::BuiltPayload>>,
     /// Restricts how many generator tasks can be executed at once.
@@ -379,7 +386,7 @@ where
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // check if the interval is reached
@@ -398,6 +405,7 @@ where
                     BuildOutcome::Better { payload, cached_reads } => {
                         this.cached_reads = Some(cached_reads);
                         debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
+                        let _ = this.best_payload_tx.send(payload.clone());
                         this.best_payload = PayloadState::Best(payload);
                     }
                     BuildOutcome::Freeze(payload) => {
@@ -455,6 +463,13 @@ where
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
         Ok(self.config.attributes.clone())
+    }
+
+    fn subscribe_best_payloads(
+        &self,
+    ) -> Pin<Box<dyn Stream<Item = Self::BuiltPayload> + Send + 'static>> {
+        let rx = self.best_payload_rx.resubscribe();
+        BroadcastStream::new(rx).filter_map(|res| async { res.ok() }).boxed()
     }
 
     fn resolve_kind(
@@ -599,7 +614,7 @@ where
 
         if let Some(best) = this.best_payload.take() {
             debug!(target: "payload_builder", "resolving best payload");
-            return Poll::Ready(Ok(best))
+            return Poll::Ready(Ok(best));
         }
 
         if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() {
@@ -615,12 +630,12 @@ where
                         Poll::Ready(res)
                     }
                     Err(err) => Poll::Ready(Err(err.into())),
-                }
+                };
             }
         }
 
         if this.is_empty() {
-            return Poll::Ready(Err(PayloadBuilderError::MissingPayload))
+            return Poll::Ready(Err(PayloadBuilderError::MissingPayload));
         }
 
         Poll::Pending
@@ -897,11 +912,11 @@ where
     ChainSpec: EthereumHardforks,
 {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-        return Ok(None)
+        return Ok(None);
     }
 
     if withdrawals.is_empty() {
-        return Ok(Some(EMPTY_WITHDRAWALS))
+        return Ok(Some(EMPTY_WITHDRAWALS));
     }
 
     let balance_increments =
