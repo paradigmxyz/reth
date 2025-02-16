@@ -29,6 +29,11 @@ pub struct EngineCapabilities {
 }
 
 impl EngineCapabilities {
+    /// Creates a new [`EngineCapabilities`] with a custom list of capabilities.
+    pub fn new(capabilities: &[&str]) -> Self {
+        Self { inner: capabilities.iter().copied().map(str::to_owned).collect() }
+    }
+
     /// Returns the list of all supported Engine capabilities for Prague spec.
     fn prague() -> Self {
         Self { inner: CAPABILITIES.iter().copied().map(str::to_owned).collect() }
@@ -37,6 +42,16 @@ impl EngineCapabilities {
     /// Returns the list of all supported Engine capabilities.
     pub fn list(&self) -> Vec<String> {
         self.inner.iter().cloned().collect()
+    }
+
+    /// Adds a new capability to the list.
+    pub fn add_capability(&mut self, capability: &str) {
+        self.inner.insert(capability.to_owned());
+    }
+
+    /// Removes a capability from the list.
+    pub fn remove_capability(&mut self, capability: &str) {
+        self.inner.remove(capability);
     }
 }
 
