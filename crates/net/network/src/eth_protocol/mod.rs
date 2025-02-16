@@ -17,10 +17,8 @@ use std::{fmt, future::Future, pin::Pin};
 use tokio::net::TcpStream;
 
 pub(crate) mod eth;
-
 /// A type alias for a future that resolves to a `PendingSessionEvent`.
-pub(crate) type ConnectionFut<N, C> =
-    Pin<Box<dyn Future<Output = PendingSessionEvent<N, C>> + Send>>;
+pub type ConnectionFut<N, C> = Pin<Box<dyn Future<Output = PendingSessionEvent<N, C>> + Send>>;
 
 /// This trait is responsible for handling the protocol negotiation and authentication.
 pub trait NetworkProtocolHandler<N: NetworkPrimitives>:
@@ -78,6 +76,7 @@ pub trait ConnectionHandler<N: NetworkPrimitives>: Send + Sync + 'static {
     /// A connection resolves to a `PendingSessionEvent`.
     type ConnectionFut: Future<Output = PendingSessionEvent<N, Self::Connection>> + Send + 'static;
 
+    /// The connection type.
     type Connection: NetworkStream<N>;
 
     /// Invoked when a new connection needs to be established, from either an incoming or outgoing

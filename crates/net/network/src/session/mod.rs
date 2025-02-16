@@ -930,17 +930,19 @@ pub async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
 }
 
 #[derive(Clone, Debug)]
+#[allow(missing_docs)]
 pub struct SessionInfo {
-    pub(crate) session_id: SessionId,
-    pub(crate) remote_addr: SocketAddr,
-    pub(crate) secret_key: SecretKey,
-    pub(crate) local_addr: Option<SocketAddr>,
+    pub session_id: SessionId,
+    pub remote_addr: SocketAddr,
+    pub secret_key: SecretKey,
+    pub local_addr: Option<SocketAddr>,
 }
 
+#[allow(missing_docs)]
 pub struct HandshakeInfo {
-    pub(crate) hello_msg: HelloMessageWithProtocols,
-    pub(crate) status_msg: Status,
-    pub(crate) fork_filter: ForkFilter,
+    pub hello_msg: HelloMessageWithProtocols,
+    pub status_msg: Status,
+    pub fork_filter: ForkFilter,
     pub(crate) extra_handlers: RlpxSubProtocolHandlers,
 }
 

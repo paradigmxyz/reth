@@ -124,7 +124,8 @@ pub mod test_utils;
 pub mod cache;
 pub mod config;
 pub mod error;
-mod eth_protocol;
+/// Eth network protocol implementation.
+pub mod eth_protocol;
 pub mod eth_requests;
 pub mod import;
 pub mod message;
@@ -158,8 +159,9 @@ pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 pub use reth_network_types::{PeersConfig, SessionsConfig};
 pub use session::{
     get_ecies_stream, ActiveSessionHandle, ActiveSessionMessage, Direction, EthRlpxConnection,
-    PeerInfo, PendingSessionEvent, PendingSessionHandle, PendingSessionHandshakeError,
-    SessionCommand, SessionEvent, SessionId, SessionManager, TryFromPeerMessage,
+    HandshakeInfo, PeerInfo, PendingSessionEvent, PendingSessionHandle,
+    PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId, SessionInfo,
+    SessionManager, TryFromPeerMessage,
 };
 
 pub use builder::NetworkBuilder;

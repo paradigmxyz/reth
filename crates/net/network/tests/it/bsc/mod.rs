@@ -1,8 +1,10 @@
 use chainspec::{boot_nodes, bsc_chain_spec};
 use futures::StreamExt;
+use network::BscNetworkProtocol;
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
-    NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager, PeersInfo,
+    EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider,
+    NetworkManager, PeersInfo,
 };
 use reth_network_api::events::{PeerEvent, SessionInfo};
 use reth_primitives::{ForkHash, ForkId};
@@ -17,6 +19,7 @@ use std::{
 use tracing::info;
 
 mod chainspec;
+mod network;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_bsc_network() {
@@ -36,6 +39,7 @@ async fn test_bsc_network() {
     let mut net_cfg = NetworkConfig::builder(secret_key)
         .listener_addr(local_addr)
         .with_pow()
+        .eth_protocol(BscNetworkProtocol::default())
         .build_with_noop_provider(bsc_chain_spec())
         .set_discovery_v4(
             Discv4ConfigBuilder::default()
@@ -46,13 +50,13 @@ async fn test_bsc_network() {
 
     let fork_id = ForkId { hash: ForkHash([0x07, 0xb5, 0x43, 0x28]), next: 0 };
     net_cfg.fork_filter.set_current_fork_id(fork_id);
-    let net_manager = NetworkManager::eth(net_cfg).await.unwrap();
+    let net_manager =
+        NetworkManager::<EthNetworkPrimitives, BscNetworkProtocol>::new(net_cfg).await.unwrap();
 
     let net_handle = net_manager.handle().clone();
     let mut events = net_handle.event_listener();
 
     tokio::spawn(net_manager);
-    info!("Looking for BSC peers...");
 
     while let Some(evt) = events.next().await {
         match evt {
@@ -63,7 +67,6 @@ async fn test_bsc_network() {
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {
                 info!(peers=%net_handle.num_connected_peers() , %peer_id, ?reason, "Session closed.");
             }
-
             _ => {}
         }
     }
