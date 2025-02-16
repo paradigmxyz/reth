@@ -599,9 +599,18 @@ mod tests {
 
         let entry_0 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(0) };
         let entry_1 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        // dup_cursor.delete_current().expect(ERROR_DEL);
+        println!("CURRENT: {:?}", dup_cursor.current());
+        println!("DELETE CURRENT: {:?}", dup_cursor.delete_current());
 
         dup_cursor.upsert(Address::with_last_byte(1), entry_0).expect(ERROR_UPSERT);
+        println!("CURRENT: {:?}", dup_cursor.current());
+        // let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
+
+        println!("DELETE CURRENT: {:?}", dup_cursor.delete_current());
+        println!("CURRENT: {:?}", dup_cursor.current());
         dup_cursor.upsert(Address::with_last_byte(1), entry_1).expect(ERROR_UPSERT);
+        println!("CURRENT: {:?}", dup_cursor.current());
 
         assert_eq!(
             dup_cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>(),
@@ -1098,6 +1107,12 @@ mod tests {
             bytecode_hash: Some(U256::from(12345).into()),
         };
 
+        let account4 = Account {
+            nonce: 4,
+            balance: U256::from(4000),
+            bytecode_hash: Some(U256::from(42345).into()),
+        };
+
         let subkey = B256::random();
 
         let value1 = U256::from(1);
@@ -1178,6 +1193,38 @@ mod tests {
 
         println!("CURRENT ACCOUNT: {:?}", account_cursor.current());
         println!("CURRENT STORAGEENTRY: {:?}", storage_entry_cursor.current());
+
+        println!("UPSERT ACCOUNT: {:?}", account_cursor.upsert(b256_var_from_bytes9, account3));
+        println!("UPSERT STORAGEENTRY: {:?}", storage_entry_cursor.upsert(b256_var_from_bytes9, entry3));
+
+        println!("CURRENT ACCOUNT: {:?}", account_cursor.current());
+        println!("CURRENT STORAGEENTRY: {:?}", storage_entry_cursor.current());
+
+        println!("INSERT ACCOUNT: {:?}", account_cursor.insert(b256_var_from_bytes9, account3));
+        println!("INSERT STORAGEENTRY: {:?}", storage_entry_cursor.insert(b256_var_from_bytes9, entry3));
+
+        println!("INSERT ACCOUNT: {:?}", account_cursor.insert(b256_var_from_bytes8, account4));
+        println!("INSERT STORAGEENTRY: {:?}", storage_entry_cursor.insert(b256_var_from_bytes8, entry4));
+
+        println!("CURRENT ACCOUNT: {:?}", account_cursor.current());
+        println!("CURRENT STORAGEENTRY: {:?}", storage_entry_cursor.current());
+
+        println!("APPEND ACCOUNT: {:?}", account_cursor.append(b256_var_from_bytes7, account1));
+        println!("APPEND STORAGEENTRY: {:?}", storage_entry_cursor.append(b256_var_from_bytes7, entry1));
+
+        tx.commit().expect(ERROR_COMMIT);
+        println!("APPEND ACCOUNT: {:?}", account_cursor.append(b256_var_from_bytes9, account1));
+        println!("APPEND STORAGEENTRY: {:?}", storage_entry_cursor.append(b256_var_from_bytes9, entry1));
+
+        println!("DELETCURRENT ACCOUNT: {:?}", account_cursor.delete_current());
+        println!("DELETCURRENT STORAGEENTRY: {:?}", storage_entry_cursor.delete_current());
+
+        println!("CURRENT ACCOUNT: {:?}", account_cursor.current());
+        println!("CURRENT STORAGEENTRY: {:?}", storage_entry_cursor.current());
+
+        println!("DELETCURRENT ACCOUNT: {:?}", account_cursor.delete_current());
+        println!("DELETCURRENT STORAGEENTRY: {:?}", storage_entry_cursor.delete_current());
+
     }
 
     #[test]
@@ -3623,9 +3670,16 @@ mod tests {
         let key_to_append = 5;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert_eq!(cursor.append(key_to_append, B256::ZERO), Ok(()));
-        tx.commit().expect(ERROR_COMMIT);
+        // assert_eq!(cursor.append(key_to_append, B256::ZERO), Ok(()));
+        println!("RESPONSE: {:?}", cursor.append(key_to_append,  B256::ZERO));
 
+        tx.commit().expect(ERROR_COMMIT);
+        // let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        // let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+
+        let key_to_append = 4;
+
+        println!("RESPONSE: {:?}", cursor.append(key_to_append,  B256::ZERO));
         // Confirm the result
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();

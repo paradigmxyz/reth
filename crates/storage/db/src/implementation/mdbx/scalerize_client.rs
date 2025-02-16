@@ -428,14 +428,11 @@ impl ScalerizeClient {
         }
     }
 
-    pub fn insert(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], subkey: Option<&[u8]>, value: &[u8]) -> Result<(), ClientError> {
+    pub fn insert(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], value: &[u8]) -> Result<(), ClientError> {
         let mut request = vec![OP_INSERT, table_code];
         request.extend_from_slice(&cursor_id);
-        
         request.extend_from_slice(key);
-        if let Some(subkey) = subkey {
-            request.extend_from_slice(subkey);
-        }           request.extend_from_slice(value);
+        request.extend_from_slice(value);
         
         println!("INSERT REQUEST: {:?}", request);
         self.stream.write_all(&request)?;
@@ -454,14 +451,11 @@ impl ScalerizeClient {
         }
     }
 
-    pub fn append(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], subkey: Option<&[u8]>, value: &[u8]) -> Result<(), ClientError> {
+    pub fn append(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], value: &[u8]) -> Result<(), ClientError> {
         let mut request = vec![OP_APPEND, table_code];
         request.extend_from_slice(&cursor_id);
-        
         request.extend_from_slice(key);
-        if let Some(subkey) = subkey {
-            request.extend_from_slice(subkey);
-        }           request.extend_from_slice(value);
+        request.extend_from_slice(value);
         
         println!("APPEND REQUEST: {:?}", request);
         self.stream.write_all(&request)?;
