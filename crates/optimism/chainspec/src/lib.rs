@@ -38,7 +38,6 @@ use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_primitives_traits::sync::LazyLock;
-use tracing::debug;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -447,8 +446,11 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
                         Some(storage_root_unhashed(storage.iter().map(|(k, v)| (*k, (*v).into()))))
                 }
             }
-            None => debug!(target: "reth::cli",
-                "Isthmus active but predeploy L2ToL1MessagePasser.sol not found in genesis alloc"),
+            None =>
+                /*debug!(target: "reth::cli",
+                "Isthmus active but predeploy L2ToL1MessagePasser.sol not found in genesis alloc"
+            ),*/
+                {}
         }
     }
 

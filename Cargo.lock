@@ -8408,7 +8408,6 @@ dependencies = [
  "reth-primitives-traits",
  "serde_json",
  "thiserror 2.0.11",
- "tracing",
 ]
 
 [[package]]
