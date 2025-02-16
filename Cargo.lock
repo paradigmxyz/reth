@@ -7369,6 +7369,7 @@ dependencies = [
  "crossbeam-channel",
  "derive_more",
  "futures",
+ "itertools 0.13.0",
  "metrics",
  "mini-moka",
  "proptest",
