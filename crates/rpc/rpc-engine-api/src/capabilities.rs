@@ -45,13 +45,14 @@ impl EngineCapabilities {
     }
 
     /// Adds a new capability to the list.
-    pub fn add_capability(&mut self, capability: &str) {
-        self.inner.insert(capability.to_owned());
+    pub fn add_capability(&mut self, capability: impl Into<String>) -> &mut Self {
+        self.inner.insert(capability.into());
+        self
     }
 
-    /// Removes a capability from the list.
-    pub fn remove_capability(&mut self, capability: &str) {
-        self.inner.remove(capability);
+    /// Removes a capability from the list and returns it if it was present.
+    pub fn remove_capability(&mut self, capability: &str) -> Option<String> {
+        self.inner.remove(capability).then(|| capability.to_owned())
     }
 }
 
