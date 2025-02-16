@@ -29,6 +29,7 @@ revm-primitives.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
 auto_impl.workspace = true
@@ -62,6 +63,7 @@ std = [
     "reth-execution-errors/std",
     "reth-storage-errors/std",
     "reth-execution-types/std",
+    "alloy-evm/std",
 ]
 test-utils = [
     "dep:parking_lot",
