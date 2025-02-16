@@ -24,9 +24,6 @@ pub enum ProviderError {
     /// RLP error.
     #[error("{_0}")]
     Rlp(alloy_rlp::Error),
-    /// Nippy jar error.
-    #[error("nippy jar error: {_0}")]
-    NippyJar(String),
     /// Trie witness error.
     #[error("trie witness error: {_0}")]
     TrieWitnessError(String),
@@ -202,6 +199,22 @@ pub struct RootMismatch {
     pub block_number: BlockNumber,
     /// The target block hash.
     pub block_hash: BlockHash,
+}
+
+/// A Static File Write Error.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct StaticFileWriterError {
+    /// The error message.
+    pub message: String,
+}
+
+impl StaticFileWriterError {
+    /// Creates a new [`StaticFileWriterError`] with the given message.
+    #[allow(dead_code)]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self { message: message.into() }
+    }
 }
 
 /// Consistent database view error.
