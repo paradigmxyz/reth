@@ -20,6 +20,7 @@ reth-network-peers.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 
 # ethereum
 alloy-chains.workspace = true
@@ -39,6 +40,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 once_cell.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }
@@ -57,6 +59,7 @@ std = [
     "reth-ethereum-forks/std",
     "reth-primitives-traits/std",
     "reth-optimism-forks/std",
+    "reth-optimism-primitives/std",
     "alloy-consensus/std",
     "once_cell/std",
     "derive_more/std",
@@ -64,4 +67,5 @@ std = [
     "thiserror/std",
     "serde_json/std",
     "op-alloy-consensus/std",
+    "tracing/std",
 ]

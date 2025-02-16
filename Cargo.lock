@@ -8404,9 +8404,11 @@ dependencies = [
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-optimism-forks",
+ "reth-optimism-primitives",
  "reth-primitives-traits",
  "serde_json",
  "thiserror 2.0.11",
+ "tracing",
 ]
 
 [[package]]
