@@ -1,45 +1,25 @@
-//! Example for how hook into the bsc p2p network
-//!
-//! Run with
-//!
-//! ```not_rust
-//! cargo run -p bsc-p2p
-//! ```
-//!
-//! This launch the regular reth node overriding the engine api payload builder with our custom.
-//!
-//! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
-
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 use chainspec::{boot_nodes, bsc_chain_spec};
+use futures::StreamExt;
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
-    EthNetworkProtocol, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
+    NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager, PeersInfo,
 };
-use reth_network_api::{
-    events::{PeerEvent, SessionInfo},
-    PeersInfo,
-};
+use reth_network_api::events::{PeerEvent, SessionInfo};
 use reth_primitives::{ForkHash, ForkId};
 use reth_tracing::{
-    tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
-    Tracer,
+    tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer, Tracer,
 };
 use secp256k1::{rand, SecretKey};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     time::Duration,
 };
-use tokio_stream::StreamExt;
+use tracing::info;
 
-pub mod chainspec;
+mod chainspec;
 
-#[tokio::main]
-async fn main() {
-    // The ECDSA private key used to create our enode identifier.
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-
+#[tokio::test(flavor = "multi_thread")]
+async fn test_bsc_network() {
     let _ = RethTracer::new()
         .with_stdout(LayerInfo::new(
             LogFormat::Terminal,
@@ -49,40 +29,32 @@ async fn main() {
         ))
         .init();
 
-    // The local address we want to bind to
     let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 30303);
 
-    // The network configuration
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+
     let mut net_cfg = NetworkConfig::builder(secret_key)
         .listener_addr(local_addr)
-        // we need to explicitly set the network mode to PoW to allow block propagation, see docs
         .with_pow()
-        .eth_protocol(EthNetworkProtocol)
         .build_with_noop_provider(bsc_chain_spec())
         .set_discovery_v4(
             Discv4ConfigBuilder::default()
                 .add_boot_nodes(boot_nodes())
-                // Set Discv4 lookup interval to 1 second
                 .lookup_interval(Duration::from_secs(1))
                 .build(),
         );
 
-    // latest BSC forkId, we need to override this to allow connections from BSC nodes
     let fork_id = ForkId { hash: ForkHash([0x07, 0xb5, 0x43, 0x28]), next: 0 };
     net_cfg.fork_filter.set_current_fork_id(fork_id);
     let net_manager = NetworkManager::eth(net_cfg).await.unwrap();
 
-    // The network handle is our entrypoint into the network.
     let net_handle = net_manager.handle().clone();
     let mut events = net_handle.event_listener();
 
-    // NetworkManager is a long running task, let's spawn it
     tokio::spawn(net_manager);
     info!("Looking for BSC peers...");
 
     while let Some(evt) = events.next().await {
-        // For the sake of the example we only print the session established event
-        // with the chain specific details
         match evt {
             NetworkEvent::ActivePeerSession { info, .. } => {
                 let SessionInfo { status, client_version, peer_id, .. } = info;
@@ -95,5 +67,4 @@ async fn main() {
             _ => {}
         }
     }
-    // We will be disconnected from peers since we are not able to answer to network requests
 }

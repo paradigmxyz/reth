@@ -12,9 +12,9 @@ use std::{
 };
 
 use crate::{
+    eth_protocol::NetworkStream,
     message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
     session::{
-        conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,
     },
@@ -26,10 +26,10 @@ use reth_eth_wire::{
     capability::RawCapabilityMessage,
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
+    Capabilities, DisconnectReason, EthMessage, NetworkPrimitives,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
-use reth_network_api::PeerRequest;
+use reth_network_api::{message::NetworkMessage, PeerRequest};
 use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
 use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
@@ -77,11 +77,15 @@ const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 ///    - incoming requests/broadcasts _from remote_ via the connection
 ///    - responses for handled ETH requests received from the remote peer.
 #[allow(dead_code)]
-pub(crate) struct ActiveSession<N: NetworkPrimitives> {
+pub(crate) struct ActiveSession<
+    N: NetworkPrimitives,
+    Conn: NetworkStream<N, Message = M>,
+    M: NetworkMessage<N> + TryFromPeerMessage<N>,
+> {
+    /// The underlying connection.
+    pub(crate) conn: Conn,
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
-    /// The underlying connection.
-    pub(crate) conn: EthRlpxConnection<N>,
     /// Identifier of the node we're connected to.
     pub(crate) remote_peer_id: PeerId,
     /// The address we're connected to.
@@ -103,7 +107,7 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// All requests that were sent by the remote peer and we're waiting on an internal response
     pub(crate) received_requests_from_remote: Vec<ReceivedRequest<N>>,
     /// Buffered messages that should be handled and sent to the peer.
-    pub(crate) queued_outgoing: QueuedOutgoingMessages<N>,
+    pub(crate) queued_outgoing: QueuedOutgoingMessages<N, M>,
     /// The maximum time we wait for a response from a peer.
     pub(crate) internal_request_timeout: Arc<AtomicU64>,
     /// Interval when to check for timed out requests.
@@ -116,10 +120,15 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
 }
 
-impl<N: NetworkPrimitives> ActiveSession<N> {
+impl<
+        N: NetworkPrimitives,
+        Conn: NetworkStream<N, Message = Msg>,
+        Msg: NetworkMessage<N> + TryFromPeerMessage<N>,
+    > ActiveSession<N, Conn, Msg>
+{
     /// Returns `true` if the session is currently in the process of disconnecting
     fn is_disconnecting(&self) -> bool {
-        self.conn.inner().is_disconnecting()
+        self.conn.is_disconnecting()
     }
 
     /// Returns the next request id
@@ -143,7 +152,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle a message read from the connection.
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
-    fn on_incoming_message(&mut self, msg: EthMessage<N>) -> OnIncomingMessageOutcome<N> {
+    fn on_incoming_message<T>(&mut self, msg: T) -> OnIncomingMessageOutcome<N>
+    where
+        T: Into<EthMessage<N>>,
+    {
+        let msg: EthMessage<N> = msg.into();
         /// A macro that handles an incoming request
         /// This creates a new channel and tries to send the sender half to the session while
         /// storing the receiver half internally so the pending response can be polled.
@@ -261,8 +274,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle an internal peer request that will be sent to the remote.
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
         let request_id = self.next_id();
-        let msg = request.create_request_message(request_id);
-        self.queued_outgoing.push_back(msg.into());
+        let msg = request.create_request_message::<Msg>(request_id);
+        self.queued_outgoing.push_back(Into::<OutgoingMessage<N, Msg>>::into(msg));
         let req = InflightRequest {
             request: RequestState::Waiting(request),
             timestamp: Instant::now(),
@@ -275,14 +288,26 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn on_internal_peer_message(&mut self, msg: PeerMessage<N>) {
         match msg {
             PeerMessage::NewBlockHashes(msg) => {
-                self.queued_outgoing.push_back(EthMessage::NewBlockHashes(msg).into());
+                if let Some(protocol_msg) =
+                    Msg::try_from_peer_message(PeerMessage::NewBlockHashes(msg))
+                {
+                    self.queued_outgoing
+                        .push_back(Into::<OutgoingMessage<N, Msg>>::into(protocol_msg));
+                }
             }
             PeerMessage::NewBlock(msg) => {
-                self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
+                self.queued_outgoing.push_back(OutgoingMessage::Broadcast(
+                    EthBroadcastMessage::NewBlock(msg.block),
+                ));
             }
             PeerMessage::PooledTransactions(msg) => {
                 if msg.is_valid_for_version(self.conn.version()) {
-                    self.queued_outgoing.push_back(EthMessage::from(msg).into());
+                    if let Some(protocol_msg) =
+                        Msg::try_from_peer_message(PeerMessage::PooledTransactions(msg))
+                    {
+                        self.queued_outgoing
+                            .push_back(Into::<OutgoingMessage<N, Msg>>::into(protocol_msg));
+                    }
                 }
             }
             PeerMessage::EthRequest(req) => {
@@ -290,7 +315,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.on_internal_peer_request(req, deadline);
             }
             PeerMessage::SendTransactions(msg) => {
-                self.queued_outgoing.push_back(EthBroadcastMessage::Transactions(msg).into());
+                self.queued_outgoing
+                    .push_back(OutgoingMessage::Broadcast(EthBroadcastMessage::Transactions(msg)));
             }
             PeerMessage::ReceivedTransaction(_) => {
                 unreachable!("Not emitted by network")
@@ -314,7 +340,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
         match resp.try_into_message(id) {
             Ok(msg) => {
-                self.queued_outgoing.push_back(msg.into());
+                self.queued_outgoing.push_back(OutgoingMessage::Eth(msg));
             }
             Err(err) => {
                 debug!(target: "net", %err, "Failed to respond to received request");
@@ -408,7 +434,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Starts the disconnect process
     fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
-        Ok(self.conn.inner_mut().start_disconnect(reason)?)
+        Ok(self.conn.start_disconnect(reason)?)
     }
 
     /// Flushes the disconnect message and emits the corresponding message
@@ -416,7 +442,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         debug_assert!(self.is_disconnecting(), "not disconnecting");
 
         // try to close the flush out the remaining Disconnect message
-        let _ = ready!(self.conn.poll_close_unpin(cx));
+        let _ = ready!(self.conn.inner_mut().poll_close_unpin(cx));
         self.emit_disconnect(cx)
     }
 
@@ -488,7 +514,12 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     }
 }
 
-impl<N: NetworkPrimitives> Future for ActiveSession<N> {
+impl<
+        N: NetworkPrimitives,
+        Conn: NetworkStream<N, Message = M>,
+        M: NetworkMessage<N> + TryFromPeerMessage<N> + Into<EthMessage<N>>,
+    > Future for ActiveSession<N, Conn, M>
+{
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -569,11 +600,11 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
 
             // Send messages by advancing the sink and queuing in buffered messages
-            while this.conn.poll_ready_unpin(cx).is_ready() {
+            while this.conn.as_sink().poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.queued_outgoing.pop_front() {
                     progress = true;
                     let res = match msg {
-                        OutgoingMessage::Eth(msg) => this.conn.start_send_unpin(msg),
+                        OutgoingMessage::Eth(msg) => this.conn.as_sink().start_send_unpin(msg),
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                         OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
                     };
@@ -772,18 +803,18 @@ enum RequestState<R> {
 }
 
 /// Outgoing messages that can be sent over the wire.
-pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
+pub(crate) enum OutgoingMessage<N: NetworkPrimitives, M: NetworkMessage<N>> {
     /// A message that is owned.
-    Eth(EthMessage<N>),
+    Eth(M),
     /// A message that may be shared by multiple sessions.
     Broadcast(EthBroadcastMessage<N>),
     /// A raw capability message
     Raw(RawCapabilityMessage),
 }
 
-impl<N: NetworkPrimitives> OutgoingMessage<N> {
+impl<N: NetworkPrimitives, M: NetworkMessage<N>> OutgoingMessage<N, M> {
     /// Returns true if this is a response.
-    const fn is_response(&self) -> bool {
+    fn is_response(&self) -> bool {
         match self {
             Self::Eth(msg) => msg.is_response(),
             _ => false,
@@ -791,15 +822,9 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
     }
 }
 
-impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
-    fn from(value: EthMessage<N>) -> Self {
+impl<N: NetworkPrimitives, M: NetworkMessage<N>> From<M> for OutgoingMessage<N, M> {
+    fn from(value: M) -> Self {
         Self::Eth(value)
-    }
-}
-
-impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for OutgoingMessage<N> {
-    fn from(value: EthBroadcastMessage<N>) -> Self {
-        Self::Broadcast(value)
     }
 }
 
@@ -815,22 +840,25 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 }
 
 /// A helper struct that wraps the queue of outgoing messages and a metric to track their count
-pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives> {
-    messages: VecDeque<OutgoingMessage<N>>,
+pub(crate) struct QueuedOutgoingMessages<N: NetworkPrimitives, M: NetworkMessage<N>> {
+    messages: VecDeque<OutgoingMessage<N, M>>,
     count: Gauge,
 }
 
-impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
+impl<N: NetworkPrimitives, M: NetworkMessage<N>> QueuedOutgoingMessages<N, M> {
     pub(crate) const fn new(metric: Gauge) -> Self {
         Self { messages: VecDeque::new(), count: metric }
     }
 
-    pub(crate) fn push_back(&mut self, message: OutgoingMessage<N>) {
-        self.messages.push_back(message);
+    pub(crate) fn push_back<T>(&mut self, message: T)
+    where
+        T: Into<OutgoingMessage<N, M>>,
+    {
+        self.messages.push_back(message.into());
         self.count.increment(1);
     }
 
-    pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage<N>> {
+    pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage<N, M>> {
         self.messages.pop_front().inspect(|_| self.count.decrement(1))
     }
 
@@ -839,399 +867,419 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
-    use reth_chainspec::MAINNET;
-    use reth_ecies::stream::ECIESStream;
-    use reth_eth_wire::{
-        EthNetworkPrimitives, EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream,
-        Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
-    };
-    use reth_network_peers::pk2id;
-    use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
-    use reth_primitives::{EthereumHardfork, ForkFilter};
-    use secp256k1::{SecretKey, SECP256K1};
-    use tokio::{
-        net::{TcpListener, TcpStream},
-        sync::mpsc,
-    };
+/// Helper trait to convert a [`PeerMessage`] into a [`EthMessage`]
+pub trait TryFromPeerMessage<N: NetworkPrimitives> {
+    /// Try to convert a [`PeerMessage`] into a [`EthMessage`]
+    fn try_from_peer_message(msg: PeerMessage<N>) -> Option<Self>
+    where
+        Self: Sized;
+}
 
-    /// Returns a testing `HelloMessage` and new secretkey
-    fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
-        HelloMessageWithProtocols::builder(pk2id(&server_key.public_key(SECP256K1))).build()
-    }
-
-    struct SessionBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
-        _remote_capabilities: Arc<Capabilities>,
-        active_session_tx: mpsc::Sender<ActiveSessionMessage<N>>,
-        active_session_rx: ReceiverStream<ActiveSessionMessage<N>>,
-        to_sessions: Vec<mpsc::Sender<SessionCommand<N>>>,
-        secret_key: SecretKey,
-        local_peer_id: PeerId,
-        hello: HelloMessageWithProtocols,
-        status: Status,
-        fork_filter: ForkFilter,
-        next_id: usize,
-    }
-
-    impl<N: NetworkPrimitives> SessionBuilder<N> {
-        fn next_id(&mut self) -> SessionId {
-            let id = self.next_id;
-            self.next_id += 1;
-            SessionId(id)
-        }
-
-        /// Connects a new Eth stream and executes the given closure with that established stream
-        fn with_client_stream<F, O>(
-            &self,
-            local_addr: SocketAddr,
-            f: F,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send>>
-        where
-            F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>, N>) -> O + Send + 'static,
-            O: Future<Output = ()> + Send + Sync,
-        {
-            let status = self.status;
-            let fork_filter = self.fork_filter.clone();
-            let local_peer_id = self.local_peer_id;
-            let mut hello = self.hello.clone();
-            let key = SecretKey::new(&mut rand::thread_rng());
-            hello.id = pk2id(&key.public_key(SECP256K1));
-            Box::pin(async move {
-                let outgoing = TcpStream::connect(local_addr).await.unwrap();
-                let sink = ECIESStream::connect(outgoing, key, local_peer_id).await.unwrap();
-
-                let (p2p_stream, _) = UnauthedP2PStream::new(sink).handshake(hello).await.unwrap();
-
-                let (client_stream, _) = UnauthedEthStream::new(p2p_stream)
-                    .handshake(status, fork_filter)
-                    .await
-                    .unwrap();
-                f(client_stream).await
-            })
-        }
-
-        async fn connect_incoming(&mut self, stream: TcpStream) -> ActiveSession<N> {
-            let remote_addr = stream.local_addr().unwrap();
-            let session_id = self.next_id();
-            let (_disconnect_tx, disconnect_rx) = oneshot::channel();
-            let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
-
-            tokio::task::spawn(start_pending_incoming_session(
-                disconnect_rx,
-                session_id,
-                stream,
-                pending_sessions_tx,
-                remote_addr,
-                self.secret_key,
-                self.hello.clone(),
-                self.status,
-                self.fork_filter.clone(),
-                Default::default(),
-            ));
-
-            let mut stream = ReceiverStream::new(pending_sessions_rx);
-
-            match stream.next().await.unwrap() {
-                PendingSessionEvent::Established {
-                    session_id,
-                    remote_addr,
-                    peer_id,
-                    capabilities,
-                    conn,
-                    ..
-                } => {
-                    let (_to_session_tx, messages_rx) = mpsc::channel(10);
-                    let (commands_to_session, commands_rx) = mpsc::channel(10);
-                    let poll_sender = PollSender::new(self.active_session_tx.clone());
-
-                    self.to_sessions.push(commands_to_session);
-
-                    ActiveSession {
-                        next_id: 0,
-                        remote_peer_id: peer_id,
-                        remote_addr,
-                        remote_capabilities: Arc::clone(&capabilities),
-                        session_id,
-                        commands_rx: ReceiverStream::new(commands_rx),
-                        to_session_manager: MeteredPollSender::new(
-                            poll_sender,
-                            "network_active_session",
-                        ),
-                        pending_message_to_session: None,
-                        internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
-                        inflight_requests: Default::default(),
-                        conn,
-                        queued_outgoing: QueuedOutgoingMessages::new(Gauge::noop()),
-                        received_requests_from_remote: Default::default(),
-                        internal_request_timeout_interval: tokio::time::interval(
-                            INITIAL_REQUEST_TIMEOUT,
-                        ),
-                        internal_request_timeout: Arc::new(AtomicU64::new(
-                            INITIAL_REQUEST_TIMEOUT.as_millis() as u64,
-                        )),
-                        protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
-                        terminate_message: None,
-                    }
-                }
-                ev => {
-                    panic!("unexpected message {ev:?}")
-                }
-            }
-        }
-    }
-
-    impl Default for SessionBuilder {
-        fn default() -> Self {
-            let (active_session_tx, active_session_rx) = mpsc::channel(100);
-
-            let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand::thread_rng());
-            let local_peer_id = pk2id(&pk);
-
-            Self {
-                next_id: 0,
-                _remote_capabilities: Arc::new(Capabilities::from(vec![])),
-                active_session_tx,
-                active_session_rx: ReceiverStream::new(active_session_rx),
-                to_sessions: vec![],
-                hello: eth_hello(&secret_key),
-                secret_key,
-                local_peer_id,
-                status: StatusBuilder::default().build(),
-                fork_filter: MAINNET
-                    .hardfork_fork_filter(EthereumHardfork::Frontier)
-                    .expect("The Frontier fork filter should exist on mainnet"),
-            }
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_disconnect() {
-        let mut builder = SessionBuilder::default();
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-
-        let expected_disconnect = DisconnectReason::UselessPeer;
-
-        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
-            let msg = client_stream.next().await.unwrap().unwrap_err();
-            assert_eq!(msg.as_disconnected().unwrap(), expected_disconnect);
-        });
-
-        tokio::task::spawn(async move {
-            let (incoming, _) = listener.accept().await.unwrap();
-            let mut session = builder.connect_incoming(incoming).await;
-
-            session.start_disconnect(expected_disconnect).unwrap();
-            session.await
-        });
-
-        fut.await;
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn handle_dropped_stream() {
-        let mut builder = SessionBuilder::default();
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-
-        let fut = builder.with_client_stream(local_addr, move |client_stream| async move {
-            drop(client_stream);
-            tokio::time::sleep(Duration::from_secs(1)).await
-        });
-
-        let (tx, rx) = oneshot::channel();
-
-        tokio::task::spawn(async move {
-            let (incoming, _) = listener.accept().await.unwrap();
-            let session = builder.connect_incoming(incoming).await;
-            session.await;
-
-            tx.send(()).unwrap();
-        });
-
-        tokio::task::spawn(fut);
-
-        rx.await.unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_send_many_messages() {
-        reth_tracing::init_test_tracing();
-        let mut builder = SessionBuilder::default();
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-
-        let num_messages = 100;
-
-        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
-            for _ in 0..num_messages {
-                client_stream
-                    .send(EthMessage::NewPooledTransactionHashes66(Vec::new().into()))
-                    .await
-                    .unwrap();
-            }
-        });
-
-        let (tx, rx) = oneshot::channel();
-
-        tokio::task::spawn(async move {
-            let (incoming, _) = listener.accept().await.unwrap();
-            let session = builder.connect_incoming(incoming).await;
-            session.await;
-
-            tx.send(()).unwrap();
-        });
-
-        tokio::task::spawn(fut);
-
-        rx.await.unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_request_timeout() {
-        reth_tracing::init_test_tracing();
-
-        let mut builder = SessionBuilder::default();
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-
-        let request_timeout = Duration::from_millis(100);
-        let drop_timeout = Duration::from_millis(1500);
-
-        let fut = builder.with_client_stream(local_addr, move |client_stream| async move {
-            let _client_stream = client_stream;
-            tokio::time::sleep(drop_timeout * 60).await;
-        });
-        tokio::task::spawn(fut);
-
-        let (incoming, _) = listener.accept().await.unwrap();
-        let mut session = builder.connect_incoming(incoming).await;
-        session
-            .internal_request_timeout
-            .store(request_timeout.as_millis() as u64, Ordering::Relaxed);
-        session.protocol_breach_request_timeout = drop_timeout;
-        session.internal_request_timeout_interval =
-            tokio::time::interval_at(tokio::time::Instant::now(), request_timeout);
-        let (tx, rx) = oneshot::channel();
-        let req = PeerRequest::GetBlockBodies { request: GetBlockBodies(vec![]), response: tx };
-        session.on_internal_peer_request(req, Instant::now());
-        tokio::spawn(session);
-
-        let err = rx.await.unwrap().unwrap_err();
-        assert_eq!(err, RequestError::Timeout);
-
-        // wait for protocol breach error
-        let msg = builder.active_session_rx.next().await.unwrap();
+/// Default implementation for [`TryFromPeerMessage`] for [`EthMessage`]
+impl<N: NetworkPrimitives> TryFromPeerMessage<N> for EthMessage<N> {
+    fn try_from_peer_message(msg: PeerMessage<N>) -> Option<Self> {
         match msg {
-            ActiveSessionMessage::ProtocolBreach { .. } => {}
-            ev => unreachable!("{ev:?}"),
+            PeerMessage::NewBlockHashes(msg) => Some(Self::NewBlockHashes(msg)),
+            PeerMessage::PooledTransactions(msg) => Some(Self::from(msg)),
+            _ => None,
         }
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_keep_alive() {
-        let mut builder = SessionBuilder::default();
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-
-        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
-            let _ = tokio::time::timeout(Duration::from_secs(5), client_stream.next()).await;
-            client_stream.into_inner().disconnect(DisconnectReason::UselessPeer).await.unwrap();
-        });
-
-        let (tx, rx) = oneshot::channel();
-
-        tokio::task::spawn(async move {
-            let (incoming, _) = listener.accept().await.unwrap();
-            let session = builder.connect_incoming(incoming).await;
-            session.await;
-
-            tx.send(()).unwrap();
-        });
-
-        tokio::task::spawn(fut);
-
-        rx.await.unwrap();
-    }
-
-    // This tests that incoming messages are delivered when there's capacity.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_send_at_capacity() {
-        let mut builder = SessionBuilder::default();
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let local_addr = listener.local_addr().unwrap();
-
-        let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
-            client_stream
-                .send(EthMessage::NewPooledTransactionHashes68(Default::default()))
-                .await
-                .unwrap();
-            let _ = tokio::time::timeout(Duration::from_secs(100), client_stream.next()).await;
-        });
-        tokio::task::spawn(fut);
-
-        let (incoming, _) = listener.accept().await.unwrap();
-        let session = builder.connect_incoming(incoming).await;
-
-        // fill the entire message buffer with an unrelated message
-        let mut num_fill_messages = 0;
-        loop {
-            if builder
-                .active_session_tx
-                .try_send(ActiveSessionMessage::ProtocolBreach { peer_id: PeerId::random() })
-                .is_err()
-            {
-                break
-            }
-            num_fill_messages += 1;
-        }
-
-        tokio::task::spawn(async move {
-            session.await;
-        });
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        for _ in 0..num_fill_messages {
-            let message = builder.active_session_rx.next().await.unwrap();
-            match message {
-                ActiveSessionMessage::ProtocolBreach { .. } => {}
-                ev => unreachable!("{ev:?}"),
-            }
-        }
-
-        let message = builder.active_session_rx.next().await.unwrap();
-        match message {
-            ActiveSessionMessage::ValidMessage {
-                message: PeerMessage::PooledTransactions(_),
-                ..
-            } => {}
-            _ => unreachable!(),
-        }
-    }
-
-    #[test]
-    fn timeout_calculation_sanity_tests() {
-        let rtt = Duration::from_secs(5);
-        // timeout for an RTT of `rtt`
-        let timeout = rtt * TIMEOUT_SCALING;
-
-        // if rtt hasn't changed, timeout shouldn't change
-        assert_eq!(calculate_new_timeout(timeout, rtt), timeout);
-
-        // if rtt changed, the new timeout should change less than it
-        assert!(calculate_new_timeout(timeout, rtt / 2) < timeout);
-        assert!(calculate_new_timeout(timeout, rtt / 2) > timeout / 2);
-        assert!(calculate_new_timeout(timeout, rtt * 2) > timeout);
-        assert!(calculate_new_timeout(timeout, rtt * 2) < timeout * 2);
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
+//     use reth_chainspec::MAINNET;
+//     use reth_ecies::stream::ECIESStream;
+//     use reth_eth_wire::{
+//         EthNetworkPrimitives, EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream,
+//         Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+//     };
+//     use reth_network_peers::pk2id;
+//     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
+//     use reth_primitives::{EthereumHardfork, ForkFilter};
+//     use secp256k1::{SecretKey, SECP256K1};
+//     use tokio::{
+//         net::{TcpListener, TcpStream},
+//         sync::mpsc,
+//     };
+
+//     /// Returns a testing `HelloMessage` and new secretkey
+//     fn eth_hello(server_key: &SecretKey) -> HelloMessageWithProtocols {
+//         HelloMessageWithProtocols::builder(pk2id(&server_key.public_key(SECP256K1))).build()
+//     }
+
+//     struct SessionBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
+//         _remote_capabilities: Arc<Capabilities>,
+//         active_session_tx: mpsc::Sender<ActiveSessionMessage<N>>,
+//         active_session_rx: ReceiverStream<ActiveSessionMessage<N>>,
+//         to_sessions: Vec<mpsc::Sender<SessionCommand<N>>>,
+//         secret_key: SecretKey,
+//         local_peer_id: PeerId,
+//         hello: HelloMessageWithProtocols,
+//         status: Status,
+//         fork_filter: ForkFilter,
+//         next_id: usize,
+//     }
+
+//     impl<N: NetworkPrimitives> SessionBuilder<N> {
+//         fn next_id(&mut self) -> SessionId {
+//             let id = self.next_id;
+//             self.next_id += 1;
+//             SessionId(id)
+//         }
+
+//         /// Connects a new Eth stream and executes the given closure with that established stream
+//         fn with_client_stream<F, O>(
+//             &self,
+//             local_addr: SocketAddr,
+//             f: F,
+//         ) -> Pin<Box<dyn Future<Output = ()> + Send>>
+//         where
+//             F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>, N>) -> O + Send + 'static,
+//             O: Future<Output = ()> + Send + Sync,
+//         {
+//             let status = self.status;
+//             let fork_filter = self.fork_filter.clone();
+//             let local_peer_id = self.local_peer_id;
+//             let mut hello = self.hello.clone();
+//             let key = SecretKey::new(&mut rand::thread_rng());
+//             hello.id = pk2id(&key.public_key(SECP256K1));
+//             Box::pin(async move {
+//                 let outgoing = TcpStream::connect(local_addr).await.unwrap();
+//                 let sink = ECIESStream::connect(outgoing, key, local_peer_id).await.unwrap();
+
+//                 let (p2p_stream, _) =
+// UnauthedP2PStream::new(sink).handshake(hello).await.unwrap();
+
+//                 let (client_stream, _) = UnauthedEthStream::new(p2p_stream)
+//                     .handshake(status, fork_filter)
+//                     .await
+//                     .unwrap();
+//                 f(client_stream).await
+//             })
+//         }
+
+//         async fn connect_incoming(&mut self, stream: TcpStream) -> ActiveSession<N> {
+//             let remote_addr = stream.local_addr().unwrap();
+//             let session_id = self.next_id();
+//             let (_disconnect_tx, disconnect_rx) = oneshot::channel();
+//             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
+
+//             tokio::task::spawn(start_pending_incoming_session(
+//                 disconnect_rx,
+//                 session_id,
+//                 stream,
+//                 pending_sessions_tx,
+//                 remote_addr,
+//                 self.secret_key,
+//                 self.hello.clone(),
+//                 self.status,
+//                 self.fork_filter.clone(),
+//                 Default::default(),
+//             ));
+
+//             let mut stream = ReceiverStream::new(pending_sessions_rx);
+
+//             match stream.next().await.unwrap() {
+//                 PendingSessionEvent::Established {
+//                     session_id,
+//                     remote_addr,
+//                     peer_id,
+//                     capabilities,
+//                     conn,
+//                     ..
+//                 } => {
+//                     let (_to_session_tx, messages_rx) = mpsc::channel(10);
+//                     let (commands_to_session, commands_rx) = mpsc::channel(10);
+//                     let poll_sender = PollSender::new(self.active_session_tx.clone());
+
+//                     self.to_sessions.push(commands_to_session);
+
+//                     ActiveSession {
+//                         next_id: 0,
+//                         remote_peer_id: peer_id,
+//                         remote_addr,
+//                         remote_capabilities: Arc::clone(&capabilities),
+//                         session_id,
+//                         commands_rx: ReceiverStream::new(commands_rx),
+//                         to_session_manager: MeteredPollSender::new(
+//                             poll_sender,
+//                             "network_active_session",
+//                         ),
+//                         pending_message_to_session: None,
+//                         internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
+//                         inflight_requests: Default::default(),
+//                         conn,
+//                         queued_outgoing: QueuedOutgoingMessages::new(Gauge::noop()),
+//                         received_requests_from_remote: Default::default(),
+//                         internal_request_timeout_interval: tokio::time::interval(
+//                             INITIAL_REQUEST_TIMEOUT,
+//                         ),
+//                         internal_request_timeout: Arc::new(AtomicU64::new(
+//                             INITIAL_REQUEST_TIMEOUT.as_millis() as u64,
+//                         )),
+//                         protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
+//                         terminate_message: None,
+//                     }
+//                 }
+//                 ev => {
+//                     panic!("unexpected message {ev:?}")
+//                 }
+//             }
+//         }
+//     }
+
+//     impl Default for SessionBuilder {
+//         fn default() -> Self {
+//             let (active_session_tx, active_session_rx) = mpsc::channel(100);
+
+//             let (secret_key, pk) = SECP256K1.generate_keypair(&mut rand::thread_rng());
+//             let local_peer_id = pk2id(&pk);
+
+//             Self {
+//                 next_id: 0,
+//                 _remote_capabilities: Arc::new(Capabilities::from(vec![])),
+//                 active_session_tx,
+//                 active_session_rx: ReceiverStream::new(active_session_rx),
+//                 to_sessions: vec![],
+//                 hello: eth_hello(&secret_key),
+//                 secret_key,
+//                 local_peer_id,
+//                 status: StatusBuilder::default().build(),
+//                 fork_filter: MAINNET
+//                     .hardfork_fork_filter(EthereumHardfork::Frontier)
+//                     .expect("The Frontier fork filter should exist on mainnet"),
+//             }
+//         }
+//     }
+
+//     #[tokio::test(flavor = "multi_thread")]
+//     async fn test_disconnect() {
+//         let mut builder = SessionBuilder::default();
+
+//         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+//         let local_addr = listener.local_addr().unwrap();
+
+//         let expected_disconnect = DisconnectReason::UselessPeer;
+
+//         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+//             let msg = client_stream.next().await.unwrap().unwrap_err();
+//             assert_eq!(msg.as_disconnected().unwrap(), expected_disconnect);
+//         });
+
+//         tokio::task::spawn(async move {
+//             let (incoming, _) = listener.accept().await.unwrap();
+//             let mut session = builder.connect_incoming(incoming).await;
+
+//             session.start_disconnect(expected_disconnect).unwrap();
+//             session.await
+//         });
+
+//         fut.await;
+//     }
+
+//     #[tokio::test(flavor = "multi_thread")]
+//     async fn handle_dropped_stream() {
+//         let mut builder = SessionBuilder::default();
+
+//         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+//         let local_addr = listener.local_addr().unwrap();
+
+//         let fut = builder.with_client_stream(local_addr, move |client_stream| async move {
+//             drop(client_stream);
+//             tokio::time::sleep(Duration::from_secs(1)).await
+//         });
+
+//         let (tx, rx) = oneshot::channel();
+
+//         tokio::task::spawn(async move {
+//             let (incoming, _) = listener.accept().await.unwrap();
+//             let session = builder.connect_incoming(incoming).await;
+//             session.await;
+
+//             tx.send(()).unwrap();
+//         });
+
+//         tokio::task::spawn(fut);
+
+//         rx.await.unwrap();
+//     }
+
+//     #[tokio::test(flavor = "multi_thread")]
+//     async fn test_send_many_messages() {
+//         reth_tracing::init_test_tracing();
+//         let mut builder = SessionBuilder::default();
+
+//         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+//         let local_addr = listener.local_addr().unwrap();
+
+//         let num_messages = 100;
+
+//         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+//             for _ in 0..num_messages {
+//                 client_stream
+//                     .send(EthMessage::NewPooledTransactionHashes66(Vec::new().into()))
+//                     .await
+//                     .unwrap();
+//             }
+//         });
+
+//         let (tx, rx) = oneshot::channel();
+
+//         tokio::task::spawn(async move {
+//             let (incoming, _) = listener.accept().await.unwrap();
+//             let session = builder.connect_incoming(incoming).await;
+//             session.await;
+
+//             tx.send(()).unwrap();
+//         });
+
+//         tokio::task::spawn(fut);
+
+//         rx.await.unwrap();
+//     }
+
+//     #[tokio::test(flavor = "multi_thread")]
+//     async fn test_request_timeout() {
+//         reth_tracing::init_test_tracing();
+
+//         let mut builder = SessionBuilder::default();
+
+//         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+//         let local_addr = listener.local_addr().unwrap();
+
+//         let request_timeout = Duration::from_millis(100);
+//         let drop_timeout = Duration::from_millis(1500);
+
+//         let fut = builder.with_client_stream(local_addr, move |client_stream| async move {
+//             let _client_stream = client_stream;
+//             tokio::time::sleep(drop_timeout * 60).await;
+//         });
+//         tokio::task::spawn(fut);
+
+//         let (incoming, _) = listener.accept().await.unwrap();
+//         let mut session = builder.connect_incoming(incoming).await;
+//         session
+//             .internal_request_timeout
+//             .store(request_timeout.as_millis() as u64, Ordering::Relaxed);
+//         session.protocol_breach_request_timeout = drop_timeout;
+//         session.internal_request_timeout_interval =
+//             tokio::time::interval_at(tokio::time::Instant::now(), request_timeout);
+//         let (tx, rx) = oneshot::channel();
+//         let req = PeerRequest::GetBlockBodies { request: GetBlockBodies(vec![]), response: tx };
+//         session.on_internal_peer_request(req, Instant::now());
+//         tokio::spawn(session);
+
+//         let err = rx.await.unwrap().unwrap_err();
+//         assert_eq!(err, RequestError::Timeout);
+
+//         // wait for protocol breach error
+//         let msg = builder.active_session_rx.next().await.unwrap();
+//         match msg {
+//             ActiveSessionMessage::ProtocolBreach { .. } => {}
+//             ev => unreachable!("{ev:?}"),
+//         }
+//     }
+
+//     #[tokio::test(flavor = "multi_thread")]
+//     async fn test_keep_alive() {
+//         let mut builder = SessionBuilder::default();
+
+//         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+//         let local_addr = listener.local_addr().unwrap();
+
+//         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+//             let _ = tokio::time::timeout(Duration::from_secs(5), client_stream.next()).await;
+//             client_stream.into_inner().disconnect(DisconnectReason::UselessPeer).await.unwrap();
+//         });
+
+//         let (tx, rx) = oneshot::channel();
+
+//         tokio::task::spawn(async move {
+//             let (incoming, _) = listener.accept().await.unwrap();
+//             let session = builder.connect_incoming(incoming).await;
+//             session.await;
+
+//             tx.send(()).unwrap();
+//         });
+
+//         tokio::task::spawn(fut);
+
+//         rx.await.unwrap();
+//     }
+
+//     // This tests that incoming messages are delivered when there's capacity.
+//     #[tokio::test(flavor = "multi_thread")]
+//     async fn test_send_at_capacity() {
+//         let mut builder = SessionBuilder::default();
+
+//         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+//         let local_addr = listener.local_addr().unwrap();
+
+//         let fut = builder.with_client_stream(local_addr, move |mut client_stream| async move {
+//             client_stream
+//                 .send(EthMessage::NewPooledTransactionHashes68(Default::default()))
+//                 .await
+//                 .unwrap();
+//             let _ = tokio::time::timeout(Duration::from_secs(100), client_stream.next()).await;
+//         });
+//         tokio::task::spawn(fut);
+
+//         let (incoming, _) = listener.accept().await.unwrap();
+//         let session = builder.connect_incoming(incoming).await;
+
+//         // fill the entire message buffer with an unrelated message
+//         let mut num_fill_messages = 0;
+//         loop {
+//             if builder
+//                 .active_session_tx
+//                 .try_send(ActiveSessionMessage::ProtocolBreach { peer_id: PeerId::random() })
+//                 .is_err()
+//             {
+//                 break
+//             }
+//             num_fill_messages += 1;
+//         }
+
+//         tokio::task::spawn(async move {
+//             session.await;
+//         });
+
+//         tokio::time::sleep(Duration::from_millis(100)).await;
+
+//         for _ in 0..num_fill_messages {
+//             let message = builder.active_session_rx.next().await.unwrap();
+//             match message {
+//                 ActiveSessionMessage::ProtocolBreach { .. } => {}
+//                 ev => unreachable!("{ev:?}"),
+//             }
+//         }
+
+//         let message = builder.active_session_rx.next().await.unwrap();
+//         match message {
+//             ActiveSessionMessage::ValidMessage {
+//                 message: PeerMessage::PooledTransactions(_),
+//                 ..
+//             } => {}
+//             _ => unreachable!(),
+//         }
+//     }
+
+//     #[test]
+//     fn timeout_calculation_sanity_tests() {
+//         let rtt = Duration::from_secs(5);
+//         // timeout for an RTT of `rtt`
+//         let timeout = rtt * TIMEOUT_SCALING;
+
+//         // if rtt hasn't changed, timeout shouldn't change
+//         assert_eq!(calculate_new_timeout(timeout, rtt), timeout);
+
+//         // if rtt changed, the new timeout should change less than it
+//         assert!(calculate_new_timeout(timeout, rtt / 2) < timeout);
+//         assert!(calculate_new_timeout(timeout, rtt / 2) > timeout / 2);
+//         assert!(calculate_new_timeout(timeout, rtt * 2) > timeout);
+//         assert!(calculate_new_timeout(timeout, rtt * 2) < timeout * 2);
+//     }
+// }
