@@ -1,5 +1,5 @@
 use crate::{
-    Block, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx,
+    Block, BlockBody, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt, FullSignedTx,
     MaybeSerdeBincodeCompat, Receipt,
 };
 use core::fmt;
