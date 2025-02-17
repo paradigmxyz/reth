@@ -3117,6 +3117,7 @@ name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "clap",
@@ -3124,7 +3125,6 @@ dependencies = [
  "reth",
  "reth-evm",
  "reth-node-ethereum",
- "revm-primitives",
 ]
 
 [[package]]
