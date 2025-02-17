@@ -3,7 +3,10 @@
 use crate::{dirs::DataDirPath, version::SHORT_VERSION};
 use bitfinity_block_validator::BitfinityBlockValidator;
 use candid::Principal;
-use evm_canister_client::{ic_agent::{identity::AnonymousIdentity, Agent}, EvmCanisterClient, IcAgentClient};
+use evm_canister_client::{
+    ic_agent::{identity::AnonymousIdentity, Agent},
+    EvmCanisterClient, IcAgentClient,
+};
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -20,7 +23,10 @@ use reth_downloaders::{
 };
 use reth_exex::ExExManagerHandle;
 use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_core::{args::{BitfinityImportArgs, IC_MAINNET_KEY, IC_MAINNET_URL}, dirs::ChainPath};
+use reth_node_core::{
+    args::{BitfinityImportArgs, IC_MAINNET_KEY, IC_MAINNET_URL},
+    dirs::ChainPath,
+};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
@@ -189,7 +195,10 @@ impl BitfinityImportCommand {
             };
 
             while tip != safe_block {
-                match self.validate_block(&tip, remote_client.clone(), provider_factory.clone()).await {
+                match self
+                    .validate_block(&tip, remote_client.clone(), provider_factory.clone())
+                    .await
+                {
                     Ok(_) => {
                         self.import_to_block(tip, remote_client, provider_factory, consensus)
                             .await?;
@@ -220,7 +229,10 @@ impl BitfinityImportCommand {
         remote_client: Arc<BitfinityEvmClient>,
         provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
-        let agent = Agent::builder().with_identity(AnonymousIdentity).with_url(self.bitfinity.evm_network.clone()).build()?;
+        let agent = Agent::builder()
+            .with_identity(AnonymousIdentity)
+            .with_url(self.bitfinity.evm_network.clone())
+            .build()?;
         if self.bitfinity.evm_network == IC_MAINNET_URL {
             let key = hex::decode(IC_MAINNET_KEY)?;
             agent.set_root_key(key);

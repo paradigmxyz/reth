@@ -152,7 +152,6 @@ impl BitfinityEvmClient {
             .map_err(|e| {
                 RemoteClientError::ProviderError(format!("error getting safe block: {e}"))
             })?
-            .ok_or_else(|| RemoteClientError::ProviderError("block not found".to_string()))?
             .number
             .into();
 
@@ -352,8 +351,7 @@ impl BitfinityEvmClient {
         let genesis_block = client
             .get_block_by_number(0.into())
             .await
-            .map_err(|e| eyre::eyre!("error getting genesis block: {}", e))?
-            .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
+            .map_err(|e| eyre::eyre!("error getting genesis block: {}", e))?;
 
         let genesis_accounts =
             client.get_genesis_balances().await.map_err(|e| eyre::eyre!(e))?.into_iter().map(
@@ -450,8 +448,7 @@ impl BitfinityEvmClient {
         let last_block = client
             .get_block_by_number(did::BlockNumber::Latest)
             .await
-            .map_err(|e| eyre::eyre!("error getting block number: {}", e))?
-            .ok_or_eyre("latest block not found")?;
+            .map_err(|e| eyre::eyre!("error getting block number: {}", e))?;
 
         let block_ts = last_block.timestamp.0.to::<u64>();
 

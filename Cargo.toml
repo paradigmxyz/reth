@@ -652,14 +652,14 @@ tracy-client = "0.17.3"
 async-channel = "2"
 bitfinity-block-validator = { path = "crates/bitfinity-block-validator" }
 candid = "0.10"
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.42.x" }
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", branch= "feat/ephermal-tx" }
 dirs = "5.0.1"
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.42.x", features = [
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", branch= "feat/ephermal-tx", features = [
     "reqwest",
 ] }
 evm-canister-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "evm-canister-client", features = [
     "ic-agent-client",
-], tag = "v0.42.x" }
+], branch= "feat/ephermal-tx" }
 ic-cbor = "3"
 ic-certificate-verification = "3"
 ic-certification = "3"

@@ -1,5 +1,5 @@
 //! Bitfinity block validator.
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::TxKind;
 use did::BlockConfirmationData;
 use evm_canister_client::{CanisterClient, EvmCanisterClient};
 use eyre::Ok;
@@ -13,22 +13,20 @@ use reth_evm_ethereum::{
 };
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{Block, BlockWithSenders};
+use reth_provider::StateRootProvider;
 use reth_provider::{
-    providers::ProviderNodeTypes, ChainSpecProvider as _, ExecutionOutcome,
-    HashedPostStateProvider as _, LatestStateProviderRef, ProviderFactory,
+    providers::ProviderNodeTypes, ChainSpecProvider as _, ExecutionOutcome, ProviderFactory,
 };
-use reth_provider::{BlockNumReader, DatabaseProviderFactory, HeaderProvider, StateRootProvider};
-use reth_revm::db::CacheDB;
-use reth_revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, TxEnv};
+use reth_revm::db::states::bundle_state::BundleRetention;
+
+use reth_revm::primitives::{EnvWithHandlerCfg, TxEnv};
 use reth_revm::{batch::BlockBatchRecord, database::StateProviderDatabase};
-use reth_revm::{CacheState, DatabaseCommit, Evm, StateBuilder};
+use reth_revm::{DatabaseCommit, StateBuilder};
 use reth_rpc_eth_types::cache::db::StateProviderTraitObjWrapper;
 use reth_rpc_eth_types::StateCacheDb;
 use reth_trie::{HashedPostState, KeccakKeyHasher};
-use reth_trie::{KeyHasher, StateRoot};
-use reth_trie_db::DatabaseStateRoot;
+
 use std::collections::HashSet;
-use std::sync::Arc;
 
 /// Block validator for Bitfinity.
 ///
@@ -78,10 +76,9 @@ where
         &self,
         confirmation_data: BlockConfirmationData,
     ) -> eyre::Result<()> {
-        match self.evm_client.confirm_block(confirmation_data).await? {
-            Ok(_) => Ok(()),
-            Err(err) => Err(eyre::eyre!("{err}")),
-        }
+        self.evm_client.confirm_block(confirmation_data).await??;
+
+        Ok(())
     }
 
     /// Calculates confirmation data for a block based on execution result.
@@ -96,7 +93,7 @@ where
             state_root: block.state_root.into(),
             transactions_root: block.transactions_root.into(),
             receipts_root: block.receipts_root.into(),
-            proof_of_work: self.calculate_pow_hash(&block, execution_result)?,
+            proof_of_work: self.compute_pow_hash(&block, execution_result)?,
         })
     }
 
@@ -105,10 +102,9 @@ where
         let executor = self.executor();
         let blocks_with_senders: Vec<_> = blocks.iter().map(Self::convert_block).collect();
 
-        match executor.execute_and_verify_batch(&blocks_with_senders) {
-            Ok(output) => Ok(output),
-            Err(err) => Err(eyre::eyre!("Failed to execute blocks: {err:?}")),
-        }
+        let output = executor.execute_and_verify_batch(&blocks_with_senders)?;
+
+        Ok(output)
     }
 
     /// Convert [`Block`] to [`BlockWithSenders`].
@@ -144,7 +140,7 @@ where
     }
 
     /// Calculates POW hash
-    fn calculate_pow_hash(
+    fn compute_pow_hash(
         &self,
         block: &Block,
         execution_result: ExecutionOutcome,
@@ -168,15 +164,20 @@ where
             evm_config.cfg_and_block_env(&block.header);
 
         cfg_env_with_handler_cfg.cfg_env.disable_balance_check = true;
-
+        let base_fee = block.base_fee_per_gas;
+        let pow_tx = did::utils::pow_transaction(base_fee.map(Into::into));
         // Simple transaction
+        let to = match pow_tx.to {
+            Some(to) => TxKind::Call(to.0),
+            None => TxKind::Create,
+        };
         let tx = TxEnv {
-            caller: Address::from_slice(&[1]),
-            gas_limit: 21000,
-            gas_price: U256::from(1),
-            transact_to: alloy_primitives::TxKind::Call(Address::from_slice(&[2; 20])),
-            value: U256::from(1),
-            nonce: Some(0),
+            caller: pow_tx.from.into(),
+            gas_limit: pow_tx.gas.0.to(),
+            gas_price: pow_tx.gas_price.unwrap_or_default().0,
+            transact_to: to,
+            value: pow_tx.value.0,
+            nonce: Some(pow_tx.nonce.0.to()),
             ..Default::default()
         };
 
@@ -188,10 +189,11 @@ where
             );
 
             let res = evm.transact()?;
+
             evm.db_mut().commit(res.state);
             assert!(res.result.is_success());
         }
-
+        state.merge_transitions(BundleRetention::PlainState);
         let bundle = state.take_bundle();
 
         let post_hashed_state =
@@ -200,5 +202,141 @@ where
         let state_root = cache.db.state_root(post_hashed_state)?;
 
         Ok(state_root.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::sync::Arc;
+
+    use candid::Principal;
+
+    use evm_canister_client::{EvmCanisterClient, IcCanisterClient};
+    use reth_chain_state::test_utils::TestBlockBuilder;
+    use reth_chainspec::ChainSpec;
+    use reth_db::test_utils::TempDatabase;
+    use reth_db::DatabaseEnv;
+    use reth_db_common::init::init_genesis;
+    use reth_ethereum_engine_primitives::EthEngineTypes;
+
+    use reth_node_types::{AnyNodeTypesWithEngine, NodeTypesWithDBAdapter};
+    use reth_primitives::{EthPrimitives, SealedBlockWithSenders};
+    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::{
+        BlockReader, BlockWriter, DatabaseProviderFactory, EthStorage, StorageLocation,
+        TransactionVariant,
+    };
+    use reth_revm::primitives::KECCAK_EMPTY;
+    use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use reth_trie::StateRoot;
+    use reth_trie_db::{DatabaseStateRoot, MerklePatriciaTrie};
+
+    use super::*;
+
+    // Common test setup function to initialize the test environment.
+    fn setup_test_block_validator() -> (
+        BitfinityBlockValidator<
+            IcCanisterClient,
+            NodeTypesWithDBAdapter<
+                AnyNodeTypesWithEngine<
+                    EthPrimitives,
+                    EthEngineTypes,
+                    ChainSpec,
+                    MerklePatriciaTrie,
+                    EthStorage,
+                >,
+                Arc<TempDatabase<DatabaseEnv>>,
+            >,
+        >,
+        SealedBlockWithSenders,
+    ) {
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory).unwrap();
+        let genesis_block = provider_factory
+            .sealed_block_with_senders(genesis_hash.into(), TransactionVariant::NoHash)
+            .unwrap()
+            .ok_or_else(|| eyre::eyre!("genesis block not found"))
+            .unwrap();
+
+        // Insert genesis block into the underlying database.
+        let provider_rw = provider_factory.database_provider_rw().unwrap();
+        provider_rw.insert_block(genesis_block.clone(), StorageLocation::Database).unwrap();
+        provider_rw.commit().unwrap();
+
+        let canister_client = EvmCanisterClient::new(IcCanisterClient::new(Principal::anonymous()));
+        let block_validator =
+            BitfinityBlockValidator::new(canister_client, provider_factory.clone());
+
+        (block_validator, genesis_block)
+    }
+
+    #[tokio::test]
+    async fn test_execute_and_calculate_pow_with_empty_execution() {
+        let mut rng = generators::rng();
+        let (block_validator, genesis_block) = setup_test_block_validator();
+
+        let block1 = {
+            // Create a test block based on genesis.
+            let test_block = random_block(
+                &mut rng,
+                genesis_block.number + 1,
+                BlockParams {
+                    parent: Some(genesis_block.hash_slow()),
+                    tx_count: Some(10),
+                    ..Default::default()
+                },
+            )
+            .seal_with_senders::<reth_primitives::Block>()
+            .unwrap()
+            .unseal();
+
+            //Insert the test block into the database.
+            let provider_rw = block_validator.provider_factory.database_provider_rw().unwrap();
+            provider_rw
+                .insert_block(test_block.clone().seal_slow(), StorageLocation::Database)
+                .unwrap();
+            provider_rw.commit().unwrap();
+
+            test_block
+        };
+
+        let original_state =
+            StateRoot::from_tx(block_validator.provider_factory.provider().unwrap().tx_ref())
+                .root()
+                .unwrap();
+        println!("Original state: {:?}", original_state);
+        // Calculate the POW hash.
+        let pow = block_validator.compute_pow_hash(&block1, ExecutionOutcome::default()).unwrap();
+        println!("POW: {:?}", pow);
+        assert_ne!(pow.0, KECCAK_EMPTY, "Proof of work hash should not be empty");
+
+        assert_ne!(original_state, pow.0, "State should change after POW calculation");
+
+        let new_state =
+            StateRoot::from_tx(block_validator.provider_factory.provider().unwrap().tx_ref())
+                .root()
+                .unwrap();
+
+        assert_eq!(original_state, new_state, "State should not change after POW calculation");
+    }
+
+    #[tokio::test]
+    async fn test_pow_hash_with_execution_outcome() {
+        let (block_validator, genesis_block) = setup_test_block_validator();
+
+        let mut block_builder = TestBlockBuilder::eth();
+        let block = block_builder
+            .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
+
+        let outcome = block.execution_outcome();
+        let block =
+            block.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
+
+        let pow_res = block_validator.compute_pow_hash(&block.block, outcome.clone());
+
+        assert!(pow_res.is_ok());
+
+        assert_ne!(pow_res.unwrap().0, KECCAK_EMPTY, "Proof of work hash should not be empty");
     }
 }

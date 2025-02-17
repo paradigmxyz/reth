@@ -41,7 +41,8 @@ async fn bitfinity_test_should_import_data_from_evm() {
         let evm_rpc_client =
             EthJsonRpcClient::new(ReqwestClient::new(evm_datasource_url.to_string()));
 
-        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap().unwrap();
+        let remote_block =
+            evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
         let local_block = provider.block_by_number(end_block).unwrap().unwrap();
 
         assert_eq!(remote_block.hash.0, local_block.header.hash_slow().0);
@@ -73,7 +74,7 @@ async fn bitfinity_test_should_import_with_small_batch_size() {
         let evm_rpc_client =
             EthJsonRpcClient::new(ReqwestClient::new(evm_datasource_url.to_string()));
 
-        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap().unwrap();
+        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
         let local_block = provider.block_by_number(end_block).unwrap().unwrap();
 
         assert_eq!(remote_block.hash.0, local_block.header.hash_slow().0);
@@ -135,7 +136,7 @@ async fn bitfinity_test_should_import_data_from_evm_with_backup_rpc_url() {
         // create evm client
         let evm_rpc_client = EthJsonRpcClient::new(ReqwestClient::new(backup_rpc_url.to_string()));
 
-        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap().unwrap();
+        let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
         let local_block = provider.block_by_number(end_block).unwrap().unwrap();
 
         assert_eq!(remote_block.hash.0, local_block.header.hash_slow().0);
