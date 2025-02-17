@@ -72,12 +72,6 @@ rand.workspace = true
 tempfile.workspace = true
 
 [features]
-optimism = [
-    "reth-db?/optimism",
-    "reth-db-api?/optimism",
-    "reth-provider/optimism",
-]
-
 test-utils = [
     "tempfile",
     "reth-db-api",

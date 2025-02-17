@@ -36,7 +36,6 @@ pub type OpBlockBody = <OpBlock as reth_primitives_traits::Block>::Body;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OpPrimitives;
 
-#[cfg(feature = "optimism")]
 impl reth_primitives_traits::NodePrimitives for OpPrimitives {
     type Block = OpBlock;
     type BlockHeader = alloy_consensus::Header;

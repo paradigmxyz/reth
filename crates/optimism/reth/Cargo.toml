@@ -82,12 +82,3 @@ network = ["dep:reth-network"]
 provider = ["storage-api", "dep:reth-provider", "dep:reth-db"]
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]
-optimism = [
-    "reth-db?/optimism",
-    "reth-optimism-consensus?/optimism",
-    "reth-optimism-evm?/optimism",
-    "reth-optimism-node?/optimism",
-    "reth-optimism-primitives/optimism",
-    "reth-optimism-rpc?/optimism",
-    "reth-provider?/optimism",
-]
