@@ -207,7 +207,7 @@ impl EthChainSpec for ScrollChainSpec {
     }
 
     fn genesis_hash(&self) -> B256 {
-        *self.genesis_hash.get_or_init(|| self.genesis_header().hash_slow())
+        self.inner.genesis_hash()
     }
 
     fn prune_delete_limit(&self) -> usize {
@@ -219,7 +219,7 @@ impl EthChainSpec for ScrollChainSpec {
     }
 
     fn genesis_header(&self) -> &Header {
-        self.inner.genesis_header.get_or_init(|| self.make_genesis_header())
+        self.inner.genesis_header()
     }
 
     fn genesis(&self) -> &Genesis {
@@ -228,28 +228,6 @@ impl EthChainSpec for ScrollChainSpec {
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.inner.bootnodes()
-    }
-}
-
-impl ScrollChainSpec {
-    fn make_genesis_header(&self) -> Header {
-        Header {
-            gas_limit: self.genesis.gas_limit,
-            difficulty: self.genesis.difficulty,
-            nonce: self.genesis.nonce.into(),
-            extra_data: self.genesis.extra_data.clone(),
-            state_root: reth_trie_common::root::state_root_ref_unhashed(&self.genesis.alloc),
-            timestamp: self.genesis.timestamp,
-            mix_hash: self.genesis.mix_hash,
-            beneficiary: self.genesis.coinbase,
-            base_fee_per_gas: None,
-            withdrawals_root: None,
-            parent_beacon_block_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
-            requests_hash: None,
-            ..Default::default()
-        }
     }
 }
 

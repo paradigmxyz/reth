@@ -686,9 +686,12 @@ crunchy = "=0.2.2"
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
 
 [patch.crates-io]
-revm = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v55" }
-revm-primitives = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v55" }
-revm-interpreter = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v55" }
+# revm = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v55" }
+# revm-primitives = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v55" }
+# revm-interpreter = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v55" }
+revm = { path = "../revm/crates/revm" }
+revm-primitives = { path = "../revm/crates/primitives" }
+revm-interpreter = { path = "../revm/crates/interpreter" }
 
 ff = { git = "https://github.com/scroll-tech/ff", branch = "feat/sp1" }
 

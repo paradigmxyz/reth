@@ -90,3 +90,4 @@ optimism = [
     "reth-optimism-primitives/optimism",
     "reth-optimism-rpc?/optimism",
 ]
+scroll = []

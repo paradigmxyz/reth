@@ -75,6 +75,5 @@ test-utils = [
 scroll = [
     "revm/scroll",
     "reth-primitives-traits/scroll",
-    "reth-revm/scroll",
     "reth-execution-types/scroll",
 ]

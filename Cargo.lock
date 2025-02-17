@@ -9374,7 +9374,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-chainspec"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -9396,7 +9396,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-cli"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "clap",
  "eyre",
@@ -9404,6 +9404,7 @@ dependencies = [
  "reth-cli",
  "reth-cli-commands",
  "reth-cli-runner",
+ "reth-consensus",
  "reth-db",
  "reth-node-builder",
  "reth-node-core",
@@ -9419,7 +9420,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-consensus"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "eyre",
  "revm",
@@ -9427,7 +9428,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-engine-primitives"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9454,7 +9455,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-evm"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9480,7 +9481,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-forks"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-chains",
  "alloy-primitives",
@@ -9491,7 +9492,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-node"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9529,7 +9530,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-payload"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "futures-util",
  "reth-basic-payload-builder",
@@ -9543,7 +9544,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-primitives"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9569,7 +9570,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-rpc"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -9604,7 +9605,7 @@ dependencies = [
 
 [[package]]
 name = "reth-scroll-trie"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-primitives",
  "alloy-trie",
@@ -10043,8 +10044,6 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "19.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfc5bef3c95fadf3b6a24a253600348380c169ef285f9780a793bb7090c8990d"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -10079,8 +10078,6 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "15.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcab7ef2064057acfc84731205f4bc77f4ec1b35630800b26ff6a185731c5ab"
 dependencies = [
  "cfg-if",
  "revm-primitives",
@@ -10090,8 +10087,6 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "16.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6caa1a7ff2cc4a09a263fcf9de99151706f323d30f33d519ed329f017a02b046"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -10110,8 +10105,6 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "15.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0f987564210317706def498421dfba2ae1af64a8edce82c6102758b48133fcb"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10540,7 +10533,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scroll-alloy-consensus"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10564,7 +10557,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-network"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10577,7 +10570,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-provider"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-primitives",
  "alloy-provider",
@@ -10614,7 +10607,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-rpc-types"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10632,7 +10625,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-rpc-types-engine"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -10642,7 +10635,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-reth"
-version = "1.1.5"
+version = "1.2.0"
 dependencies = [
  "clap",
  "reth-cli-util",

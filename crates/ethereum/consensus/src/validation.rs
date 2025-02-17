@@ -1,6 +1,4 @@
-use alloy_consensus::{
-    proofs::calculate_receipt_root, BlockHeader, Eip2718EncodableReceipt, TxReceipt,
-};
+use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::EthereumHardforks;

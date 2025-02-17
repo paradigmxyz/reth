@@ -3,7 +3,7 @@
 use crate::{
     config::{ScrollConfigureEvm, ScrollEvmT},
     receipt::{BasicScrollReceiptBuilder, ReceiptBuilderCtx, ScrollReceiptBuilder},
-    ForkError, ScrollEvmConfig,
+    ForkError, ScrollBlockExecutionError, ScrollEvmConfig,
 };
 use alloy_consensus::{Header, Transaction, TxReceipt, Typed2718};
 use alloy_eips::eip7685::Requests;
@@ -13,7 +13,6 @@ use reth_evm::{
     execute::{
         BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
         BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
-        InternalBlockExecutionError,
     },
     Database, Evm,
 };
@@ -77,9 +76,10 @@ where
         self.state.set_state_clear_flag(state_clear_flag);
 
         // load the l1 gas oracle contract in cache
-        let _ = self.state.load_cache_account(L1_GAS_PRICE_ORACLE_ADDRESS).map_err(|err| {
-            BlockExecutionError::Internal(InternalBlockExecutionError::other(err))
-        })?;
+        let _ = self
+            .state
+            .load_cache_account(L1_GAS_PRICE_ORACLE_ADDRESS)
+            .map_err(BlockExecutionError::other)?;
 
         if self
             .evm_config
@@ -89,7 +89,9 @@ where
         {
             if let Err(err) = apply_curie_hard_fork(&mut self.state) {
                 tracing::debug!(%err, "failed to apply curie hardfork");
-                return Err(ForkError::Curie(err.to_string()).into());
+                return Err(
+                    ScrollBlockExecutionError::fork(ForkError::Curie(err.to_string())).into()
+                );
             };
         }
 
@@ -120,26 +122,26 @@ where
 
             // verify the transaction type is accepted by the current fork.
             if transaction.is_eip2930() && !chain_spec.is_curie_active_at_block(block.number) {
-                return Err(ConsensusError::InvalidTransaction(
-                    InvalidTransactionError::Eip2930Disabled,
+                return Err(ScrollBlockExecutionError::consensus(
+                    ConsensusError::InvalidTransaction(InvalidTransactionError::Eip2930Disabled),
                 )
                 .into())
             }
             if transaction.is_eip1559() && !chain_spec.is_curie_active_at_block(block.number) {
-                return Err(ConsensusError::InvalidTransaction(
-                    InvalidTransactionError::Eip1559Disabled,
+                return Err(ScrollBlockExecutionError::consensus(
+                    ConsensusError::InvalidTransaction(InvalidTransactionError::Eip1559Disabled),
                 )
                 .into())
             }
             if transaction.is_eip4844() {
-                return Err(ConsensusError::InvalidTransaction(
-                    InvalidTransactionError::Eip4844Disabled,
+                return Err(ScrollBlockExecutionError::consensus(
+                    ConsensusError::InvalidTransaction(InvalidTransactionError::Eip4844Disabled),
                 )
                 .into())
             }
             if transaction.is_eip7702() {
-                return Err(ConsensusError::InvalidTransaction(
-                    InvalidTransactionError::Eip7702Disabled,
+                return Err(ScrollBlockExecutionError::consensus(
+                    ConsensusError::InvalidTransaction(InvalidTransactionError::Eip7702Disabled),
                 )
                 .into())
             }
@@ -200,6 +202,10 @@ where
 
     fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
+    }
+
+    fn into_state(self) -> revm::db::State<Self::DB> {
+        self.state
     }
 
     fn validate_block_post_execution(

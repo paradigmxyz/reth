@@ -14,6 +14,7 @@ use clap::{value_parser, Parser};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{common::CliNodeTypes, node::NoArgs};
 use reth_cli_runner::CliRunner;
+use reth_consensus::noop::NoopConsensus;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
@@ -115,6 +116,9 @@ where
 
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
+        let components = |spec: Arc<C::ChainSpec>| {
+            (ScrollExecutorProvider::scroll(spec), NoopConsensus::default())
+        };
 
         let runner = CliRunner::default();
         match self.command {
@@ -125,16 +129,13 @@ where
             Commands::InitState(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<Types>())
             }
-            Commands::Import(command) => runner.run_blocking_until_ctrl_c(
-                command.execute::<Types, _, _>(ScrollExecutorProvider::scroll),
-            ),
+            Commands::Import(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<Types, _, _>(components))
+            }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<Types>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<Types, _, _, ScrollNetworkPrimitives>(
-                    ctx,
-                    ScrollExecutorProvider::scroll,
-                )
+                command.execute::<Types, _, _, ScrollNetworkPrimitives>(ctx, components)
             }),
             Commands::P2P(command) => {
                 runner.run_until_ctrl_c(command.execute::<ScrollNetworkPrimitives>())

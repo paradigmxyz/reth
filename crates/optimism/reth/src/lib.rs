@@ -10,7 +10,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(unused_crate_dependencies)]
 // The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
+#![cfg(all(feature = "optimism", not(feature = "scroll")))]
 
 /// Re-exported ethereum types
 #[doc(inline)]
