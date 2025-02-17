@@ -1133,6 +1133,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut account_cursor = tx.cursor_write::<HashedAccounts>().unwrap();
         let mut storage_entry_cursor = tx.cursor_write::<HashedStorages>().unwrap();
+        let mut storage_entry_dup_cursor = tx.cursor_dup_write::<HashedStorages>().unwrap();
 
         println!("FIRST ACCOUNT: {:?}", account_cursor.first());
         println!("FIRST STORAGEENTRY: {:?}", storage_entry_cursor.first());
@@ -1205,6 +1206,7 @@ mod tests {
 
         println!("INSERT ACCOUNT: {:?}", account_cursor.insert(b256_var_from_bytes8, account4));
         println!("INSERT STORAGEENTRY: {:?}", storage_entry_cursor.insert(b256_var_from_bytes8, entry4));
+        println!("INSERT STORAGEENTRY: {:?}", storage_entry_cursor.insert(b256_var_from_bytes8, entry5));
 
         println!("CURRENT ACCOUNT: {:?}", account_cursor.current());
         println!("CURRENT STORAGEENTRY: {:?}", storage_entry_cursor.current());
@@ -1212,19 +1214,28 @@ mod tests {
         println!("APPEND ACCOUNT: {:?}", account_cursor.append(b256_var_from_bytes7, account1));
         println!("APPEND STORAGEENTRY: {:?}", storage_entry_cursor.append(b256_var_from_bytes7, entry1));
 
-        tx.commit().expect(ERROR_COMMIT);
         println!("APPEND ACCOUNT: {:?}", account_cursor.append(b256_var_from_bytes9, account1));
         println!("APPEND STORAGEENTRY: {:?}", storage_entry_cursor.append(b256_var_from_bytes9, entry1));
 
-        println!("DELETCURRENT ACCOUNT: {:?}", account_cursor.delete_current());
-        println!("DELETCURRENT STORAGEENTRY: {:?}", storage_entry_cursor.delete_current());
+        // println!("DELETCURRENT ACCOUNT: {:?}", account_cursor.delete_current());
+        // println!("DELETCURRENT STORAGEENTRY: {:?}", storage_entry_cursor.delete_current());
 
         println!("CURRENT ACCOUNT: {:?}", account_cursor.current());
         println!("CURRENT STORAGEENTRY: {:?}", storage_entry_cursor.current());
 
-        println!("DELETCURRENT ACCOUNT: {:?}", account_cursor.delete_current());
-        println!("DELETCURRENT STORAGEENTRY: {:?}", storage_entry_cursor.delete_current());
+        // println!("DELETCURRENT ACCOUNT: {:?}", account_cursor.delete_current());
+        // println!("DELETCURRENT STORAGEENTRY: {:?}", storage_entry_cursor.delete_current());
 
+        println!("NEXTDUP STORAGEENTRY: {:?}", storage_entry_dup_cursor.next_dup());
+        println!("NEXTDUP STORAGEENTRY: {:?}", storage_entry_dup_cursor.next_dup());
+        println!("NEXTDUP STORAGEENTRY: {:?}", storage_entry_dup_cursor.next_dup());
+        println!("CURRENT STORAGEENTRY: {:?}", storage_entry_dup_cursor.current());
+
+        println!("NEXTNODUP STORAGEENTRY: {:?}", storage_entry_dup_cursor.next_no_dup());
+        println!("FIRST STORAGEENTRY: {:?}", storage_entry_dup_cursor.first());
+        println!("NEXTDUPVAL STORAGEENTRY: {:?}", storage_entry_dup_cursor.next_dup_val());
+
+        println!("SEEKBYKEYSUBKEY STORAGEENTRY: {:?}", storage_entry_dup_cursor.seek_by_key_subkey(b256_var_from_bytes8, b256_var_from_bytes6))
     }
 
     #[test]

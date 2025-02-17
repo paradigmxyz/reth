@@ -1,11 +1,5 @@
-use super::{SERIALIZED_HASHED_ACCOUNTS_KEY_BYTES, SERIALIZED_HASHED_STORAGES_KEY_BYTES, TABLE_CODE_HASHED_ACCOUNTS, TABLE_CODE_HASHED_STORAGES};
 use rand::{thread_rng, Rng};
 use reth_storage_errors::db::DatabaseError;
-use reth_primitives::{Account, StorageEntry};
-use reth_db_api::{
-    table::{Compress, DupSort, Encode, Table, TableImporter},
-    transaction::{DbTx, DbTxMut},
-};
 use std::{
     fmt,
     io::{Read, Write},
@@ -536,30 +530,6 @@ impl ScalerizeClient {
 
         match status {
             STATUS_SUCCESS => self.parse_key_value_response(data, key_len).map(Some),
-            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
-            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
-        }
-    }
-
-    pub fn next_dup_val(&mut self, table_code: u8, cursor_id: Vec<u8>) -> Result<Option<Vec<u8>>, ClientError> {
-        let mut request = vec![OP_NEXT_DUP_VAL];
-        request.extend_from_slice(&table_code.to_be_bytes());
-        request.extend_from_slice(&cursor_id);
-        
-        println!("NEXT DUP VAL REQUEST: {:?}", request);
-        self.stream.write_all(&request)?;
-        self.stream.flush()?;
-
-        let response = self.read_full_response()?;
-        let status = response[0];
-        let data = &response[1..];
-
-        if data.is_empty() {
-            return Ok(None);
-        }
-
-        match status {
-            STATUS_SUCCESS => Ok(Some(data.to_vec())),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
             _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
         }

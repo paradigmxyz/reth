@@ -501,16 +501,90 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     /// Returns the next `(key, value)` pair of a DUPSORT table.
     fn next_dup(&mut self) -> PairResult<T> {
+        let table_code = match T::NAME {
+            "HashedStorages" => Some(TABLE_CODE_HASHED_STORAGES),
+            _ => None,
+        };
+
+        if let Some(code) = table_code {
+            let mut client = self.scalerize_client.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
+            let response = client.next_dup(code, self.id.to_vec(), SERIALIZED_HASHED_ACCOUNTS_KEY_BYTES).map_err(DatabaseError::from)?;
+            if response.is_none() {
+                return Ok(None)
+            }
+
+            let key: B256 = bincode::deserialize(&response.as_ref().unwrap().0).map_err(|_| {DatabaseError::Other("Failed to deserialize Key".to_string())})?;
+            let value: StorageEntry = bincode::deserialize(&response.as_ref().unwrap().1).map_err(|_| {DatabaseError::Other("Failed to deserialize StorageEntry".to_string())})?;
+
+            unsafe {
+                let ptr = &key as *const B256 as *const <T as Table>::Key;
+                let key = ptr.read();
+
+                let ptr = &value as *const StorageEntry as *const <T as Table>::Value;
+                let value = ptr.read();
+
+                return Ok(Some((key, value)))
+            } 
+        }
+
         decode::<T>(self.inner.next_dup())
     }
 
     /// Returns the next `(key, value)` pair skipping the duplicates.
     fn next_no_dup(&mut self) -> PairResult<T> {
+        let table_code = match T::NAME {
+            "HashedStorages" => Some(TABLE_CODE_HASHED_STORAGES),
+            _ => None,
+        };
+
+        if let Some(code) = table_code {
+            let mut client = self.scalerize_client.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
+            let response = client.next_no_dup(code, self.id.to_vec(), SERIALIZED_HASHED_ACCOUNTS_KEY_BYTES).map_err(DatabaseError::from)?;
+            if response.is_none() {
+                return Ok(None)
+            }
+
+            let key: B256 = bincode::deserialize(&response.as_ref().unwrap().0).map_err(|_| {DatabaseError::Other("Failed to deserialize Key".to_string())})?;
+            let value: StorageEntry = bincode::deserialize(&response.as_ref().unwrap().1).map_err(|_| {DatabaseError::Other("Failed to deserialize StorageEntry".to_string())})?;
+
+            unsafe {
+                let ptr = &key as *const B256 as *const <T as Table>::Key;
+                let key = ptr.read();
+
+                let ptr = &value as *const StorageEntry as *const <T as Table>::Value;
+                let value = ptr.read();
+
+                return Ok(Some((key, value)))
+            } 
+        }
+
         decode::<T>(self.inner.next_nodup())
     }
 
     /// Returns the next `value` of a duplicate `key`.
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
+        let table_code = match T::NAME {
+            "HashedStorages" => Some(TABLE_CODE_HASHED_STORAGES),
+            _ => None,
+        };
+
+        if let Some(code) = table_code {
+            let mut client = self.scalerize_client.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
+            let response = client.next_dup(code, self.id.to_vec(), SERIALIZED_HASHED_ACCOUNTS_KEY_BYTES).map_err(DatabaseError::from)?;
+            if response.is_none() {
+                return Ok(None)
+            }
+
+            let value: StorageEntry = bincode::deserialize(&response.as_ref().unwrap().1).map_err(|_| {DatabaseError::Other("Failed to deserialize StorageEntry".to_string())})?;
+
+            unsafe {
+                let ptr = &value as *const StorageEntry as *const <T as Table>::Value;
+                let value = ptr.read();
+
+                return Ok(Some(value))
+            } 
+        }
+
         self.inner
             .next_dup()
             .map_err(|e| DatabaseError::Read(e.into()))?
@@ -523,6 +597,31 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         key: <T as Table>::Key,
         subkey: <T as DupSort>::SubKey,
     ) -> ValueOnlyResult<T> {
+        let table_code = match T::NAME {
+            "HashedStorages" => Some(TABLE_CODE_HASHED_STORAGES),
+            _ => None,
+        };
+
+        if let Some(code) = table_code {
+            let mut client = self.scalerize_client.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
+            let key = bincode::serialize(&key).map_err(|_| DatabaseError::Other("Failed to serialize Key".to_string()))?;
+            let subkey = bincode::serialize(&subkey).map_err(|_| DatabaseError::Other("Failed to serialize Subkey".to_string()))?;
+
+            let response = client.seek_by_key_subkey(code, self.id.to_vec(), &key, &subkey).map_err(DatabaseError::from)?;
+            if response.is_none() {
+                return Ok(None)
+            }
+            
+            let value: StorageEntry = bincode::deserialize(&response.as_ref().unwrap()).map_err(|_| {DatabaseError::Other("Failed to deserialize StorageEntry".to_string())})?;
+
+            unsafe {
+                let ptr = &value as *const StorageEntry as *const <T as Table>::Value;
+                let value = ptr.read();
+
+                return Ok(Some(value))
+            } 
+        }
+
         self.inner
             .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
             .map_err(|e| DatabaseError::Read(e.into()))?
