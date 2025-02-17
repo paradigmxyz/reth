@@ -7,9 +7,9 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::{StoredBlockOmmers, StoredBlockWithdrawals},
+    tables,
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
-    tables,
 };
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{
