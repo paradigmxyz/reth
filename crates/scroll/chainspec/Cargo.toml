@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits.workspace = true
+reth-trie-common.workspace = true
 
 # scroll
 reth-scroll-forks.workspace = true
@@ -53,6 +54,7 @@ std = [
     "reth-ethereum-forks/std",
     "reth-primitives-traits/std",
     "reth-scroll-forks/std",
+    "reth-trie-common/std",
     "alloy-consensus/std",
     "once_cell/std",
     "serde/std",

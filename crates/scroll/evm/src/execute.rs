@@ -602,7 +602,7 @@ mod tests {
             ScrollTxType::Eip2930,
             NOT_CURIE_BLOCK_NUMBER,
             U256::ZERO,
-            Some("EIP-2930 transactions are disabled"),
+            Some("failed to validate block: EIP-2930 transactions are disabled"),
         )?;
         Ok(())
     }
@@ -622,7 +622,7 @@ mod tests {
             ScrollTxType::Eip1559,
             NOT_CURIE_BLOCK_NUMBER,
             U256::ZERO,
-            Some("EIP-1559 transactions are disabled"),
+            Some("failed to validate block: EIP-1559 transactions are disabled"),
         )?;
         Ok(())
     }
