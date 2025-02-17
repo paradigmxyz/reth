@@ -9389,7 +9389,6 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "reth-scroll-forks",
- "reth-trie-common",
  "serde",
  "serde_json",
 ]

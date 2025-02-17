@@ -189,12 +189,10 @@ jobs:
           cargo udeps --workspace --lib --examples --tests --benches --all-features --locked \
             --exclude reth-optimism-cli --exclude reth-optimism-consensus --exclude reth-optimism-payload-builder \
             --exclude reth-optimism-node --exclude reth-optimism-evm --exclude reth-optimism-node --exclude reth-optimism-rpc \
-            --exclude reth-optimism-txpool --exclude op-reth --exclude "example-*" --exclude reth --exclude reth-payload-primitives \
-            --exclude reth-e2e-test-utils --exclude reth-ethereum-payload-builder --exclude reth-exex-test-utils \
-            --exclude reth-node-ethereum --exclude reth-scroll-cli --exclude reth-scroll-evm \
+            --exclude reth-optimism-txpool --exclude reth-op --exclude op-reth --exclude "example-*" --exclude reth  \
+            --exclude reth-exex-test-utils --exclude reth-node-ethereum --exclude reth-scroll-cli --exclude reth-scroll-evm \
             --exclude reth-scroll-node --exclude scroll-reth --exclude reth-scroll-rpc  --exclude reth-scroll-trie \
-            --exclude reth-scroll-engine-primitives --exclude reth-scroll-payload --exclude scroll-alloy-provider
-
+            --exclude reth-scroll-engine-primitives --exclude scroll-alloy-provider --exclude reth-scroll-payload
   book:
     name: book
     runs-on: ubuntu-latest

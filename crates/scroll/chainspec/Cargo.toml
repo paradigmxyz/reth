@@ -17,7 +17,6 @@ reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits.workspace = true
-reth-trie-common.workspace = true
 
 # scroll
 reth-scroll-forks.workspace = true
@@ -60,5 +59,4 @@ std = [
     "derive_more/std",
     "reth-network-peers/std",
     "serde_json/std",
-    "reth-trie-common/std",
 ]
