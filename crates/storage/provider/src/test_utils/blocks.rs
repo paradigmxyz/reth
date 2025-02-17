@@ -8,8 +8,7 @@ use alloy_primitives::{
 use alloy_consensus::Header;
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_primitives::PrimitiveSignature as Signature;
-use reth_db::tables;
-use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
+use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
 use reth_node_types::NodeTypes;
 use reth_primitives::{
     Account, BlockBody, Receipt, RecoveredBlock, SealedBlock, SealedHeader, Transaction,

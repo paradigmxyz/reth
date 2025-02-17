@@ -1,7 +1,10 @@
 use super::missing_static_data_error;
 use futures_util::TryStreamExt;
-use reth_db::{tables, transaction::DbTx};
-use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
+use reth_db_api::{
+    cursor::DbCursorRO,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
 use reth_provider::{

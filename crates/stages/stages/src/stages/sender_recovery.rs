@@ -1,11 +1,13 @@
 use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
-use reth_db::{static_file::TransactionMask, table::Value, tables, RawValue};
+use reth_db::static_file::TransactionMask;
 use reth_db_api::{
     cursor::DbCursorRW,
+    table::Value,
+    tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt,
+    DbTxUnwindExt, RawValue,
 };
 use reth_primitives::{GotExpected, NodePrimitives, StaticFileSegment};
 use reth_primitives_traits::SignedTransaction;

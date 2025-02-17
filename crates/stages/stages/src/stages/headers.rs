@@ -4,11 +4,12 @@ use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_consensus::HeaderValidator;
-use reth_db::{table::Value, tables, transaction::DbTx, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    transaction::DbTxMut,
-    DbTxUnwindExt,
+    table::Value,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    DbTxUnwindExt, RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};

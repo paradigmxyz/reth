@@ -3,10 +3,10 @@ use alloy_primitives::{
     map::{AddressMap, B256Map},
     Address, BlockNumber, B256, U256,
 };
-use reth_db::tables;
 use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
+    tables,
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;

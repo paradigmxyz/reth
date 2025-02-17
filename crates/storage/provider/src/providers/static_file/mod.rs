@@ -61,11 +61,10 @@ mod tests {
     use alloy_consensus::{Header, Transaction};
     use alloy_primitives::{BlockHash, TxNumber, B256, U256};
     use rand::seq::SliceRandom;
-    use reth_db::{
-        test_utils::create_test_static_files_dir, CanonicalHeaders, HeaderNumbers,
-        HeaderTerminalDifficulties, Headers,
+    use reth_db::test_utils::create_test_static_files_dir;
+    use reth_db_api::{
+        transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers,
     };
-    use reth_db_api::transaction::DbTxMut;
     use reth_primitives::{
         static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
         EthPrimitives, Receipt, TransactionSigned,
