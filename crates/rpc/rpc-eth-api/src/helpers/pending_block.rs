@@ -2,10 +2,9 @@
 //! RPC methods.
 
 use super::SpawnBlocking;
-use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
-use alloy_network::Network;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
@@ -41,8 +40,8 @@ use tracing::debug;
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadPendingBlock:
     EthApiTypes<
-        NetworkTypes: Network<
-            HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
+        NetworkTypes: RpcTypes<
+            Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
         Error: FromEvmError<Self::Evm>,
     > + RpcNodeCore<

@@ -13,6 +13,7 @@ use reth_provider::{
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
+    types::RpcTypes,
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
@@ -25,7 +26,7 @@ impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: SpawnBlocking<
-            NetworkTypes: alloy_network::Network<HeaderResponse = alloy_rpc_types_eth::Header>,
+            NetworkTypes: RpcTypes<Header = alloy_rpc_types_eth::Header>,
             Error: FromEvmError<Self::Evm>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<
