@@ -21,4 +21,4 @@ tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 
 # misc
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
