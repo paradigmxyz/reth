@@ -6,7 +6,7 @@ use core::fmt;
 use reth_optimism_primitives::predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_storage_api::StorageRootProvider;
 use reth_trie_common::HashedStorage;
-use revm::db::BundleAccount;
+use revm::database::BundleAccount;
 
 /// Verifies that `withdrawals_root` (i.e. `l2tol1-msg-passer` storage root since Isthmus) field is
 /// set in block header.

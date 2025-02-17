@@ -11,7 +11,8 @@ use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, StateBuilder,
+    database::StateProviderDatabase,
+    db::{states::bundle_state::BundleRetention, StateBuilder},
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;

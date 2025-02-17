@@ -40,10 +40,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::StateCommitment;
-use revm::{
-    db::BundleState,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-};
+use revm_database::BundleState;
 use std::{
     ops::{Add, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
@@ -811,7 +808,7 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use revm::db::BundleState;
+    use revm_database::BundleState;
     use std::{
         ops::{Bound, Deref, Range, RangeBounds},
         sync::Arc,

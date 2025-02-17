@@ -19,12 +19,14 @@ extern crate alloc;
 
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip2930::AccessList;
-use alloy_evm::EvmFactory;
-use alloy_primitives::{Address, Bytes, B256, U256};
+pub use alloy_evm::evm::EvmFactory;
+use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
-use revm::GetInspector;
-use revm_primitives::{TxEnv, TxKind};
+use revm::{
+    context::TxEnv,
+    inspector::{Inspector, NoOpInspector},
+};
 
 pub mod batch;
 pub mod either;
@@ -45,6 +47,19 @@ pub mod test_utils;
 
 pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, InvalidTxError};
 
+/// Helper trait to bound [`Inspector`] for a [`ConfigureEvm`].
+pub trait InspectorFor<DB: Database, Evm: ConfigureEvm>:
+    Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>
+{
+}
+impl<T, DB, Evm> InspectorFor<DB, Evm> for T
+where
+    DB: Database,
+    Evm: ConfigureEvm,
+    T: Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>,
+{
+}
+
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// The EVM factory.
@@ -61,7 +76,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         &self,
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, ()> {
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
         self.evm_factory().create_evm(db, evm_env)
     }
 
@@ -76,7 +91,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         &self,
         db: DB,
         header: &Self::Header,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, ()> {
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
         let evm_env = self.evm_env(header);
         self.evm_with_env(db, evm_env)
     }
@@ -92,10 +107,10 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, I>
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, I>
     where
         DB: Database,
-        I: GetInspector<DB>,
+        I: InspectorFor<DB, Self>,
     {
         self.evm_factory().create_evm_with_inspector(db, evm_env, inspector)
     }
@@ -116,7 +131,7 @@ where
         &self,
         db: DB,
         header: &Self::Header,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, ()> {
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
         (*self).evm_for_block(db, header)
     }
 
@@ -124,7 +139,7 @@ where
         &self,
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, ()> {
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
         (*self).evm_with_env(db, evm_env)
     }
 
@@ -133,10 +148,10 @@ where
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, I>
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, I>
     where
         DB: Database,
-        I: GetInspector<DB>,
+        I: InspectorFor<DB, Self>,
     {
         (*self).evm_with_env_and_inspector(db, evm_env, inspector)
     }
@@ -161,7 +176,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     type Error: core::error::Error + Send + Sync;
 
     /// Identifier of the EVM specification.
-    type Spec: Into<revm_primitives::SpecId> + Debug + Copy + Send + Sync;
+    type Spec: Debug + Copy + Send + Sync + 'static;
 
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
     fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv;
@@ -205,11 +220,8 @@ pub struct NextBlockEnvAttributes {
 
 /// Abstraction over transaction environment.
 pub trait TransactionEnv:
-    Into<revm_primitives::TxEnv> + Debug + Default + Clone + Send + Sync + 'static
+    revm::context_interface::Transaction + Debug + Clone + Send + Sync + 'static
 {
-    /// Returns configured gas limit.
-    fn gas_limit(&self) -> u64;
-
     /// Set the gas limit.
     fn set_gas_limit(&mut self, gas_limit: u64);
 
@@ -220,11 +232,7 @@ pub trait TransactionEnv:
     }
 
     /// Returns the configured nonce.
-    ///
-    /// This may return `None`, if the nonce has been intentionally unset in the environment. This
-    /// is useful in optimizations like transaction prewarming, where nonce checks should be
-    /// ignored.
-    fn nonce(&self) -> Option<u64>;
+    fn nonce(&self) -> u64;
 
     /// Sets the nonce.
     fn set_nonce(&mut self, nonce: u64);
@@ -235,29 +243,6 @@ pub trait TransactionEnv:
         self
     }
 
-    /// Unsets the nonce. This should be used when nonce checks for the transaction should be
-    /// ignored.
-    ///
-    /// See [`TransactionEnv::nonce`] for applications where this may be desired.
-    fn unset_nonce(&mut self);
-
-    /// Constructs a version of this [`TransactionEnv`] that has the nonce unset.
-    ///
-    /// See [`TransactionEnv::nonce`] for applications where this may be desired.
-    fn without_nonce(mut self) -> Self {
-        self.unset_nonce();
-        self
-    }
-
-    /// Returns configured gas price.
-    fn gas_price(&self) -> U256;
-
-    /// Returns configured value.
-    fn value(&self) -> U256;
-
-    /// Caller of the transaction.
-    fn caller(&self) -> Address;
-
     /// Set access list.
     fn set_access_list(&mut self, access_list: AccessList);
 
@@ -266,56 +251,41 @@ pub trait TransactionEnv:
         self.set_access_list(access_list);
         self
     }
-
-    /// Returns calldata for the transaction.
-    fn input(&self) -> &Bytes;
-
-    /// Returns [`TxKind`] of the transaction.
-    fn kind(&self) -> TxKind;
 }
 
 impl TransactionEnv for TxEnv {
-    fn gas_limit(&self) -> u64 {
-        self.gas_limit
-    }
-
     fn set_gas_limit(&mut self, gas_limit: u64) {
         self.gas_limit = gas_limit;
     }
 
-    fn gas_price(&self) -> U256 {
-        self.gas_price.to()
-    }
-
-    fn nonce(&self) -> Option<u64> {
+    fn nonce(&self) -> u64 {
         self.nonce
     }
 
     fn set_nonce(&mut self, nonce: u64) {
-        self.nonce = Some(nonce);
-    }
-
-    fn unset_nonce(&mut self) {
-        self.nonce = None;
-    }
-
-    fn value(&self) -> U256 {
-        self.value
-    }
-
-    fn caller(&self) -> Address {
-        self.caller
+        self.nonce = nonce;
     }
 
     fn set_access_list(&mut self, access_list: AccessList) {
-        self.access_list = access_list.to_vec();
+        self.access_list = access_list;
+    }
+}
+
+#[cfg(feature = "op")]
+impl<T: TransactionEnv> TransactionEnv for revm_optimism::OpTransaction<T> {
+    fn set_gas_limit(&mut self, gas_limit: u64) {
+        self.base.set_gas_limit(gas_limit);
     }
 
-    fn input(&self) -> &Bytes {
-        &self.data
+    fn nonce(&self) -> u64 {
+        TransactionEnv::nonce(&self.base)
     }
 
-    fn kind(&self) -> TxKind {
-        self.transact_to
+    fn set_nonce(&mut self, nonce: u64) {
+        self.base.set_nonce(nonce);
+    }
+
+    fn set_access_list(&mut self, access_list: AccessList) {
+        self.base.set_access_list(access_list);
     }
 }

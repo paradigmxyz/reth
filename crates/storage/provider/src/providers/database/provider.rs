@@ -66,7 +66,7 @@ use reth_trie::{
     HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
-use revm::db::states::{
+use revm_database::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
 use std::{
