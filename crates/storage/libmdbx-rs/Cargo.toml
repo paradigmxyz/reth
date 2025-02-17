@@ -21,7 +21,7 @@ indexmap = "2"
 parking_lot.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 
 dashmap = { workspace = true, features = ["inline"], optional = true }
 
