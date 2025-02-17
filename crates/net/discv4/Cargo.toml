@@ -31,7 +31,7 @@ tokio-stream.workspace = true
 
 # misc
 schnellru.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 thiserror.workspace = true
 parking_lot.workspace = true
 rand = { workspace = true, optional = true }
