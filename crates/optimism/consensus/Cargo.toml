@@ -80,7 +80,8 @@ std = [
     "reth-execution-types/std",
 ]
 optimism = [
-    "reth-optimism-primitives/optimism",
-    "reth-execution-types/optimism",
-    "reth-optimism-node/optimism",
+	"reth-optimism-primitives/optimism",
+	"reth-execution-types/optimism",
+	"reth-optimism-node/optimism",
+	"reth-provider/optimism"
 ]
