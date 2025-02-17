@@ -2883,8 +2883,8 @@ mod tests {
         sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
 
         let normal_printed = format!("{sparse}");
-        let expected =
-            "Root -> Extension { key: Nibbles(0x05), hash: None, store_in_db_trie: None }
+        let expected = "\
+Root -> Extension { key: Nibbles(0x05), hash: None, store_in_db_trie: None }
 5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None }
 50 -> Extension { key: Nibbles(0x0203), hash: None, store_in_db_trie: None }
 5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
@@ -2900,7 +2900,8 @@ mod tests {
         assert_eq!(normal_printed, expected);
 
         let alternate_printed = format!("{sparse:#}");
-        let expected = "Root -> Extension { key: Nibbles(0x05), hash: None, store_in_db_trie: None }
+        let expected = "\
+Root -> Extension { key: Nibbles(0x05), hash: None, store_in_db_trie: None }
     5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None }
         50 -> Extension { key: Nibbles(0x0203), hash: None, store_in_db_trie: None }
             5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
