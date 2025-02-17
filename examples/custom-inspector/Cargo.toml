@@ -9,9 +9,9 @@ license.workspace = true
 reth.workspace = true
 reth-evm.workspace = true
 reth-node-ethereum.workspace = true
-revm-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 clap = { workspace = true, features = ["derive"] }
 futures-util.workspace = true
+alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
