@@ -22,7 +22,7 @@ jsonrpsee-server.workspace = true
 http.workspace = true
 tower.workspace = true
 
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 eyre.workspace = true
 
 [target.'cfg(unix)'.dependencies]
