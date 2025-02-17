@@ -80,15 +80,21 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-db-api/test-utils",
     "reth-nippy-jar/test-utils",
+    "reth-primitives-traits/test-utils",
 ]
 bench = ["reth-db-api/bench"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "reth-db-api/arbitrary",
     "alloy-primitives/arbitrary",
+    "alloy-consensus/arbitrary",
+    "reth-primitives-traits/arbitrary",
 ]
 optimism = ["reth-db-api/optimism"]
-op = ["reth-db-api/op"]
+op = [
+    "reth-db-api/op",
+    "reth-primitives-traits/op",
+]
 disable-lock = []
 
 [[bench]]
