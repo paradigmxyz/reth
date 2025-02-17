@@ -96,3 +96,4 @@ op = [
     "reth-codecs/op",
     "reth-primitives-traits/op",
 ]
+bench = []

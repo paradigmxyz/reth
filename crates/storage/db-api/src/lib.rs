@@ -70,6 +70,7 @@ pub mod database_metrics;
 pub mod mock;
 /// Table traits
 pub mod table;
+pub mod tables;
 /// Transaction database traits.
 pub mod transaction;
 /// Re-exports
