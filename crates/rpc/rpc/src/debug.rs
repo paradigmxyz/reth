@@ -25,7 +25,8 @@ use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
 use reth_provider::{
     BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProofProvider, TransactionVariant,
+    ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
@@ -660,6 +661,23 @@ where
             .await
     }
 
+    /// Returns the code associated with a given hash at the specified block ID.
+    /// If no block ID is provided, it defaults to the latest block.
+    pub async fn debug_code_by_hash(
+        &self,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> Result<Bytes, Eth::Error> {
+        Ok(self
+            .provider()
+            .state_by_block_id(block_id.unwrap_or_default())
+            .map_err(Eth::Error::from_eth_err)?
+            .bytecode_by_hash(&hash)
+            .map_err(Eth::Error::from_eth_err)?
+            .unwrap_or_default()
+            .original_bytes())
+    }
+
     /// Executes the configured transaction with the environment on the given database.
     ///
     /// It optionally takes fused inspector ([`TracingInspector::fused`]) to avoid re-creating the
@@ -1042,6 +1060,10 @@ where
 
     async fn debug_chaindb_property(&self, _property: String) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn debug_code_by_hash(&self, hash: B256, block_id: Option<BlockId>) -> RpcResult<Bytes> {
+        Self::debug_code_by_hash(self, hash, block_id).await.map_err(Into::into)
     }
 
     async fn debug_cpu_profile(&self, _file: String, _seconds: u64) -> RpcResult<()> {
