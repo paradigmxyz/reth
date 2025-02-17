@@ -21,7 +21,7 @@ pub struct HashBuilderState {
     pub stack: Vec<RlpNode>,
 
     /// Group masks.
-    pub groups: Vec<TrieMask>,
+    pub state_masks: Vec<TrieMask>,
     /// Tree masks.
     pub tree_masks: Vec<TrieMask>,
     /// Hash masks.
@@ -37,7 +37,7 @@ impl From<HashBuilderState> for HashBuilder {
             key: Nibbles::from_nibbles_unchecked(state.key),
             stack: state.stack,
             value: state.value,
-            groups: state.groups,
+            state_masks: state.state_masks,
             tree_masks: state.tree_masks,
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,
@@ -54,7 +54,7 @@ impl From<HashBuilder> for HashBuilderState {
             key: state.key.into(),
             stack: state.stack,
             value: state.value,
-            groups: state.groups,
+            state_masks: state.state_masks,
             tree_masks: state.tree_masks,
             hash_masks: state.hash_masks,
             stored_in_database: state.stored_in_database,
@@ -82,9 +82,9 @@ impl reth_codecs::Compact for HashBuilderState {
 
         len += self.value.to_compact(buf);
 
-        buf.put_u16(self.groups.len() as u16);
+        buf.put_u16(self.state_masks.len() as u16);
         len += 2;
-        for item in &self.groups {
+        for item in &self.state_masks {
             len += (*item).to_compact(buf);
         }
 
@@ -120,11 +120,11 @@ impl reth_codecs::Compact for HashBuilderState {
 
         let (value, mut buf) = HashBuilderValue::from_compact(buf, 0);
 
-        let groups_len = buf.get_u16() as usize;
-        let mut groups = Vec::with_capacity(groups_len);
-        for _ in 0..groups_len {
+        let state_masks_len = buf.get_u16() as usize;
+        let mut state_masks = Vec::with_capacity(state_masks_len);
+        for _ in 0..state_masks_len {
             let (item, rest) = TrieMask::from_compact(buf, 0);
-            groups.push(item);
+            state_masks.push(item);
             buf = rest;
         }
 
@@ -145,7 +145,7 @@ impl reth_codecs::Compact for HashBuilderState {
         }
 
         let stored_in_database = buf.get_u8() != 0;
-        (Self { key, stack, value, groups, tree_masks, hash_masks, stored_in_database }, buf)
+        (Self { key, stack, value, state_masks, tree_masks, hash_masks, stored_in_database }, buf)
     }
 }
 
