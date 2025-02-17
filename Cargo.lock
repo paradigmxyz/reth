@@ -6994,7 +6994,6 @@ dependencies = [
  "strum",
  "sysinfo",
  "tempfile",
- "test-fuzz",
  "thiserror 2.0.11",
 ]
 

@@ -49,7 +49,6 @@ reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
 serde_json.workspace = true
 tempfile.workspace = true
-test-fuzz.workspace = true
 parking_lot.workspace = true
 
 alloy-consensus.workspace = true
