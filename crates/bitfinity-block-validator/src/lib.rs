@@ -339,4 +339,57 @@ mod tests {
 
         assert_ne!(pow_res.unwrap().0, KECCAK_EMPTY, "Proof of work hash should not be empty");
     }
+
+    #[tokio::test]
+    async fn test_pow_hash_deterministic() {
+        let (block_validator, genesis_block) = setup_test_block_validator();
+        let mut block_builder = TestBlockBuilder::eth();
+        let block = block_builder
+            .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
+
+        let outcome = block.execution_outcome();
+        let block =
+            block.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
+
+        // Compute POW hash twice with the same input
+        let pow1 = block_validator.compute_pow_hash(&block.block, outcome.clone()).unwrap();
+        let pow2 = block_validator.compute_pow_hash(&block.block, outcome.clone()).unwrap();
+
+        // Results should be deterministic
+        assert_eq!(pow1, pow2, "POW hash computation should be deterministic");
+    }
+
+    #[tokio::test]
+    async fn test_pow_hash_state_independence() {
+        let (block_validator, genesis_block) = setup_test_block_validator();
+        let mut block_builder = TestBlockBuilder::eth();
+        let block = block_builder
+            .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
+
+        let outcome = block.execution_outcome();
+        let block =
+            block.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
+
+        // Get initial state
+        let initial_state =
+            StateRoot::from_tx(block_validator.provider_factory.provider().unwrap().tx_ref())
+                .root()
+                .unwrap();
+
+        // Compute POW multiple times
+        for _ in 0..3 {
+            let _ = block_validator.compute_pow_hash(&block.block, outcome.clone()).unwrap();
+
+            // Check state after each computation
+            let current_state =
+                StateRoot::from_tx(block_validator.provider_factory.provider().unwrap().tx_ref())
+                    .root()
+                    .unwrap();
+
+            assert_eq!(
+                initial_state, current_state,
+                "State should remain unchanged after POW computation"
+            );
+        }
+    }
 }
