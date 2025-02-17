@@ -49,7 +49,7 @@ eyre.workspace = true
 itertools.workspace = true
 
 # tracing
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 
 [features]
 optimism = [
