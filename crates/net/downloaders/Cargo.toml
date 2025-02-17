@@ -48,7 +48,7 @@ metrics.workspace = true
 # misc
 rayon.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 
 tempfile = { workspace = true, optional = true }
 itertools.workspace = true
