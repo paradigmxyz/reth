@@ -18,4 +18,4 @@ reth-tasks.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 
 # misc
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
