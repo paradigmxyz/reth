@@ -22,8 +22,8 @@ use reth::{
     cli::Cli,
     revm::{
         bytecode::opcode::OpCode,
-        context_interface::ContextTrait,
-        handler::Inspector,
+        context_interface::ContextTr,
+        inspector::Inspector,
         interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
     },
     rpc::api::eth::helpers::Call,
@@ -125,7 +125,7 @@ struct DummyInspector {
 
 impl<CTX> Inspector<CTX, EthInterpreter> for DummyInspector
 where
-    CTX: ContextTrait,
+    CTX: ContextTr,
 {
     /// This method is called at each step of the EVM execution.
     /// It checks if the current opcode is valid and if so, it stores the opcode and its

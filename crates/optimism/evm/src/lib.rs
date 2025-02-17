@@ -172,7 +172,7 @@ mod tests {
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
     use reth_primitives_traits::{Account, RecoveredBlock};
-    use revm::{database_interface::EmptyDBTyped, handler::NoOpInspector, state::AccountInfo};
+    use revm::{database_interface::EmptyDBTyped, inspector::NoOpInspector, state::AccountInfo};
     use revm_database::{BundleState, CacheDB};
     use revm_optimism::OpSpecId;
     use revm_primitives::Log;

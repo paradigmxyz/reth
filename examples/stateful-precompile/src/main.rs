@@ -14,9 +14,10 @@ use reth::{
         context::{Cfg, Context, TxEnv},
         context_interface::{
             result::{EVMError, HaltReason},
-            ContextTrait,
+            ContextTr,
         },
-        handler::{EthPrecompiles, Inspector, NoOpInspector, PrecompileProvider},
+        handler::{EthPrecompiles, PrecompileProvider},
+        inspector::{Inspector, NoOpInspector},
         interpreter::{interpreter::EthInterpreter, InterpreterResult},
         precompile::PrecompileErrors,
         specification::hardfork::SpecId,
@@ -76,10 +77,10 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
             .with_db(db)
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
-            .build_mainnet()
+            .build_mainnet_with_inspector(NoOpInspector {})
             .with_precompiles(WrappedPrecompile::new(EthPrecompiles::default(), new_cache));
 
-        EthEvm::new(evm)
+        EthEvm::new(evm, false)
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
@@ -88,7 +89,7 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector))
+        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
     }
 }
 
@@ -132,7 +133,7 @@ impl<P: PrecompileProvider<Output = InterpreterResult>> PrecompileProvider
     type Context = P::Context;
     type Output = P::Output;
 
-    fn set_spec(&mut self, spec: <<Self::Context as ContextTrait>::Cfg as Cfg>::Spec) {
+    fn set_spec(&mut self, spec: <<Self::Context as ContextTr>::Cfg as Cfg>::Spec) {
         self.precompile.set_spec(spec.clone());
         self.spec = spec.into();
     }

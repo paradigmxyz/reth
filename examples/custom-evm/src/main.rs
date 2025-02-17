@@ -17,9 +17,10 @@ use reth::{
         context::{Cfg, Context, TxEnv},
         context_interface::{
             result::{EVMError, HaltReason},
-            ContextTrait,
+            ContextTr,
         },
-        handler::{EthPrecompiles, Inspector, NoOpInspector, PrecompileProvider},
+        handler::{EthPrecompiles, PrecompileProvider},
+        inspector::{Inspector, NoOpInspector},
         interpreter::{interpreter::EthInterpreter, InterpreterResult},
         precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
         specification::hardfork::SpecId,
@@ -63,10 +64,10 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
             .with_db(db)
             .with_cfg(input.cfg_env)
             .with_block(input.block_env)
-            .build_mainnet()
+            .build_mainnet_with_inspector(NoOpInspector {})
             .with_precompiles(CustomPrecompiles::new());
 
-        EthEvm::new(evm)
+        EthEvm::new(evm, false)
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
@@ -75,7 +76,7 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector))
+        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
     }
 }
 
@@ -191,7 +192,7 @@ pub struct CustomPrecompiles<CTX> {
     pub precompiles: EthPrecompiles<CTX>,
 }
 
-impl<CTX: ContextTrait> CustomPrecompiles<CTX> {
+impl<CTX: ContextTr> CustomPrecompiles<CTX> {
     /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn new() -> Self {
@@ -216,11 +217,11 @@ pub fn prague_custom() -> &'static Precompiles {
     })
 }
 
-impl<CTX: ContextTrait> PrecompileProvider for CustomPrecompiles<CTX> {
+impl<CTX: ContextTr> PrecompileProvider for CustomPrecompiles<CTX> {
     type Context = CTX;
     type Output = InterpreterResult;
 
-    fn set_spec(&mut self, spec: <<Self::Context as ContextTrait>::Cfg as Cfg>::Spec) {
+    fn set_spec(&mut self, spec: <<Self::Context as ContextTr>::Cfg as Cfg>::Spec) {
         let spec_id = spec.clone().into();
         if spec_id == SpecId::PRAGUE {
             self.precompiles = EthPrecompiles { precompiles: prague_custom(), ..Default::default() }
