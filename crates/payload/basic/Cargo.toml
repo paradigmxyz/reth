@@ -42,4 +42,4 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
