@@ -3099,7 +3099,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
- "once_cell",
  "reth",
  "reth-chainspec",
  "reth-ethereum-payload-builder",

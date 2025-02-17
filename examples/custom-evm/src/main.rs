@@ -6,7 +6,6 @@ use alloy_consensus::Header;
 use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes};
-use once_cell::race::OnceBox;
 use reth::{
     builder::{
         components::{ExecutorBuilder, PayloadServiceBuilder},
@@ -44,7 +43,10 @@ use reth_node_ethereum::{
 };
 use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
-use std::{convert::Infallible, sync::Arc};
+use std::{
+    convert::Infallible,
+    sync::{Arc, OnceLock},
+};
 
 /// Custom EVM configuration.
 #[derive(Debug, Clone, Default)]
@@ -202,7 +204,7 @@ impl<CTX: ContextTr> CustomPrecompiles<CTX> {
 
 /// Returns precompiles for Fjor spec.
 pub fn prague_custom() -> &'static Precompiles {
-    static INSTANCE: OnceBox<Precompiles> = OnceBox::new();
+    static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
     INSTANCE.get_or_init(|| {
         let mut precompiles = Precompiles::prague().clone();
         // Custom precompile.
@@ -213,7 +215,7 @@ pub fn prague_custom() -> &'static Precompiles {
             } as PrecompileFn,
         )
             .into()]);
-        Box::new(precompiles)
+        precompiles
     })
 }
 
