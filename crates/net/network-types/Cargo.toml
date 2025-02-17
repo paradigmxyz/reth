@@ -24,7 +24,7 @@ humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"] }
 
 # misc
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 
 [features]
 serde = [
