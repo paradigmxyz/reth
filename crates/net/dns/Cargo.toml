@@ -34,7 +34,7 @@ data-encoding = "2"
 linked_hash_set.workspace = true
 schnellru.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 parking_lot.workspace = true
 serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
