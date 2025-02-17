@@ -108,7 +108,7 @@ jobs:
       - run: cargo hack check --workspace
 
   msrv:
-    name: MSRV / ${{ matrix.network }}
+    name: MSRV
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -125,7 +125,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo build --bin "${{ matrix.binary }}" --workspace"
+      - run: cargo build --bin "${{ matrix.binary }}" --workspace
         env:
           RUSTFLAGS: -D warnings
 
