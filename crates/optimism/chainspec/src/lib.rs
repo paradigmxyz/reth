@@ -29,12 +29,14 @@ use derive_more::{Constructor, Deref, Display, From, Into};
 pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
-use reth_chainspec::{make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head};
+use reth_chainspec::{
+    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
+    DepositContract, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+};
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_primitives_traits::SealedHeader;
-use reth_primitives_traits::sync::LazyLock;
+use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -356,7 +358,9 @@ impl From<Genesis> for OpChainSpec {
         Self {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
-                genesis_header: SealedHeader::new_unhashed(make_genesis_header(&genesis, &hardforks)),
+                genesis_header: SealedHeader::new_unhashed(make_genesis_header(
+                    &genesis, &hardforks,
+                )),
                 genesis,
                 hardforks,
                 // We assume no OP network merges, and set the paris block and total difficulty to
