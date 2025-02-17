@@ -27,7 +27,7 @@ reth-stages-types.workspace = true
 alloy-primitives.workspace = true
 
 # misc
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 rayon.workspace = true
 parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
 
