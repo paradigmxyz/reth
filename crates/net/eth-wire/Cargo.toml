@@ -37,7 +37,7 @@ tokio-util = { workspace = true, features = ["io", "codec"] }
 futures.workspace = true
 tokio-stream.workspace = true
 pin-project.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 snap = "1.0.5"
 
 # arbitrary utils
