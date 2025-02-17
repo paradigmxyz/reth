@@ -9490,7 +9490,6 @@ dependencies = [
  "reth-chainspec",
  "reth-db",
  "reth-db-api",
- "reth-db-models",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-primitives-traits",

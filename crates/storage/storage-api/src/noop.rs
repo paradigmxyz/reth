@@ -20,7 +20,7 @@ use core::{
     ops::{RangeBounds, RangeInclusive},
 };
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
-use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{
     Account, Bytecode, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
