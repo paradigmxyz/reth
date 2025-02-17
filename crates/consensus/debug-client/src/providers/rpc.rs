@@ -1,5 +1,4 @@
 use crate::BlockProvider;
-use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::Block;
 use futures::StreamExt;
@@ -66,11 +65,9 @@ impl BlockProvider for RpcBlockProvider {
     }
 
     async fn get_block(&self, block_number: u64) -> eyre::Result<Block> {
-        let block: Block = self
-            .provider
-            .get_block_by_number(BlockNumberOrTag::Number(block_number), true.into())
+        self.provider
+            .get_block_by_number(block_number.into(), true.into())
             .await?
-            .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
-        Ok(block)
+            .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))
     }
 }
