@@ -3,14 +3,14 @@ use alloy_primitives::{
     map::{AddressMap, B256Map},
     Address, BlockNumber, B256, U256,
 };
-use reth_db::tables;
 use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
+    tables,
     transaction::DbTx,
+    DatabaseError,
 };
 use reth_execution_errors::StateRootError;
-use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,

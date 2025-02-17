@@ -4,8 +4,11 @@ use clap::Parser;
 use itertools::Itertools;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{mdbx::tx::Tx, static_file::iter_static_files, tables, DatabaseError};
-use reth_db_api::transaction::{DbTx, DbTxMut};
+use reth_db::{mdbx::tx::Tx, static_file::iter_static_files, DatabaseError};
+use reth_db_api::{
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_db_common::{
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
     DbTool,

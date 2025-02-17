@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use alloy_primitives::{map::HashMap, B256};
 use reth_db::DatabaseError;
 use reth_trie::{
@@ -7,6 +5,7 @@ use reth_trie::{
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeCompact, Nibbles,
 };
+use std::collections::BTreeSet;
 use tracing::warn;
 
 #[derive(Debug)]

@@ -4,10 +4,10 @@ use alloy_primitives::{
 };
 use core::{marker::PhantomData, ops::RangeInclusive};
 use derive_more::Deref;
-use reth_db::tables;
 use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
+    tables,
     transaction::DbTx,
     DatabaseError,
 };

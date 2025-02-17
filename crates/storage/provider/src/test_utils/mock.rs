@@ -16,8 +16,10 @@ use alloy_primitives::{
 };
 use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, EthChainSpec};
-use reth_db::mock::{DatabaseMock, TxMock};
-use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_db_api::{
+    mock::{DatabaseMock, TxMock},
+    models::{AccountBeforeTx, StoredBlockBodyIndices},
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives::{

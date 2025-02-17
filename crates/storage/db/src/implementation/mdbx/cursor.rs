@@ -1,8 +1,8 @@
 //! Cursor wrapper for libmdbx-sys.
 
+use super::utils::*;
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation},
-    tables::utils::*,
     DatabaseError,
 };
 use reth_db_api::{

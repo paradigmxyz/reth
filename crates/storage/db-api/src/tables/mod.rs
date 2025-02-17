@@ -5,7 +5,7 @@
 //! This module defines the tables in reth, as well as some table-related abstractions:
 //!
 //! - [`codecs`] integrates different codecs into [`Encode`] and [`Decode`]
-//! - [`models`](reth_db_api::models) defines the values written to tables
+//! - [`models`](crate::models) defines the values written to tables
 //!
 //! # Database Tour
 //!
@@ -16,12 +16,7 @@ pub mod codecs;
 mod raw;
 pub use raw::{RawDupSort, RawKey, RawTable, RawValue, TableRawRow};
 
-#[cfg(feature = "mdbx")]
-pub(crate) mod utils;
-
-use alloy_consensus::Header;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_db_api::{
+use crate::{
     models::{
         accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
@@ -31,6 +26,8 @@ use reth_db_api::{
     },
     table::{Decode, DupSort, Encode, Table, TableInfo},
 };
+use alloy_consensus::Header;
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use reth_primitives::{Receipt, StorageEntry, TransactionSigned};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -54,8 +51,10 @@ pub enum TableType {
 /// # Example
 ///
 /// ```
-/// use reth_db::{TableViewer, Tables};
-/// use reth_db_api::table::{DupSort, Table};
+/// use reth_db_api::{
+///     table::{DupSort, Table},
+///     TableViewer, Tables,
+/// };
 ///
 /// struct MyTableViewer;
 ///
@@ -143,9 +142,9 @@ macro_rules! tables {
                 }
             }
 
-            impl$(<$($generic),*>)? reth_db_api::table::Table for $name$(<$($generic),*>)?
+            impl$(<$($generic),*>)? $crate::table::Table for $name$(<$($generic),*>)?
             where
-                $value: reth_db_api::table::Value + 'static
+                $value: $crate::table::Value + 'static
                 $($(,$generic: Send + Sync)*)?
             {
                 const NAME: &'static str = table_names::$name;
@@ -163,9 +162,6 @@ macro_rules! tables {
         )*
 
         // Tables enum.
-        // NOTE: the ordering of the enum does not matter, but it is assumed that the discriminants
-        // start at 0 and increment by 1 for each variant (the default behavior).
-        // See for example `reth_db::implementation::mdbx::tx::Tx::db_handles`.
 
         /// A table in the database.
         #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -281,8 +277,7 @@ macro_rules! tables {
         /// # Examples
         ///
         /// ```
-        /// use reth_db::{Tables, tables_to_generic};
-        /// use reth_db_api::table::Table;
+        /// use reth_db_api::{table::Table, Tables, tables_to_generic};
         ///
         /// let table = Tables::Headers;
         /// let result = tables_to_generic!(table, |GenericTable| <GenericTable as Table>::NAME);
@@ -553,11 +548,11 @@ impl Encode for ChainStateKey {
 }
 
 impl Decode for ChainStateKey {
-    fn decode(value: &[u8]) -> Result<Self, reth_db_api::DatabaseError> {
+    fn decode(value: &[u8]) -> Result<Self, crate::DatabaseError> {
         match value {
             [0] => Ok(Self::LastFinalizedBlock),
             [1] => Ok(Self::LastSafeBlockBlock),
-            _ => Err(reth_db_api::DatabaseError::Decode),
+            _ => Err(crate::DatabaseError::Decode),
         }
     }
 }
