@@ -30,13 +30,13 @@ pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
-    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
+    DepositContract, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_primitives_traits::sync::LazyLock;
+use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -353,11 +353,16 @@ impl From<Genesis> for OpChainSpec {
         // append the remaining unknown hardforks to ensure we don't filter any out
         ordered_hardforks.append(&mut block_hardforks);
 
+        let hardforks = ChainHardforks::new(ordered_hardforks);
+
         Self {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
+                genesis_header: SealedHeader::new_unhashed(make_genesis_header(
+                    &genesis, &hardforks,
+                )),
                 genesis,
-                hardforks: ChainHardforks::new(ordered_hardforks),
+                hardforks,
                 // We assume no OP network merges, and set the paris block and total difficulty to
                 // zero
                 paris_block_and_final_difficulty: Some((0, U256::ZERO)),
