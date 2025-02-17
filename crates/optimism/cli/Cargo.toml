@@ -46,14 +46,14 @@ reth-tracing.workspace = true
 
 # eth
 alloy-eips.workspace = true
-alloy-consensus = { workspace = true, optional = true }
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # misc
 futures-util.workspace = true
-derive_more = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
+derive_more.workspace = true
+serde.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
@@ -63,7 +63,7 @@ eyre.workspace = true
 
 # reth test-vectors
 proptest = { workspace = true, optional = true }
-op-alloy-consensus = { workspace = true, optional = true }
+op-alloy-consensus.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -72,22 +72,6 @@ reth-db-common.workspace = true
 reth-cli-commands.workspace = true
 
 [features]
-optimism = [
-    "op-alloy-consensus",
-    "alloy-consensus",
-    "dep:derive_more",
-    "dep:serde",
-    "reth-optimism-evm/optimism",
-    "reth-node-core/optimism",
-    "reth-optimism-node/optimism",
-    "reth-execution-types/optimism",
-    "reth-db/optimism",
-    "reth-db-api/optimism",
-    "reth-optimism-primitives/optimism",
-    "reth-downloaders/optimism",
-    "reth-provider/optimism",
-    "reth-optimism-consensus/optimism",
-]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-node-core/asm-keccak",
@@ -105,11 +89,12 @@ dev = [
     "dep:proptest",
     "reth-cli-commands/arbitrary",
 ]
+
 serde = [
-    "alloy-consensus?/serde",
+    "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
-    "op-alloy-consensus?/serde",
+    "op-alloy-consensus/serde",
     "reth-execution-types/serde",
     "reth-provider/serde",
     "reth-optimism-primitives/serde",
