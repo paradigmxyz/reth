@@ -121,4 +121,3 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-serde?/arbitrary",
 ]
-optimism = []
