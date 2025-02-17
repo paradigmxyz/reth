@@ -8,7 +8,6 @@ use alloy_consensus::{
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE, BlockNumberOrTag};
 use alloy_primitives::{B256, U256};
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
-use op_alloy_network::Network;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
@@ -21,6 +20,7 @@ use reth_provider::{
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
+    types::RpcTypes,
     EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
@@ -31,8 +31,8 @@ impl<N> LoadPendingBlock for OpEthApi<N>
 where
     Self: SpawnBlocking
         + EthApiTypes<
-            NetworkTypes: Network<
-                HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
+            NetworkTypes: RpcTypes<
+                Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
             Error: FromEvmError<Self::Evm>,
         >,
