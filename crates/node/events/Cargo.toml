@@ -32,7 +32,7 @@ tokio.workspace = true
 # async
 futures.workspace = true
 
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 
 # misc
 pin-project.workspace = true
