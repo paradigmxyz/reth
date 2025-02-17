@@ -35,7 +35,7 @@ metrics.workspace = true
 alloy-primitives.workspace = true
 
 # misc
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 thiserror.workspace = true
 itertools.workspace = true
 rayon.workspace = true
