@@ -20,7 +20,7 @@ use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardfor
 use reth_errors::RethError;
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, EvmError, InvalidTxError,
+    system_calls::SystemCaller, ConfigureEvm, Evm, EvmEnv, EvmError, InvalidTxError,
     NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
@@ -32,15 +32,17 @@ use reth_primitives_traits::{
     proofs::{self},
     Block as _, SignedTransaction,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{states::bundle_state::BundleRetention, State},
+};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
     PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
 use revm::{
-    db::{states::bundle_state::BundleRetention, State},
-    primitives::ResultAndState,
+    context_interface::{result::ResultAndState, Block as _},
     DatabaseCommit,
 };
 use std::sync::Arc;
@@ -186,19 +188,19 @@ where
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = evm_env.block_env.gas_limit.to::<u64>();
-    let base_fee = evm_env.block_env.basefee.to::<u64>();
+    let block_gas_limit: u64 = evm_env.block_env.gas_limit;
+    let base_fee = evm_env.block_env.basefee;
 
     let mut executed_txs = Vec::new();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
-        evm_env.block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
+        evm_env.block_env.blob_gasprice().map(|gasprice| gasprice as u64),
     ));
     let mut total_fees = U256::ZERO;
 
-    let block_number = evm_env.block_env.number.to::<u64>();
-    let beneficiary = evm_env.block_env.coinbase;
+    let block_number = evm_env.block_env.number;
+    let beneficiary = evm_env.block_env.beneficiary;
 
     let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
 

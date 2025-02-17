@@ -3,6 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_consensus::Header;
+use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes};
 use reth::{
@@ -12,21 +13,24 @@ use reth::{
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
     revm::{
-        handler::register::EvmHandler,
-        inspector_handle_register,
-        precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
-        primitives::{
-            CfgEnvWithHandlerCfg, EVMError, Env, HaltReason, HandlerCfg, PrecompileResult, SpecId,
-            TxEnv,
+        context::{Cfg, Context, TxEnv},
+        context_interface::{
+            result::{EVMError, HaltReason},
+            ContextTr,
         },
-        ContextPrecompiles, EvmBuilder, GetInspector,
+        handler::{EthPrecompiles, PrecompileProvider},
+        inspector::{Inspector, NoOpInspector},
+        interpreter::{interpreter::EthInterpreter, InterpreterResult},
+        precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
+        specification::hardfork::SpecId,
+        MainBuilder, MainContext,
     },
     rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::{env::EvmEnv, Database};
+use reth_evm::{Database, EvmEnv};
 use reth_evm_ethereum::{EthEvm, EthEvmConfig};
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
@@ -39,7 +43,44 @@ use reth_node_ethereum::{
 };
 use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
-use std::{convert::Infallible, sync::Arc};
+use std::{
+    convert::Infallible,
+    sync::{Arc, OnceLock},
+};
+
+/// Custom EVM configuration.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct MyEvmFactory;
+
+impl EvmFactory<EvmEnv> for MyEvmFactory {
+    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
+        EthEvm<DB, I, CustomPrecompiles<EthEvmContext<DB>>>;
+    type Tx = TxEnv;
+    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
+    type Context<DB: Database> = EthEvmContext<DB>;
+
+    fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
+        let evm = Context::mainnet()
+            .with_db(db)
+            .with_cfg(input.cfg_env)
+            .with_block(input.block_env)
+            .build_mainnet_with_inspector(NoOpInspector {})
+            .with_precompiles(CustomPrecompiles::new());
+
+        EthEvm::new(evm, false)
+    }
+
+    fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>, EthInterpreter>>(
+        &self,
+        db: DB,
+        input: EvmEnv,
+        inspector: I,
+    ) -> Self::Evm<DB, I> {
+        EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
+    }
+}
 
 /// Custom EVM configuration
 #[derive(Debug, Clone)]
@@ -47,42 +88,13 @@ use std::{convert::Infallible, sync::Arc};
 pub struct MyEvmConfig {
     /// Wrapper around mainnet configuration
     inner: EthEvmConfig,
+    /// Custom EVM factory.
+    evm_factory: MyEvmFactory,
 }
 
 impl MyEvmConfig {
-    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { inner: EthEvmConfig::new(chain_spec) }
-    }
-}
-
-impl MyEvmConfig {
-    /// Sets the precompiles to the EVM handler
-    ///
-    /// This will be invoked when the EVM is created via [ConfigureEvm::evm_with_env] or
-    /// [ConfigureEvm::evm_with_env_and_inspector]
-    ///
-    /// This will use the default mainnet precompiles and add additional precompiles.
-    pub fn set_precompiles<EXT, DB>(handler: &mut EvmHandler<EXT, DB>)
-    where
-        DB: Database,
-    {
-        // first we need the evm spec id, which determines the precompiles
-        let spec_id = handler.cfg.spec_id;
-
-        // install the precompiles
-        handler.pre_execution.load_precompiles = Arc::new(move || {
-            let mut precompiles = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
-            precompiles.extend([(
-                address!("0000000000000000000000000000000000000999"),
-                Precompile::Env(Self::my_precompile).into(),
-            )]);
-            precompiles
-        });
-    }
-
-    /// A custom precompile that does nothing
-    fn my_precompile(_data: &Bytes, _gas: u64, _env: &Env) -> PrecompileResult {
-        Ok(PrecompileOutput::new(0, Bytes::new()))
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { inner: EthEvmConfig::new(chain_spec), evm_factory: MyEvmFactory::default() }
     }
 }
 
@@ -111,50 +123,10 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
-    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
-    type HaltReason = HaltReason;
+    type EvmFactory = MyEvmFactory;
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg::new(evm_env.spec),
-        };
-        EvmBuilder::default()
-            .with_db(db)
-            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            // add additional precompiles
-            .append_handler_register(MyEvmConfig::set_precompiles)
-            .build()
-            .into()
-    }
-
-    fn evm_with_env_and_inspector<DB, I>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<'_, DB, I>
-    where
-        DB: Database,
-        I: GetInspector<DB>,
-    {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg::new(evm_env.spec),
-        };
-
-        EvmBuilder::default()
-            .with_db(db)
-            .with_external_context(inspector)
-            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            // add additional precompiles
-            .append_handler_register(MyEvmConfig::set_precompiles)
-            .append_handler_register(inspector_handle_register)
-            .build()
-            .into()
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        &self.evm_factory
     }
 }
 
@@ -215,6 +187,70 @@ where
         self.inner.build(MyEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
+
+/// A custom precompile that contains static precompiles.
+#[derive(Clone)]
+pub struct CustomPrecompiles<CTX> {
+    pub precompiles: EthPrecompiles<CTX>,
+}
+
+impl<CTX: ContextTr> CustomPrecompiles<CTX> {
+    /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
+    /// wrapper that can be used inside Evm.
+    fn new() -> Self {
+        Self { precompiles: EthPrecompiles::default() }
+    }
+}
+
+/// Returns precompiles for Fjor spec.
+pub fn prague_custom() -> &'static Precompiles {
+    static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let mut precompiles = Precompiles::prague().clone();
+        // Custom precompile.
+        precompiles.extend([(
+            address!("0000000000000000000000000000000000000999"),
+            |_, _| -> PrecompileResult {
+                PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
+            } as PrecompileFn,
+        )
+            .into()]);
+        precompiles
+    })
+}
+
+impl<CTX: ContextTr> PrecompileProvider for CustomPrecompiles<CTX> {
+    type Context = CTX;
+    type Output = InterpreterResult;
+
+    fn set_spec(&mut self, spec: <<Self::Context as ContextTr>::Cfg as Cfg>::Spec) {
+        let spec_id = spec.clone().into();
+        if spec_id == SpecId::PRAGUE {
+            self.precompiles = EthPrecompiles { precompiles: prague_custom(), ..Default::default() }
+        } else {
+            self.precompiles.set_spec(spec);
+        }
+    }
+
+    fn run(
+        &mut self,
+        context: &mut Self::Context,
+        address: &Address,
+        bytes: &Bytes,
+        gas_limit: u64,
+    ) -> Result<Option<Self::Output>, reth::revm::precompile::PrecompileErrors> {
+        self.precompiles.run(context, address, bytes, gas_limit)
+    }
+
+    fn contains(&self, address: &Address) -> bool {
+        self.precompiles.contains(address)
+    }
+
+    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address> + '_> {
+        self.precompiles.warm_addresses()
+    }
+}
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
