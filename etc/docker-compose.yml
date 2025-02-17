@@ -53,7 +53,7 @@ services:
     ports:
       - 3000:3000
     environment:
-      PROMETHEUS_URL: http://prometheus:9090
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
     volumes:
       - grafanadata:/var/lib/grafana
       - ./grafana/datasources:/etc/grafana/provisioning/datasources
