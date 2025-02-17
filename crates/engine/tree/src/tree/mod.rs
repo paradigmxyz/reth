@@ -50,10 +50,7 @@ use reth_provider::{
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
-use reth_revm::{
-    cancelled::ManualCancel, context_interface::result::ResultAndState,
-    database::StateProviderDatabase,
-};
+use reth_revm::{cancelled::ManualCancel, database::StateProviderDatabase};
 use reth_stages_api::ControlFlow;
 use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState,

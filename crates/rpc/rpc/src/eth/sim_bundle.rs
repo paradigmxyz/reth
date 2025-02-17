@@ -245,7 +245,7 @@ where
             .eth_api
             .spawn_with_state_at_block(current_block_id, move |state| {
                 // Setup environment
-                let current_block_number = current_block.as_u64().unwrap();
+                let current_block_number = current_block.number();
                 let coinbase = evm_env.block_env.beneficiary;
                 let basefee = evm_env.block_env.basefee;
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));

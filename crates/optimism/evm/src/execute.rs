@@ -15,7 +15,7 @@ use reth_evm::{
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
     },
     state_change::post_block_balance_increments,
-    system_calls::{OnStateHook, SystemCaller},
+    system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
     ConfigureEvm, ConfigureEvmFor, Database, Evm, HaltReasonFor,
 };
 use reth_optimism_chainspec::OpChainSpec;
