@@ -187,7 +187,7 @@ mod tests {
         context::{BlockEnv, CfgEnv},
         database_interface::EmptyDBTyped,
         db::CacheDB,
-        handler::NoOpInspector,
+        inspector::NoOpInspector,
     };
 
     #[test]

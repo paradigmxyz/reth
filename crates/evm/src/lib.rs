@@ -25,7 +25,7 @@ use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{
     context::TxEnv,
-    handler::{Inspector, NoOpInspector},
+    inspector::{Inspector, NoOpInspector},
 };
 
 pub mod batch;

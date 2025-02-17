@@ -13,20 +13,20 @@ reth-tracing = { path = "../../crates/tracing" }
 reth-node-api = { path = "../../crates/node/api" }
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "8c7ead7" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "8c7ead7" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "c2d906c" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "c2d906c" }
 
-revm = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-database = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-context = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-specification = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
-revm-optimism = { git = "https://github.com/bluealloy/revm", rev = "3a4acd4" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-specification = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm-optimism = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
 
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "0e9da64" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "74b6aa4" }
