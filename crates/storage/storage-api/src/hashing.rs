@@ -2,7 +2,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloy_primitives::{map::HashMap, Address, BlockNumber, B256};
 use auto_impl::auto_impl;
 use core::ops::{RangeBounds, RangeInclusive};
-use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
+use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress};
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -29,7 +29,7 @@ pub trait HashingWriter: Send + Sync {
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
 
-    /// Inserts all accounts into [reth_db::tables::AccountsHistory] table.
+    /// Inserts all accounts into the `AccountsHistory` table.
     ///
     /// # Returns
     ///
@@ -39,7 +39,7 @@ pub trait HashingWriter: Send + Sync {
         accounts: impl IntoIterator<Item = (Address, Option<Account>)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
 
-    /// Unwind and clear storage hashing
+    /// Unwind and clear storage hashing.
     ///
     /// # Returns
     ///
