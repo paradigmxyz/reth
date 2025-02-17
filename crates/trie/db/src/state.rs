@@ -8,9 +8,9 @@ use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
     tables,
     transaction::DbTx,
+    DatabaseError,
 };
 use reth_execution_errors::StateRootError;
-use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,

@@ -3,8 +3,8 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     tables,
     transaction::DbTx,
+    DatabaseError,
 };
-use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::StorageTrieUpdates,
