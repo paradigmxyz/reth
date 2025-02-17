@@ -14,7 +14,8 @@ use super::{
 use crate::{EthNetworkPrimitives, EthVersion, NetworkPrimitives, SharedTransactions};
 use alloc::{boxed::Box, sync::Arc};
 use alloy_primitives::bytes::{Buf, BufMut};
-use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
+use alloy_rlp::{length_of_length, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
+use bytes::{Bytes, BytesMut};
 use core::fmt::Debug;
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
@@ -52,6 +53,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         let message_type = EthMessageID::decode(buf)?;
 
         let message = match message_type {
+            EthMessageID::StatusUpgrade => EthMessage::StatusUpgrade(StatusUpgrade::decode(buf)?),
             EthMessageID::Status => EthMessage::Status(Status::decode(buf)?),
             EthMessageID::NewBlockHashes => {
                 if version.is_eth69() {
@@ -152,6 +154,44 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
     }
 }
 
+/// This message is exchanged between peers during the eth handshake phase.
+/// This is not intended to be received after a peer connection is set.
+/// Each node sends its own extension config that will affect their p2p interactions.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, RlpEncodable, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct StatusUpgrade {
+    /// Protocol extension parameters.
+    pub extension: ProtocolExtension,
+}
+
+/// This message conveys additional protocol parameters that affect
+/// peers interactions.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, RlpEncodable, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ProtocolExtension {
+    /// BSC adds a switch to turn off the tx broadcast.
+    pub disable_peer_tx_broadcast: bool,
+}
+
+impl StatusUpgrade {
+    /// Returns `true` if this protocol upgrade allows transaction propagation.
+    pub fn is_tx_propagation_allowed(&self) -> bool {
+        !self.extension.disable_peer_tx_broadcast
+    }
+
+    /// Returns an instance of `Self` that allows transaction propagation.
+    pub fn with_allowed_txns() -> Self {
+        Self { extension: ProtocolExtension { disable_peer_tx_broadcast: false } }
+    }
+
+    /// Packs `self` into a [`ProtocolMessage`] and returns its bytes.
+    pub fn into_msg_bytes<N: NetworkPrimitives>(self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(4);
+        ProtocolMessage::from(EthMessage::<N>::StatusUpgrade(self)).encode(&mut buf);
+        buf.freeze()
+    }
+}
+
 /// Represents a message in the eth wire protocol, versions 66, 67 and 68.
 ///
 /// The ethereum wire protocol is a set of messages that are broadcast to the network in two
@@ -174,6 +214,8 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a Status message required for the protocol handshake.
     Status(Status),
+    /// BSC additional status params since eth/67
+    StatusUpgrade(StatusUpgrade),
     /// Represents a `NewBlockHashes` message broadcast to the network.
     NewBlockHashes(NewBlockHashes),
     /// Represents a `NewBlock` message broadcast to the network.
@@ -236,6 +278,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
     pub const fn message_id(&self) -> EthMessageID {
         match self {
             Self::Status(_) => EthMessageID::Status,
+            Self::StatusUpgrade(_) => EthMessageID::StatusUpgrade,
             Self::NewBlockHashes(_) => EthMessageID::NewBlockHashes,
             Self::NewBlock(_) => EthMessageID::NewBlock,
             Self::Transactions(_) => EthMessageID::Transactions,
@@ -284,6 +327,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::Status(status) => status.encode(out),
+            Self::StatusUpgrade(upgrade) => upgrade.encode(out),
             Self::NewBlockHashes(new_block_hashes) => new_block_hashes.encode(out),
             Self::NewBlock(new_block) => new_block.encode(out),
             Self::Transactions(transactions) => transactions.encode(out),
@@ -304,6 +348,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
     fn length(&self) -> usize {
         match self {
             Self::Status(status) => status.length(),
+            Self::StatusUpgrade(upgrade) => upgrade.length(),
             Self::NewBlockHashes(new_block_hashes) => new_block_hashes.length(),
             Self::NewBlock(new_block) => new_block.length(),
             Self::Transactions(transactions) => transactions.length(),
@@ -401,6 +446,8 @@ pub enum EthMessageID {
     GetReceipts = 0x0f,
     /// Represents receipts.
     Receipts = 0x10,
+    /// Status upgrade message.
+    StatusUpgrade = 0x0b,
 }
 
 impl EthMessageID {

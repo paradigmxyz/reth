@@ -7,7 +7,7 @@ use reth_network::{
     NetworkManager, PeersInfo,
 };
 use reth_network_api::events::{PeerEvent, SessionInfo};
-use reth_primitives::{ForkHash, ForkId};
+use reth_provider::noop::NoopProvider;
 use reth_tracing::{
     tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer, Tracer,
 };
@@ -36,20 +36,19 @@ async fn test_bsc_network() {
 
     let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-    let mut net_cfg = NetworkConfig::builder(secret_key)
-        .listener_addr(local_addr)
+    let net_cfg = NetworkConfig::builder(secret_key)
+        .boot_nodes(boot_nodes())
         .with_pow()
+        .listener_addr(local_addr)
         .eth_protocol(BscNetworkProtocol::default())
-        .build_with_noop_provider(bsc_chain_spec())
-        .set_discovery_v4(
-            Discv4ConfigBuilder::default()
-                .add_boot_nodes(boot_nodes())
-                .lookup_interval(Duration::from_secs(1))
-                .build(),
-        );
+        .build(NoopProvider::eth(bsc_chain_spec()));
 
-    let fork_id = ForkId { hash: ForkHash([0x07, 0xb5, 0x43, 0x28]), next: 0 };
-    net_cfg.fork_filter.set_current_fork_id(fork_id);
+    let net_cfg = net_cfg.set_discovery_v4(
+        Discv4ConfigBuilder::default()
+            .add_boot_nodes(boot_nodes())
+            .lookup_interval(Duration::from_millis(500))
+            .build(),
+    );
     let net_manager =
         NetworkManager::<EthNetworkPrimitives, BscNetworkProtocol>::new(net_cfg).await.unwrap();
 

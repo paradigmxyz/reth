@@ -943,7 +943,7 @@ pub struct HandshakeInfo {
     pub hello_msg: HelloMessageWithProtocols,
     pub status_msg: Status,
     pub fork_filter: ForkFilter,
-    pub(crate) extra_handlers: RlpxSubProtocolHandlers,
+    pub extra_handlers: RlpxSubProtocolHandlers,
 }
 
 impl fmt::Debug for HandshakeInfo {

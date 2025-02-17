@@ -207,10 +207,14 @@ impl<
         }
 
         match msg {
-            message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
-                error: EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake),
-                message,
-            },
+            message @ (EthMessage::StatusUpgrade(_) | EthMessage::Status(_)) => {
+                OnIncomingMessageOutcome::BadMessage {
+                    error: EthStreamError::EthHandshakeError(
+                        EthHandshakeError::StatusNotInHandshake,
+                    ),
+                    message,
+                }
+            }
             EthMessage::NewBlockHashes(msg) => {
                 self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
             }
