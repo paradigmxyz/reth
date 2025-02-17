@@ -73,7 +73,7 @@ impl BlockProvider for EtherscanBlockProvider {
             }
 
             if tx.send(block).await.is_err() {
-                // channel closed
+                // Channel closed.
                 break;
             }
 
