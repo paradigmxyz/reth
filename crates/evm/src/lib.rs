@@ -232,10 +232,6 @@ pub trait TransactionEnv:
     }
 
     /// Returns the configured nonce.
-    ///
-    /// This may return `None`, if the nonce has been intentionally unset in the environment. This
-    /// is useful in optimizations like transaction prewarming, where nonce checks should be
-    /// ignored.
     fn nonce(&self) -> u64;
 
     /// Sets the nonce.
