@@ -172,7 +172,7 @@ impl Command {
             ]);
         }
 
-        let static_files = iter_static_files(data_dir.static_files())?;
+        let static_files = iter_static_files(&data_dir.static_files())?;
         let static_file_provider =
             StaticFileProvider::<N>::read_only(data_dir.static_files(), false)?;
 
