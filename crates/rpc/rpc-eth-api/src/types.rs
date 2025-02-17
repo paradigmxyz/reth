@@ -28,9 +28,9 @@ impl<T> RpcTypes for T
 where
     T: Network,
 {
-    type Header = <T as Network>::HeaderResponse;
-    type Receipt = <T as Network>::ReceiptResponse;
-    type Transaction = <T as Network>::TransactionResponse;
+    type Header = T::HeaderResponse;
+    type Receipt = T::ReceiptResponse;
+    type Transaction = T::TransactionResponse;
 }
 
 /// Network specific `eth` API types.
