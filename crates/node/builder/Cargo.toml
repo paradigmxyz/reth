@@ -78,7 +78,7 @@ jsonrpsee.workspace = true
 rayon.workspace = true
 
 # tracing
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 tempfile.workspace = true
