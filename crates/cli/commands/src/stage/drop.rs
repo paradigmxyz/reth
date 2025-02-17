@@ -10,6 +10,7 @@ use reth_db_common::{
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
     DbTool,
 };
+use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
 use reth_provider::{
     writer::UnifiedStorageWriter, DatabaseProviderFactory, StaticFileProviderFactory,
@@ -66,7 +67,7 @@ impl<C: ChainSpecParser> Command<C> {
         match self.stage {
             StageEnum::Headers => {
                 tx.clear::<tables::CanonicalHeaders>()?;
-                tx.clear::<tables::Headers>()?;
+                tx.clear::<tables::Headers<HeaderTy<N>>>()?;
                 tx.clear::<tables::HeaderTerminalDifficulties>()?;
                 tx.clear::<tables::HeaderNumbers>()?;
                 reset_stage_checkpoint(tx, StageId::Headers)?;
@@ -75,11 +76,11 @@ impl<C: ChainSpecParser> Command<C> {
             }
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
-                tx.clear::<tables::Transactions>()?;
+                tx.clear::<tables::Transactions<TxTy<N>>>()?;
                 reset_prune_checkpoint(tx, PruneSegment::Transactions)?;
 
                 tx.clear::<tables::TransactionBlocks>()?;
-                tx.clear::<tables::BlockOmmers>()?;
+                tx.clear::<tables::BlockOmmers<HeaderTy<N>>>()?;
                 tx.clear::<tables::BlockWithdrawals>()?;
                 reset_stage_checkpoint(tx, StageId::Bodies)?;
 
@@ -97,7 +98,7 @@ impl<C: ChainSpecParser> Command<C> {
                 tx.clear::<tables::AccountChangeSets>()?;
                 tx.clear::<tables::StorageChangeSets>()?;
                 tx.clear::<tables::Bytecodes>()?;
-                tx.clear::<tables::Receipts>()?;
+                tx.clear::<tables::Receipts<ReceiptTy<N>>>()?;
 
                 reset_prune_checkpoint(tx, PruneSegment::Receipts)?;
                 reset_prune_checkpoint(tx, PruneSegment::ContractLogs)?;

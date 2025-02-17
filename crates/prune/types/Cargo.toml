@@ -37,6 +37,14 @@ test-fuzz.workspace = true
 toml.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "derive_more/std",
+    "serde?/std",
+    "serde_json/std",
+    "thiserror/std",
+]
 test-utils = [
     "dep:arbitrary",
     "reth-codecs?/test-utils",

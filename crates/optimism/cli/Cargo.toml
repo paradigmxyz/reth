@@ -34,6 +34,7 @@ reth-node-metrics.workspace = true
 ## optimism
 reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
+reth-optimism-consensus.workspace = true
 
 reth-chainspec.workspace = true
 reth-node-events.workspace = true
@@ -84,6 +85,7 @@ optimism = [
     "reth-db-api/optimism",
     "reth-optimism-primitives/optimism",
     "reth-downloaders/optimism",
+    "reth-optimism-consensus/optimism",
 ]
 asm-keccak = [
     "alloy-primitives/asm-keccak",

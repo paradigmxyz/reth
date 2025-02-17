@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{map::B256HashMap, B256, U256};
+use alloy_primitives::{map::B256Map, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use itertools::Itertools;
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
@@ -215,7 +215,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
     }
 }
 
-fn generate_test_data(size: usize) -> B256HashMap<U256> {
+fn generate_test_data(size: usize) -> B256Map<U256> {
     let mut runner = TestRunner::deterministic();
     proptest::collection::hash_map(any::<B256>(), any::<U256>(), size)
         .new_tree(&mut runner)

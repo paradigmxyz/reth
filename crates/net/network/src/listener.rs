@@ -77,7 +77,8 @@ pub enum ListenerEvent {
     },
     /// Encountered an error when accepting a connection.
     ///
-    /// This is non-fatal error as the listener continues to listen for new connections to accept.
+    /// This is a non-fatal error as the listener continues to listen for new connections to
+    /// accept.
     Error(io::Error),
 }
 

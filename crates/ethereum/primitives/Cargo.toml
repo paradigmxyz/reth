@@ -24,7 +24,7 @@ alloy-network = { workspace = true, optional = true }
 alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-serde = { workspace = true, optional = true }
 alloy-rlp.workspace = true
-alloy-rpc-types = { workspace = true, optional = true }
+alloy-rpc-types-eth = { workspace = true, optional = true }
 revm-primitives.workspace = true
 
 # misc
@@ -54,7 +54,7 @@ test-utils = [
     "reth-codecs?/test-utils",
     "reth-primitives-traits/test-utils",
 ]
-alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types"]
+alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth"]
 std = [
     "alloy-consensus/std",
     "alloy-primitives/std",
@@ -67,6 +67,7 @@ std = [
     "secp256k1?/std",
     "revm-primitives/std",
     "alloy-serde?/std",
+    "alloy-rpc-types-eth?/std",
 ]
 reth-codec = [
     "std",
@@ -84,8 +85,8 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "alloy-eips/arbitrary",
     "revm-primitives/arbitrary",
-    "alloy-rpc-types?/arbitrary",
     "alloy-serde?/arbitrary",
+    "alloy-rpc-types-eth?/arbitrary",
 ]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",

@@ -31,7 +31,7 @@ impl LoadedJar {
                 let mmap_handle = Arc::new(data_reader);
                 Ok(Self { jar, mmap_handle })
             }
-            Err(e) => Err(ProviderError::NippyJar(e.to_string())),
+            Err(e) => Err(ProviderError::other(e)),
         }
     }
 
