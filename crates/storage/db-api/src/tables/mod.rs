@@ -140,9 +140,9 @@ macro_rules! tables {
                 }
             }
 
-            impl$(<$($generic),*>)? crate::table::Table for $name$(<$($generic),*>)?
+            impl$(<$($generic),*>)? $crate::table::Table for $name$(<$($generic),*>)?
             where
-                $value: crate::table::Value + 'static
+                $value: $crate::table::Value + 'static
                 $($(,$generic: Send + Sync)*)?
             {
                 const NAME: &'static str = table_names::$name;
