@@ -39,7 +39,7 @@ revm-primitives.workspace = true
 
 # misc
 derive_more.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 thiserror.workspace = true
 
 [dev-dependencies]
