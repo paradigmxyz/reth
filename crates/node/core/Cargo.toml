@@ -58,7 +58,7 @@ dirs-next = "2.0.0"
 shellexpand.workspace = true
 
 # tracing
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 
 # crypto
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
