@@ -39,7 +39,7 @@ impl BlockProvider for RpcBlockProvider {
                     target: "consensus::debug-client",
                     %err,
                     url=%self.url,
-                    "failed to subscribe to blocks",
+                    "Failed to subscribe to blocks",
                 );
                 return;
             }
@@ -57,7 +57,7 @@ impl BlockProvider for RpcBlockProvider {
                         target: "consensus::debug-client",
                         %err,
                         url=%self.url,
-                        "failed to fetch a block",
+                        "Failed to fetch a block",
                     );
                 }
             }

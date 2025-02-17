@@ -63,7 +63,11 @@ impl BlockProvider for EtherscanBlockProvider {
             let block = match self.load_block(BlockNumberOrTag::Latest).await {
                 Ok(block) => block,
                 Err(err) => {
-                    warn!(target: "consensus::debug-client", %err, "failed to fetch a block from Etherscan");
+                    warn!(
+                        target: "consensus::debug-client",
+                        %err,
+                        "Failed to fetch a block from Etherscan",
+                    );
                     continue
                 }
             };
