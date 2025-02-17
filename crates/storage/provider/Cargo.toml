@@ -87,12 +87,6 @@ eyre.workspace = true
 alloy-consensus.workspace = true
 
 [features]
-optimism = [
-    "reth-execution-types/optimism",
-    "reth-codecs/op",
-    "reth-db/optimism",
-    "reth-db-api/optimism",
-]
 serde = [
     "dashmap/serde",
     "notify/serde",

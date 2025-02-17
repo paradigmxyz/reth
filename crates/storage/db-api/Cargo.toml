@@ -86,11 +86,6 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "reth-optimism-primitives?/arbitrary",
 ]
-optimism = [
-    "reth-codecs/op",
-    "reth-optimism-primitives?/optimism",
-    "op",
-]
 op = [
     "dep:reth-optimism-primitives",
     "reth-codecs/op",

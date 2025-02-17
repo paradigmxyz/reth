@@ -83,8 +83,3 @@ std = [
     "revm-database/std",
     "revm-optimism/std",
 ]
-optimism = [
-    "reth-execution-types/optimism",
-    "reth-optimism-consensus/optimism",
-    "reth-optimism-primitives/optimism",
-]

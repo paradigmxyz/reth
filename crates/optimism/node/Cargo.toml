@@ -13,8 +13,8 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-db.workspace = true
-reth-engine-local.workspace = true
+reth-db = { workspace = true, features = ["op"] }
+reth-engine-local = { workspace = true, features = ["op"] }
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-payload-builder.workspace = true
@@ -43,7 +43,7 @@ reth-optimism-txpool.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 
 # revm with required optimism features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
@@ -87,19 +87,6 @@ futures.workspace = true
 
 [features]
 default = ["reth-codec"]
-optimism = [
-    "reth-provider/optimism",
-    "reth-optimism-evm/optimism",
-    "reth-optimism-payload-builder/optimism",
-    "reth-optimism-rpc/optimism",
-    "reth-engine-local/op",
-    "reth-optimism-consensus/optimism",
-    "reth-db/optimism",
-    "reth-optimism-node/optimism",
-    "reth-node-core/optimism",
-    "reth-optimism-primitives/optimism",
-    "reth-optimism-txpool/optimism",
-]
 asm-keccak = [
     "reth-primitives/asm-keccak",
     "alloy-primitives/asm-keccak",

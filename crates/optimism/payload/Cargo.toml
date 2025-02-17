@@ -51,12 +51,3 @@ derive_more.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
-
-[features]
-optimism = [
-    "reth-provider/optimism",
-    "reth-optimism-evm/optimism",
-    "reth-execution-types/optimism",
-    "reth-optimism-consensus/optimism",
-    "reth-optimism-primitives/optimism",
-]

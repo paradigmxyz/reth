@@ -23,7 +23,7 @@ jobs:
       matrix:
         bin:
           - cargo run --bin reth --features "dev"
-          - cargo run --bin op-reth --features "optimism dev" --manifest-path crates/optimism/bin/Cargo.toml
+          - cargo run --bin op-reth --features "dev" --manifest-path crates/optimism/bin/Cargo.toml
     steps:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable

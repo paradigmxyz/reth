@@ -90,7 +90,6 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
 ]
-optimism = ["reth-db-api/optimism"]
 op = [
     "reth-db-api/op",
     "reth-primitives-traits/op",

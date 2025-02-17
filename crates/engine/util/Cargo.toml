@@ -51,8 +51,3 @@ itertools.workspace = true
 
 # tracing
 tracing.workspace = true
-
-[features]
-optimism = [
-    "reth-provider/optimism",
-]
