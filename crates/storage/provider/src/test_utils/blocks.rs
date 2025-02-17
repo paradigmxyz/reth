@@ -16,7 +16,8 @@ use reth_primitives::{
     TransactionSigned, TxType,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
-use revm::{db::BundleState, primitives::AccountInfo};
+use revm_database::BundleState;
+use revm_state::AccountInfo;
 use std::{str::FromStr, sync::LazyLock};
 
 /// Assert genesis block

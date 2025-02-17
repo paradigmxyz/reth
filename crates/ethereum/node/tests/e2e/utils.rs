@@ -1,4 +1,4 @@
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::{eip2930::AccessListItem, eip7702::Authorization, BlockId, BlockNumberOrTag};
 use alloy_primitives::{bytes, Address, B256, U256};
 use alloy_provider::{
     network::{
@@ -16,7 +16,6 @@ use reth_ethereum_primitives::TxType;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::FullProvider;
-use revm::primitives::{AccessListItem, Authorization};
 
 /// Helper function to create a new eth payload attributes
 pub(crate) fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttributes {

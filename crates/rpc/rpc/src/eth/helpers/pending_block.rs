@@ -4,7 +4,7 @@ use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header, Transaction, EMPTY_O
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, HaltReasonFor};
 use reth_primitives::{logs_bloom, BlockBody, Receipt};
 use reth_primitives_traits::proofs::calculate_transaction_root;
 use reth_provider::{
@@ -18,7 +18,11 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm_primitives::{BlockEnv, B256};
+use revm::{
+    context::BlockEnv,
+    context_interface::{result::ExecutionResult, Block},
+};
+use revm_primitives::B256;
 
 use crate::EthApi;
 
@@ -67,7 +71,7 @@ where
 
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
 
-        let timestamp = block_env.timestamp.to::<u64>();
+        let timestamp = block_env.timestamp;
         let is_shanghai = chain_spec.is_shanghai_active_at_timestamp(timestamp);
         let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
         let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
@@ -75,24 +79,24 @@ where
         let header = Header {
             parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: block_env.coinbase,
+            beneficiary: block_env.beneficiary,
             state_root,
             transactions_root,
             receipts_root,
             withdrawals_root: is_shanghai.then_some(EMPTY_WITHDRAWALS),
             logs_bloom,
-            timestamp: block_env.timestamp.to::<u64>(),
+            timestamp: block_env.timestamp,
             mix_hash: block_env.prevrandao.unwrap_or_default(),
             nonce: BEACON_NONCE.into(),
-            base_fee_per_gas: Some(block_env.basefee.to::<u64>()),
-            number: block_env.number.to::<u64>(),
-            gas_limit: block_env.gas_limit.to::<u64>(),
+            base_fee_per_gas: Some(block_env.basefee),
+            number: block_env.number,
+            gas_limit: block_env.gas_limit,
             difficulty: U256::ZERO,
             gas_used: receipts.last().map(|r| r.cumulative_gas_used).unwrap_or_default(),
             blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
-            excess_blob_gas: block_env.get_blob_excess_gas(),
+            excess_blob_gas: block_env.blob_excess_gas(),
             extra_data: Default::default(),
             parent_beacon_block_root: is_cancun.then_some(B256::ZERO),
             requests_hash: is_prague.then_some(EMPTY_REQUESTS_HASH),
@@ -108,7 +112,7 @@ where
     fn assemble_receipt(
         &self,
         tx: &ProviderTx<Self::Provider>,
-        result: revm_primitives::ExecutionResult,
+        result: ExecutionResult<HaltReasonFor<Self::Evm>>,
         cumulative_gas_used: u64,
     ) -> reth_provider::ProviderReceipt<Self::Provider> {
         #[allow(clippy::needless_update)]

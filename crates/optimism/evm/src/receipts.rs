@@ -2,21 +2,21 @@ use alloy_consensus::{Eip658Value, Receipt};
 use core::fmt;
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use revm_primitives::ExecutionResult;
+use revm::context_interface::result::ExecutionResult;
 
 /// Context for building a receipt.
 #[derive(Debug)]
-pub struct ReceiptBuilderCtx<'a, T> {
+pub struct ReceiptBuilderCtx<'a, T, Halt> {
     /// Transaction
     pub tx: &'a T,
     /// Result of transaction execution.
-    pub result: ExecutionResult,
+    pub result: ExecutionResult<Halt>,
     /// Cumulative gas used.
     pub cumulative_gas_used: u64,
 }
 
 /// Type that knows how to build a receipt based on execution result.
-pub trait OpReceiptBuilder<T>: fmt::Debug + Send + Sync + Unpin + 'static {
+pub trait OpReceiptBuilder<T, Halt>: fmt::Debug + Send + Sync + Unpin + 'static {
     /// Receipt type.
     type Receipt: Send + Sync + Clone + Unpin + 'static;
 
@@ -26,8 +26,8 @@ pub trait OpReceiptBuilder<T>: fmt::Debug + Send + Sync + Unpin + 'static {
     /// case, the `build_deposit_receipt` method will be called.
     fn build_receipt<'a>(
         &self,
-        ctx: ReceiptBuilderCtx<'a, T>,
-    ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, T>>;
+        ctx: ReceiptBuilderCtx<'a, T, Halt>,
+    ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, T, Halt>>;
 
     /// Builds receipt for a deposit transaction.
     fn build_deposit_receipt(&self, inner: OpDepositReceipt) -> Self::Receipt;
@@ -38,13 +38,13 @@ pub trait OpReceiptBuilder<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 #[non_exhaustive]
 pub struct BasicOpReceiptBuilder;
 
-impl OpReceiptBuilder<OpTransactionSigned> for BasicOpReceiptBuilder {
+impl<Halt> OpReceiptBuilder<OpTransactionSigned, Halt> for BasicOpReceiptBuilder {
     type Receipt = OpReceipt;
 
     fn build_receipt<'a>(
         &self,
-        ctx: ReceiptBuilderCtx<'a, OpTransactionSigned>,
-    ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, OpTransactionSigned>> {
+        ctx: ReceiptBuilderCtx<'a, OpTransactionSigned, Halt>,
+    ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, OpTransactionSigned, Halt>> {
         match ctx.tx.tx_type() {
             OpTxType::Deposit => Err(ctx),
             ty => {

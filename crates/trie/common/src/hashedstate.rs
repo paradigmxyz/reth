@@ -9,14 +9,14 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use itertools::Itertools;
-use reth_primitives_traits::Account;
-use revm::db::{AccountStatus, BundleAccount};
-
 #[cfg(feature = "rayon")]
 pub use rayon::*;
+use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+
+use revm_database::{AccountStatus, BundleAccount};
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -381,10 +381,8 @@ mod tests {
     use super::*;
     use crate::KeccakKeyHasher;
     use alloy_primitives::Bytes;
-    use revm::{
-        db::{states::StorageSlot, StorageWithOriginalValues},
-        primitives::{AccountInfo, Bytecode},
-    };
+    use revm_database::{states::StorageSlot, StorageWithOriginalValues};
+    use revm_state::{AccountInfo, Bytecode};
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -470,7 +468,7 @@ mod tests {
             balance: U256::from(123),
             nonce: 42,
             code_hash: B256::random(),
-            code: Some(Bytecode::LegacyRaw(Bytes::from(vec![1, 2]))),
+            code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
         };
 
         let mut storage = StorageWithOriginalValues::default();
