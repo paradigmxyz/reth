@@ -51,8 +51,10 @@ pub enum TableType {
 /// # Example
 ///
 /// ```
-/// use crate::table::{DupSort, Table};
-/// use reth_db::{TableViewer, Tables};
+/// use reth_db_api::{
+///     table::{DupSort, Table},
+///     TableViewer, Tables,
+/// };
 ///
 /// struct MyTableViewer;
 ///
@@ -160,9 +162,6 @@ macro_rules! tables {
         )*
 
         // Tables enum.
-        // NOTE: the ordering of the enum does not matter, but it is assumed that the discriminants
-        // start at 0 and increment by 1 for each variant (the default behavior).
-        // See for example `reth_db::implementation::mdbx::tx::Tx::db_handles`.
 
         /// A table in the database.
         #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -278,8 +277,7 @@ macro_rules! tables {
         /// # Examples
         ///
         /// ```
-        /// use reth_db::{Tables, tables_to_generic};
-        /// use crate::table::Table;
+        /// use reth_db_api::{table::Table, Tables, tables_to_generic};
         ///
         /// let table = Tables::Headers;
         /// let result = tables_to_generic!(table, |GenericTable| <GenericTable as Table>::NAME);
