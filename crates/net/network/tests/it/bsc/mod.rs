@@ -1,4 +1,4 @@
-use chainspec::{boot_nodes, bsc_chain_spec};
+use chainspec::{boot_nodes, bsc_chain_spec, head};
 use futures::StreamExt;
 use network::BscNetworkProtocol;
 use reth_discv4::Discv4ConfigBuilder;
@@ -38,6 +38,7 @@ async fn test_bsc_network() {
 
     let net_cfg = NetworkConfig::builder(secret_key)
         .boot_nodes(boot_nodes())
+        .set_head(head())
         .with_pow()
         .listener_addr(local_addr)
         .eth_protocol(BscNetworkProtocol::default())

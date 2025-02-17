@@ -1,7 +1,7 @@
 use alloy_primitives::{b256, U256};
 use reth_chainspec::{
     hardfork, once_cell_set, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec,
-    EthereumHardfork, ForkCondition, Hardfork, NamedChain,
+    EthereumHardfork, ForkCondition, Hardfork, Head, NamedChain,
 };
 use reth_network_peers::NodeRecord;
 use serde::{Deserialize, Serialize};
@@ -130,13 +130,15 @@ static BOOTNODES : [&str; 6] = [
 pub(crate) fn boot_nodes() -> Vec<NodeRecord> {
     BOOTNODES[..].iter().map(|s| s.parse().unwrap()).collect()
 }
-
+pub(crate) fn head() -> Head {
+    Head { number: 40_000_000, timestamp: 1727317200, ..Default::default() }
+}
 #[cfg(test)]
 mod tests {
 
     #[cfg(test)]
     mod tests {
-        use crate::bsc::chainspec::bsc_chain_spec;
+        use crate::bsc::chainspec::{bsc_chain_spec, head};
         use alloy_primitives::hex;
         use reth_chainspec::{ForkHash, ForkId};
 
@@ -146,7 +148,7 @@ mod tests {
             let expected = [b[0], b[1], b[2], b[3]];
             let expected_f_id = ForkId { hash: ForkHash(expected), next: 0 };
 
-            let fork_id = bsc_chain_spec().latest_fork_id();
+            let fork_id = bsc_chain_spec().fork_id(&head());
             assert_eq!(fork_id, expected_f_id);
         }
     }
