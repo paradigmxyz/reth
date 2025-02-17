@@ -35,6 +35,10 @@ reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["reth-codec"] }
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 # misc
 c-kzg.workspace = true
 derive_more.workspace = true
