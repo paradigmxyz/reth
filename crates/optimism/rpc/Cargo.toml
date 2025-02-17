@@ -68,7 +68,7 @@ serde_json.workspace = true
 
 # misc
 thiserror.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 derive_more = { workspace = true, features = ["constructor"] }
 
 [dev-dependencies]
