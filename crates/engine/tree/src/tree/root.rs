@@ -337,6 +337,7 @@ struct MultiproofManager<Factory> {
     pending: VecDeque<MultiproofInput<Factory>>,
     /// Thread pool to spawn multiproof calculations.
     thread_pool: Arc<rayon::ThreadPool>,
+    metrics: StateRootTaskMetrics,
 }
 
 impl<Factory> MultiproofManager<Factory>
@@ -345,7 +346,11 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
+    fn new(
+        thread_pool: Arc<rayon::ThreadPool>,
+        thread_pool_size: usize,
+        metrics: StateRootTaskMetrics,
+    ) -> Self {
         // we keep 2 threads to be used internally by [`StateRootTask`]
         let max_concurrent = thread_pool_size.saturating_sub(2);
         debug_assert!(max_concurrent != 0);
@@ -354,6 +359,7 @@ where
             max_concurrent,
             inflight: 0,
             pending: VecDeque::with_capacity(max_concurrent),
+            metrics,
         }
     }
 
@@ -375,6 +381,7 @@ where
 
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
+            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
             return;
         }
 
@@ -385,8 +392,10 @@ where
     /// spawn a new calculation if needed.
     fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
+        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
 
         if let Some(input) = self.pending.pop_front() {
+            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
             self.spawn_multiproof(input);
         }
     }
@@ -453,6 +462,7 @@ where
         });
 
         self.inflight += 1;
+        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
     }
 }
 
@@ -477,6 +487,11 @@ struct StateRootTaskMetrics {
     pub proofs_processed_histogram: Histogram,
     /// Histogram of state root update iterations.
     pub state_root_iterations_histogram: Histogram,
+
+    /// Histogram of the number of inflight multiproofs.
+    pub inflight_multiproofs_histogram: Histogram,
+    /// Histogram of the number of pending multiproofs.
+    pub pending_multiproofs_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -515,6 +530,7 @@ where
     /// Creates a new state root task with the unified message channel
     pub fn new(config: StateRootConfig<Factory>, thread_pool: Arc<rayon::ThreadPool>) -> Self {
         let (tx, rx) = channel();
+        let metrics = StateRootTaskMetrics::default();
         Self {
             config,
             rx,
@@ -522,8 +538,12 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             thread_pool: thread_pool.clone(),
-            multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
-            metrics: StateRootTaskMetrics::default(),
+            multiproof_manager: MultiproofManager::new(
+                thread_pool,
+                thread_pool_size(),
+                metrics.clone(),
+            ),
+            metrics,
         }
     }
 
