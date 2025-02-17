@@ -1235,7 +1235,11 @@ mod tests {
         println!("FIRST STORAGEENTRY: {:?}", storage_entry_dup_cursor.first());
         println!("NEXTDUPVAL STORAGEENTRY: {:?}", storage_entry_dup_cursor.next_dup_val());
 
-        println!("SEEKBYKEYSUBKEY STORAGEENTRY: {:?}", storage_entry_dup_cursor.seek_by_key_subkey(b256_var_from_bytes8, b256_var_from_bytes6))
+        println!("SEEKBYKEYSUBKEY STORAGEENTRY: {:?}", storage_entry_dup_cursor.seek_by_key_subkey(b256_var_from_bytes8, b256_var_from_bytes6));
+        // println!("DELETECURRENTDUPLICATES STORAGEENTRY: {:?}", storage_entry_dup_cursor.delete_current_duplicates());
+        // println!("SEEKBYKEYSUBKEY STORAGEENTRY: {:?}", storage_entry_dup_cursor.seek_by_key_subkey(b256_var_from_bytes8, b256_var_from_bytes6));
+
+        println!("APPENDDUP STORAGEENTRY: {:?}", storage_entry_cursor.append_dup(b256_var_from_bytes8, entry4))
     }
 
     #[test]
@@ -3155,6 +3159,8 @@ mod tests {
         let entry12 = StorageEntry { key: b256_var_from_bytes9, value: value4 };
 
         let mut cursor = tx.cursor_write::<HashedStorages>().unwrap();
+        let mut dupcursor = tx.cursor_dup_write::<HashedStorages>().unwrap();
+        println!("DELETECURRENTDUPLICATES: {:?}", dupcursor.delete_current_duplicates());
         println!("CURRENT 1: {:?}", cursor.current());
         assert!(cursor.insert(b256_var_from_bytes1, entry1).is_ok());
         // assert!(tx.put(b256_var_from_bytes1, entry2).is_ok());
@@ -3817,6 +3823,10 @@ mod tests {
         let subkey_to_append = 2;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<AccountChangeSets>().unwrap();
+        println!("APPENDDUP: {:?}", cursor.append_dup(
+            4,
+            AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
+        ));
         assert_eq!(
             cursor.append_dup(
                 transition_id,

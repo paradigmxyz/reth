@@ -812,12 +812,37 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 
 impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
+        let table_code = match T::NAME {
+            "HashedStorages" => Some(TABLE_CODE_HASHED_STORAGES),
+            _ => None,
+        };
+
+        if let Some(code) = table_code {
+            let mut client = self.scalerize_client.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
+            client.delete_current_duplicates(code, self.id.to_vec()).map_err(DatabaseError::from)?;
+            return client.write().map_err(DatabaseError::from)
+        }
+
         self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, None, |this| {
             this.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
 
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        let table_code = match T::NAME {
+            "HashedAccounts" => Some(TABLE_CODE_HASHED_ACCOUNTS),
+            "HashedStorages" => Some(TABLE_CODE_HASHED_STORAGES),
+            _ => None,
+        };
+
+        if let Some(code) = table_code {
+            let mut client = self.scalerize_client.write().map_err(|e| DatabaseError::Other(e.to_string()))?;
+            let key = bincode::serialize(&key).map_err(|_| DatabaseError::Other("Failed to serialize Key".to_string()))?;
+            let value = bincode::serialize(&value).map_err(|_| {DatabaseError::Other("Failed to serialize Value".to_string())})?;
+            client.append_dup(code, self.id.to_vec(), key.as_slice(), &value).map_err(DatabaseError::from)?;
+            return client.write().map_err(DatabaseError::from)
+        }
+
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
         self.execute_with_operation_metric(

@@ -581,12 +581,10 @@ impl ScalerizeClient {
         }
     }
 
-    pub fn append_dup(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], subkey: &[u8], value: &[u8]) -> Result<(), ClientError> {
+    pub fn append_dup(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], value: &[u8]) -> Result<(), ClientError> {
         let mut request = vec![OP_APPEND_DUP, table_code];
         request.extend_from_slice(&cursor_id);
-        
         request.extend_from_slice(key);
-        request.extend_from_slice(subkey);
         request.extend_from_slice(value);
         
         println!("APPEND DUP REQUEST: {:?}", request);
