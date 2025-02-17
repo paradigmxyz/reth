@@ -305,10 +305,10 @@ mod tests {
             StateRoot::from_tx(block_validator.provider_factory.provider().unwrap().tx_ref())
                 .root()
                 .unwrap();
-        println!("Original state: {:?}", original_state);
+
         // Calculate the POW hash.
         let pow = block_validator.compute_pow_hash(&block1, ExecutionOutcome::default()).unwrap();
-        println!("POW: {:?}", pow);
+
         assert_ne!(pow.0, KECCAK_EMPTY, "Proof of work hash should not be empty");
 
         assert_ne!(original_state, pow.0, "State should change after POW calculation");
