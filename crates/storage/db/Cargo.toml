@@ -15,32 +15,23 @@ workspace = true
 # reth
 reth-db-api.workspace = true
 reth-primitives = { workspace = true, features = ["reth-codec"] }
-reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
-reth-prune-types = { workspace = true, features = ["reth-codec", "serde"] }
-reth-stages-types.workspace = true
-reth-trie-common = { workspace = true, features = ["serde"] }
 reth-tracing.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
 
 # mdbx
 reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
 eyre = { workspace = true, optional = true }
-
-# codecs
-serde = { workspace = true, default-features = false }
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 # misc
-bytes.workspace = true
 page_size = { version = "0.6.0", optional = true }
 thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
@@ -55,11 +46,13 @@ strum = { workspace = true, features = ["derive"], optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
 serde_json.workspace = true
 tempfile.workspace = true
-test-fuzz.workspace = true
 parking_lot.workspace = true
 
+alloy-consensus.workspace = true
+serde.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
 
@@ -85,23 +78,17 @@ test-utils = [
     "arbitrary",
     "parking_lot",
     "reth-primitives/test-utils",
-    "reth-primitives-traits/test-utils",
     "reth-db-api/test-utils",
     "reth-nippy-jar/test-utils",
-    "reth-trie-common/test-utils",
-    "reth-prune-types/test-utils",
-    "reth-stages-types/test-utils",
+    "reth-primitives-traits/test-utils",
 ]
-bench = []
+bench = ["reth-db-api/bench"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "reth-db-api/arbitrary",
-    "reth-primitives-traits/arbitrary",
-    "reth-trie-common/arbitrary",
     "alloy-primitives/arbitrary",
-    "reth-prune-types/arbitrary",
-    "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
+    "reth-primitives-traits/arbitrary",
 ]
 optimism = ["reth-db-api/optimism"]
 op = [

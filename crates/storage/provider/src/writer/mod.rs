@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_errors::ProviderResult;
 use reth_primitives::{NodePrimitives, StaticFileSegment};
 use reth_primitives_traits::SignedTransaction;
@@ -228,10 +228,10 @@ mod tests {
         test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
     };
     use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
-    use reth_db::tables;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
+        tables,
         transaction::{DbTx, DbTxMut},
     };
     use reth_execution_types::ExecutionOutcome;

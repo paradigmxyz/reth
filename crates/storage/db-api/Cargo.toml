@@ -18,7 +18,7 @@ reth-db-models = { workspace = true, features = ["reth-codec"] }
 reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
 reth-stages-types = { workspace = true, features = ["serde", "reth-codec"] }
-reth-prune-types = { workspace = true, features = ["reth-codec"] }
+reth-prune-types = { workspace = true, features = ["serde", "reth-codec"] }
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
@@ -96,3 +96,4 @@ op = [
     "reth-codecs/op",
     "reth-primitives-traits/op",
 ]
+bench = []

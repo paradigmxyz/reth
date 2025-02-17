@@ -4,12 +4,13 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
-use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::Table,
+    tables,
     transaction::DbTx,
+    BlockNumberList,
 };
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
@@ -541,10 +542,11 @@ mod tests {
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
     };
     use alloy_primitives::{address, b256, Address, B256, U256};
-    use reth_db::{tables, BlockNumberList};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
+        tables,
         transaction::{DbTx, DbTxMut},
+        BlockNumberList,
     };
     use reth_primitives::{Account, StorageEntry};
     use reth_storage_api::{

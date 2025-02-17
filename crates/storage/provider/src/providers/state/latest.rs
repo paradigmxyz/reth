@@ -3,8 +3,7 @@ use crate::{
     HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
-use reth_db::tables;
-use reth_db_api::{cursor::DbDupCursorRO, transaction::DbTx};
+use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
     DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,

@@ -29,7 +29,7 @@ pub trait HashingWriter: Send + Sync {
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>>;
 
-    /// Inserts all accounts into the `AccountsHistory` table.
+    /// Inserts all accounts into [`AccountsHistory`][reth_db_api::tables::AccountsHistory] table.
     ///
     /// # Returns
     ///
