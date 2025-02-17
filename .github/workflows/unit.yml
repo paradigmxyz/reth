@@ -94,15 +94,12 @@ jobs:
       - run: cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
-    name: doc tests (${{ matrix.network }})
+    name: doc tests
     runs-on:
       group: Reth
     env:
       RUST_BACKTRACE: 1
     timeout-minutes: 30
-    strategy:
-      matrix:
-        network: ["ethereum", "optimism"]
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
@@ -111,7 +108,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Run doctests
-        run: cargo test --doc --workspace --features "${{ matrix.network }}"
+        run: cargo test --doc --workspace --all-features
 
   unit-success:
     name: unit success
