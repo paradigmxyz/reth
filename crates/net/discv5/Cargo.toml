@@ -34,7 +34,7 @@ rand.workspace = true
 
 # misc
 derive_more.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["std"] }
 thiserror.workspace = true
 itertools.workspace = true
 metrics.workspace = true
