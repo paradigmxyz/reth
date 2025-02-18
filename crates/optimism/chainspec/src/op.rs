@@ -1,10 +1,10 @@
 //! Chain specification for the Optimism Mainnet network.
 
-use crate::{LazyLock, OpChainSpec};
+use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
 use alloc::{sync::Arc, vec};
 use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
-use reth_chainspec::{make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
+use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OpHardfork;
 use reth_primitives_traits::SealedHeader;
@@ -20,7 +20,7 @@ pub static OP_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
         inner: ChainSpec {
             chain: Chain::optimism_mainnet(),
             genesis_header: SealedHeader::new(
-                make_genesis_header(&genesis, &hardforks),
+                make_op_genesis_header(&genesis, &hardforks),
                 b256!("7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"),
             ),
             genesis,
