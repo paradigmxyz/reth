@@ -42,6 +42,20 @@ use tracing::{debug, error, trace, trace_span};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
+/// The minimum size of the thread pool used for multiproof calculations.
+///
+/// At least two parallel threads are required:
+///     - multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+///     - storage root computation spawned in [`ParallelProof::multiproof`]
+const MULTIPROOF_THREAD_POOL_SIZE_MIN: usize = 2;
+
+/// The parallelism threshold for running the state root task.
+///
+/// It requires at least [`MULTIPROOF_THREAD_POOL_SIZE_MIN`] plus 2 threads:
+///     - engine in main thread that spawns the state root task
+///     - state root task spawned in [`StateRootTask::spawn`]
+const ROOT_TASK_PARALLELISM_THRESHOLD: usize = MULTIPROOF_THREAD_POOL_SIZE_MIN + 2;
+
 /// Determines the size of the thread pool to be used in [`StateRootTask`].
 /// It should be at least two, one for spawning multiproof calculations plus one to be
 /// used by multiproof calculation internally.
@@ -49,19 +63,15 @@ const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 /// NOTE: this value can be greater than the available cores in the host, it
 /// represents the maximum number of threads that can be handled by the pool.
 pub(crate) fn thread_pool_size() -> usize {
-    std::thread::available_parallelism().map_or(2, |num| (num.get() / 2).max(2))
+    std::thread::available_parallelism().map_or(MULTIPROOF_THREAD_POOL_SIZE_MIN, |num| {
+        (num.get() / 2).max(MULTIPROOF_THREAD_POOL_SIZE_MIN)
+    })
 }
 
 /// Determines if the host has enough parallelism to run the state root task.
-///
-/// It requires at least 5 parallel threads:
-/// - Engine in main thread that spawns the state root task.
-/// - State Root Task spawned in [`StateRootTask::spawn`]
-/// - Sparse Trie spawned in [`run_sparse_trie`]
-/// - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
-/// - Storage root computation spawned in [`ParallelProof::multiproof`]
 pub(crate) fn has_enough_parallelism() -> bool {
-    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
+    std::thread::available_parallelism()
+        .is_ok_and(|num| num.get() >= ROOT_TASK_PARALLELISM_THRESHOLD)
 }
 
 /// Outcome of the state root computation, including the state root itself with
