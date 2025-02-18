@@ -10,7 +10,7 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
-use reth_evm::{ConfigureEvmEnv, EvmEnv};
+use reth_evm::{ConfigureEvmEnv, EvmEnvFor};
 use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
     StateProviderFactory,
@@ -210,13 +210,10 @@ pub trait LoadState:
     /// for.
     /// If the [`BlockId`] is pending, this will return the "Pending" tag, otherwise this returns
     /// the hash of the exact block.
-    #[expect(clippy::type_complexity)]
     fn evm_env_at(
         &self,
         at: BlockId,
-    ) -> impl Future<
-        Output = Result<(EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, BlockId), Self::Error>,
-    > + Send
+    ) -> impl Future<Output = Result<(EvmEnvFor<Self::Evm>, BlockId), Self::Error>> + Send
     where
         Self: LoadPendingBlock + SpawnBlocking,
     {
