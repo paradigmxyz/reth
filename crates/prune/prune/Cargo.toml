@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-exex-types.workspace = true
-reth-db.workspace = true
 reth-db-api.workspace = true
 reth-errors.workspace = true
 reth-provider.workspace = true

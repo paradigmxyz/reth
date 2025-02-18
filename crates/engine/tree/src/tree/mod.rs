@@ -37,7 +37,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
-    ConfigureEvm, Evm, TransactionEnv,
+    ConfigureEvm, Evm,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
@@ -2431,8 +2431,11 @@ where
         // Atomic bool for letting the prewarm tasks know when to stop
         let cancel_execution = ManualCancel::default();
 
+        let use_legacy_state_root =
+            self.config.legacy_state_root() || !root::has_enough_parallelism();
+
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
-            if is_descendant_of_persisting_blocks && !self.config.legacy_state_root() {
+            if is_descendant_of_persisting_blocks && !use_legacy_state_root {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
                 // Compute trie input
@@ -2557,7 +2560,7 @@ where
         // a different database transaction per thread and it might end up with a
         // different view of the database.
         let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks {
-            if self.config.legacy_state_root() {
+            if use_legacy_state_root {
                 match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
                 {
                     Ok(result) => {
@@ -2764,12 +2767,15 @@ where
 
             let state_provider = StateProviderDatabase::new(&state_provider);
 
+            let mut evm_env = evm_config.evm_env(&block);
+
+            evm_env.cfg_env.disable_nonce_check = true;
+
             // create a new executor and disable nonce checks in the env
-            let mut evm = evm_config.evm_for_block(state_provider, &block);
+            let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
             // create the tx env and reset nonce
-            let mut tx_env = evm_config.tx_env(&tx, tx.signer());
-            tx_env.unset_nonce();
+            let tx_env = evm_config.tx_env(&tx, tx.signer());
 
             // exit early if execution is done
             if cancel_execution.is_cancelled() {

@@ -33,9 +33,6 @@ reth-network-peers.workspace = true
 reth-engine-local.workspace = true
 reth-tasks.workspace = true
 
-# currently need to enable this for workspace level
-reth-optimism-primitives = { workspace = true, features = ["arbitrary", "serde", "serde-bincode-compat"] }
-
 # rpc
 jsonrpsee.workspace = true
 url.workspace = true

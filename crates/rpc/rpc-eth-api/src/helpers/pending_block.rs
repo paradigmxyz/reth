@@ -11,8 +11,8 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{
-    env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
-    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm, EvmError, InvalidTxError,
+    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
+    ConfigureEvm, ConfigureEvmEnv, Evm, EvmEnv, EvmError, HaltReasonFor, InvalidTxError,
     NextBlockEnvAttributes,
 };
 use reth_primitives::{InvalidTransactionError, RecoveredBlock};
@@ -23,14 +23,21 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    primitives::{BlockEnv, ExecutionResult, ResultAndState},
+    db::{states::bundle_state::BundleRetention, State},
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
     TransactionPool,
 };
-use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
+use revm::{
+    context::BlockEnv,
+    context_interface::{
+        result::{ExecutionResult, ResultAndState},
+        Block,
+    },
+    DatabaseCommit,
+};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::debug;
@@ -155,7 +162,7 @@ pub trait LoadPendingBlock:
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.evm_env.block_env.number.to::<u64>() == pending_block.block.number() &&
+                if pending.evm_env.block_env.number == pending_block.block.number() &&
                     parent_hash == pending_block.block.parent_hash() &&
                     now <= pending_block.expires_at
                 {
@@ -193,7 +200,7 @@ pub trait LoadPendingBlock:
     fn assemble_receipt(
         &self,
         tx: &ProviderTx<Self::Provider>,
-        result: ExecutionResult,
+        result: ExecutionResult<HaltReasonFor<Self::Evm>>,
         cumulative_gas_used: u64,
     ) -> ProviderReceipt<Self::Provider>;
 
@@ -214,7 +221,7 @@ pub trait LoadPendingBlock:
         parent_hash: B256,
         state_root: B256,
         transactions: Vec<ProviderTx<Self::Provider>>,
-        results: Vec<ExecutionResult>,
+        results: Vec<ExecutionResult<HaltReasonFor<Self::Evm>>>,
     ) -> (ProviderBlock<Self::Provider>, Vec<ProviderReceipt<Self::Provider>>) {
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(results.len());
@@ -257,15 +264,15 @@ pub trait LoadPendingBlock:
 
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = evm_env.block_env.gas_limit.to::<u64>();
-        let base_fee = evm_env.block_env.basefee.to::<u64>();
+        let block_gas_limit: u64 = evm_env.block_env.gas_limit;
+        let base_fee = evm_env.block_env.basefee;
 
         let mut executed_txs = Vec::new();
         let mut senders = Vec::new();
         let mut best_txs =
             self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
                 base_fee,
-                evm_env.block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
+                evm_env.block_env.blob_gasprice().map(|gasprice| gasprice as u64),
             ));
 
         let chain_spec = self.provider().chain_spec();
@@ -384,7 +391,7 @@ pub trait LoadPendingBlock:
         // executes the withdrawals and commits them to the Database and BundleState.
         let balance_increments = post_block_withdrawals_balance_increments(
             chain_spec.as_ref(),
-            evm_env.block_env.timestamp.try_into().unwrap_or(u64::MAX),
+            evm_env.block_env.timestamp,
             &[],
         );
 

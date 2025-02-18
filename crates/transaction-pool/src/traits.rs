@@ -12,7 +12,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobTransactionSidecar, BlobTransactionValidationError},
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
@@ -1284,7 +1284,7 @@ impl<T: alloy_consensus::Transaction> alloy_consensus::Transaction for EthPooled
         self.transaction.value()
     }
 
-    fn input(&self) -> &revm_primitives::Bytes {
+    fn input(&self) -> &Bytes {
         self.transaction.input()
     }
 

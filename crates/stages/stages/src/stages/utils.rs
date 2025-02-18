@@ -1,13 +1,12 @@
 //! Utils for `stages`.
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_config::config::EtlConfig;
-use reth_db::BlockNumberList;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::sharded_key::NUM_OF_INDICES_IN_SHARD,
     table::{Decompress, Table},
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
+    BlockNumberList, DatabaseError,
 };
 use reth_etl::Collector;
 use reth_primitives::StaticFileSegment;

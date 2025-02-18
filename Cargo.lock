@@ -259,6 +259,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-evm"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm?rev=bcb0ebe#bcb0ebed25d8b7a0184b78543144eda21b8b98c7"
+dependencies = [
+ "alloy-primitives",
+ "revm",
+ "revm-optimism",
+]
+
+[[package]]
 name = "alloy-genesis"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -353,6 +363,17 @@ dependencies = [
  "thiserror 2.0.11",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "alloy-op-evm"
+version = "0.1.0"
+source = "git+https://github.com/alloy-rs/evm?rev=bcb0ebe#bcb0ebed25d8b7a0184b78543144eda21b8b98c7"
+dependencies = [
+ "alloy-evm",
+ "alloy-primitives",
+ "revm",
+ "revm-optimism",
 ]
 
 [[package]]
@@ -1862,9 +1883,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.29"
+version = "4.5.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8acebd8ad879283633b343856142139f2da2317c96b05b4dd6181c61e2480184"
+checksum = "92b7b18d71fad5313a1e320fa9897994228ce274b60faa4d694fe0ea89cd9e6d"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1872,9 +1893,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.29"
+version = "4.5.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6ba32cbda51c7e1dfd49acc1457ba1a7dec5b64fe360e828acb13ca8dc9c2f9"
+checksum = "a35db2071778a7344791a4fb4f95308b5673d219dee3ae348b86642574ecc90c"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2555,6 +2576,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-where"
+version = "1.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62d671cc41a825ebabc75757b62d3d168c577f9149b2d49ece1dad1f72119d25"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
 name = "derive_arbitrary"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2986,7 +3018,6 @@ name = "example-bsc-p2p"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
- "alloy-primitives",
  "reth-chainspec",
  "reth-discv4",
  "reth-network",
@@ -3063,6 +3094,7 @@ name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -3084,6 +3116,7 @@ name = "example-custom-inspector"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "clap",
@@ -3091,7 +3124,6 @@ dependencies = [
  "reth",
  "reth-evm",
  "reth-node-ethereum",
- "revm-primitives",
 ]
 
 [[package]]
@@ -3261,6 +3293,7 @@ name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
@@ -6288,7 +6321,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3779b94aeb87e8bd4e834cee3650289ee9e0d5677f976ecdb6d219e5f4f6cd94"
 dependencies = [
  "rand_chacha 0.9.0",
- "rand_core 0.9.0",
+ "rand_core 0.9.1",
  "zerocopy 0.8.18",
 ]
 
@@ -6319,7 +6352,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.9.0",
+ "rand_core 0.9.1",
 ]
 
 [[package]]
@@ -6342,9 +6375,9 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b08f3c9802962f7e1b25113931d94f43ed9725bebc59db9d0c3e9a23b67e15ff"
+checksum = "a88e0da7a2c97baa202165137c158d0a2e824ac465d13d81046727b34cb247d3"
 dependencies = [
  "getrandom 0.3.1",
  "zerocopy 0.8.18",
@@ -6400,9 +6433,9 @@ dependencies = [
 
 [[package]]
 name = "raw-cpuid"
-version = "11.3.0"
+version = "11.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6928fa44c097620b706542d428957635951bade7143269085389d42c8a4927e"
+checksum = "529468c1335c1c03919960dfefdb1b3648858c20d7ec2d0663e728e4a717efbc"
 dependencies = [
  "bitflags 2.8.0",
 ]
@@ -6731,7 +6764,8 @@ dependencies = [
  "reth-storage-api",
  "reth-testing-utils",
  "reth-trie",
- "revm",
+ "revm-database",
+ "revm-state",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -6972,7 +7006,6 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "assert_matches",
- "bytes",
  "codspeed-criterion-compat",
  "derive_more",
  "eyre",
@@ -6988,18 +7021,14 @@ dependencies = [
  "reth-nippy-jar",
  "reth-primitives",
  "reth-primitives-traits",
- "reth-prune-types",
- "reth-stages-types",
  "reth-storage-errors",
  "reth-tracing",
- "reth-trie-common",
  "rustc-hash 2.1.1",
  "serde",
  "serde_json",
  "strum",
  "sysinfo",
  "tempfile",
- "test-fuzz",
  "thiserror 2.0.11",
 ]
 
@@ -7224,7 +7253,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
- "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
@@ -7407,6 +7435,7 @@ dependencies = [
  "reth-trie-parallel",
  "reth-trie-sparse",
  "revm-primitives",
+ "revm-state",
  "schnellru",
  "thiserror 2.0.11",
  "tokio",
@@ -7439,6 +7468,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-trie",
+ "revm-database",
  "revm-primitives",
  "serde",
  "serde_json",
@@ -7655,7 +7685,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-testing-utils",
  "reth-zstd-compressors",
- "revm-primitives",
+ "revm-context",
  "secp256k1",
  "serde",
  "test-fuzz",
@@ -7677,6 +7707,7 @@ version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-primitives",
  "auto_impl",
  "futures-util",
@@ -7695,7 +7726,8 @@ dependencies = [
  "reth-primitives-traits",
  "reth-storage-errors",
  "revm",
- "revm-primitives",
+ "revm-database",
+ "revm-optimism",
 ]
 
 [[package]]
@@ -7704,10 +7736,10 @@ version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
  "alloy-sol-types",
- "derive_more",
  "reth-chainspec",
  "reth-consensus",
  "reth-ethereum-consensus",
@@ -7718,8 +7750,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-revm",
  "reth-testing-utils",
- "revm",
- "revm-primitives",
  "secp256k1",
  "serde_json",
 ]
@@ -7733,6 +7763,7 @@ dependencies = [
  "alloy-rlp",
  "nybbles",
  "reth-storage-errors",
+ "revm-database-interface",
  "thiserror 2.0.11",
 ]
 
@@ -7752,6 +7783,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-trie-common",
  "revm",
+ "revm-database",
  "serde",
  "serde_with",
 ]
@@ -8496,7 +8528,6 @@ dependencies = [
  "reth-optimism-forks",
  "reth-optimism-node",
  "reth-optimism-primitives",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
@@ -8504,7 +8535,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "reth-trie-common",
- "reth-trie-db",
  "revm",
  "thiserror 2.0.11",
  "tracing",
@@ -8516,7 +8546,9 @@ version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-genesis",
+ "alloy-op-evm",
  "alloy-primitives",
  "derive_more",
  "op-alloy-consensus",
@@ -8534,6 +8566,8 @@ dependencies = [
  "reth-primitives-traits",
  "reth-revm",
  "revm",
+ "revm-database",
+ "revm-optimism",
  "revm-primitives",
  "thiserror 2.0.11",
  "tracing",
@@ -8600,6 +8634,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie-db",
  "revm",
+ "revm-optimism",
  "serde",
  "serde_json",
  "tokio",
@@ -8665,7 +8700,8 @@ dependencies = [
  "reth-codecs",
  "reth-primitives-traits",
  "reth-zstd-compressors",
- "revm-primitives",
+ "revm-context",
+ "revm-optimism",
  "rstest",
  "secp256k1",
  "serde",
@@ -8717,6 +8753,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "revm-optimism",
  "serde_json",
  "thiserror 2.0.11",
  "tokio",
@@ -8745,11 +8782,13 @@ dependencies = [
  "c-kzg",
  "derive_more",
  "futures-util",
+ "metrics",
  "op-alloy-consensus",
  "op-alloy-flz",
  "parking_lot",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-metrics",
  "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-forks",
@@ -8758,7 +8797,7 @@ dependencies = [
  "reth-provider",
  "reth-storage-api",
  "reth-transaction-pool",
- "revm",
+ "revm-optimism",
 ]
 
 [[package]]
@@ -8882,7 +8921,9 @@ dependencies = [
  "rayon",
  "reth-chainspec",
  "reth-codecs",
+ "revm-bytecode",
  "revm-primitives",
+ "revm-state",
  "secp256k1",
  "serde",
  "serde_json",
@@ -8933,7 +8974,9 @@ dependencies = [
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-db",
- "revm",
+ "revm-database",
+ "revm-database-interface",
+ "revm-state",
  "strum",
  "tempfile",
  "tokio",
@@ -9003,6 +9046,8 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "revm",
+ "revm-database",
+ "revm-inspector",
 ]
 
 [[package]]
@@ -9284,6 +9329,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "revm",
+ "revm-database",
  "revm-inspectors",
  "revm-primitives",
  "schnellru",
@@ -9489,9 +9535,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "auto_impl",
  "reth-chainspec",
- "reth-db",
  "reth-db-api",
- "reth-db-models",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-primitives-traits",
@@ -9500,7 +9544,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "reth-trie-db",
- "revm",
+ "revm-database",
 ]
 
 [[package]]
@@ -9514,6 +9558,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
+ "revm-database-interface",
  "thiserror 2.0.11",
 ]
 
@@ -9605,7 +9650,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "revm-interpreter",
- "revm-primitives",
+ "revm-specification",
  "rustc-hash 2.1.1",
  "schnellru",
  "serde",
@@ -9641,7 +9686,8 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "reth-trie-sparse",
- "revm",
+ "revm-database",
+ "revm-state",
  "serde_json",
  "tracing",
  "triehash",
@@ -9672,7 +9718,8 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-primitives-traits",
- "revm",
+ "revm-database",
+ "revm-state",
  "serde",
  "serde_json",
  "serde_with",
@@ -9700,6 +9747,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "revm",
+ "revm-database",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -9721,11 +9769,11 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "rayon",
- "reth-db",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-storage-errors",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
@@ -9769,16 +9817,124 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "19.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfc5bef3c95fadf3b6a24a253600348380c169ef285f9780a793bb7090c8990d"
+version = "20.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
 dependencies = [
- "auto_impl",
- "cfg-if",
- "dyn-clone",
- "once_cell",
+ "revm-bytecode",
+ "revm-context",
+ "revm-context-interface",
+ "revm-database",
+ "revm-database-interface",
+ "revm-handler",
+ "revm-inspector",
  "revm-interpreter",
  "revm-precompile",
+ "revm-primitives",
+ "revm-specification",
+ "revm-state",
+]
+
+[[package]]
+name = "revm-bytecode"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
+ "bitvec",
+ "revm-primitives",
+ "revm-specification",
+ "serde",
+]
+
+[[package]]
+name = "revm-context"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
+ "alloy-eip2930",
+ "alloy-eip7702",
+ "auto_impl",
+ "cfg-if",
+ "derive-where",
+ "revm-bytecode",
+ "revm-context-interface",
+ "revm-database-interface",
+ "revm-interpreter",
+ "revm-primitives",
+ "revm-specification",
+ "revm-state",
+ "serde",
+]
+
+[[package]]
+name = "revm-context-interface"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
+ "alloy-eip2930",
+ "alloy-eip7702",
+ "auto_impl",
+ "revm-database-interface",
+ "revm-primitives",
+ "revm-specification",
+ "revm-state",
+ "serde",
+]
+
+[[package]]
+name = "revm-database"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
+ "auto_impl",
+ "revm-bytecode",
+ "revm-database-interface",
+ "revm-primitives",
+ "revm-state",
+ "serde",
+]
+
+[[package]]
+name = "revm-database-interface"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
+ "auto_impl",
+ "revm-primitives",
+ "revm-state",
+ "serde",
+]
+
+[[package]]
+name = "revm-handler"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
+ "auto_impl",
+ "revm-bytecode",
+ "revm-context",
+ "revm-context-interface",
+ "revm-database",
+ "revm-interpreter",
+ "revm-precompile",
+ "revm-primitives",
+ "revm-specification",
+ "revm-state",
+ "serde",
+]
+
+[[package]]
+name = "revm-inspector"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
+ "auto_impl",
+ "revm-context",
+ "revm-database-interface",
+ "revm-handler",
+ "revm-interpreter",
+ "revm-precompile",
+ "revm-primitives",
+ "revm-state",
  "serde",
  "serde_json",
 ]
@@ -9786,8 +9942,7 @@ dependencies = [
 [[package]]
 name = "revm-inspectors"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d87cdf1c0d878b48423f8a86232950657abaf72a2d0d14af609467542313b1a"
+source = "git+https://github.com/paradigmxyz/revm-inspectors?rev=74b6aa4#74b6aa48107b93a9f661a30bd1d763bbf145e828"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -9805,28 +9960,45 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "15.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcab7ef2064057acfc84731205f4bc77f4ec1b35630800b26ff6a185731c5ab"
+version = "16.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
 dependencies = [
+ "revm-bytecode",
+ "revm-context-interface",
  "revm-primitives",
+ "revm-specification",
+ "serde",
+]
+
+[[package]]
+name = "revm-optimism"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
+ "auto_impl",
+ "once_cell",
+ "revm",
+ "revm-inspector",
+ "revm-precompile",
  "serde",
 ]
 
 [[package]]
 name = "revm-precompile"
-version = "16.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6caa1a7ff2cc4a09a263fcf9de99151706f323d30f33d519ed329f017a02b046"
+version = "17.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
  "c-kzg",
  "cfg-if",
  "k256",
+ "libsecp256k1",
  "once_cell",
  "p256",
+ "revm-context-interface",
  "revm-primitives",
+ "revm-specification",
  "ripemd",
  "secp256k1",
  "sha2 0.10.8",
@@ -9835,21 +10007,31 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "15.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0f987564210317706def498421dfba2ae1af64a8edce82c6102758b48133fcb"
+version = "16.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
 dependencies = [
- "alloy-eip2930",
- "alloy-eip7702",
  "alloy-primitives",
- "auto_impl",
- "bitflags 2.8.0",
- "bitvec",
- "c-kzg",
- "cfg-if",
- "dyn-clone",
+]
+
+[[package]]
+name = "revm-specification"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
  "enumn",
- "hex",
+ "revm-primitives",
+ "serde",
+]
+
+[[package]]
+name = "revm-state"
+version = "1.0.0-alpha.1"
+source = "git+https://github.com/bluealloy/revm?rev=a8b9b1e#a8b9b1e403d73be0af1fd107f217dd835eb79971"
+dependencies = [
+ "bitflags 2.8.0",
+ "revm-bytecode",
+ "revm-primitives",
+ "revm-specification",
  "serde",
 ]
 
@@ -10210,9 +10392,9 @@ checksum = "6ea1a2d0a644769cc99faa24c3ad26b379b786fe7c36fd3c546254801650e6dd"
 
 [[package]]
 name = "ryu-js"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad97d4ce1560a5e27cec89519dc8300d1aa6035b099821261c651486a19e44d5"
+checksum = "dd29631678d6fb0903b69223673e122c32e9ae559d0960a38d574695ebc0ea15"
 
 [[package]]
 name = "same-file"
@@ -10949,9 +11131,9 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tempfile"
-version = "3.16.0"
+version = "3.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38c246215d7d24f48ae091a2902398798e05d978b24315d6efbc00ede9a8bb91"
+checksum = "22e5a0acb1f3f55f65cc4a866c361b2fb2a0ff6366785ae6fbb5f85df07ba230"
 dependencies = [
  "cfg-if",
  "fastrand 2.3.0",

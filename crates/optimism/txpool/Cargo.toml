@@ -26,7 +26,7 @@ reth-storage-api.workspace = true
 reth-transaction-pool.workspace = true
 
 # revm
-revm.workspace = true
+revm-optimism.workspace = true
 
 # optimism
 op-alloy-consensus.workspace = true
@@ -34,6 +34,10 @@ op-alloy-flz.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["reth-codec"] }
+
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
 
 # misc
 c-kzg.workspace = true
@@ -44,10 +48,3 @@ parking_lot.workspace = true
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
-
-[features]
-optimism = [
-    "reth-optimism-evm/optimism",
-    "reth-optimism-primitives/optimism",
-    "revm/optimism",
-]
