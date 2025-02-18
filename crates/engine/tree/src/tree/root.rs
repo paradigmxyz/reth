@@ -52,6 +52,18 @@ pub(crate) fn thread_pool_size() -> usize {
     std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
 }
 
+/// Determines if the host has enough parallelism to run the state root task.
+///
+/// It requires at least 5 parallel threads:
+/// - Engine in main thread that spawns the state root task.
+/// - State Root Task spawned in [`StateRootTask::spawn`]
+/// - Sparse Trie spawned in [`run_sparse_trie`]
+/// - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+/// - Storage root computation spawned in [`ParallelProof::multiproof`]
+pub(crate) fn has_enough_parallelism() -> bool {
+    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
+}
+
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
 #[derive(Debug)]
