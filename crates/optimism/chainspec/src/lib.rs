@@ -437,7 +437,8 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
                 }
             }
             None =>
-                /*debug!(target: "reth::cli",
+                // todo: log this when no_std tracing available <https://github.com/paradigmxyz/reth/issues/14526>
+            /*debug!(target: "reth::cli",
                 "Isthmus active but predeploy L2ToL1MessagePasser.sol not found in genesis alloc"
             ),*/
                 {}
