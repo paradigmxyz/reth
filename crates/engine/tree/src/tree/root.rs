@@ -32,7 +32,7 @@ use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
-        mpsc::{self, channel, Receiver, Sender},
+        mpsc::{self, channel, Receiver, Sender, TryRecvError},
         Arc,
     },
     time::{Duration, Instant},
@@ -49,7 +49,8 @@ const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 /// NOTE: this value can be greater than the available cores in the host, it
 /// represents the maximum number of threads that can be handled by the pool.
 pub(crate) fn thread_pool_size() -> usize {
-    std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
+    // std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
+    2
 }
 
 /// Determines if the host has enough parallelism to run the state root task.
@@ -360,7 +361,7 @@ where
     /// Creates a new [`MultiproofManager`].
     fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
         // we keep 2 threads to be used internally by [`StateRootTask`]
-        let max_concurrent = thread_pool_size.saturating_sub(2);
+        let max_concurrent = thread_pool_size.saturating_sub(1);
         debug_assert!(max_concurrent != 0);
         Self {
             thread_pool,
@@ -1023,13 +1024,32 @@ where
     let mut num_iterations = 0;
     let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
 
-    while let Ok(mut update) = update_rx.recv() {
+    'main: loop {
+        let mut update: Option<SparseTrieUpdate> = None;
         num_iterations += 1;
-        let mut num_updates = 1;
-        while let Ok(next) = update_rx.try_recv() {
-            update.extend(next);
-            num_updates += 1;
+
+        let mut num_updates = 0;
+        'poll: loop {
+            match update_rx.try_recv() {
+                Ok(next) => {
+                    num_updates += 1;
+                    update.get_or_insert_default().extend(next);
+                }
+                Err(TryRecvError::Empty) => break 'poll,
+                Err(TryRecvError::Disconnected) => {
+                    if update.is_some() {
+                        break 'poll
+                    } else {
+                        break 'main
+                    }
+                }
+            };
         }
+
+        let Some(update) = update else {
+            rayon::yield_now();
+            continue 'main;
+        };
 
         debug!(
             target: "engine::root",
