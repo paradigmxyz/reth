@@ -1,11 +1,10 @@
 use alloy_primitives::BlockNumber;
-use reth_db::{BlockNumberList, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::ShardedKey,
     table::Table,
     transaction::DbTxMut,
-    DatabaseError,
+    BlockNumberList, DatabaseError, RawKey, RawTable, RawValue,
 };
 use reth_provider::DBProvider;
 

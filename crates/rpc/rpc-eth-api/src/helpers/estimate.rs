@@ -7,15 +7,16 @@ use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest,
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv, Database, TransactionEnv};
+use reth_evm::{ConfigureEvmEnv, Database, EvmEnv, TransactionEnv};
 use reth_provider::StateProvider;
-use reth_revm::{database::StateProviderDatabase, db::CacheDB, primitives::ExecutionResult};
+use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     error::api::FromEvmHalt,
     revm_utils::{apply_state_overrides, caller_gas_allowance},
     EthApiError, RevertError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
+use revm::context_interface::{result::ExecutionResult, Transaction};
 use revm_primitives::TxKind;
 use tracing::trace;
 
@@ -55,7 +56,7 @@ pub trait EstimateCall: Call {
         request.nonce = None;
 
         // Keep a copy of gas related request values
-        let tx_request_gas_limit = request.gas.map(U256::from);
+        let tx_request_gas_limit = request.gas;
         let tx_request_gas_price = request.gas_price;
         // the gas limit of the corresponding block
         let block_env_gas_limit = evm_env.block_env.gas_limit;
@@ -73,8 +74,8 @@ pub trait EstimateCall: Call {
             .unwrap_or(block_env_gas_limit);
 
         // Configure the evm env
-        let mut tx_env = self.create_txn_env(&evm_env.block_env, request)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
+        let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
         // Apply any state overrides if specified.
         if let Some(state_override) = state_override {
@@ -107,14 +108,11 @@ pub trait EstimateCall: Call {
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        if tx_env.gas_price() > U256::ZERO {
+        if tx_env.gas_price() > 0 {
             // cap the highest gas limit by max gas caller can afford with given gas price
             highest_gas_limit = highest_gas_limit
                 .min(caller_gas_allowance(&mut db, &tx_env).map_err(Self::Error::from_eth_err)?);
         }
-
-        // We can now normalize the highest gas limit to a u64
-        let mut highest_gas_limit = highest_gas_limit.saturating_to::<u64>();
 
         // If the provided gas limit is less than computed cap, use that
         tx_env.set_gas_limit(tx_env.gas_limit().min(highest_gas_limit));
@@ -288,7 +286,7 @@ pub trait EstimateCall: Call {
     #[inline]
     fn map_out_of_gas_err<DB>(
         &self,
-        env_gas_limit: U256,
+        env_gas_limit: u64,
         evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         mut tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         db: &mut DB,
@@ -298,7 +296,7 @@ pub trait EstimateCall: Call {
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();
-        tx_env.set_gas_limit(env_gas_limit.try_into().unwrap_or(u64::MAX));
+        tx_env.set_gas_limit(env_gas_limit);
         let (res, _) = match self.transact(db, evm_env, tx_env) {
             Ok(res) => res,
             Err(err) => return err,
@@ -314,7 +312,7 @@ pub trait EstimateCall: Call {
                 RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err()
             }
             ExecutionResult::Halt { reason, .. } => {
-                RpcInvalidTransactionError::EvmHalt(reason).into_eth_err()
+                Self::Error::from_evm_halt(reason, req_gas_limit)
             }
         }
     }
@@ -326,8 +324,8 @@ pub trait EstimateCall: Call {
 /// gas limit for a transaction. It adjusts the highest or lowest gas limits depending on
 /// whether the execution succeeded, reverted, or halted due to specific reasons.
 #[inline]
-pub fn update_estimated_gas_range(
-    result: ExecutionResult,
+pub fn update_estimated_gas_range<Halt>(
+    result: ExecutionResult<Halt>,
     tx_gas_limit: u64,
     highest_gas_limit: &mut u64,
     lowest_gas_limit: &mut u64,

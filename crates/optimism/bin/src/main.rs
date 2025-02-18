@@ -1,6 +1,4 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 use clap::Parser;
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};

@@ -2,7 +2,7 @@ use crate::{segments::SegmentSet, Pruner};
 use alloy_eips::eip2718::Encodable2718;
 use reth_chainspec::MAINNET;
 use reth_config::PruneConfig;
-use reth_db::{table::Value, transaction::DbTxMut};
+use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{

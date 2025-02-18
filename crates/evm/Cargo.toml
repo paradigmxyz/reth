@@ -24,11 +24,13 @@ reth-primitives-traits.workspace = true
 reth-storage-errors.workspace = true
 
 revm.workspace = true
-revm-primitives.workspace = true
+revm-database.workspace = true
+revm-optimism = { workspace = true, optional = true }
 
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
 auto_impl.workspace = true
@@ -53,15 +55,17 @@ std = [
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
-    "revm-primitives/std",
     "revm/std",
     "reth-ethereum-forks/std",
     "reth-ethereum-primitives/std",
     "reth-chainspec/std",
     "reth-consensus-common/std",
+    "alloy-evm/std",
+    "revm-database/std",
+    "revm-optimism?/std",
     "reth-execution-errors/std",
-    "reth-storage-errors/std",
     "reth-execution-types/std",
+    "reth-storage-errors/std",
 ]
 test-utils = [
     "dep:parking_lot",
@@ -71,4 +75,9 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "revm/test-utils",
+]
+op = [
+    "revm-optimism",
+    "alloy-evm/op",
+    "reth-primitives-traits/op",
 ]

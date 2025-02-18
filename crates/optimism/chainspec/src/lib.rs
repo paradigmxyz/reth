@@ -30,13 +30,13 @@ pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
-    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
+    DepositContract, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_primitives_traits::sync::LazyLock;
+use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -94,7 +94,7 @@ impl OpChainSpecBuilder {
     }
 
     /// Remove the given fork from the spec.
-    pub fn without_fork(mut self, fork: reth_optimism_forks::OpHardfork) -> Self {
+    pub fn without_fork(mut self, fork: OpHardfork) -> Self {
         self.inner = self.inner.without_fork(fork);
         self
     }
@@ -102,17 +102,14 @@ impl OpChainSpecBuilder {
     /// Enable Bedrock at genesis
     pub fn bedrock_activated(mut self) -> Self {
         self.inner = self.inner.paris_activated();
-        self.inner =
-            self.inner.with_fork(reth_optimism_forks::OpHardfork::Bedrock, ForkCondition::Block(0));
+        self.inner = self.inner.with_fork(OpHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
     /// Enable Regolith at genesis
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Regolith, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -121,9 +118,7 @@ impl OpChainSpecBuilder {
         self = self.regolith_activated();
         // Canyon also activates changes from L1's Shanghai hardfork
         self.inner = self.inner.with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Canyon, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -131,36 +126,28 @@ impl OpChainSpecBuilder {
     pub fn ecotone_activated(mut self) -> Self {
         self = self.canyon_activated();
         self.inner = self.inner.with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Ecotone, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Fjord at genesis
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Fjord, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Granite at genesis
     pub fn granite_activated(mut self) -> Self {
         self = self.fjord_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Granite, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Holocene at genesis
     pub fn holocene_activated(mut self) -> Self {
         self = self.granite_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Holocene, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Holocene, ForkCondition::Timestamp(0));
         self
     }
 
@@ -199,7 +186,7 @@ impl OpChainSpec {
 impl EthChainSpec for OpChainSpec {
     type Header = Header;
 
-    fn chain(&self) -> alloy_chains::Chain {
+    fn chain(&self) -> Chain {
         self.inner.chain()
     }
 
@@ -249,13 +236,11 @@ impl EthChainSpec for OpChainSpec {
 }
 
 impl Hardforks for OpChainSpec {
-    fn fork<H: reth_chainspec::Hardfork>(&self, fork: H) -> reth_chainspec::ForkCondition {
+    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
         self.inner.fork(fork)
     }
 
-    fn forks_iter(
-        &self,
-    ) -> impl Iterator<Item = (&dyn reth_chainspec::Hardfork, reth_chainspec::ForkCondition)> {
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.inner.forks_iter()
     }
 
@@ -368,11 +353,16 @@ impl From<Genesis> for OpChainSpec {
         // append the remaining unknown hardforks to ensure we don't filter any out
         ordered_hardforks.append(&mut block_hardforks);
 
+        let hardforks = ChainHardforks::new(ordered_hardforks);
+
         Self {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
+                genesis_header: SealedHeader::new_unhashed(make_genesis_header(
+                    &genesis, &hardforks,
+                )),
                 genesis,
-                hardforks: ChainHardforks::new(ordered_hardforks),
+                hardforks,
                 // We assume no OP network merges, and set the paris block and total difficulty to
                 // zero
                 paris_block_and_final_difficulty: Some((0, U256::ZERO)),
@@ -413,7 +403,7 @@ impl OpGenesisInfo {
                                 BaseFeeParams::new(denominator as u128, elasticity as u128),
                             ),
                             (
-                                reth_optimism_forks::OpHardfork::Canyon.boxed(),
+                                OpHardfork::Canyon.boxed(),
                                 BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
                             ),
                         ]

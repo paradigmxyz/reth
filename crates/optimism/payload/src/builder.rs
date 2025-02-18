@@ -21,8 +21,8 @@ use reth_basic_payload_builder::*;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvmEnv, ConfigureEvmFor, Database, Evm,
-    EvmError, InvalidTxError, NextBlockEnvAttributes,
+    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmFor, Database, Evm, EvmEnv, EvmError,
+    HaltReasonFor, InvalidTxError, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
@@ -43,13 +43,18 @@ use reth_provider::{
     StateRootProvider, StorageRootProvider,
 };
 use reth_revm::{
-    cancelled::CancelOnDrop, database::StateProviderDatabase, witness::ExecutionWitnessRecord,
+    cancelled::CancelOnDrop,
+    database::StateProviderDatabase,
+    db::{states::bundle_state::BundleRetention, State},
+    witness::ExecutionWitnessRecord,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use reth_trie::HashedStorage;
 use revm::{
-    db::{states::bundle_state::BundleRetention, State},
-    primitives::{ExecutionResult, ResultAndState},
+    context_interface::{
+        result::{ExecutionResult, ResultAndState},
+        Block,
+    },
     DatabaseCommit,
 };
 use std::{fmt::Display, sync::Arc};
@@ -57,7 +62,7 @@ use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
-pub struct OpPayloadBuilder<Pool, Client, EvmConfig, N: NodePrimitives, Txs = ()> {
+pub struct OpPayloadBuilder<Pool, Client, EvmConfig: ConfigureEvm, N: NodePrimitives, Txs = ()> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
@@ -73,10 +78,15 @@ pub struct OpPayloadBuilder<Pool, Client, EvmConfig, N: NodePrimitives, Txs = ()
     /// transactions are allowed.
     pub best_transactions: Txs,
     /// Node primitive types.
-    pub receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
+    pub receipt_builder:
+        Arc<dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>>,
 }
 
-impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, EvmConfig, N> {
+impl<Pool, Client, EvmConfig, N> OpPayloadBuilder<Pool, Client, EvmConfig, N>
+where
+    EvmConfig: ConfigureEvm,
+    N: NodePrimitives,
+{
     /// `OpPayloadBuilder` constructor.
     ///
     /// Configures the builder with the default settings.
@@ -84,7 +94,11 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, 
         pool: Pool,
         client: Client,
         evm_config: EvmConfig,
-        receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
+        receipt_builder: impl OpReceiptBuilder<
+            N::SignedTx,
+            HaltReasonFor<EvmConfig>,
+            Receipt = N::Receipt,
+        >,
     ) -> Self {
         Self::with_builder_config(pool, client, evm_config, receipt_builder, Default::default())
     }
@@ -94,7 +108,11 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, 
         pool: Pool,
         client: Client,
         evm_config: EvmConfig,
-        receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
+        receipt_builder: impl OpReceiptBuilder<
+            N::SignedTx,
+            HaltReasonFor<EvmConfig>,
+            Receipt = N::Receipt,
+        >,
         config: OpBuilderConfig,
     ) -> Self {
         Self {
@@ -109,7 +127,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, 
     }
 }
 
-impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
+impl<Pool, Client, EvmConfig: ConfigureEvm, N: NodePrimitives, Txs>
     OpPayloadBuilder<Pool, Client, EvmConfig, N, Txs>
 {
     /// Sets the rollup's compute pending block configuration option.
@@ -469,7 +487,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         let header = Header {
             parent_hash: ctx.parent().hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: ctx.evm_env.block_env.coinbase,
+            beneficiary: ctx.evm_env.block_env.beneficiary,
             state_root,
             transactions_root,
             receipts_root,
@@ -642,7 +660,7 @@ impl<N: NodePrimitives> ExecutionInfo<N> {
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
-pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv, ChainSpec, N: NodePrimitives> {
+pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvm, ChainSpec, N: NodePrimitives> {
     /// The type that knows how to perform system calls and configure the evm.
     pub evm_config: EvmConfig,
     /// The DA config for the payload builder
@@ -658,12 +676,13 @@ pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv, ChainSpec, N: NodePri
     /// The currently best payload.
     pub best_payload: Option<OpBuiltPayload<N>>,
     /// Receipt builder.
-    pub receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
+    pub receipt_builder:
+        Arc<dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>>,
 }
 
 impl<EvmConfig, ChainSpec, N> OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>
 where
-    EvmConfig: ConfigureEvmEnv,
+    EvmConfig: ConfigureEvm,
     ChainSpec: EthChainSpec + OpHardforks,
     N: NodePrimitives,
 {
@@ -686,24 +705,22 @@ where
 
     /// Returns the block gas limit to target.
     pub fn block_gas_limit(&self) -> u64 {
-        self.attributes()
-            .gas_limit
-            .unwrap_or_else(|| self.evm_env.block_env.gas_limit.saturating_to())
+        self.attributes().gas_limit.unwrap_or(self.evm_env.block_env.gas_limit)
     }
 
     /// Returns the block number for the block.
     pub fn block_number(&self) -> u64 {
-        self.evm_env.block_env.number.to()
+        self.evm_env.block_env.number
     }
 
     /// Returns the current base fee
     pub fn base_fee(&self) -> u64 {
-        self.evm_env.block_env.basefee.to()
+        self.evm_env.block_env.basefee
     }
 
     /// Returns the current blob gas price.
     pub fn get_blob_gasprice(&self) -> Option<u64> {
-        self.evm_env.block_env.get_blob_gasprice().map(|gasprice| gasprice as u64)
+        self.evm_env.block_env.blob_gasprice().map(|gasprice| gasprice as u64)
     }
 
     /// Returns the blob fields for the header.
@@ -835,7 +852,7 @@ where
     fn build_receipt(
         &self,
         info: &ExecutionInfo<N>,
-        result: ExecutionResult,
+        result: ExecutionResult<HaltReasonFor<EvmConfig>>,
         deposit_nonce: Option<u64>,
         tx: &N::SignedTx,
     ) -> N::Receipt {

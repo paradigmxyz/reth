@@ -1,12 +1,12 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
 use alloc::vec::Vec;
+use alloy_consensus::ReceiptWithBloom;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives::ReceiptWithBloom;
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
@@ -79,12 +79,11 @@ pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Receipt;
+    use alloy_consensus::{Receipt, ReceiptWithBloom};
     use alloy_primitives::{b256, bloom, hex, Address, Bloom, Bytes, Log, LogData};
     use op_alloy_consensus::OpDepositReceipt;
     use reth_optimism_chainspec::BASE_SEPOLIA;
     use reth_optimism_primitives::OpReceipt;
-    use reth_primitives::ReceiptWithBloom;
 
     /// Tests that the receipt root is computed correctly for the regolith block.
     /// This was implemented due to a minor bug in op-geth and op-erigon where in
