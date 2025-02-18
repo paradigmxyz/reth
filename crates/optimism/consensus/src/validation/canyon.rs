@@ -3,7 +3,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_consensus::ConsensusError;
-use reth_primitives::GotExpected;
+use reth_primitives_traits::GotExpected;
 
 /// Verifies that withdrawals root in block header (Shanghai) is always [`EMPTY_ROOT_HASH`] in
 /// Canyon.

@@ -1,7 +1,10 @@
 use super::missing_static_data_error;
 use futures_util::TryStreamExt;
-use reth_db::{tables, transaction::DbTx};
-use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
+use reth_db_api::{
+    cursor::DbCursorRO,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
@@ -36,19 +39,19 @@ use tracing::*;
 ///
 /// The bodies are processed and data is inserted into these tables:
 ///
-/// - [`BlockOmmers`][reth_db::tables::BlockOmmers]
-/// - [`BlockBodies`][reth_db::tables::BlockBodyIndices]
-/// - [`Transactions`][reth_db::tables::Transactions]
-/// - [`TransactionBlocks`][reth_db::tables::TransactionBlocks]
+/// - [`BlockOmmers`][reth_db_api::tables::BlockOmmers]
+/// - [`BlockBodies`][reth_db_api::tables::BlockBodyIndices]
+/// - [`Transactions`][reth_db_api::tables::Transactions]
+/// - [`TransactionBlocks`][reth_db_api::tables::TransactionBlocks]
 ///
 /// # Genesis
 ///
 /// This stage expects that the genesis has been inserted into the appropriate tables:
 ///
 /// - The header tables (see [`HeaderStage`][crate::stages::HeaderStage])
-/// - The [`BlockOmmers`][reth_db::tables::BlockOmmers] table
-/// - The [`BlockBodies`][reth_db::tables::BlockBodyIndices] table
-/// - The [`Transactions`][reth_db::tables::Transactions] table
+/// - The [`BlockOmmers`][reth_db_api::tables::BlockOmmers] table
+/// - The [`BlockBodies`][reth_db_api::tables::BlockBodyIndices] table
+/// - The [`Transactions`][reth_db_api::tables::Transactions] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
