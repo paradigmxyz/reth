@@ -12,7 +12,7 @@ pub mod cancun;
 pub mod prague;
 pub mod shanghai;
 
-use alloy_rpc_types::engine::{ExecutionData, MaybeCancunPayloadFields, PayloadError};
+use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use reth_chainspec::EthereumHardforks;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::{Block, SignedTransaction};
@@ -104,14 +104,14 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
             self.is_shanghai_active_at_timestamp(sealed_block.timestamp),
         )?;
 
-        cancun::ensure_well_formed_new_fields(
-            block,
+        cancun::ensure_well_formed_fields(
+            &sealed_block,
             sidecar.cancun(),
             self.is_cancun_active_at_timestamp(sealed_block.timestamp),
         )?;
 
         prague::ensure_well_formed_fields(
-            block.body(),
+            sealed_block.body(),
             sidecar.prague(),
             self.is_prague_active_at_timestamp(sealed_block.timestamp),
         )?;

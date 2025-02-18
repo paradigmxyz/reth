@@ -1,7 +1,8 @@
 //! Cancun rules for new payloads.
 
-use alloy_rpc_types::engine::MaybeCancunPayloadFields;
-use reth_primitives_traits::{Block, BlockBody};
+use alloy_consensus::{BlockBody, Transaction, Typed2718};
+use alloy_rpc_types_engine::{CancunPayloadFields, PayloadError};
+use reth_primitives_traits::{AlloyBlockHeader, Block, SealedBlock};
 
 /// Checks block and sidecar w.r.t new Cancun fields and new transaction type EIP-4844.
 ///
@@ -10,23 +11,28 @@ use reth_primitives_traits::{Block, BlockBody};
 /// - contains EIP-4844 transactions if Cancun is active and vv
 /// - checks blob versioned hashes in block and sidecar match
 #[inline]
-pub fn ensure_well_formed_fields<T: Block>(
-    block: &SealedBlock<T>,
-    cancun_fields: MaybeCancunPayloadFields,
+pub fn ensure_well_formed_fields<T, B>(
+    block: &SealedBlock<B>,
+    cancun_sidecar_fields: Option<&CancunPayloadFields>,
     is_cancun_active: bool,
-) -> Result<(), PayloadError> {
-    ensure_well_formed_header_and_sidecar_fields(block, cancun_fields, is_cancun_active)?;
-    ensure_well_formed_transactions_field(block.body(), is_cancun_active)?;
-    if is_cancun_active {
-        ensure_matching_blob_versioned_hashes(block, cancun_fields)?;
-    }
+) -> Result<(), PayloadError>
+where
+    T: Transaction + Typed2718,
+    B: Block<Body = BlockBody<T>>,
+{
+    ensure_well_formed_header_and_sidecar_fields(block, cancun_sidecar_fields, is_cancun_active)?;
+    ensure_well_formed_transactions_field_with_sidecar(
+        block.body(),
+        cancun_sidecar_fields,
+        is_cancun_active,
+    )
 }
 
 /// Checks that Cancun fields on block header and sidecar are present if Cancun is active and vv.
 #[inline]
 pub fn ensure_well_formed_header_and_sidecar_fields<T: Block>(
     block: &SealedBlock<T>,
-    cancun_fields: &MaybeCancunPayloadFields,
+    cancun_sidecar_fields: Option<&CancunPayloadFields>,
     is_cancun_active: bool,
 ) -> Result<(), PayloadError> {
     if is_cancun_active {
@@ -34,11 +40,11 @@ pub fn ensure_well_formed_header_and_sidecar_fields<T: Block>(
             // cancun active but blob gas used not present
             return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
         }
-        if block.excess_blob_gas.is_none() {
+        if block.excess_blob_gas().is_none() {
             // cancun active but excess blob gas not present
             return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
         }
-        if sidecar.cancun().is_none() {
+        if cancun_sidecar_fields.is_none() {
             // cancun active but cancun fields not present
             return Err(PayloadError::PostCancunWithoutCancunFields)
         }
@@ -51,11 +57,13 @@ pub fn ensure_well_formed_header_and_sidecar_fields<T: Block>(
             // cancun not active but excess blob gas present
             return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
         }
-        if sidecar.cancun().is_some() {
+        if cancun_sidecar_fields.is_some() {
             // cancun not active but cancun fields present
             return Err(PayloadError::PreCancunWithCancunFields)
         }
     }
+
+    Ok(())
 }
 
 /// Checks transactions field and sidecar w.r.t new Cancun fields and new transaction type EIP-4844.
@@ -64,20 +72,18 @@ pub fn ensure_well_formed_header_and_sidecar_fields<T: Block>(
 /// - contains EIP-4844 transactions if Cancun is active and vv
 /// - checks blob versioned hashes in block and sidecar match
 #[inline]
-pub fn ensure_well_formed_transactions_field_with_sidecar<T: BlockBody>(
-    block_body: T,
-    cancun_fields: &MaybeCancunPayloadFields,
+pub fn ensure_well_formed_transactions_field_with_sidecar<T: Transaction + Typed2718>(
+    block_body: &BlockBody<T>,
+    cancun_sidecar_fields: Option<&CancunPayloadFields>,
     is_cancun_active: bool,
 ) -> Result<(), PayloadError> {
     if is_cancun_active {
         if !block_body.has_eip4844_transactions() {
             return Err(PayloadError::PostCancunBlockWithoutBlobTransactions)
         }
-        ensure_matching_blob_versioned_hashes(block_body, cancun_fields)
-    } else {
-        if block_body.has_eip4844_transactions() {
-            return Err(PayloadError::PreCancunBlockWithBlobTransactions)
-        }
+        ensure_matching_blob_versioned_hashes(block_body, cancun_sidecar_fields)?
+    } else if block_body.has_eip4844_transactions() {
+        return Err(PayloadError::PreCancunBlockWithBlobTransactions)
     }
 
     Ok(())
@@ -86,13 +92,13 @@ pub fn ensure_well_formed_transactions_field_with_sidecar<T: BlockBody>(
 /// Ensures that the number of blob versioned hashes of a EIP-4844 transactions in block, matches
 /// the number hashes included in the _separate_ `block_versioned_hashes` of the cancun payload
 /// fields on the sidecar.
-pub fn ensure_matching_blob_versioned_hashes<T: BlockBody>(
-    block_body: T,
-    cancun_fields: &MaybeCancunPayloadFields,
+pub fn ensure_matching_blob_versioned_hashes<T: Transaction + Typed2718>(
+    block_body: &BlockBody<T>,
+    cancun_sidecar_fields: Option<&CancunPayloadFields>,
 ) -> Result<(), PayloadError> {
     let num_blob_versioned_hashes = block_body.blob_versioned_hashes_iter().count();
     // Additional Cancun checks for blob transactions
-    if let Some(versioned_hashes) = cancun_fields.versioned_hashes() {
+    if let Some(versioned_hashes) = cancun_sidecar_fields.map(|fields| &fields.versioned_hashes) {
         if num_blob_versioned_hashes != versioned_hashes.len() {
             // Number of blob versioned hashes does not match
             return Err(PayloadError::InvalidVersionedHashes)
