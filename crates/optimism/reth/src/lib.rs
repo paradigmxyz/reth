@@ -9,8 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(unused_crate_dependencies)]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 /// Re-exported ethereum types
 #[doc(inline)]
@@ -27,10 +25,13 @@ pub mod primitives {
 pub mod consensus {
     #[doc(inline)]
     pub use reth_consensus::*;
-    #[doc(inline)]
-    pub use reth_consensus_common::*;
-    #[doc(inline)]
-    pub use reth_optimism_consensus::*;
+    /// Consensus rule checks.
+    pub mod validation {
+        #[doc(inline)]
+        pub use reth_consensus_common::validation::*;
+        #[doc(inline)]
+        pub use reth_optimism_consensus::validation::*;
+    }
 }
 
 /// Re-exported from `reth_chainspec`
@@ -82,6 +83,13 @@ pub mod node {
     pub use reth_node_api as api;
     #[cfg(feature = "node")]
     pub use reth_optimism_node::*;
+}
+
+/// Re-exported reth trie types
+#[cfg(feature = "trie")]
+pub mod trie {
+    #[doc(inline)]
+    pub use reth_trie::*;
 }
 
 /// Re-exported rpc types

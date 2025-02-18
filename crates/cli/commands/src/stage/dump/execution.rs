@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
 use super::setup;
 use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
-use reth_db::{tables, DatabaseEnv};
+use reth_db::DatabaseEnv;
 use reth_db_api::{
-    cursor::DbCursorRO, database::Database, table::TableImporter, transaction::DbTx,
+    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
 };
 use reth_db_common::DbTool;
 use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
@@ -15,6 +13,7 @@ use reth_provider::{
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
+use std::sync::Arc;
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<N, E, C>(

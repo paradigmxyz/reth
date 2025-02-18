@@ -5,12 +5,13 @@ use derive_more::derive::Deref;
 use metrics::Histogram;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
-use reth_evm::system_calls::OnStateHook;
+use reth_evm::system_calls::{OnStateHook, StateChangeSource};
 use reth_metrics::Metrics;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
 };
+use reth_revm::state::EvmState;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
@@ -27,7 +28,7 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
-use revm_primitives::{keccak256, EvmState, B256};
+use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
@@ -52,6 +53,18 @@ const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 /// represents the maximum number of threads that can be handled by the pool.
 pub(crate) fn thread_pool_size() -> usize {
     std::thread::available_parallelism().map_or(3, |num| (num.get().saturating_sub(3).max(3)))
+}
+
+/// Determines if the host has enough parallelism to run the state root task.
+///
+/// It requires at least 5 parallel threads:
+/// - Engine in main thread that spawns the state root task.
+/// - State Root Task spawned in [`StateRootTask::spawn`]
+/// - Sparse Trie spawned in [`run_sparse_trie`]
+/// - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+/// - Storage root computation spawned in [`ParallelProof::multiproof`]
+pub(crate) fn has_enough_parallelism() -> bool {
+    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
 }
 
 /// Outcome of the state root computation, including the state root itself with
@@ -149,8 +162,8 @@ impl<Factory> StateRootConfig<Factory> {
 pub enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
-    /// New state update from transaction execution
-    StateUpdate(EvmState),
+    /// New state update from transaction execution with its source
+    StateUpdate(StateChangeSource, EvmState),
     /// Empty proof for a specific state update
     EmptyProof {
         /// The index of this proof in the sequence of state updates
@@ -284,7 +297,7 @@ impl Drop for StateHookSender {
 }
 
 fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::default();
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
         if account.is_touched() {
@@ -298,9 +311,8 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             let mut changed_storage_iter = account
                 .storage
                 .into_iter()
-                .filter_map(|(slot, value)| {
-                    value.is_changed().then(|| (keccak256(B256::from(slot)), value.present_value))
-                })
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
                 .peekable();
 
             if destroyed {
@@ -320,6 +332,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 #[derive(Debug)]
 struct MultiproofInput<Factory> {
     config: StateRootConfig<Factory>,
+    source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
@@ -395,14 +408,17 @@ where
     }
 
     /// Spawns a multiproof calculation.
-    fn spawn_multiproof(&mut self, input: MultiproofInput<Factory>) {
-        let MultiproofInput {
+    fn spawn_multiproof(
+        &mut self,
+        MultiproofInput {
             config,
+            source,
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-        } = input;
+        }: MultiproofInput<Factory>,
+    ) {
         let thread_pool = self.thread_pool.clone();
 
         self.thread_pool.spawn(move || {
@@ -413,8 +429,8 @@ where
                 target: "engine::root",
                 proof_sequence_number,
                 ?proof_targets,
-                ?account_targets,
-                ?storage_targets,
+                account_targets,
+                storage_targets,
                 "Starting multiproof calculation",
             );
             let start = Instant::now();
@@ -424,8 +440,9 @@ where
                 target: "engine::root",
                 proof_sequence_number,
                 ?elapsed,
-                ?account_targets,
-                ?storage_targets,
+                ?source,
+                account_targets,
+                storage_targets,
                 "Multiproof calculated",
             );
 
@@ -540,8 +557,10 @@ where
     pub fn state_hook(&self) -> impl OnStateHook {
         let state_hook = self.state_hook_sender();
 
-        move |state: &EvmState| {
-            if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
+        move |source: StateChangeSource, state: &EvmState| {
+            if let Err(error) =
+                state_hook.send(StateRootMessage::StateUpdate(source, state.clone()))
+            {
                 error!(target: "engine::root", ?error, "Failed to send state update");
             }
         }
@@ -559,7 +578,7 @@ where
         std::thread::Builder::new()
             .name("State Root Task".to_string())
             .spawn(move || {
-                debug!(target: "engine::tree", "Starting state root task");
+                debug!(target: "engine::tree", "State root task starting");
 
                 let result = self.run(sparse_trie_tx);
                 let _ = tx.send(result);
@@ -578,7 +597,7 @@ where
     ) -> Sender<SparseTrieUpdate> {
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
-            debug!(target: "engine::tree", "Starting sparse trie task");
+            debug!(target: "engine::tree", "Sparse trie task starting");
             // We clone the task sender here so that it can be used in case the sparse trie task
             // succeeds, without blocking due to any `Drop` implementation.
             //
@@ -599,6 +618,7 @@ where
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
+            source: None,
             hashed_state_update: Default::default(),
             proof_targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
@@ -659,13 +679,19 @@ where
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(&mut self, update: EvmState, proof_sequence_number: u64) {
+    fn on_state_update(
+        &mut self,
+        source: StateChangeSource,
+        update: EvmState,
+        proof_sequence_number: u64,
+    ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
+            source: Some(source),
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
@@ -763,7 +789,7 @@ where
                         );
                         self.on_prefetch_proof(targets);
                     }
-                    StateRootMessage::StateUpdate(update) => {
+                    StateRootMessage::StateUpdate(source, update) => {
                         trace!(target: "engine::root", "processing StateRootMessage::StateUpdate");
                         if updates_received == 0 {
                             first_update_time = Some(Instant::now());
@@ -774,12 +800,13 @@ where
                         updates_received += 1;
                         debug!(
                             target: "engine::root",
+                            ?source,
                             len = update.len(),
                             total_updates = updates_received,
                             "Received new state update"
                         );
                         let next_sequence = self.proof_sequencer.next_sequence();
-                        self.on_state_update(update, next_sequence);
+                        self.on_state_update(source, update, next_sequence);
                     }
                     StateRootMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
@@ -1172,15 +1199,16 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
+    use reth_evm::system_calls::StateChangeSource;
     use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
     use reth_testing_utils::generators::{self, Rng};
     use reth_trie::{test_utils::state_root, TrieInput};
-    use revm_primitives::{
-        Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
-        HashMap, B256, KECCAK_EMPTY, U256,
+    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
+    use revm_state::{
+        Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot,
     };
     use std::sync::Arc;
 
@@ -1348,8 +1376,8 @@ mod tests {
         let mut state_hook = task.state_hook();
         let handle = task.spawn();
 
-        for update in state_updates {
-            state_hook.on_state(&update);
+        for (i, update) in state_updates.into_iter().enumerate() {
+            state_hook.on_state(StateChangeSource::Transaction(i), &update);
         }
         drop(state_hook);
 

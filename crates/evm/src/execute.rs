@@ -18,8 +18,8 @@ use alloy_primitives::{
 };
 use reth_consensus::ConsensusError;
 use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
-use revm::db::{states::bundle_state::BundleRetention, State};
-use revm_primitives::{Account, AccountStatus, EvmState};
+use revm::state::{Account, AccountStatus, EvmState};
+use revm_database::{states::bundle_state::BundleRetention, State};
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -57,9 +57,9 @@ pub trait Executor<DB: Database>: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let BlockExecutionResult { receipts, requests, gas_used } = self.execute_one(block)?;
+        let result = self.execute_one(block)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
@@ -96,10 +96,10 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: FnMut(&State<DB>),
     {
-        let BlockExecutionResult { receipts, requests, gas_used } = self.execute_one(block)?;
+        let result = self.execute_one(block)?;
         let mut state = self.into_state();
         f(&state);
-        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
@@ -112,10 +112,9 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: OnStateHook + 'static,
     {
-        let BlockExecutionResult { receipts, requests, gas_used } =
-            self.execute_one_with_state_hook(block, state_hook)?;
+        let result = self.execute_one_with_state_hook(block, state_hook)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
@@ -379,8 +378,12 @@ mod tests {
     use core::marker::PhantomData;
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_primitives::EthPrimitives;
-    use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{address, bytes, AccountInfo, KECCAK_EMPTY};
+    use revm::{
+        database_interface::EmptyDBTyped,
+        primitives::{address, bytes, KECCAK_EMPTY},
+        state::AccountInfo,
+    };
+    use revm_database::CacheDB;
     use std::sync::Arc;
 
     #[derive(Clone, Default)]

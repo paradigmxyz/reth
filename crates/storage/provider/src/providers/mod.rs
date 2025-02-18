@@ -1,7 +1,7 @@
 //! Contains the main provider types and traits for interacting with the blockchain's storage.
 
 use reth_chainspec::EthereumHardforks;
-use reth_db::table::Value;
+use reth_db_api::table::Value;
 use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine};
 
 mod database;

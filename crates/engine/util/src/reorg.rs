@@ -2,14 +2,14 @@
 
 use alloy_consensus::{Header, Transaction};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState,
+    PayloadStatus,
 };
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, ExecutionData,
-    ExecutionPayload as _, OnForkChoiceUpdated,
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, OnForkChoiceUpdated,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
@@ -338,13 +338,11 @@ where
         }
 
         cumulative_gas_used += exec_result.result.gas_used();
-        #[allow(clippy::needless_update)] // side-effect of optimism fields
         receipts.push(Receipt {
             tx_type: tx.tx_type(),
             success: exec_result.result.is_success(),
             cumulative_gas_used,
             logs: exec_result.result.into_logs().into_iter().collect(),
-            ..Default::default()
         });
 
         // append transaction to the list of executed transactions

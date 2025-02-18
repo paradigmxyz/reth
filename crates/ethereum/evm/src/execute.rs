@@ -16,13 +16,12 @@ use reth_evm::{
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
     },
     state_change::post_block_balance_increments,
-    system_calls::{OnStateHook, SystemCaller},
+    system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
     ConfigureEvm, Database, Evm,
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use revm::db::State;
-use revm_primitives::{db::DatabaseCommit, ResultAndState};
+use reth_revm::{context_interface::result::ResultAndState, db::State, DatabaseCommit};
 
 /// Factory for [`EthExecutionStrategy`].
 #[derive(Debug, Clone)]
@@ -140,7 +139,7 @@ where
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body().transaction_count());
-        for (sender, transaction) in block.transactions_with_sender() {
+        for (tx_index, (sender, transaction)) in block.transactions_with_sender().enumerate() {
             // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block's gasLimit.
             let block_available_gas = block.gas_limit() - cumulative_gas_used;
@@ -162,7 +161,8 @@ where
                     error: Box::new(err),
                 }
             })?;
-            self.system_caller.on_state(&result_and_state.state);
+            self.system_caller
+                .on_state(StateChangeSource::Transaction(tx_index), &result_and_state.state);
             let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
@@ -228,7 +228,10 @@ where
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
         // call state hook with changes due to balance increments.
         let balance_state = balance_increment_state(&balance_increments, &mut self.state)?;
-        self.system_caller.on_state(&balance_state);
+        self.system_caller.on_state(
+            StateChangeSource::PostBlock(StateChangePostBlockSource::BalanceIncrements),
+            &balance_state,
+        );
 
         Ok(requests)
     }
@@ -296,10 +299,14 @@ mod tests {
     use reth_primitives::{Account, Block, BlockBody, Transaction};
     use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Block as _};
     use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, Database, TransitionState,
+        database::StateProviderDatabase,
+        db::TransitionState,
+        primitives::{address, BLOCKHASH_SERVE_WINDOW},
+        state::EvmState,
+        test_utils::StateProviderTest,
+        Database,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{address, EvmState, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
     use std::{collections::HashMap, sync::mpsc};
 
@@ -1131,7 +1138,7 @@ mod tests {
         let tx_clone = tx.clone();
 
         let _output = executor
-            .execute_with_state_hook(block, move |state: &EvmState| {
+            .execute_with_state_hook(block, move |_, state: &EvmState| {
                 if let Some(account) = state.get(&withdrawal_recipient) {
                     let _ = tx_clone.send(account.info.balance);
                 }

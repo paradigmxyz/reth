@@ -4,11 +4,12 @@ use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_consensus::HeaderValidator;
-use reth_db::{table::Value, tables, transaction::DbTx, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    transaction::DbTxMut,
-    DbTxUnwindExt,
+    table::Value,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    DbTxUnwindExt, RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
@@ -36,7 +37,7 @@ use tracing::*;
 /// the perceived highest block on the network.
 ///
 /// The headers are processed and data is inserted into static files, as well as into the
-/// [`HeaderNumbers`][reth_db::tables::HeaderNumbers] table.
+/// [`HeaderNumbers`][reth_db_api::tables::HeaderNumbers] table.
 ///
 /// NOTE: This stage downloads headers in reverse and pushes them to the ETL [`Collector`]. It then
 /// proceeds to push them sequentially to static files. The stage checkpoint is not updated until

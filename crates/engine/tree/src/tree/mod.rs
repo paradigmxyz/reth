@@ -26,7 +26,7 @@ use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
+use reth_consensus::{Consensus, FullConsensus};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
@@ -37,7 +37,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
-    ConfigureEvm, Evm, TransactionEnv,
+    ConfigureEvm, Evm,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
@@ -58,7 +58,6 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::ResultAndState;
 use root::{
     StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
 };
@@ -950,11 +949,14 @@ where
         };
 
         let mut outcome = TreeOutcome::new(status);
+        // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
-            // if the block is valid and it is the sync target head, make it canonical
-            outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
-                sync_target_head: block_hash,
-            }));
+            // but only if it isn't already the canonical head
+            if self.state.tree_state.canonical_block_hash() != block_hash {
+                outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
+                    sync_target_head: block_hash,
+                }));
+            }
         }
 
         Ok(outcome)
@@ -1436,7 +1438,12 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
-                                let output = self.on_new_payload(payload);
+                                let mut output = self.on_new_payload(payload);
+
+                                let maybe_event =
+                                    output.as_mut().ok().and_then(|out| out.event.take());
+
+                                // emit response
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(|e| {
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
@@ -1448,6 +1455,9 @@ where
                                         .failed_new_payload_response_deliveries
                                         .increment(1);
                                 }
+
+                                // handle the event if any
+                                self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
                                 // triggering this hook will record that we received a request from
@@ -1592,6 +1602,8 @@ where
     }
 
     /// Handles a tree event.
+    ///
+    /// Returns an error if a [`TreeAction::MakeCanonical`] results in a fatal error.
     fn on_tree_event(&mut self, event: TreeEvent) -> ProviderResult<()> {
         match event {
             TreeEvent::TreeAction(action) => match action {
@@ -2419,8 +2431,11 @@ where
         // Atomic bool for letting the prewarm tasks know when to stop
         let cancel_execution = ManualCancel::default();
 
+        let use_legacy_state_root =
+            self.config.legacy_state_root() || !root::has_enough_parallelism();
+
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
-            if is_descendant_of_persisting_blocks && !self.config.legacy_state_root() {
+            if is_descendant_of_persisting_blocks && !use_legacy_state_root {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
                 // Compute trie input
@@ -2527,10 +2542,7 @@ where
         // Ensure that prewarm tasks don't send proof messages after state root sender is dropped
         cancel_execution.cancel();
 
-        if let Err(err) = self.consensus.validate_block_post_execution(
-            &block,
-            PostExecutionInput::new(&output.receipts, &output.requests),
-        ) {
+        if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
             return Err(err.into())
@@ -2548,7 +2560,7 @@ where
         // a different database transaction per thread and it might end up with a
         // different view of the database.
         let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks {
-            if self.config.legacy_state_root() {
+            if use_legacy_state_root {
                 match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
                 {
                     Ok(result) => {
@@ -2720,7 +2732,11 @@ where
     ) -> Result<(), InsertBlockErrorKind> {
         // Get the builder once, outside the thread
         let Some(state_provider_builder) = self.state_provider_builder(block.parent_hash())? else {
-            trace!(target: "engine::tree", parent=%block.parent_hash(), "Could not get state provider builder for prewarm");
+            trace!(
+                target: "engine::tree",
+                parent=%block.parent_hash(),
+                "Could not get state provider builder for prewarm",
+            );
             return Ok(())
         };
 
@@ -2736,26 +2752,30 @@ where
             let state_provider = match state_provider_builder.build() {
                 Ok(provider) => provider,
                 Err(err) => {
-                    trace!(target: "engine::tree", %err, "Failed to build state provider in prewarm thread");
+                    trace!(
+                        target: "engine::tree",
+                        %err,
+                        "Failed to build state provider in prewarm thread"
+                    );
                     return
                 }
             };
 
             // Use the caches to create a new provider with caching
-            let state_provider = CachedStateProvider::new_with_caches(
-                state_provider,
-                caches,
-                cache_metrics,
-            );
+            let state_provider =
+                CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
             let state_provider = StateProviderDatabase::new(&state_provider);
 
+            let mut evm_env = evm_config.evm_env(&block);
+
+            evm_env.cfg_env.disable_nonce_check = true;
+
             // create a new executor and disable nonce checks in the env
-            let mut evm = evm_config.evm_for_block(state_provider, &block);
+            let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
             // create the tx env and reset nonce
-            let mut tx_env = evm_config.tx_env(&tx, tx.signer());
-            tx_env.unset_nonce();
+            let tx_env = evm_config.tx_env(&tx, tx.signer());
 
             // exit early if execution is done
             if cancel_execution.is_cancelled() {
@@ -2763,10 +2783,16 @@ where
             }
 
             let execution_start = Instant::now();
-            let ResultAndState { state, .. } = match evm.transact(tx_env) {
+            let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    trace!(target: "engine::tree", %err, tx_hash=%tx.tx_hash(), sender=%tx.signer(), "Error when executing prewarm transaction");
+                    trace!(
+                        target: "engine::tree",
+                        %err,
+                        tx_hash=%tx.tx_hash(),
+                        sender=%tx.signer(),
+                        "Error when executing prewarm transaction",
+                    );
                     return
                 }
             };
@@ -2780,18 +2806,25 @@ where
                 return
             }
 
-            let Some(state_root_sender) = state_root_sender else {
-                return
-            };
+            let Some(state_root_sender) = state_root_sender else { return };
 
-            let mut targets = MultiProofTargets::default();
-            for (addr, account) in state {
-                // if account was not touched, do not fetch for it
-                if !account.is_touched() {
+            let mut targets =
+                MultiProofTargets::with_capacity_and_hasher(res.state.len(), Default::default());
+            let mut storage_targets = 0;
+            for (addr, account) in res.state {
+                // if the account was not touched, or if the account was selfdestructed, do not
+                // fetch proofs for it
+                //
+                // Since selfdestruct can only happen in the same transaction, we can skip
+                // prefetching proofs for selfdestructed accounts
+                //
+                // See: https://eips.ethereum.org/EIPS/eip-6780
+                if !account.is_touched() || account.is_selfdestructed() {
                     continue
                 }
 
-                let mut storage_set = B256Set::default();
+                let mut storage_set =
+                    B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
                 for (key, slot) in account.storage {
                     // do nothing if unchanged
                     if !slot.is_changed() {
@@ -2801,10 +2834,10 @@ where
                     storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
                 }
 
+                storage_targets += storage_set.len();
                 targets.insert(keccak256(addr), storage_set);
             }
 
-            let storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>();
             debug!(
                 target: "engine::tree",
                 tx_hash = ?tx.tx_hash(),
@@ -2841,7 +2874,13 @@ where
         // If the error was due to an invalid payload, the payload is added to the
         // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
         // returned.
-        warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number(), %validation_err, "Invalid block error on new payload");
+        warn!(
+            target: "engine::tree",
+            invalid_hash=%block.hash(),
+            invalid_number=block.number(),
+            %validation_err,
+            "Invalid block error on new payload",
+        );
         let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
 
         // keep track of the invalid header
@@ -2906,7 +2945,9 @@ where
                             return Ok((regular_root, regular_updates, time_from_last_update));
                         }
                     } else {
-                        debug!(target: "engine::tree", "Regular state root does not match block state root");
+                        debug!(target: "engine::tree",
+                            "Regular state root does not match block state root"
+                        );
                     }
                 }
 
@@ -3200,12 +3241,13 @@ mod tests {
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{
-        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+        CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1,
+        ExecutionPayloadV3,
     };
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-    use reth_engine_primitives::{ExecutionData, ForkchoiceStatus};
+    use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_ethereum_primitives::{Block, EthPrimitives};

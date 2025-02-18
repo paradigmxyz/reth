@@ -1,14 +1,13 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
 pub mod api;
-pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
-
-use core::time::Duration;
-
+use crate::error::api::FromEvmHalt;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::{ContractError, RevertReason};
+pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
+use core::time::Duration;
 use reth_errors::RethError;
 use reth_primitives_traits::transaction::signed::RecoveryError;
 use reth_rpc_server_types::result::{
@@ -18,9 +17,10 @@ use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
 };
-use revm::primitives::{EVMError, ExecutionResult, HaltReason, InvalidTransaction, OutOfGasError};
+use revm::context_interface::result::{
+    EVMError, ExecutionResult, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
+};
 use revm_inspectors::tracing::MuxError;
-use revm_primitives::InvalidHeader;
 use tracing::error;
 
 /// A trait to convert an error to an RPC error.
@@ -273,11 +273,20 @@ impl From<reth_errors::ProviderError> for EthApiError {
     }
 }
 
-impl<T> From<EVMError<T>> for EthApiError
+impl From<InvalidHeader> for EthApiError {
+    fn from(value: InvalidHeader) -> Self {
+        match value {
+            InvalidHeader::ExcessBlobGasNotSet => Self::ExcessBlobGasNotSet,
+            InvalidHeader::PrevrandaoNotSet => Self::PrevrandaoNotSet,
+        }
+    }
+}
+
+impl<T> From<EVMError<T, InvalidTransaction>> for EthApiError
 where
     T: Into<Self>,
 {
-    fn from(err: EVMError<T>) -> Self {
+    fn from(err: EVMError<T, InvalidTransaction>) -> Self {
         match err {
             EVMError::Transaction(invalid_tx) => match invalid_tx {
                 InvalidTransaction::NonceTooLow { tx, state } => {
@@ -285,8 +294,7 @@ where
                 }
                 _ => RpcInvalidTransactionError::from(invalid_tx).into(),
             },
-            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Self::PrevrandaoNotSet,
-            EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Self::ExcessBlobGasNotSet,
+            EVMError::Header(err) => err.into(),
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
             EVMError::Precompile(err) => Self::EvmPrecompile(err),
@@ -489,7 +497,9 @@ impl RpcInvalidTransactionError {
     /// Converts the out of gas error
     pub const fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
         match reason {
-            OutOfGasError::Basic => Self::BasicOutOfGas(gas_limit),
+            OutOfGasError::Basic | OutOfGasError::ReentrancySentry => {
+                Self::BasicOutOfGas(gas_limit)
+            }
             OutOfGasError::Memory | OutOfGasError::MemoryLimit => Self::MemoryOutOfGas(gas_limit),
             OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
@@ -514,9 +524,8 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
     }
 }
 
-impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
-    fn from(err: revm::primitives::InvalidTransaction) -> Self {
-        use revm::primitives::InvalidTransaction;
+impl From<InvalidTransaction> for RpcInvalidTransactionError {
+    fn from(err: InvalidTransaction) -> Self {
         match err {
             InvalidTransaction::InvalidChainId => Self::InvalidChainId,
             InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
@@ -546,7 +555,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobGasPriceGreaterThanMax => Self::BlobFeeCapTooLow,
             InvalidTransaction::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
-            InvalidTransaction::TooManyBlobs { have } => Self::TooManyBlobs { have },
+            InvalidTransaction::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
             InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
             InvalidTransaction::AuthorizationListNotSupported => {
@@ -779,15 +788,15 @@ pub enum SignError {
 
 /// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if it
 /// is [`ExecutionResult::Success`].
-pub fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
+pub fn ensure_success<Halt, Error: FromEvmHalt<Halt> + FromEthApiError>(
+    result: ExecutionResult<Halt>,
+) -> Result<Bytes, Error> {
     match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),
         ExecutionResult::Revert { output, .. } => {
-            Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
+            Err(Error::from_eth_err(RpcInvalidTransactionError::Revert(RevertError::new(output))))
         }
-        ExecutionResult::Halt { reason, gas_used } => {
-            Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
-        }
+        ExecutionResult::Halt { reason, gas_used } => Err(Error::from_evm_halt(reason, gas_used)),
     }
 }
 

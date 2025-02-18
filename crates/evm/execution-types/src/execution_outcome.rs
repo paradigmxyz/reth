@@ -3,11 +3,9 @@ use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
-use reth_trie::{HashedPostState, KeyHasher};
-use revm::{
-    db::{states::BundleState, BundleAccount},
-    primitives::AccountInfo,
-};
+use reth_trie_common::{HashedPostState, KeyHasher};
+use revm::state::AccountInfo;
+use revm_database::{states::BundleState, BundleAccount};
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,7 +31,7 @@ impl ChangedAccount {
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ExecutionOutcome<T = reth_primitives::Receipt> {
+pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// Bundle state with reverts.
     pub bundle: BundleState,
     /// The collection of receipts.
@@ -129,12 +127,12 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Creates a new `ExecutionOutcome` from a single block execution result.
-    pub fn single(block_number: u64, result: BlockExecutionOutput<T>) -> Self {
+    pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
         Self {
-            bundle: result.state,
-            receipts: vec![result.receipts],
+            bundle: output.state,
+            receipts: vec![output.result.receipts],
             first_block: block_number,
-            requests: vec![result.requests],
+            requests: vec![output.result.requests],
         }
     }
 
@@ -390,19 +388,14 @@ impl ExecutionOutcome {
     pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
         self.generic_receipts_root_slow(
             block_number,
-            reth_primitives::Receipt::calculate_receipt_root_no_memo,
+            reth_ethereum_primitives::Receipt::calculate_receipt_root_no_memo,
         )
     }
 }
 
 impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
-    fn from(value: (BlockExecutionOutput<T>, BlockNumber)) -> Self {
-        Self {
-            bundle: value.0.state,
-            receipts: vec![value.0.receipts],
-            first_block: value.1,
-            requests: vec![value.0.requests],
-        }
+    fn from((output, block_number): (BlockExecutionOutput<T>, BlockNumber)) -> Self {
+        Self::single(block_number, output)
     }
 }
 
