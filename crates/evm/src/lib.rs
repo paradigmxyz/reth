@@ -36,7 +36,7 @@ pub mod execute;
 mod aliases;
 pub use aliases::*;
 
-#[cfg(feature = "std")]
+#[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;
 pub mod state_change;

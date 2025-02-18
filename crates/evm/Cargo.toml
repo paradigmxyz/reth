@@ -47,8 +47,6 @@ metrics-util = { workspace = true, features = ["debugging"] }
 [features]
 default = ["std"]
 std = [
-    "dep:metrics",
-    "dep:reth-metrics",
     "reth-consensus/std",
     "reth-primitives/std",
     "reth-primitives-traits/std",
@@ -67,6 +65,11 @@ std = [
     "reth-execution-types/std",
     "reth-storage-errors/std",
     "futures-util/std",
+]
+metrics = [
+    "std",
+    "dep:metrics",
+    "dep:reth-metrics",
 ]
 test-utils = [
     "dep:parking_lot",
