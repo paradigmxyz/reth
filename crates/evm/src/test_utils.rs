@@ -8,13 +8,13 @@ use crate::{
     system_calls::OnStateHook,
     Database,
 };
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives::{EthPrimitives, NodePrimitives, RecoveredBlock};
 use revm_database::State;
-use std::sync::Arc;
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
