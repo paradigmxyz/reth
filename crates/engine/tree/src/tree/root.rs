@@ -61,7 +61,7 @@ pub(crate) fn thread_pool_size() -> usize {
 /// - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
 /// - Storage root computation spawned in [`ParallelProof::multiproof`]
 pub(crate) fn has_enough_parallelism() -> bool {
-    std::thread::available_parallelism().map_or(false, |num| num.get() >= 5)
+    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
 }
 
 /// Outcome of the state root computation, including the state root itself with
