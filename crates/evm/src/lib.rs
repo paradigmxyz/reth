@@ -47,6 +47,9 @@ pub mod test_utils;
 
 pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, InvalidTxError};
 
+/// Alias for `EvmEnv<<Evm as ConfigureEvmEnv>::Spec>`
+pub type EvmEnvFor<Evm> = EvmEnv<<Evm as ConfigureEvmEnv>::Spec>;
+
 /// Helper trait to bound [`Inspector`] for a [`ConfigureEvm`].
 pub trait InspectorFor<DB: Database, Evm: ConfigureEvm>:
     Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>
