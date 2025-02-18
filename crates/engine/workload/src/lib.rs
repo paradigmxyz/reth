@@ -1,4 +1,19 @@
 //! This crate includes thread pool primitives for mixed I/O and CPU-bound workloads.
+//!
+//! This is intended to be used for computing the state root during payload validation.
+
+
+/// Workflow
+///
+/// Stateroot task:
+///   - spawns multiproof calculations
+///     * fetches multiproofs from disk
+///        * this spawns more tasks Starting proof calculation
+///        * joins all
+///     * (emits proof calculated message)
+///
+/// 1. spawn stateroot task
+//
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -18,7 +33,7 @@ use std::time::Duration;
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 
-// Enhanced WorkloadExecutor with cancellation and scheduling
+/// An executor for mixed I/O and CPU workloads.
 pub struct WorkloadExecutor<T> {
     runtime: Arc<Runtime>,
     cpu_pool: Arc<RayonPool>,
