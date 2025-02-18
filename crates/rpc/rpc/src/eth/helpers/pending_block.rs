@@ -115,13 +115,11 @@ where
         result: ExecutionResult<HaltReasonFor<Self::Evm>>,
         cumulative_gas_used: u64,
     ) -> reth_provider::ProviderReceipt<Self::Provider> {
-        #[allow(clippy::needless_update)]
         Receipt {
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
             logs: result.into_logs().into_iter().collect(),
-            ..Default::default()
         }
     }
 }
