@@ -1035,22 +1035,21 @@ where
 
     'main: loop {
         let mut update: Option<SparseTrieUpdate> = None;
-        num_iterations += 1;
 
         let mut num_updates = 0;
         'poll: loop {
             match update_rx.try_recv() {
                 Ok(next) => {
                     num_updates += 1;
-                    update.get_or_insert_default().extend(next);
+                    update.get_or_insert_with(SparseTrieUpdate::default).extend(next);
                 }
                 Err(TryRecvError::Empty) => break 'poll,
                 Err(TryRecvError::Disconnected) => {
                     if update.is_some() {
                         break 'poll
-                    } else {
-                        break 'main
                     }
+
+                    break 'main
                 }
             };
         }
@@ -1060,6 +1059,7 @@ where
             continue 'main;
         };
 
+        num_iterations += 1;
         debug!(
             target: "engine::root",
             num_updates,
