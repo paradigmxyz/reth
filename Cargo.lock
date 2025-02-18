@@ -7434,6 +7434,7 @@ dependencies = [
  "reth-trie-db",
  "reth-trie-parallel",
  "reth-trie-sparse",
+ "reth-workload-executor",
  "revm-primitives",
  "revm-state",
  "schnellru",
