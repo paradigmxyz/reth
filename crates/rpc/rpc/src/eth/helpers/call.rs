@@ -101,7 +101,6 @@ where
             db.basic(caller).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default()
         };
 
-        #[allow(clippy::needless_update)]
         let env = TxEnv {
             tx_type,
             gas_limit,

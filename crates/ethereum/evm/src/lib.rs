@@ -216,7 +216,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn test_evm_with_env_default_spec() {
         let evm_config = EthEvmConfig::new(MAINNET.clone());
 
@@ -232,7 +231,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn test_evm_with_env_custom_cfg() {
         let evm_config = EthEvmConfig::new(MAINNET.clone());
 
@@ -250,7 +248,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn test_evm_with_env_custom_block_and_tx() {
         let evm_config = EthEvmConfig::new(MAINNET.clone());
 
@@ -272,7 +269,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn test_evm_with_spec_id() {
         let evm_config = EthEvmConfig::new(MAINNET.clone());
 
@@ -290,7 +286,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn test_evm_with_env_and_default_inspector() {
         let evm_config = EthEvmConfig::new(MAINNET.clone());
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
@@ -305,7 +300,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn test_evm_with_env_inspector_and_custom_cfg() {
         let evm_config = EthEvmConfig::new(MAINNET.clone());
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
@@ -322,7 +316,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn test_evm_with_env_inspector_and_custom_block_tx() {
         let evm_config = EthEvmConfig::new(MAINNET.clone());
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
@@ -340,7 +333,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn test_evm_with_env_inspector_and_spec_id() {
         let evm_config = EthEvmConfig::new(MAINNET.clone());
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();

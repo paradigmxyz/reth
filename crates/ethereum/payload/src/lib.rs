@@ -327,13 +327,11 @@ where
         cumulative_gas_used += gas_used;
 
         // Push transaction changeset and calculate header bloom filter for receipt.
-        #[allow(clippy::needless_update)] // side-effect of optimism fields
         receipts.push(Receipt {
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
             logs: result.into_logs().into_iter().collect(),
-            ..Default::default()
         });
 
         // update add to total fees
