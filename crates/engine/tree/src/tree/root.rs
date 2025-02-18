@@ -499,6 +499,110 @@ struct StateRootTaskMetrics {
     pub state_root_iterations_histogram: Histogram,
 }
 
+/// Result provided by a state root calculation
+pub trait StateRootComputeHandle: Send + 'static {
+    /// Waits for the state root calculation to complete and returns the result.
+    fn wait_for_result(self) -> Result<StateRootComputeOutcome, ParallelStateRootError>;
+}
+
+impl StateRootComputeHandle for StateRootHandle {
+    fn wait_for_result(self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+        self.wait_for_result()
+    }
+}
+
+/// Public interface of the state root task.
+pub trait StateRootTaskRunner: Send + 'static {
+    /// Type of state root result returned by this runner
+    type ResultHandle: StateRootComputeHandle;
+
+    /// Spawns the state root task and returns a handle to await its result.
+    fn spawn(self) -> Self::ResultHandle;
+
+    /// Returns a state hook that can be used to send state updates to this task.
+    fn state_hook(&self) -> Box<dyn OnStateHook>;
+
+    /// Returns a [`StateRootMessage`] sender.
+    fn state_root_message_sender(&self) -> Sender<StateRootMessage>;
+}
+
+impl<Factory> StateRootTaskRunner for StateRootTask<Factory>
+where
+    Factory:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
+{
+    type ResultHandle = StateRootHandle;
+
+    fn spawn(self) -> StateRootHandle {
+        self.spawn()
+    }
+
+    fn state_hook(&self) -> Box<dyn OnStateHook> {
+        Box::new(self.state_hook())
+    }
+
+    fn state_root_message_sender(&self) -> Sender<StateRootMessage> {
+        self.state_root_message_sender()
+    }
+}
+
+/// Factory trait for creating state root task runners.
+pub trait StateRootTaskFactory<Provider>: Send + 'static {
+    /// The type of task runner this factory creates.
+    type Runner: StateRootTaskRunner;
+
+    /// Creates a new state root task runner.
+    fn create_task(&mut self, config: StateRootConfig<Provider>) -> Self::Runner;
+
+    /// Creates a new state root task runner.
+    fn thread_pool(&self) -> Arc<rayon::ThreadPool>;
+}
+
+/// Factory for creating real state root tasks.
+#[derive(Debug)]
+pub struct BasicStateRootTaskFactory {
+    /// Thread pool used for parallel proof generation.
+    thread_pool: Arc<rayon::ThreadPool>,
+}
+
+impl BasicStateRootTaskFactory {
+    /// Creates a new factory.
+    pub fn new() -> Self {
+        let num_threads = rayon_thread_pool_size();
+        let thread_pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .thread_name(|i| format!("srt-worker-{}", i))
+                .build()
+                .expect("Failed to create proof worker thread pool"),
+        );
+
+        Self { thread_pool }
+    }
+}
+
+impl Default for BasicStateRootTaskFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<Provider> StateRootTaskFactory<Provider> for BasicStateRootTaskFactory
+where
+    Provider:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
+{
+    type Runner = StateRootTask<Provider>;
+
+    fn create_task(&mut self, config: StateRootConfig<Provider>) -> Self::Runner {
+        StateRootTask::new(config, self.thread_pool.clone())
+    }
+
+    fn thread_pool(&self) -> Arc<rayon::ThreadPool> {
+        self.thread_pool.clone()
+    }
+}
+
 /// Standalone task that receives a transaction state stream and updates relevant
 /// data structures to calculate state root.
 ///
