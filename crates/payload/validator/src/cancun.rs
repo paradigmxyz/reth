@@ -85,7 +85,7 @@ pub fn ensure_well_formed_transactions_field_with_sidecar<T: BlockBody>(
 
 /// Ensures that the number of blob versioned hashes of a EIP-4844 transactions in block, matches
 /// the number hashes included in the _separate_ `block_versioned_hashes` of the cancun payload
-/// fields.
+/// fields on the sidecar.
 pub fn ensure_matching_blob_versioned_hashes<T: BlockBody>(
     block_body: T,
     cancun_fields: &MaybeCancunPayloadFields,
