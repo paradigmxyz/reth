@@ -11,6 +11,7 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOV
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
+    handshake::{EthHandshake, Handshake},
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, Status,
 };
 use reth_ethereum_forks::{ForkFilter, Head};
@@ -83,6 +84,8 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
     pub nat: Option<NatResolver>,
+    /// The P2P handshake
+    pub handshake: Arc<dyn Handshake>,
 }
 
 // === impl NetworkConfig ===
@@ -207,6 +210,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
     nat: Option<NatResolver>,
+    /// The P2P handshake
+    handshake: Arc<dyn Handshake>,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -246,6 +251,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             block_import: None,
             transactions_manager_config: Default::default(),
             nat: None,
+            handshake: Arc::new(EthHandshake),
         }
     }
 
@@ -533,6 +539,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Overrides the default handshake.
+    pub fn handshake(mut self, handshake: Arc<dyn Handshake>) -> Self {
+        self.handshake = handshake;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///
@@ -564,6 +576,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             block_import,
             transactions_manager_config,
             nat,
+            handshake,
         } = self;
 
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
@@ -631,6 +644,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             tx_gossip_disabled,
             transactions_manager_config,
             nat,
+            handshake,
         }
     }
 }

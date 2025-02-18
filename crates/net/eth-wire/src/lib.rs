@@ -23,6 +23,9 @@ mod p2pstream;
 mod pinger;
 pub mod protocol;
 
+/// Handshake logic
+pub mod handshake;
+
 #[cfg(test)]
 pub mod test_utils;
 

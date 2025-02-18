@@ -14,6 +14,7 @@ use reth_eth_wire_types::NetworkPrimitives;
 use reth_ethereum_forks::ForkFilter;
 use reth_primitives_traits::GotExpected;
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -362,8 +363,11 @@ where
     EthStreamError: From<<S as Sink<Bytes>>::Error>,
     N: NetworkPrimitives,
 {
-    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
-        self.inner.disconnect(reason).await.map_err(Into::into)
+    fn disconnect(
+        &mut self,
+        reason: DisconnectReason,
+    ) -> Pin<Box<dyn Future<Output = Result<(), EthStreamError>> + Send + '_>> {
+        Box::pin(async move { self.inner.disconnect(reason).await.map_err(Into::into) })
     }
 }
 

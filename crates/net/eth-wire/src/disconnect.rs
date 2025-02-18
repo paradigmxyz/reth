@@ -1,6 +1,6 @@
 //! Disconnect
 
-use std::future::Future;
+use std::{future::Future, pin::Pin};
 
 use futures::{Sink, SinkExt};
 use reth_ecies::stream::ECIESStream;
@@ -18,7 +18,7 @@ pub trait CanDisconnect<T>: Sink<T> + Unpin {
     fn disconnect(
         &mut self,
         reason: DisconnectReason,
-    ) -> impl Future<Output = Result<(), <Self as Sink<T>>::Error>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<(), <Self as Sink<T>>::Error>> + Send + '_>>;
 }
 
 // basic impls for things like Framed<TcpStream, etc>
@@ -27,11 +27,11 @@ where
     T: AsyncWrite + Unpin + Send,
     U: Encoder<I> + Send,
 {
-    async fn disconnect(
+    fn disconnect(
         &mut self,
         _reason: DisconnectReason,
-    ) -> Result<(), <Self as Sink<I>>::Error> {
-        self.close().await
+    ) -> Pin<Box<dyn Future<Output = Result<(), <Self as Sink<I>>::Error>> + Send + '_>> {
+        Box::pin(async move { self.close().await })
     }
 }
 
@@ -39,8 +39,11 @@ impl<S> CanDisconnect<bytes::Bytes> for ECIESStream<S>
 where
     S: AsyncWrite + Unpin + Send,
 {
-    async fn disconnect(&mut self, _reason: DisconnectReason) -> Result<(), std::io::Error> {
-        self.close().await
+    fn disconnect(
+        &mut self,
+        _reason: DisconnectReason,
+    ) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + Send + '_>> {
+        Box::pin(async move { self.close().await })
     }
 }
 

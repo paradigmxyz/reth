@@ -33,9 +33,9 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    errors::EthStreamError, multiplex::RlpxProtocolMultiplexer, Capabilities, DisconnectReason,
-    EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status, UnauthedEthStream,
-    UnauthedP2PStream,
+    errors::EthStreamError, handshake::Handshake, multiplex::RlpxProtocolMultiplexer, Capabilities,
+    DisconnectReason, EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status,
+    UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -113,6 +113,8 @@ pub struct SessionManager<N: NetworkPrimitives> {
     disconnections_counter: DisconnectionsCounter,
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
+    /// The P2P handshake
+    handshake: Arc<dyn Handshake>,
 }
 
 // === impl SessionManager ===
@@ -128,6 +130,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
+        handshake: Arc<dyn Handshake>,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -154,6 +157,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             extra_protocols,
             disconnections_counter: Default::default(),
             metrics: Default::default(),
+            handshake,
         }
     }
 
@@ -256,6 +260,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             Direction::Incoming,
             pending_events.clone(),
             start_pending_incoming_session(
+                self.handshake.clone(),
                 disconnect_rx,
                 session_id,
                 stream,
@@ -297,6 +302,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 Direction::Outgoing(remote_peer_id),
                 pending_events.clone(),
                 start_pending_outbound_session(
+                    self.handshake.clone(),
                     disconnect_rx,
                     pending_events,
                     session_id,
@@ -811,6 +817,7 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
 /// This will wait for the _incoming_ handshake request and answer it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
+    handshake: Arc<dyn Handshake>,
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
     stream: TcpStream,
@@ -823,6 +830,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
     authenticate(
+        handshake,
         disconnect_rx,
         events,
         stream,
@@ -842,6 +850,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 #[instrument(skip_all, fields(%remote_addr, peer_id), target = "net")]
 #[allow(clippy::too_many_arguments)]
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
+    handshake: Arc<dyn Handshake>,
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     session_id: SessionId,
@@ -873,6 +882,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
         }
     };
     authenticate(
+        handshake,
         disconnect_rx,
         events,
         stream,
@@ -891,6 +901,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
 /// Authenticates a session
 #[allow(clippy::too_many_arguments)]
 async fn authenticate<N: NetworkPrimitives>(
+    handshake: Arc<dyn Handshake>,
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent<N>>,
     stream: TcpStream,
@@ -922,6 +933,7 @@ async fn authenticate<N: NetworkPrimitives>(
     let unauthed = UnauthedP2PStream::new(stream);
 
     let auth = authenticate_stream(
+        handshake,
         unauthed,
         session_id,
         remote_addr,
@@ -974,6 +986,7 @@ async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
 /// also negotiate the additional protocols.
 #[allow(clippy::too_many_arguments)]
 async fn authenticate_stream<N: NetworkPrimitives>(
+    handshake: Arc<dyn Handshake>,
     stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
