@@ -25,8 +25,10 @@ use reth_consensus_common::validation::{
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{Block, BlockBody, BlockHeader, SealedBlock};
+use reth_primitives_traits::{
+    Block, BlockBody, BlockHeader, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader,
+};
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
