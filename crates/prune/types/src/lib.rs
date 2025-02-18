@@ -20,8 +20,9 @@ mod target;
 
 use alloc::{collections::BTreeMap, vec::Vec};
 use alloy_primitives::{Address, BlockNumber};
-pub use checkpoint::PruneCheckpoint;
 use core::ops::Deref;
+
+pub use checkpoint::PruneCheckpoint;
 pub use event::PrunerEvent;
 pub use mode::PruneMode;
 pub use pruner::{
