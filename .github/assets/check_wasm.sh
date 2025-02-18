@@ -28,7 +28,6 @@ exclude_crates=(
   reth-ethereum-cli
   reth-ethereum-payload-builder
   reth-etl
-  reth-evm
   reth-exex
   reth-exex-test-utils
   reth-ipc
