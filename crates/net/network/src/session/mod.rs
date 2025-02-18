@@ -34,8 +34,8 @@ use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::Handshake, multiplex::RlpxProtocolMultiplexer, Capabilities,
-    DisconnectReason, EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status,
-    UnauthedEthStream, UnauthedP2PStream,
+    DisconnectReason, EthStream, EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status,
+    UnauthedP2PStream,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -1001,7 +1001,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
     extra_handlers.retain(|handler| hello.try_add_protocol(handler.protocol()).is_ok());
 
     // conduct the p2p handshake and return the authenticated stream
-    let (p2p_stream, their_hello) = match stream.handshake(hello).await {
+    let (mut p2p_stream, their_hello) = match stream.handshake(hello).await {
         Ok(stream_res) => stream_res,
         Err(err) => {
             return PendingSessionEvent::Disconnected {
@@ -1031,18 +1031,11 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         //
         // Before trying status handshake, set up the version to negotiated shared version
         status.set_eth_version(eth_version);
-        let eth_unauthed = UnauthedEthStream::new(p2p_stream);
-        let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
-            Ok(stream_res) => stream_res,
-            Err(err) => {
-                return PendingSessionEvent::Disconnected {
-                    remote_addr,
-                    session_id,
-                    direction,
-                    error: Some(PendingSessionHandshakeError::Eth(err)),
-                }
-            }
-        };
+
+        let their_status =
+            handshake.handshake(&mut p2p_stream, status, fork_filter.clone()).await.unwrap();
+        let eth_stream = EthStream::new(status.version, p2p_stream);
+
         (eth_stream.into(), their_status)
     } else {
         // Multiplex the stream with the extra protocols
