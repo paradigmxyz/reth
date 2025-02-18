@@ -36,6 +36,7 @@ use std::{cmp::Ordering, collections::BinaryHeap, sync::Arc, time::Duration};
 use tokio::{runtime::Runtime, sync::broadcast};
 
 /// An executor for mixed I/O and CPU workloads.
+#[derive(Clone)]
 pub struct WorkloadExecutor {
     runtime: Arc<Runtime>,
     rayon_pool: Arc<RayonPool>,
