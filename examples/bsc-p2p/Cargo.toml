@@ -32,4 +32,13 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [features]
-serde = ["dep:serde"]
+default = ["serde"]
+serde = [
+    "dep:serde",
+    "alloy-primitives/serde",
+    "reth-eth-wire/serde",
+    "reth-eth-wire-types/serde",
+    "reth-ethereum-forks/serde",
+    "reth-provider/serde",
+    "secp256k1/serde"
+]
