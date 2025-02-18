@@ -1,6 +1,9 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, EthChainSpec};
+use crate::{
+    constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
+    EthChainSpec,
+};
 use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
@@ -320,7 +323,7 @@ impl Default for ChainSpec {
             hardforks: Default::default(),
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-            prune_delete_limit: MAINNET.prune_delete_limit,
+            prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
             blob_params: Default::default(),
         }
     }
