@@ -8,6 +8,8 @@ use reth_eth_wire_types::DisconnectReason;
 use tokio::io::AsyncWrite;
 use tokio_util::codec::{Encoder, Framed};
 
+type DisconnectResult<E> = Result<(), E>;
+
 /// This trait is meant to allow higher level protocols like `eth` to disconnect from a peer, using
 /// lower-level disconnect functions (such as those that exist in the `p2p` protocol) if the
 /// underlying stream supports it.
@@ -18,7 +20,7 @@ pub trait CanDisconnect<T>: Sink<T> + Unpin {
     fn disconnect(
         &mut self,
         reason: DisconnectReason,
-    ) -> Pin<Box<dyn Future<Output = Result<(), <Self as Sink<T>>::Error>> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = DisconnectResult<Self::Error>> + Send + '_>>;
 }
 
 // basic impls for things like Framed<TcpStream, etc>

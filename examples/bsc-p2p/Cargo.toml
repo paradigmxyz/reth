@@ -8,21 +8,28 @@ license.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+derive_more.workspace = true
+futures.workspace = true
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
+reth-ethereum-forks = { workspace = true, features = ["serde"] }
+reth-eth-wire.workspace = true
+reth-eth-wire-types.workspace = true
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
 reth-primitives.workspace = true
-reth-tracing.workspace = true
 reth-provider.workspace = true
-
-secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
-
+reth-tracing.workspace = true
+secp256k1 = { workspace = true, features = ["global-context","std", "rand-std", "recovery"] }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
-reth-eth-wire.workspace = true
-serde_json.workspace = true
 tracing.workspace = true
-alloy-genesis.workspace = true
-alloy-primitives.workspace = true
+
+[features]
+serde = ["dep:serde"]

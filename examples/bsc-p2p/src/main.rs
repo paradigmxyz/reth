@@ -10,8 +10,8 @@
 //!
 //! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
 use chainspec::{boot_nodes, bsc_chain_spec, head};
+use handshake::BscHandshake;
 use reth_discv4::Discv4ConfigBuilder;
-use reth_eth_wire::handshake::BscHandshake;
 use reth_network::{
     EthNetworkPrimitives, NetworkConfig, NetworkEvent, NetworkEventListenerProvider,
     NetworkManager, PeersInfo,
@@ -30,7 +30,8 @@ use std::{
 use tokio_stream::StreamExt;
 use tracing::info;
 
-pub mod chainspec;
+mod chainspec;
+mod handshake;
 
 #[tokio::main]
 async fn main() {

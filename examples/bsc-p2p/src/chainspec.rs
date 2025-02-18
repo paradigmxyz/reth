@@ -5,6 +5,8 @@ use reth_chainspec::{
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives::SealedHeader;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{
     fmt,
     fmt::{Display, Formatter},
