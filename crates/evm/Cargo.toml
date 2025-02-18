@@ -66,6 +66,7 @@ std = [
     "reth-execution-errors/std",
     "reth-execution-types/std",
     "reth-storage-errors/std",
+    "futures-util/std",
 ]
 test-utils = [
     "dep:parking_lot",

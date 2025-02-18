@@ -346,7 +346,7 @@ reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
 reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }
-reth-evm = { path = "crates/evm" }
+reth-evm = { path = "crates/evm", default-features = false }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-optimism-evm = { path = "crates/optimism/evm", default-features = false }
 reth-execution-errors = { path = "crates/evm/execution-errors", default-features = false }
@@ -559,7 +559,7 @@ async-stream = "0.3"
 async-trait = "0.1.68"
 futures = "0.3"
 futures-core = "0.3"
-futures-util = "0.3"
+futures-util = { version = "0.3", default-features = false }
 hyper = "1.3"
 hyper-util = "0.1.5"
 pin-project = "1.0.12"

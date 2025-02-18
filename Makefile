@@ -432,7 +432,7 @@ rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc
 	cargo +nightly docs \
 	--document-private-items
 
-test:
+cargo-test:
 	cargo test \
 	--workspace \
 	--bin "op-reth" \
@@ -445,7 +445,7 @@ test-doc:
 	cargo test --doc --workspace --all-features
 
 test:
-	make test && \
+	make cargo-test && \
 	make test-doc
 
 pr:

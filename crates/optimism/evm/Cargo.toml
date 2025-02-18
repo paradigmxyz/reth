@@ -82,4 +82,5 @@ std = [
     "alloy-op-evm/std",
     "revm-database/std",
     "revm-optimism/std",
+    "reth-evm/std",
 ]
