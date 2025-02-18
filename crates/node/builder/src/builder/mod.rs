@@ -149,6 +149,7 @@ pub type RethFullAdapter<DB, Types> =
 /// [builder]: https://doc.rust-lang.org/1.0.0/style/ownership/builders.html
 pub struct NodeBuilder<DB, ChainSpec> {
     /// All settings for how the node should be configured.
+    // TODO(mattsse): can we replace `Chainspec` with a trait Config {type ChainSpec?}
     config: NodeConfig<ChainSpec>,
     /// The configured database for the node.
     database: DB,

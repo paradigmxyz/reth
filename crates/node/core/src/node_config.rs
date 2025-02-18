@@ -30,6 +30,7 @@ use std::{
     sync::Arc,
 };
 use tracing::*;
+use crate::cli::config::RethNetworkConfig;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
@@ -86,7 +87,7 @@ pub const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: u64 = 4 * 1024;
 /// }
 /// ```
 #[derive(Debug)]
-pub struct NodeConfig<ChainSpec> {
+pub struct NodeConfig<ChainSpec> { // struct NodeConfig<N: NodeConfigT> {config: N}
     /// All data directory related arguments
     pub datadir: DatadirArgs,
 
@@ -145,6 +146,16 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All engine related arguments
     pub engine: EngineArgs,
+}
+
+trait NodeConfigT  {
+    type ChainSpec;
+
+    fn rpc_args(&self) -> &RpcServerArgs;
+
+    fn debug_args(&self) -> &DebugArgs;
+
+
 }
 
 impl NodeConfig<ChainSpec> {

@@ -76,7 +76,7 @@ where
     >,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>, // NodeAdapter<T, CB::Components> -> T: BuilderComponents
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
@@ -93,7 +93,7 @@ where
             components_builder,
             add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
             config,
-        } = target;
+        } = target; // becomes NodeBuilderWithComponents {internals};
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
         // setup the launch context

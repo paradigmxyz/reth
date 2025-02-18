@@ -146,14 +146,21 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
     }
 }
 
-/// A fully type configured node builder.
+// Action Items:
+// - investigate if `BuilderInternals` makes trait bounds easier downstream (on launcher, no NodeAdapter requirement in where bounds)
+// - can we introduce a trait that encapsulates the NodeConfig (NodeConfigT) which provides all the cli args add additional settings, chainspec etc.
+
+/// A fully type configured node builder with its internals
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents<
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-> {
+pub struct NodeBuilderWithComponents<T: FullNodeComponents,CB> {
+// pub struct NodeBuilderWithComponents<T: BuilderInternals> {
+    /// All settings for how the node should be configured.
+   adapter: BuilderComponentsAdapter<T, CB> ,
+}
+
+/// This represents the internal state of the nodebuilder
+struct BuilderComponentsAdapter<T, CB> {
     /// All settings for how the node should be configured.
     pub config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
     /// Adapter for the underlying node types and database
@@ -162,6 +169,17 @@ pub struct NodeBuilderWithComponents<
     pub components_builder: CB,
     /// Additional node extensions.
     pub add_ons: AddOns<NodeAdapter<T, CB::Components>, AO>,
+
+}
+
+/// Inernal helper as alias for for adapters
+trait BuilderInternals {
+    type ..;
+    type
+}
+
+impl<...> BuilderInternals for BuilderComponentsAdapter<....> {
+    type: ...;
 }
 
 impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
