@@ -428,7 +428,7 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
 
     // If Isthmus is active, overwrite the withdrawals root with the storage root of predeploy
     // `L2ToL1MessagePasser.sol`
-    if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(genesis.timestamp) {
+    if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) {
         match genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
             Some(predeploy) => {
                 if let Some(ref storage) = predeploy.storage {
