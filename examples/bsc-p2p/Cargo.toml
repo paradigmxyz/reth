@@ -15,12 +15,14 @@ reth-network-api.workspace = true
 reth-network-peers.workspace = true
 reth-primitives.workspace = true
 reth-tracing.workspace = true
+reth-provider.workspace = true
 
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 
 tokio.workspace = true
 tokio-stream.workspace = true
-
+reth-eth-wire.workspace = true
 serde_json.workspace = true
-
+tracing.workspace = true
 alloy-genesis.workspace = true
+alloy-primitives.workspace = true

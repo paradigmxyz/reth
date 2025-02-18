@@ -11,7 +11,10 @@ use super::{
     GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
 };
-use crate::{EthNetworkPrimitives, EthVersion, NetworkPrimitives, SharedTransactions};
+use crate::{
+    upgrade_status::UpgradeStatus, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
+    SharedTransactions,
+};
 use alloc::{boxed::Box, sync::Arc};
 use alloy_primitives::bytes::{Buf, BufMut};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
@@ -101,6 +104,10 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::GetReceipts => EthMessage::GetReceipts(RequestPair::decode(buf)?),
             EthMessageID::Receipts => EthMessage::Receipts(RequestPair::decode(buf)?),
+            EthMessageID::UpgradeStatus => {
+                let upgrade_status = UpgradeStatus::decode(buf)?;
+                EthMessage::UpgradeStatus(upgrade_status)
+            }
         };
         Ok(Self { message_type, message })
     }
@@ -229,6 +236,9 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
     )]
     Receipts(RequestPair<Receipts<N::Receipt>>),
+
+    /// Represents a `UpgradeStatus` request-response pair.
+    UpgradeStatus(UpgradeStatus),
 }
 
 impl<N: NetworkPrimitives> EthMessage<N> {
@@ -252,6 +262,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) => EthMessageID::GetReceipts,
             Self::Receipts(_) => EthMessageID::Receipts,
+            Self::UpgradeStatus(_) => EthMessageID::UpgradeStatus,
         }
     }
 
@@ -299,6 +310,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
             Self::Receipts(receipts) => receipts.encode(out),
+            Self::UpgradeStatus(status) => status.encode(out),
         }
     }
     fn length(&self) -> usize {
@@ -319,6 +331,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
             Self::Receipts(receipts) => receipts.length(),
+            Self::UpgradeStatus(status) => status.length(),
         }
     }
 }
@@ -401,6 +414,8 @@ pub enum EthMessageID {
     GetReceipts = 0x0f,
     /// Represents receipts.
     Receipts = 0x10,
+    /// BSC messages overloaded in eth/66.
+    UpgradeStatus = 0x0b,
 }
 
 impl EthMessageID {
@@ -437,6 +452,7 @@ impl Decodable for EthMessageID {
             0x0e => Self::NodeData,
             0x0f => Self::GetReceipts,
             0x10 => Self::Receipts,
+            0x0b => Self::UpgradeStatus,
             _ => return Err(alloy_rlp::Error::Custom("Invalid message ID")),
         };
         buf.advance(1);

@@ -10,8 +10,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
-
 mod status;
+pub mod upgrade_status;
 pub use status::{Status, StatusBuilder, StatusEth69};
 
 pub mod version;

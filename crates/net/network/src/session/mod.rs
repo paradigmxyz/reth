@@ -1032,11 +1032,20 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         // Before trying status handshake, set up the version to negotiated shared version
         status.set_eth_version(eth_version);
 
-        let their_status =
-            handshake.handshake(&mut p2p_stream, status, fork_filter.clone()).await.unwrap();
-        let eth_stream = EthStream::new(status.version, p2p_stream);
-
-        (eth_stream.into(), their_status)
+        match handshake.handshake(&mut p2p_stream, status, fork_filter.clone()).await {
+            Ok(their_status) => {
+                let eth_stream = EthStream::new(status.version, p2p_stream);
+                (eth_stream.into(), their_status)
+            }
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
+                }
+            }
+        }
     } else {
         // Multiplex the stream with the extra protocols
         let mut multiplex_stream = RlpxProtocolMultiplexer::new(p2p_stream);
