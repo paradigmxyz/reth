@@ -7,7 +7,7 @@ use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTra
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_primitives_traits::SignedTransaction;
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer, FromEthApiError, FromEvmError,
@@ -17,10 +17,7 @@ use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
 };
-use revm::{
-    db::{CacheDB, DatabaseCommit, DatabaseRef},
-    primitives::ResultAndState,
-};
+use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -101,14 +98,14 @@ where
         let (mut evm_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
         if let Some(coinbase) = coinbase {
-            evm_env.block_env.coinbase = coinbase;
+            evm_env.block_env.beneficiary = coinbase;
         }
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
-            evm_env.block_env.timestamp = U256::from(timestamp);
+            evm_env.block_env.timestamp = timestamp;
         } else {
-            evm_env.block_env.timestamp += U256::from(12);
+            evm_env.block_env.timestamp += 12;
         }
 
         if let Some(difficulty) = difficulty {
@@ -116,9 +113,8 @@ where
         }
 
         // default to call gas limit unless user requests a smaller limit
-        evm_env.block_env.gas_limit = U256::from(self.inner.eth_api.call_gas_limit());
+        evm_env.block_env.gas_limit = self.inner.eth_api.call_gas_limit();
         if let Some(gas_limit) = gas_limit {
-            let gas_limit = U256::from(gas_limit);
             if gas_limit > evm_env.block_env.gas_limit {
                 return Err(
                     EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
@@ -128,19 +124,19 @@ where
         }
 
         if let Some(base_fee) = base_fee {
-            evm_env.block_env.basefee = U256::from(base_fee);
+            evm_env.block_env.basefee = base_fee.try_into().unwrap_or(u64::MAX);
         }
 
         let state_block_number = evm_env.block_env.number;
         // use the block number of the request
-        evm_env.block_env.number = U256::from(block_number);
+        evm_env.block_env.number = block_number;
 
         let eth_api = self.eth_api().clone();
 
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
-                let coinbase = evm_env.block_env.coinbase;
-                let basefee = Some(evm_env.block_env.basefee.to::<u64>());
+                let coinbase = evm_env.block_env.beneficiary;
+                let basefee = Some(evm_env.block_env.basefee);
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = db
@@ -244,7 +240,7 @@ where
                     eth_sent_to_coinbase,
                     gas_fees: total_gas_fess,
                     results,
-                    state_block_number: state_block_number.to(),
+                    state_block_number,
                     total_gas_used,
                 };
 

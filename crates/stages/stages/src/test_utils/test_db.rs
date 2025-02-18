@@ -1,7 +1,6 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::MAINNET;
 use reth_db::{
-    tables,
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
 };
@@ -11,6 +10,7 @@ use reth_db_api::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
+    tables,
     transaction::{DbTx, DbTxMut},
     DatabaseError as DbError,
 };

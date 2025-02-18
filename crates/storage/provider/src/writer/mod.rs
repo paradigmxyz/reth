@@ -5,13 +5,13 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_errors::ProviderResult;
 use reth_primitives::{NodePrimitives, StaticFileSegment};
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{DBProvider, StageCheckpointWriter, TransactionsProviderExt};
 use reth_storage_errors::writer::UnifiedStorageWriterError;
-use revm::db::OriginalValuesKnown;
+use revm_database::OriginalValuesKnown;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -228,10 +228,10 @@ mod tests {
         test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
     };
     use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
-    use reth_db::tables;
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
+        tables,
         transaction::{DbTx, DbTxMut},
     };
     use reth_execution_types::ExecutionOutcome;
@@ -242,17 +242,15 @@ mod tests {
         HashedPostState, HashedStorage, StateRoot, StorageRoot,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
-    use revm::{
-        db::{
-            states::{
-                bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
-            },
-            BundleState, EmptyDB,
+    use revm_database::{
+        states::{
+            bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
         },
-        primitives::{
-            Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
-        },
-        DatabaseCommit, State,
+        BundleState, State,
+    };
+    use revm_database_interface::{DatabaseCommit, EmptyDB};
+    use revm_state::{
+        Account as RevmAccount, AccountInfo as RevmAccountInfo, AccountStatus, EvmStorageSlot,
     };
     use std::{collections::BTreeMap, str::FromStr};
 

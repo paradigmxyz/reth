@@ -11,6 +11,7 @@ use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
 };
+use reth_revm::state::EvmState;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
@@ -27,7 +28,7 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
-use revm_primitives::{keccak256, EvmState, B256};
+use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
@@ -49,6 +50,18 @@ const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 /// represents the maximum number of threads that can be handled by the pool.
 pub(crate) fn thread_pool_size() -> usize {
     std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
+}
+
+/// Determines if the host has enough parallelism to run the state root task.
+///
+/// It requires at least 5 parallel threads:
+/// - Engine in main thread that spawns the state root task.
+/// - State Root Task spawned in [`StateRootTask::spawn`]
+/// - Sparse Trie spawned in [`run_sparse_trie`]
+/// - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+/// - Storage root computation spawned in [`ParallelProof::multiproof`]
+pub(crate) fn has_enough_parallelism() -> bool {
+    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
 }
 
 /// Outcome of the state root computation, including the state root itself with
@@ -1190,9 +1203,9 @@ mod tests {
     };
     use reth_testing_utils::generators::{self, Rng};
     use reth_trie::{test_utils::state_root, TrieInput};
-    use revm_primitives::{
-        Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
-        HashMap, B256, KECCAK_EMPTY, U256,
+    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
+    use revm_state::{
+        Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot,
     };
     use std::sync::Arc;
 
