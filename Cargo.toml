@@ -502,7 +502,7 @@ bytes = { version = "1.5", default-features = false }
 cfg-if = "1.0"
 clap = "4"
 dashmap = "6.0"
-derive_more = { version = "1", default-features = false, features = ["full"] }
+derive_more = { version = "2", default-features = false, features = ["full"] }
 dirs-next = "2.0.0"
 dyn-clone = "1.0.17"
 eyre = "0.6"
@@ -510,10 +510,10 @@ fdlimit = "0.3.0"
 generic-array = "0.14"
 humantime = "2.1"
 humantime-serde = "1.1"
-itertools = { version = "0.13", default-features = false }
+itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
 modular-bitfield = "0.11.2"
-notify = { version = "6.1.1", default-features = false, features = ["macos_fsevent"] }
+notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
 nybbles = { version = "0.3.0", default-features = false }
 once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
 parking_lot = "0.12"
@@ -528,7 +528,7 @@ serde_with = { version = "3", default-features = false, features = ["macros"] }
 sha2 = { version = "0.10", default-features = false }
 shellexpand = "3.0.0"
 smallvec = "1"
-strum = { version = "0.26", default-features = false }
+strum = { version = "0.27", default-features = false }
 syn = "2.0"
 thiserror = { version = "2.0.0", default-features = false }
 tracing = "0.1.0"
@@ -569,7 +569,7 @@ tower = "0.4"
 tower-http = "0.6"
 
 # p2p
-discv5 = "0.8.0"
+discv5 = "0.9"
 if-addrs = "0.13"
 
 # rpc
@@ -587,9 +587,9 @@ jsonwebtoken = "9"
 proptest-arbitrary-interop = "0.1.0"
 
 # crypto
-enr = { version = "0.12.1", default-features = false }
+enr = { version = "0.13", default-features = false }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-secp256k1 = { version = "0.29", default-features = false, features = ["global-context", "recovery"] }
+secp256k1 = { version = "0.30", default-features = false, features = ["global-context", "recovery"] }
 
 # for eip-4844
 c-kzg = "1.0.0"
@@ -607,13 +607,13 @@ proptest-derive = "0.5"
 serial_test = { default-features = false, version = "3" }
 similar-asserts = { version = "1.5.0", features = ["serde"] }
 tempfile = "3.8"
-test-fuzz = "6"
-rstest = "0.23.0"
+test-fuzz = "7"
+rstest = "0.24.0"
 
 # allocators
 tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
-tracy-client = "0.17.3"
+tracy-client = "0.18.0"
 snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 
 # TODO: When we build for a windows target on an ubuntu runner, crunchy tries to
