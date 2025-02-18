@@ -11,12 +11,21 @@
 
 extern crate alloc;
 
-mod base;
-mod base_sepolia;
+mod available_chains;
+mod chain_metadata;
+mod chain_spec_macro;
+mod chain_specs;
+mod configs;
 pub mod constants;
 mod dev;
 mod op;
 mod op_sepolia;
+
+pub use crate::available_chains::{AvailableSuperchain, AVAILABLE_CHAINS};
+pub use chain_specs::*;
+pub use dev::OP_DEV;
+pub use op::OP_MAINNET;
+pub use op_sepolia::OP_SEPOLIA;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
@@ -25,12 +34,7 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
 use alloy_primitives::{B256, U256};
-pub use base::BASE_MAINNET;
-pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, From, Into};
-pub use dev::OP_DEV;
-pub use op::OP_MAINNET;
-pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
     DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
@@ -466,6 +470,7 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
@@ -1062,7 +1067,6 @@ mod tests {
         ];
 
         for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {
-            println!("got {expected:?}, {actual:?}");
             assert_eq!(&**expected, &**actual);
         }
         assert_eq!(expected_hardforks.len(), hardforks.len());
