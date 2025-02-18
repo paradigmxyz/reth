@@ -60,16 +60,15 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
         self.conditional = Some(Box::new(conditional));
         self
     }
-
-    /// Conditional getter.
-    pub fn conditional(&self) -> Option<&TransactionConditional> {
-        self.conditional.as_deref()
-    }
 }
 
 impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Pooled> {
     fn set_conditional(&mut self, conditional: TransactionConditional) {
         self.conditional = Some(Box::new(conditional))
+    }
+
+    fn conditional(&self) -> Option<&TransactionConditional> {
+        self.conditional.as_deref()
     }
 }
 

@@ -6,8 +6,7 @@ use alloy_primitives::{map::HashMap, Address, B256, U256};
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
-use reth_db::tables;
-use reth_db_api::{transaction::DbTxMut, DatabaseError};
+use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
     Account, Bytecode, GotExpected, NodePrimitives, StaticFileSegment, StorageEntry,
@@ -724,7 +723,6 @@ mod tests {
                 ..Default::default()
             },
             hardforks: Default::default(),
-            genesis_hash: Default::default(),
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             ..Default::default()

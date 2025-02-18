@@ -16,15 +16,15 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvmFor, Database, Evm,
+    ConfigureEvm, ConfigureEvmFor, Database, Evm, HaltReasonFor,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt, OpPrimitives};
 use reth_primitives_traits::{BlockBody, NodePrimitives, RecoveredBlock, SignedTransaction};
-use revm::State;
-use revm_primitives::{db::DatabaseCommit, ResultAndState};
+use revm::{context_interface::result::ResultAndState, DatabaseCommit};
+use revm_database::State;
 use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
@@ -32,14 +32,15 @@ use tracing::trace;
 pub struct OpExecutionStrategyFactory<
     N: NodePrimitives = OpPrimitives,
     ChainSpec = OpChainSpec,
-    EvmConfig = OpEvmConfig<ChainSpec>,
+    EvmConfig: ConfigureEvm = OpEvmConfig<ChainSpec>,
 > {
     /// The chainspec
     chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
     /// Receipt builder.
-    receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
+    receipt_builder:
+        Arc<dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>>,
 }
 
 impl OpExecutionStrategyFactory<OpPrimitives> {
@@ -53,12 +54,18 @@ impl OpExecutionStrategyFactory<OpPrimitives> {
     }
 }
 
-impl<N: NodePrimitives, ChainSpec, EvmConfig> OpExecutionStrategyFactory<N, ChainSpec, EvmConfig> {
+impl<N: NodePrimitives, ChainSpec, EvmConfig: ConfigureEvm>
+    OpExecutionStrategyFactory<N, ChainSpec, EvmConfig>
+{
     /// Creates a new executor strategy factory.
     pub fn new(
         chain_spec: Arc<ChainSpec>,
         evm_config: EvmConfig,
-        receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
+        receipt_builder: impl OpReceiptBuilder<
+            N::SignedTx,
+            HaltReasonFor<EvmConfig>,
+            Receipt = N::Receipt,
+        >,
     ) -> Self {
         Self { chain_spec, evm_config, receipt_builder: Arc::new(receipt_builder) }
     }
@@ -93,7 +100,7 @@ where
 #[allow(missing_debug_implementations)]
 pub struct OpExecutionStrategy<DB, N: NodePrimitives, ChainSpec, EvmConfig>
 where
-    EvmConfig: Clone,
+    EvmConfig: ConfigureEvm,
 {
     /// The chainspec
     chain_spec: Arc<ChainSpec>,
@@ -104,21 +111,24 @@ where
     /// Utility to call system smart contracts.
     system_caller: SystemCaller<EvmConfig, ChainSpec>,
     /// Receipt builder.
-    receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
+    receipt_builder:
+        Arc<dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>>,
 }
 
 impl<DB, N, ChainSpec, EvmConfig> OpExecutionStrategy<DB, N, ChainSpec, EvmConfig>
 where
     N: NodePrimitives,
     ChainSpec: OpHardforks,
-    EvmConfig: Clone,
+    EvmConfig: ConfigureEvm,
 {
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(
         state: State<DB>,
         chain_spec: Arc<ChainSpec>,
         evm_config: EvmConfig,
-        receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
+        receipt_builder: Arc<
+            dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>,
+        >,
     ) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
         Self { state, chain_spec, evm_config, system_caller, receipt_builder }
@@ -292,7 +302,7 @@ where
         &mut self.state
     }
 
-    fn into_state(self) -> revm::db::State<Self::DB> {
+    fn into_state(self) -> revm_database::State<Self::DB> {
         self.state
     }
 
@@ -337,9 +347,8 @@ mod tests {
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::Account;
-    use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
-    };
+    use reth_revm::{database::StateProviderDatabase, test_utils::StateProviderTest};
+    use revm_optimism::constants::L1_BLOCK_CONTRACT;
     use std::{collections::HashMap, str::FromStr};
 
     fn create_op_state_provider() -> StateProviderTest {

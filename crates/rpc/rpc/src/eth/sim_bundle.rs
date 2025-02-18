@@ -1,8 +1,9 @@
 //! `Eth` Sim bundle implementation and helpers.
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
-use alloy_rpc_types_eth::{BlockId, BlockOverrides};
+use alloy_rpc_types_eth::BlockId;
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, Privacy, RefundConfig, SendBundleRequest, SimBundleLogs,
     SimBundleOverrides, SimBundleResponse, Validity,
@@ -10,20 +11,19 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_provider::ProviderTx;
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthTransactions, LoadPendingBlock},
+    helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::{
+    revm_utils::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
+};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{
-    db::CacheDB,
-    primitives::{Address, ResultAndState},
-    DatabaseCommit, DatabaseRef,
-};
+use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm_primitives::Address;
 use std::{sync::Arc, time::Duration};
 use tracing::info;
 
@@ -83,7 +83,7 @@ impl<Eth> EthSimBundle<Eth> {
 
 impl<Eth> EthSimBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions + LoadBlock + Call + 'static,
 {
     /// Flattens a potentially nested bundle into a list of individual transactions in a
     /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
@@ -221,54 +221,37 @@ where
         Ok(items)
     }
 
-    async fn sim_bundle(
+    async fn sim_bundle_inner(
         &self,
         request: SendBundleRequest,
         overrides: SimBundleOverrides,
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
         let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
-        let BlockOverrides { number, coinbase, time, gas_limit, base_fee, .. } = block_overrides;
 
         // Parse and validate bundle
         // Also, flatten the bundle here so that its easier to process
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
 
-        let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
-        let (mut evm_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
-
-        // apply overrides
-        if let Some(block_number) = number {
-            evm_env.block_env.number = U256::from(block_number);
-        }
-
-        if let Some(coinbase) = coinbase {
-            evm_env.block_env.coinbase = coinbase;
-        }
-
-        if let Some(timestamp) = time {
-            evm_env.block_env.timestamp = U256::from(timestamp);
-        }
-
-        if let Some(gas_limit) = gas_limit {
-            evm_env.block_env.gas_limit = U256::from(gas_limit);
-        }
-
-        if let Some(base_fee) = base_fee {
-            evm_env.block_env.basefee = U256::from(base_fee);
-        }
+        let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
+        let (mut evm_env, current_block_id) = self.eth_api().evm_env_at(block_id).await?;
+        let current_block = self.eth_api().block_with_senders(current_block_id).await?;
+        let current_block = current_block.ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         let eth_api = self.inner.eth_api.clone();
 
         let sim_response = self
             .inner
             .eth_api
-            .spawn_with_state_at_block(current_block, move |state| {
+            .spawn_with_state_at_block(current_block_id, move |state| {
                 // Setup environment
-                let current_block_number = current_block.as_u64().unwrap();
-                let coinbase = evm_env.block_env.coinbase;
+                let current_block_number = current_block.number();
+                let coinbase = evm_env.block_env.beneficiary;
                 let basefee = evm_env.block_env.basefee;
-                let db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                // apply overrides
+                apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
                     .map_err(EthApiError::from_eth_err)?
@@ -351,7 +334,7 @@ where
                         });
 
                         // Calculate payout transaction fee
-                        let payout_tx_fee = basefee *
+                        let payout_tx_fee = U256::from(basefee) *
                             U256::from(SBUNDLE_PAYOUT_MAX_COST) *
                             U256::from(refund_configs.len() as u64);
 
@@ -405,10 +388,7 @@ where
                     revert: None,
                 })
             })
-            .await
-            .map_err(|_| {
-                EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string())
-            })?;
+            .await?;
 
         Ok(sim_response)
     }
@@ -417,7 +397,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> MevSimApiServer for EthSimBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions + LoadBlock + Call + 'static,
 {
     async fn sim_bundle(
         &self,
@@ -434,11 +414,11 @@ where
             .unwrap_or(DEFAULT_SIM_TIMEOUT);
 
         let bundle_res =
-            tokio::time::timeout(timeout, Self::sim_bundle(self, request, overrides, true))
+            tokio::time::timeout(timeout, Self::sim_bundle_inner(self, request, overrides, true))
                 .await
                 .map_err(|_| {
-                EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string())
-            })?;
+                    EthApiError::InvalidParams(EthSimBundleError::BundleTimeout.to_string())
+                })?;
 
         bundle_res.map_err(Into::into)
     }

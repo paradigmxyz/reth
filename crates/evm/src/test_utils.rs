@@ -8,13 +8,13 @@ use crate::{
     system_calls::OnStateHook,
     Database,
 };
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives::{EthPrimitives, NodePrimitives, RecoveredBlock};
-use revm::State;
-use std::sync::Arc;
+use revm_database::State;
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
@@ -100,7 +100,7 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         _f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&revm::db::State<DB>),
+        F: FnMut(&revm_database::State<DB>),
     {
         <Self as Executor<DB>>::execute(self, block)
     }
@@ -116,7 +116,7 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         <Self as Executor<DB>>::execute(self, block)
     }
 
-    fn into_state(self) -> revm::db::State<DB> {
+    fn into_state(self) -> revm_database::State<DB> {
         unreachable!()
     }
 

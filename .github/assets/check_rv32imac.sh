@@ -16,6 +16,7 @@ crates_to_check=(
     reth-execution-errors
     reth-execution-types
     reth-db-models
+    reth-evm
 
     ## ethereum
     reth-ethereum-forks

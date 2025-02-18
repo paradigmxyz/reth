@@ -50,7 +50,7 @@ use reth_transaction_pool::{
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-use revm::primitives::TxEnv;
+use revm::context::TxEnv;
 use std::sync::Arc;
 
 /// Storage implementation for Optimism.
@@ -107,7 +107,10 @@ impl OpNode {
             self.args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(OpPoolBuilder::default())
+            .pool(
+                OpPoolBuilder::default()
+                    .with_enable_tx_conditional(self.args.enable_tx_conditional),
+            )
             .payload(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
             )
@@ -243,7 +246,7 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
+        Evm: ConfigureEvmEnv<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
@@ -315,7 +318,7 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv>,
+        Evm: ConfigureEvm<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
@@ -433,20 +436,33 @@ where
 pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
+    /// Enable transaction conditionals.
+    pub enable_tx_conditional: bool,
     /// Marker for the pooled transaction type.
     _pd: core::marker::PhantomData<T>,
 }
 
 impl<T> Default for OpPoolBuilder<T> {
     fn default() -> Self {
-        Self { pool_config_overrides: Default::default(), _pd: Default::default() }
+        Self {
+            pool_config_overrides: Default::default(),
+            enable_tx_conditional: false,
+            _pd: Default::default(),
+        }
+    }
+}
+
+impl<T> OpPoolBuilder<T> {
+    fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+        self.enable_tx_conditional = enable_tx_conditional;
+        self
     }
 }
 
 impl<Node, T> PoolBuilder<Node> for OpPoolBuilder<T>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
-    T: EthPoolTransaction<Consensus = TxTy<Node::Types>>,
+    T: EthPoolTransaction<Consensus = TxTy<Node::Types>> + MaybeConditionalTransaction,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
@@ -481,7 +497,7 @@ where
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 
-        // spawn txpool maintenance task
+        // spawn txpool maintenance tasks
         {
             let pool = transaction_pool.clone();
             let chain_events = ctx.provider().canonical_state_stream();
@@ -500,18 +516,31 @@ where
                 },
             );
 
-            // spawn the maintenance task
+            // spawn the main maintenance task
             ctx.task_executor().spawn_critical(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
-                    pool,
+                    pool.clone(),
                     chain_events,
                     ctx.task_executor().clone(),
                     Default::default(),
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
+
+            if self.enable_tx_conditional {
+                // spawn the Op txpool maintenance task
+                let chain_events = ctx.provider().canonical_state_stream();
+                ctx.task_executor().spawn_critical(
+                    "Op txpool maintenance task",
+                    reth_optimism_txpool::maintain::maintain_transaction_pool_future(
+                        pool,
+                        chain_events,
+                    ),
+                );
+                debug!(target: "reth::cli", "Spawned Op txpool maintenance task");
+            }
         }
 
         Ok(transaction_pool)

@@ -8,6 +8,7 @@ use derive_more::Display;
 use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
+use revm_database_interface::DBErrorMarker;
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -24,9 +25,6 @@ pub enum ProviderError {
     /// RLP error.
     #[error("{_0}")]
     Rlp(alloy_rlp::Error),
-    /// Nippy jar error.
-    #[error("nippy jar error: {_0}")]
-    NippyJar(String),
     /// Trie witness error.
     #[error("trie witness error: {_0}")]
     TrieWitnessError(String),
@@ -180,6 +178,8 @@ impl ProviderError {
     }
 }
 
+impl DBErrorMarker for ProviderError {}
+
 impl From<alloy_rlp::Error> for ProviderError {
     fn from(error: alloy_rlp::Error) -> Self {
         Self::Rlp(error)
@@ -202,6 +202,22 @@ pub struct RootMismatch {
     pub block_number: BlockNumber,
     /// The target block hash.
     pub block_hash: BlockHash,
+}
+
+/// A Static File Write Error.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct StaticFileWriterError {
+    /// The error message.
+    pub message: String,
+}
+
+impl StaticFileWriterError {
+    /// Creates a new [`StaticFileWriterError`] with the given message.
+    #[allow(dead_code)]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self { message: message.into() }
+    }
 }
 
 /// Consistent database view error.

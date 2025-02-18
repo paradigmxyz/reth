@@ -1,6 +1,6 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, EthChainSpec};
 use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
@@ -26,25 +26,79 @@ use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
     sepolia_nodes, NodeRecord,
 };
-use reth_primitives_traits::{
-    sync::{LazyLock, OnceLock},
-    SealedHeader,
-};
+use reth_primitives_traits::{sync::LazyLock, SealedHeader};
+
+/// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
+pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
+    // If London is activated at genesis, we set the initial base fee as per EIP-1559.
+    let base_fee_per_gas = hardforks
+        .fork(EthereumHardfork::London)
+        .active_at_block(0)
+        .then(|| genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(INITIAL_BASE_FEE));
+
+    // If shanghai is activated, initialize the header with an empty withdrawals hash, and
+    // empty withdrawals list.
+    let withdrawals_root = hardforks
+        .fork(EthereumHardfork::Shanghai)
+        .active_at_timestamp(genesis.timestamp)
+        .then_some(EMPTY_WITHDRAWALS);
+
+    // If Cancun is activated at genesis, we set:
+    // * parent beacon block root to 0x0
+    // * blob gas used to provided genesis or 0x0
+    // * excess blob gas to provided genesis or 0x0
+    let (parent_beacon_block_root, blob_gas_used, excess_blob_gas) =
+        if hardforks.fork(EthereumHardfork::Cancun).active_at_timestamp(genesis.timestamp) {
+            let blob_gas_used = genesis.blob_gas_used.unwrap_or(0);
+            let excess_blob_gas = genesis.excess_blob_gas.unwrap_or(0);
+            (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
+        } else {
+            (None, None, None)
+        };
+
+    // If Prague is activated at genesis we set requests root to an empty trie root.
+    let requests_hash = hardforks
+        .fork(EthereumHardfork::Prague)
+        .active_at_timestamp(genesis.timestamp)
+        .then_some(EMPTY_REQUESTS_HASH);
+
+    Header {
+        gas_limit: genesis.gas_limit,
+        difficulty: genesis.difficulty,
+        nonce: genesis.nonce.into(),
+        extra_data: genesis.extra_data.clone(),
+        state_root: state_root_ref_unhashed(&genesis.alloc),
+        timestamp: genesis.timestamp,
+        mix_hash: genesis.mix_hash,
+        beneficiary: genesis.coinbase,
+        base_fee_per_gas,
+        withdrawals_root,
+        parent_beacon_block_root,
+        blob_gas_used,
+        excess_blob_gas,
+        requests_hash,
+        ..Default::default()
+    }
+}
 
 /// The Ethereum mainnet spec
 pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
+    let genesis = serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
+        .expect("Can't deserialize Mainnet genesis json");
+    let hardforks = EthereumHardfork::mainnet().into();
     let mut spec = ChainSpec {
         chain: Chain::mainnet(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
-            .expect("Can't deserialize Mainnet genesis json"),
-        genesis_hash: once_cell_set(MAINNET_GENESIS_HASH),
-        genesis_header: Default::default(),
+        genesis_header: SealedHeader::new(
+            make_genesis_header(&genesis, &hardforks),
+            MAINNET_GENESIS_HASH,
+        ),
+        genesis,
         // <https://etherscan.io/block/15537394>
         paris_block_and_final_difficulty: Some((
             15537394,
             U256::from(58_750_003_716_598_352_816_469u128),
         )),
-        hardforks: EthereumHardfork::mainnet().into(),
+        hardforks,
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
             MAINNET_DEPOSIT_CONTRACT_ADDRESS,
@@ -61,15 +115,19 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
 
 /// The Sepolia spec
 pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
+    let genesis = serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
+        .expect("Can't deserialize Sepolia genesis json");
+    let hardforks = EthereumHardfork::sepolia().into();
     let mut spec = ChainSpec {
         chain: Chain::sepolia(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
-            .expect("Can't deserialize Sepolia genesis json"),
-        genesis_hash: once_cell_set(SEPOLIA_GENESIS_HASH),
-        genesis_header: Default::default(),
+        genesis_header: SealedHeader::new(
+            make_genesis_header(&genesis, &hardforks),
+            SEPOLIA_GENESIS_HASH,
+        ),
+        genesis,
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
-        hardforks: EthereumHardfork::sepolia().into(),
+        hardforks,
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
             address!("7f02c3e3c98b133055b8b348b2ac625669ed295d"),
@@ -86,14 +144,18 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
 
 /// The Holesky spec
 pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
+    let genesis = serde_json::from_str(include_str!("../res/genesis/holesky.json"))
+        .expect("Can't deserialize Holesky genesis json");
+    let hardforks = EthereumHardfork::holesky().into();
     let mut spec = ChainSpec {
         chain: Chain::holesky(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
-            .expect("Can't deserialize Holesky genesis json"),
-        genesis_hash: once_cell_set(HOLESKY_GENESIS_HASH),
-        genesis_header: Default::default(),
+        genesis_header: SealedHeader::new(
+            make_genesis_header(&genesis, &hardforks),
+            HOLESKY_GENESIS_HASH,
+        ),
+        genesis,
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
-        hardforks: EthereumHardfork::holesky().into(),
+        hardforks,
         deposit_contract: Some(DepositContract::new(
             address!("4242424242424242424242424242424242424242"),
             0,
@@ -112,11 +174,16 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
 /// Includes 20 prefunded accounts with `10_000` ETH each derived from mnemonic "test test test test
 /// test test test test test test test junk".
 pub static DEV: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
+    let genesis = serde_json::from_str(include_str!("../res/genesis/dev.json"))
+        .expect("Can't deserialize Dev testnet genesis json");
+    let hardforks = DEV_HARDFORKS.clone();
     ChainSpec {
         chain: Chain::dev(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/dev.json"))
-            .expect("Can't deserialize Dev testnet genesis json"),
-        genesis_hash: once_cell_set(DEV_GENESIS_HASH),
+        genesis_header: SealedHeader::new(
+            make_genesis_header(&genesis, &hardforks),
+            DEV_GENESIS_HASH,
+        ),
+        genesis,
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: DEV_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
@@ -220,17 +287,8 @@ pub struct ChainSpec {
     /// The genesis block.
     pub genesis: Genesis,
 
-    /// The hash of the genesis block.
-    ///
-    /// This is either stored at construction time if it is known using [`once_cell_set`], or
-    /// computed once on the first access.
-    pub genesis_hash: OnceLock<B256>,
-
     /// The header corresponding to the genesis block.
-    ///
-    /// This is either stored at construction time if it is known using [`once_cell_set`], or
-    /// computed once on the first access.
-    pub genesis_header: OnceLock<Header>,
+    pub genesis_header: SealedHeader,
 
     /// The block at which [`EthereumHardfork::Paris`] was activated and the final difficulty at
     /// this block.
@@ -256,7 +314,6 @@ impl Default for ChainSpec {
     fn default() -> Self {
         Self {
             chain: Default::default(),
-            genesis_hash: Default::default(),
             genesis: Default::default(),
             genesis_header: Default::default(),
             paris_block_and_final_difficulty: Default::default(),
@@ -307,55 +364,7 @@ impl ChainSpec {
 
     /// Get the header for the genesis block.
     pub fn genesis_header(&self) -> &Header {
-        self.genesis_header.get_or_init(|| self.make_genesis_header())
-    }
-
-    fn make_genesis_header(&self) -> Header {
-        // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        let base_fee_per_gas = self.initial_base_fee();
-
-        // If shanghai is activated, initialize the header with an empty withdrawals hash, and
-        // empty withdrawals list.
-        let withdrawals_root = self
-            .fork(EthereumHardfork::Shanghai)
-            .active_at_timestamp(self.genesis.timestamp)
-            .then_some(EMPTY_WITHDRAWALS);
-
-        // If Cancun is activated at genesis, we set:
-        // * parent beacon block root to 0x0
-        // * blob gas used to provided genesis or 0x0
-        // * excess blob gas to provided genesis or 0x0
-        let (parent_beacon_block_root, blob_gas_used, excess_blob_gas) =
-            if self.is_cancun_active_at_timestamp(self.genesis.timestamp) {
-                let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
-                let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
-                (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
-            } else {
-                (None, None, None)
-            };
-
-        // If Prague is activated at genesis we set requests root to an empty trie root.
-        let requests_hash = self
-            .is_prague_active_at_timestamp(self.genesis.timestamp)
-            .then_some(EMPTY_REQUESTS_HASH);
-
-        Header {
-            gas_limit: self.genesis.gas_limit,
-            difficulty: self.genesis.difficulty,
-            nonce: self.genesis.nonce.into(),
-            extra_data: self.genesis.extra_data.clone(),
-            state_root: state_root_ref_unhashed(&self.genesis.alloc),
-            timestamp: self.genesis.timestamp,
-            mix_hash: self.genesis.mix_hash,
-            beneficiary: self.genesis.coinbase,
-            base_fee_per_gas,
-            withdrawals_root,
-            parent_beacon_block_root,
-            blob_gas_used,
-            excess_blob_gas,
-            requests_hash,
-            ..Default::default()
-        }
+        &self.genesis_header
     }
 
     /// Get the sealed header for the genesis block.
@@ -413,7 +422,7 @@ impl ChainSpec {
 
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
-        *self.genesis_hash.get_or_init(|| self.genesis_header().hash_slow())
+        self.genesis_header.hash()
     }
 
     /// Get the timestamp of the genesis block.
@@ -728,11 +737,13 @@ impl From<Genesis> for ChainSpec {
             DepositContract { address, block: 0, topic: MAINNET_DEPOSIT_CONTRACT.topic }
         });
 
+        let hardforks = ChainHardforks::new(ordered_hardforks);
+
         Self {
             chain: genesis.config.chain_id.into(),
+            genesis_header: SealedHeader::new_unhashed(make_genesis_header(&genesis, &hardforks)),
             genesis,
-            genesis_hash: OnceLock::new(),
-            hardforks: ChainHardforks::new(ordered_hardforks),
+            hardforks,
             paris_block_and_final_difficulty,
             deposit_contract,
             blob_params,
@@ -974,10 +985,14 @@ impl ChainSpecBuilder {
                 }
             })
         };
+        let genesis = self.genesis.expect("The genesis is required");
         ChainSpec {
             chain: self.chain.expect("The chain is required"),
-            genesis: self.genesis.expect("The genesis is required"),
-            genesis_hash: OnceLock::new(),
+            genesis_header: SealedHeader::new_unhashed(make_genesis_header(
+                &genesis,
+                &self.hardforks,
+            )),
+            genesis,
             hardforks: self.hardforks,
             paris_block_and_final_difficulty,
             deposit_contract: None,
@@ -1930,7 +1945,6 @@ Post-merge hard forks (timestamp based):
             assert_eq!(&alloy_rlp::encode(TrieAccount::from(account.clone())), expected_rlp);
         }
 
-        assert_eq!(chainspec.genesis_hash.get(), None);
         let expected_state_root: B256 =
             hex!("078dc6061b1d8eaa8493384b59c9c65ceb917201221d08b80c4de6770b6ec7e7").into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
@@ -2003,7 +2017,6 @@ Post-merge hard forks (timestamp based):
 
         let genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
-        assert_eq!(chainspec.genesis_hash.get(), None);
         assert_eq!(chainspec.chain, Chain::from_named(NamedChain::Optimism));
         let expected_state_root: B256 =
             hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
@@ -2318,7 +2331,6 @@ Post-merge hard forks (timestamp based):
         let spec = ChainSpec {
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
-            genesis_hash: OnceLock::new(),
             hardforks: ChainHardforks::new(vec![(
                 EthereumHardfork::Frontier.boxed(),
                 ForkCondition::Never,
@@ -2336,7 +2348,6 @@ Post-merge hard forks (timestamp based):
         let spec = ChainSpec {
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
-            genesis_hash: OnceLock::new(),
             hardforks: ChainHardforks::new(vec![(
                 EthereumHardfork::Shanghai.boxed(),
                 ForkCondition::Never,

@@ -6,11 +6,12 @@ use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
-use reth_db::{tables::*, test_utils::create_test_rw_db_with_path};
+use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     table::{Compress, Decode, Decompress, DupSort, Encode, Table},
+    tables::*,
     transaction::{DbTx, DbTxMut},
 };
 use reth_fs_util as fs;

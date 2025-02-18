@@ -1,5 +1,5 @@
 use crate::{providers::NodeTypesForProvider, DatabaseProvider};
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_types::{FullNodePrimitives, FullSignedTx};
 use reth_primitives_traits::FullBlockHeader;
 use reth_storage_api::{ChainStorageReader, ChainStorageWriter, EthStorage};
