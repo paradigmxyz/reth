@@ -5,15 +5,23 @@
 
 /// Workflow
 ///
+/// Main thread:
+///  - executes block sequentially
+///  - awaits stateroot
+///
 /// Stateroot task:
 ///   - spawns multiproof calculations
 ///     * fetches multiproofs from disk
 ///        * this spawns more tasks Starting proof calculation
 ///        * joins all
 ///     * (emits proof calculated message)
+/// Prewarming task:
+///  - schedules transactions (this should be a simple loop over a channel that spawns tx execution and receives result until cancelled)
+///  - should be tokio blocking task, limited to
 ///
 /// 1. spawn stateroot task
-//
+/// 2. spawn transaction prewarming task
+///
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
