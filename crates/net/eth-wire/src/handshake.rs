@@ -26,7 +26,7 @@ pub trait Handshake: Debug + Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>>;
 }
 
-/// An unauthenticated [`EthStream`].
+/// An unauthenticated stream that can send and receive messages.
 pub trait UnauthEth:
     Stream<Item = Result<BytesMut, P2PStreamError>>
     + Sink<Bytes, Error = P2PStreamError>
