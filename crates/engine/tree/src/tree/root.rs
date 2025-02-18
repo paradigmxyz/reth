@@ -369,7 +369,7 @@ where
 {
     /// Creates a new [`MultiproofManager`].
     fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
-        // we keep 2 threads to be used internally by [`StateRootTask`]
+        // we keep 1 thread to be used internally by [`StateRootTask`]
         let max_concurrent = thread_pool_size.saturating_sub(1);
         debug_assert!(max_concurrent != 0);
         Self {
