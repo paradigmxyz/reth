@@ -8479,7 +8479,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "derive_more 2.0.1",
- "once_cell",
+ "miniz_oxide",
  "op-alloy-consensus",
  "op-alloy-rpc-types",
  "reth-chainspec",
@@ -8488,7 +8488,9 @@ dependencies = [
  "reth-optimism-forks",
  "reth-optimism-primitives",
  "reth-primitives-traits",
+ "serde",
  "serde_json",
+ "tar-no-std",
  "thiserror 2.0.11",
 ]
 
@@ -11209,6 +11211,18 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "tar-no-std"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f3702156d45f3b61411186a2555956d57d94f63049bbfaa3fd4856729f7c14a"
+dependencies = [
+ "bitflags 2.8.0",
+ "log",
+ "memchr",
+ "num-traits",
+]
 
 [[package]]
 name = "tempfile"
