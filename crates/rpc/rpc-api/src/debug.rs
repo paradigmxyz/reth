@@ -198,7 +198,11 @@ pub trait DebugApi {
     /// Returns the code associated with a given hash at the specified block ID.
     /// If no block ID is provided, it defaults to the latest block.
     #[method(name = "codeByHash")]
-    async fn debug_code_by_hash(&self, hash: B256, block_id: Option<BlockId>) -> RpcResult<Bytes>;
+    async fn debug_code_by_hash(
+        &self,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<Option<Bytes>>;
 
     /// Turns on CPU profiling for the given duration and writes profile data to disk.
     #[method(name = "cpuProfile")]
