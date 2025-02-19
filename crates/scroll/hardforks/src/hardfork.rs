@@ -2,12 +2,10 @@
 
 use alloc::{format, string::String, vec};
 use core::{
-    any::Any,
     fmt::{self, Display, Formatter},
     str::FromStr,
 };
 
-use alloy_chains::{Chain, NamedChain};
 use reth_ethereum_forks::{hardfork, ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -29,142 +27,6 @@ hardfork!(
 );
 
 impl ScrollHardfork {
-    /// Retrieves the activation block for the specified hardfork on the given chain.
-    pub fn activation_block<H: Hardfork>(self, fork: H, chain: Chain) -> Option<u64> {
-        // TODO(scroll): migrate to Chain::scroll() (introduced in https://github.com/alloy-rs/chains/pull/112) when alloy-chains is bumped to version 0.1.48
-        if chain == Chain::from_named(NamedChain::Scroll) {
-            return Self::scroll_sepolia_activation_block(fork);
-        }
-        // TODO(scroll): migrate to Chain::scroll_sepolia() (introduced in https://github.com/alloy-rs/chains/pull/112) when alloy-chains is bumped to version 0.1.48
-        if chain == Chain::from_named(NamedChain::ScrollSepolia) {
-            return Self::scroll_mainnet_activation_block(fork);
-        }
-
-        None
-    }
-
-    /// Retrieves the activation timestamp for the specified hardfork on the given chain.
-    pub fn activation_timestamp<H: Hardfork>(self, fork: H, chain: Chain) -> Option<u64> {
-        // TODO(scroll): migrate to Chain::scroll_sepolia() (introduced in https://github.com/alloy-rs/chains/pull/112) when alloy-chains is bumped to version 0.1.48
-        if chain == Chain::from_named(NamedChain::ScrollSepolia) {
-            return Self::scroll_sepolia_activation_timestamp(fork);
-        }
-        // TODO(scroll): migrate to Chain::scroll() (introduced in https://github.com/alloy-rs/chains/pull/112) when alloy-chains is bumped to version 0.1.48
-        if chain == Chain::from_named(NamedChain::Scroll) {
-            return Self::scroll_mainnet_activation_timestamp(fork);
-        }
-
-        None
-    }
-
-    /// Retrieves the activation block for the specified hardfork on the Scroll Sepolia testnet.
-    pub fn scroll_sepolia_activation_block<H: Hardfork>(fork: H) -> Option<u64> {
-        match_hardfork(
-            fork,
-            |fork| match fork {
-                EthereumHardfork::Homestead |
-                EthereumHardfork::Tangerine |
-                EthereumHardfork::SpuriousDragon |
-                EthereumHardfork::Byzantium |
-                EthereumHardfork::Constantinople |
-                EthereumHardfork::Petersburg |
-                EthereumHardfork::Istanbul |
-                EthereumHardfork::Berlin |
-                EthereumHardfork::London |
-                EthereumHardfork::Shanghai => Some(0),
-                _ => None,
-            },
-            |fork| match fork {
-                Self::Archimedes => Some(0),
-                Self::Bernoulli => Some(3747132),
-                Self::Curie => Some(4740239),
-                Self::Darwin => Some(6075509),
-                Self::DarwinV2 => Some(6375501),
-            },
-        )
-    }
-
-    /// Retrieves the activation block for the specified hardfork on the Scroll mainnet.
-    pub fn scroll_mainnet_activation_block<H: Hardfork>(fork: H) -> Option<u64> {
-        match_hardfork(
-            fork,
-            |fork| match fork {
-                EthereumHardfork::Homestead |
-                EthereumHardfork::Tangerine |
-                EthereumHardfork::SpuriousDragon |
-                EthereumHardfork::Byzantium |
-                EthereumHardfork::Constantinople |
-                EthereumHardfork::Petersburg |
-                EthereumHardfork::Istanbul |
-                EthereumHardfork::Berlin |
-                EthereumHardfork::London |
-                EthereumHardfork::Shanghai => Some(0),
-                _ => None,
-            },
-            |fork| match fork {
-                Self::Archimedes => Some(0),
-                Self::Bernoulli => Some(5220340),
-                Self::Curie => Some(7096836),
-                Self::Darwin => Some(8568134),
-                Self::DarwinV2 => Some(8923772),
-            },
-        )
-    }
-
-    /// Retrieves the activation timestamp for the specified hardfork on the Scroll Sepolia testnet.
-    pub fn scroll_sepolia_activation_timestamp<H: Hardfork>(fork: H) -> Option<u64> {
-        match_hardfork(
-            fork,
-            |fork| match fork {
-                EthereumHardfork::Homestead |
-                EthereumHardfork::Tangerine |
-                EthereumHardfork::SpuriousDragon |
-                EthereumHardfork::Byzantium |
-                EthereumHardfork::Constantinople |
-                EthereumHardfork::Petersburg |
-                EthereumHardfork::Istanbul |
-                EthereumHardfork::Berlin |
-                EthereumHardfork::London |
-                EthereumHardfork::Shanghai => Some(0),
-                _ => None,
-            },
-            |fork| match fork {
-                Self::Archimedes => Some(0),
-                Self::Bernoulli => Some(1713175866),
-                Self::Curie => Some(1718616171),
-                Self::Darwin => Some(1723622400),
-                Self::DarwinV2 => Some(1724832000),
-            },
-        )
-    }
-
-    /// Retrieves the activation timestamp for the specified hardfork on the Scroll mainnet.
-    pub fn scroll_mainnet_activation_timestamp<H: Hardfork>(fork: H) -> Option<u64> {
-        match_hardfork(
-            fork,
-            |fork| match fork {
-                EthereumHardfork::Homestead |
-                EthereumHardfork::Tangerine |
-                EthereumHardfork::SpuriousDragon |
-                EthereumHardfork::Byzantium |
-                EthereumHardfork::Constantinople |
-                EthereumHardfork::Petersburg |
-                EthereumHardfork::Istanbul |
-                EthereumHardfork::Berlin |
-                EthereumHardfork::London |
-                EthereumHardfork::Shanghai => Some(0),
-                _ => None,
-            },
-            |fork| match fork {
-                Self::Archimedes => Some(0),
-                Self::Bernoulli => Some(1714358352),
-                Self::Curie => Some(1719994277),
-                Self::Darwin => Some(1724227200),
-                Self::DarwinV2 => Some(1725264000),
-            },
-        )
-    }
-
     /// Scroll mainnet list of hardforks.
     pub fn scroll_mainnet() -> ChainHardforks {
         ChainHardforks::new(vec![
@@ -211,35 +73,9 @@ impl ScrollHardfork {
     }
 }
 
-/// Match helper method since it's not possible to match on `dyn Hardfork`
-fn match_hardfork<H, HF, SHF>(fork: H, hardfork_fn: HF, scroll_hardfork_fn: SHF) -> Option<u64>
-where
-    H: Hardfork,
-    HF: Fn(&EthereumHardfork) -> Option<u64>,
-    SHF: Fn(&ScrollHardfork) -> Option<u64>,
-{
-    let fork: &dyn Any = &fork;
-    if let Some(fork) = fork.downcast_ref::<EthereumHardfork>() {
-        return hardfork_fn(fork);
-    }
-    fork.downcast_ref::<ScrollHardfork>().and_then(scroll_hardfork_fn)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_match_hardfork() {
-        assert_eq!(
-            ScrollHardfork::scroll_mainnet_activation_block(ScrollHardfork::Bernoulli),
-            Some(5220340)
-        );
-        assert_eq!(
-            ScrollHardfork::scroll_mainnet_activation_block(ScrollHardfork::Curie),
-            Some(7096836)
-        );
-    }
 
     #[test]
     fn check_scroll_hardfork_from_str() {
