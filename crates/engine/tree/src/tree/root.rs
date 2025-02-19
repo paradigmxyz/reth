@@ -152,10 +152,12 @@ pub struct StateRootConfig<Factory> {
 impl<Factory> StateRootConfig<Factory> {
     /// Creates a new state root config from the consistent view and the trie input.
     pub fn new_from_input(consistent_view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+        let (nodes, state) =
+            rayon::join(|| input.nodes.into_sorted(), || input.state.into_sorted());
         Self {
             consistent_view,
-            nodes_sorted: Arc::new(input.nodes.into_sorted()),
-            state_sorted: Arc::new(input.state.into_sorted()),
+            nodes_sorted: Arc::new(nodes),
+            state_sorted: Arc::new(state),
             prefix_sets: Arc::new(input.prefix_sets),
         }
     }
