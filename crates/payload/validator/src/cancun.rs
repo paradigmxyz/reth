@@ -7,7 +7,7 @@ use reth_primitives_traits::{AlloyBlockHeader, Block, SealedBlock};
 /// Checks block and sidecar w.r.t new Cancun fields and new transaction type EIP-4844.
 ///
 /// Checks that:
-/// - Cancun fields are present if Cancun is active and vv
+/// - Cancun fields are present if Cancun is active
 /// - contains EIP-4844 transactions if Cancun is active and vv
 /// - checks blob versioned hashes in block and sidecar match
 #[inline]
@@ -69,7 +69,7 @@ pub fn ensure_well_formed_header_and_sidecar_fields<T: Block>(
 /// Checks transactions field and sidecar w.r.t new Cancun fields and new transaction type EIP-4844.
 ///
 /// Checks that:
-/// - contains EIP-4844 transactions if Cancun is active and vv
+/// - contains EIP-4844 transactions if Cancun is active
 /// - checks blob versioned hashes in block and sidecar match
 #[inline]
 pub fn ensure_well_formed_transactions_field_with_sidecar<T: Transaction + Typed2718>(
@@ -78,9 +78,6 @@ pub fn ensure_well_formed_transactions_field_with_sidecar<T: Transaction + Typed
     is_cancun_active: bool,
 ) -> Result<(), PayloadError> {
     if is_cancun_active {
-        if !block_body.has_eip4844_transactions() {
-            return Err(PayloadError::PostCancunBlockWithoutBlobTransactions)
-        }
         ensure_matching_blob_versioned_hashes(block_body, cancun_sidecar_fields)?
     } else if block_body.has_eip4844_transactions() {
         return Err(PayloadError::PreCancunBlockWithBlobTransactions)
