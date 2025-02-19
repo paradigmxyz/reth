@@ -32,7 +32,7 @@ use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
-        mpsc::{self, channel, Receiver, Sender},
+        mpsc::{self, channel, Receiver, Sender, TryRecvError},
         Arc,
     },
     time::{Duration, Instant},
@@ -42,26 +42,36 @@ use tracing::{debug, error, trace, trace_span};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
+/// The minimum size of the thread pool used for multiproof calculations.
+///
+/// At least two parallel threads are required:
+///     - multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+///     - storage root computation spawned in [`ParallelProof::multiproof`]
+const MULTIPROOF_THREAD_POOL_SIZE_MIN: usize = 2;
+
+/// The parallelism threshold for running the state root task.
+///
+/// It requires at least [`MULTIPROOF_THREAD_POOL_SIZE_MIN`] plus 2 threads:
+///     - engine in main thread that spawns the state root task
+///     - state root task spawned in [`StateRootTask::spawn`]
+const ROOT_TASK_PARALLELISM_THRESHOLD: usize = MULTIPROOF_THREAD_POOL_SIZE_MIN + 2;
+
 /// Determines the size of the thread pool to be used in [`StateRootTask`].
-/// It should be at least three, one for multiproof calculations  plus two to be
-/// used internally in [`StateRootTask`].
+/// It should be at least two, one for spawning multiproof calculations plus one to be
+/// used by multiproof calculation internally.
 ///
 /// NOTE: this value can be greater than the available cores in the host, it
 /// represents the maximum number of threads that can be handled by the pool.
 pub(crate) fn thread_pool_size() -> usize {
-    std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
+    std::thread::available_parallelism().map_or(MULTIPROOF_THREAD_POOL_SIZE_MIN, |num| {
+        (num.get() / 2).max(MULTIPROOF_THREAD_POOL_SIZE_MIN)
+    })
 }
 
 /// Determines if the host has enough parallelism to run the state root task.
-///
-/// It requires at least 5 parallel threads:
-/// - Engine in main thread that spawns the state root task.
-/// - State Root Task spawned in [`StateRootTask::spawn`]
-/// - Sparse Trie spawned in [`run_sparse_trie`]
-/// - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
-/// - Storage root computation spawned in [`ParallelProof::multiproof`]
 pub(crate) fn has_enough_parallelism() -> bool {
-    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
+    std::thread::available_parallelism()
+        .is_ok_and(|num| num.get() >= ROOT_TASK_PARALLELISM_THRESHOLD)
 }
 
 /// Outcome of the state root computation, including the state root itself with
@@ -359,8 +369,8 @@ where
 {
     /// Creates a new [`MultiproofManager`].
     fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
-        // we keep 2 threads to be used internally by [`StateRootTask`]
-        let max_concurrent = thread_pool_size.saturating_sub(2);
+        // we keep 1 thread to be used internally by [`StateRootTask`]
+        let max_concurrent = thread_pool_size.saturating_sub(1);
         debug_assert!(max_concurrent != 0);
         Self {
             thread_pool,
@@ -1023,14 +1033,33 @@ where
     let mut num_iterations = 0;
     let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
 
-    while let Ok(mut update) = update_rx.recv() {
-        num_iterations += 1;
-        let mut num_updates = 1;
-        while let Ok(next) = update_rx.try_recv() {
-            update.extend(next);
-            num_updates += 1;
+    'main: loop {
+        let mut update: Option<SparseTrieUpdate> = None;
+
+        let mut num_updates = 0;
+        'poll: loop {
+            match update_rx.try_recv() {
+                Ok(next) => {
+                    num_updates += 1;
+                    update.get_or_insert_with(SparseTrieUpdate::default).extend(next);
+                }
+                Err(TryRecvError::Empty) => break 'poll,
+                Err(TryRecvError::Disconnected) => {
+                    if update.is_some() {
+                        break 'poll
+                    }
+
+                    break 'main
+                }
+            };
         }
 
+        let Some(update) = update else {
+            rayon::yield_now();
+            continue 'main;
+        };
+
+        num_iterations += 1;
         debug!(
             target: "engine::root",
             num_updates,
