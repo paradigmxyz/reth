@@ -1,6 +1,9 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
-use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header, Transaction, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{
+    constants::EMPTY_WITHDRAWALS, transaction::Recovered, Header, Transaction,
+    EMPTY_OMMER_ROOT_HASH,
+};
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -61,7 +64,7 @@ where
         block_env: &BlockEnv,
         parent_hash: revm_primitives::B256,
         state_root: revm_primitives::B256,
-        transactions: Vec<ProviderTx<Self::Provider>>,
+        transactions: Vec<Recovered<ProviderTx<Self::Provider>>>,
         receipts: &[ProviderReceipt<Self::Provider>],
     ) -> reth_provider::ProviderBlock<Self::Provider> {
         let chain_spec = self.provider().chain_spec();
@@ -105,7 +108,11 @@ where
         // seal the block
         reth_primitives::Block {
             header,
-            body: BlockBody { transactions, ommers: vec![], withdrawals: None },
+            body: BlockBody {
+                transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
+                ommers: vec![],
+                withdrawals: None,
+            },
         }
     }
 

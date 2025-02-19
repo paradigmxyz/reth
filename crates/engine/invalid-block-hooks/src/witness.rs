@@ -8,7 +8,6 @@ use reth_evm::{
     state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvmFor, Evm,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -78,18 +77,15 @@ where
         // Setup EVM
         let mut evm = self.evm_config.evm_for_block(&mut db, block.header());
 
-        let mut system_caller =
-            SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());
+        let mut system_caller = SystemCaller::new(self.provider.chain_spec());
 
         // Apply pre-block system contract calls.
         system_caller.apply_pre_execution_changes(block.header(), &mut evm)?;
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
-        for tx in block.body().transactions() {
-            let signer =
-                tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover sender"))?;
-            evm.transact_commit(self.evm_config.tx_env(tx, signer))?;
+        for tx in block.transactions_recovered() {
+            evm.transact_commit(self.evm_config.tx_env(tx))?;
         }
 
         drop(evm);

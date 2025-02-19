@@ -4,12 +4,12 @@ use alloc::{sync::Arc, vec};
 
 use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
-use reth_chainspec::{make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
+use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OpHardfork;
 use reth_primitives_traits::SealedHeader;
 
-use crate::{LazyLock, OpChainSpec};
+use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
 
 /// The Base Sepolia spec
 pub static BASE_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
@@ -20,7 +20,7 @@ pub static BASE_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
         inner: ChainSpec {
             chain: Chain::base_sepolia(),
             genesis_header: SealedHeader::new(
-                make_genesis_header(&genesis, &hardforks),
+                make_op_genesis_header(&genesis, &hardforks),
                 b256!("0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"),
             ),
             genesis,
