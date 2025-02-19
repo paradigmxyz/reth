@@ -173,12 +173,10 @@ pub trait BlockExecutionStrategy {
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error>;
 
-    /// Executes all transactions in the block.
-    fn execute_transactions<'a>(
+    /// Executes a single transaction and applies execution result to internal state.
+    fn execute_transaction(
         &mut self,
-        transactions: impl IntoIterator<
-            Item = Recovered<&'a <Self::Primitives as NodePrimitives>::SignedTx>,
-        >,
+        tx: Recovered<&<Self::Primitives as NodePrimitives>::SignedTx>,
     ) -> Result<(), Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
@@ -278,7 +276,9 @@ where
         let mut strategy = self.strategy_factory.create_strategy(&mut self.db, block);
 
         strategy.apply_pre_execution_changes()?;
-        strategy.execute_transactions(block.transactions_recovered())?;
+        for tx in block.transactions_recovered() {
+            strategy.execute_transaction(tx)?;
+        }
         let result = strategy.apply_post_execution_changes()?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
@@ -298,7 +298,9 @@ where
         strategy.with_state_hook(Some(Box::new(state_hook)));
 
         strategy.apply_pre_execution_changes()?;
-        strategy.execute_transactions(block.transactions_recovered())?;
+        for tx in block.transactions_recovered() {
+            strategy.execute_transaction(tx)?;
+        }
         let result = strategy.apply_post_execution_changes()?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
@@ -444,9 +446,9 @@ mod tests {
             Ok(())
         }
 
-        fn execute_transactions<'a>(
+        fn execute_transaction(
             &mut self,
-            _transactions: impl IntoIterator<Item = Recovered<&'a TransactionSigned>>,
+            _tx: Recovered<&TransactionSigned>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }

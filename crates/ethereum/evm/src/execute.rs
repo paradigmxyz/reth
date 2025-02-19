@@ -92,6 +92,8 @@ pub struct EthExecutionStrategy<'a, Evm, EvmConfig> {
     evm: Evm,
     /// Receipts of executed transactions.
     receipts: Vec<Receipt>,
+    /// Total gas used by transactions in this block.
+    gas_used: u64,
     /// Utility to call system smart contracts.
     system_caller: SystemCaller<&'a ChainSpec>,
 }
@@ -108,6 +110,7 @@ impl<'a, Evm, EvmConfig> EthExecutionStrategy<'a, Evm, EvmConfig> {
             factory,
             block,
             receipts: Vec::new(),
+            gas_used: 0,
             system_caller: SystemCaller::new(&factory.chain_spec),
         }
     }
@@ -132,49 +135,47 @@ where
         Ok(())
     }
 
-    fn execute_transactions<'a>(
+    fn execute_transaction(
         &mut self,
-        transactions: impl IntoIterator<Item = Recovered<&'a TransactionSigned>>,
+        tx: Recovered<&TransactionSigned>,
     ) -> Result<(), Self::Error> {
-        let mut cumulative_gas_used = 0;
-        for (tx_index, tx) in transactions.into_iter().enumerate() {
-            // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
-            // must be no greater than the block's gasLimit.
-            let block_available_gas = self.block.gas_limit() - cumulative_gas_used;
-            if tx.gas_limit() > block_available_gas {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: tx.gas_limit(),
-                    block_available_gas,
-                }
-                .into())
+        // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
+        // must be no greater than the block's gasLimit.
+        let block_available_gas = self.block.gas_limit() - self.gas_used;
+        if tx.gas_limit() > block_available_gas {
+            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                transaction_gas_limit: tx.gas_limit(),
+                block_available_gas,
             }
-
-            let tx_env = self.evm_config.tx_env(tx.clone());
-            let hash = tx.hash();
-
-            // Execute transaction.
-            let result_and_state = self.evm.transact(tx_env).map_err(move |err| {
-                // Ensure hash is calculated for error log, if not already done
-                BlockValidationError::EVM { hash: *hash, error: Box::new(err) }
-            })?;
-            self.system_caller
-                .on_state(StateChangeSource::Transaction(tx_index), &result_and_state.state);
-            let ResultAndState { result, state } = result_and_state;
-            self.evm.db_mut().commit(state);
-
-            // append gas used
-            cumulative_gas_used += result.gas_used();
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            self.receipts.push(Receipt {
-                tx_type: tx.tx_type(),
-                // Success flag was added in `EIP-658: Embedding transaction status code in
-                // receipts`.
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.into_logs(),
-            });
+            .into())
         }
+
+        let tx_env = self.evm_config.tx_env(tx.clone());
+        let hash = tx.hash();
+
+        // Execute transaction.
+        let result_and_state = self.evm.transact(tx_env).map_err(move |err| {
+            // Ensure hash is calculated for error log, if not already done
+            BlockValidationError::EVM { hash: *hash, error: Box::new(err) }
+        })?;
+        self.system_caller
+            .on_state(StateChangeSource::Transaction(self.receipts.len()), &result_and_state.state);
+        let ResultAndState { result, state } = result_and_state;
+        self.evm.db_mut().commit(state);
+
+        // append gas used
+        self.gas_used += result.gas_used();
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        self.receipts.push(Receipt {
+            tx_type: tx.tx_type(),
+            // Success flag was added in `EIP-658: Embedding transaction status code in
+            // receipts`.
+            success: result.is_success(),
+            cumulative_gas_used: self.gas_used,
+            logs: result.into_logs(),
+        });
+
         Ok(())
     }
 
