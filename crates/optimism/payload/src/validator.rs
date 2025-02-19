@@ -1,27 +1,20 @@
 //! Validates execution payload wrt Optimism consensus rules
 
 use alloc::sync::Arc;
-use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
-use derive_more::Deref;
-use op_alloy_rpc_types_engine::OpExecutionData;
+use alloy_rpc_types_engine::PayloadError;
+use derive_more::{Constructor, Deref};
+use op_alloy_rpc_types_engine::{OpExecutionData, OpPayloadError};
 use reth_optimism_forks::OpHardforks;
-use reth_payload_validator::ExecutionPayloadValidator;
+use reth_payload_validator::{cancun, prague, shanghai};
 use reth_primitives::{Block, SealedBlock};
-use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
+use reth_primitives_traits::{Block as _, SignedTransaction};
 
 /// Execution payload validator.
-#[derive(Clone, Debug, Deref)]
+#[derive(Clone, Debug, Deref, Constructor)]
 pub struct OpExecutionPayloadValidator<ChainSpec> {
     /// Chain spec to validate against.
     #[deref]
-    inner: ExecutionPayloadValidator<ChainSpec>,
-}
-
-impl<ChainSpec> OpExecutionPayloadValidator<ChainSpec> {
-    /// Returns a new instance.
-    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { inner: ExecutionPayloadValidator::new(chain_spec) }
-    }
+    inner: Arc<ChainSpec>,
 }
 
 impl<ChainSpec> OpExecutionPayloadValidator<ChainSpec>
@@ -49,109 +42,39 @@ where
     pub fn ensure_well_formed_payload<T: SignedTransaction>(
         &self,
         payload: OpExecutionData,
-    ) -> Result<SealedBlock<Block<T>>, PayloadError> {
+    ) -> Result<SealedBlock<Block<T>>, OpPayloadError> {
         let OpExecutionData { payload, sidecar } = payload;
 
         let expected_hash = payload.block_hash();
 
         // First parse the block
-        let mut block = payload.try_into_block_with_sidecar(&sidecar)?;
-
-        // update withdrawals root to l2 withdrawals root if isthmus active
-        if self.chain_spec().is_isthmus_active_at_timestamp(block.timestamp) {
-            // overwrite l1 withdrawals root with l2 withdrawals root, ie with storage root of
-            // predeploy `L2ToL1MessagePasser.sol` at `0x42..16`
-            match payload.withdrawals_root() {
-                Some(l2_withdrawals_root) => block.withdrawals_root = l2_withdrawals_root,
-                None => return Err(PayloadError::PreCancunBlockWithBlobTransactions), /* todo: return op specific error */
-            }
-        }
-
-        let sealed_block = block.seal_slow();
+        let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();
 
         // Ensure the hash included in the payload matches the block hash
         if expected_hash != sealed_block.hash() {
             return Err(PayloadError::BlockHash {
                 execution: sealed_block.hash(),
                 consensus: expected_hash,
-            })
+            })?
         }
 
-        if sealed_block.body().has_eip4844_transactions() {
-            // todo: needs new error type OpPayloadError
-            return Err(PayloadError::PreCancunBlockWithBlobTransactions)
-        }
+        shanghai::ensure_well_formed_fields(
+            sealed_block.body(),
+            self.is_shanghai_active_at_timestamp(sealed_block.timestamp),
+        )?;
 
-        if self.chain_spec().is_cancun_active_at_timestamp(sealed_block.timestamp) {
-            if sealed_block.blob_gas_used.is_none() {
-                // cancun active but blob gas used not present
-                return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
-            }
-            if sealed_block.excess_blob_gas.is_none() {
-                // cancun active but excess blob gas not present
-                return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
-            }
-            match sidecar.canyon() {
-                None => {
-                    // cancun active but cancun fields not present
-                    return Err(PayloadError::PostCancunWithoutCancunFields)
-                }
-                Some(fields) => {
-                    if !fields.versioned_hashes.is_empty() {
-                        // todo: needs new error type OpPayloadError
-                        return Err(PayloadError::PreCancunBlockWithBlobTransactions)
-                    }
-                }
-            }
-            match sealed_block.blob_versioned_hashes() {
-                None => {
-                    // cancun active but blob versioned hashes not present
-                    return Err(PayloadError::PostCancunBlockWithoutBlobVersionedHashes)
-                }
-                Some(hashes) => {
-                    if !hashes.is_empty() {
-                        // todo: needs new error type OpPayloadError
-                        return Err(PayloadError::PreCancunBlockWithBlobTransactions)
-                    }
-                }
-            }
-        } else {
-            if sealed_block.blob_gas_used.is_some() {
-                // cancun not active but blob gas used present
-                return Err(PayloadError::PreCancunBlockWithBlobGasUsed)
-            }
-            if sealed_block.excess_blob_gas.is_some() {
-                // cancun not active but excess blob gas present
-                return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
-            }
-            if sidecar.canyon().is_some() {
-                // cancun not active but cancun fields present
-                return Err(PayloadError::PreCancunWithCancunFields)
-            }
-        }
+        cancun::ensure_well_formed_header_and_sidecar_fields(
+            &sealed_block,
+            sidecar.canyon(),
+            self.is_cancun_active_at_timestamp(sealed_block.timestamp),
+        )?;
 
-        let shanghai_active =
-            self.chain_spec().is_shanghai_active_at_timestamp(sealed_block.timestamp);
-        if let Some(l1_withdrawals) = sealed_block.body().withdrawals() {
-            if shanghai_active {
-                if !l1_withdrawals.is_empty() {
-                    // todo: needs op specific error
-                    return Err(PayloadError::PostShanghaiBlockWithoutWithdrawals)
-                }
-            } else {
-                // shanghai active but withdrawals not present
-                return Err(PayloadError::PostShanghaiBlockWithoutWithdrawals)
-            }
-        }
-
-        if !self.chain_spec().is_prague_active_at_timestamp(sealed_block.timestamp) &&
-            sealed_block.body().has_eip7702_transactions()
-        {
-            return Err(PayloadError::PrePragueBlockWithEip7702Transactions)
-        }
+        prague::ensure_well_formed_fields(
+            sealed_block.body(),
+            sidecar.isthmus(),
+            self.is_prague_active_at_timestamp(sealed_block.timestamp),
+        )?;
 
         Ok(sealed_block)
     }
 }
-
-// todo: needs to return op specific error to be able to unit test
