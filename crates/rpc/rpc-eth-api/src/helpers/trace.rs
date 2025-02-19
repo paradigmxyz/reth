@@ -204,14 +204,14 @@ pub trait Trace:
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-                let block_txs = block.transactions_with_sender();
+                let block_txs = block.transactions_recovered();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
 
-                let tx_env = this.evm_config().tx_env(tx.tx(), tx.signer());
+                let tx_env = this.evm_config().tx_env(tx);
                 let (res, _) = this.inspect(
                     StateCacheDbRefMutWrapper(&mut db),
                     evm_env,
@@ -339,10 +339,10 @@ pub trait Trace:
                 let mut results = Vec::with_capacity(max_transactions);
 
                 let mut transactions = block
-                    .transactions_with_sender()
+                    .transactions_recovered()
                     .take(max_transactions)
                     .enumerate()
-                    .map(|(idx, (signer, tx))| {
+                    .map(|(idx, tx)| {
                         let tx_info = TransactionInfo {
                             hash: Some(*tx.tx_hash()),
                             index: Some(idx as u64),
@@ -350,7 +350,7 @@ pub trait Trace:
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = this.evm_config().tx_env(tx, *signer);
+                        let tx_env = this.evm_config().tx_env(tx);
                         (tx_info, tx_env)
                     })
                     .peekable();

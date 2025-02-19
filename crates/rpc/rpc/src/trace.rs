@@ -113,7 +113,7 @@ where
             .map_transaction(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
-        let tx_env = self.eth_api().evm_config().tx_env(tx.tx(), tx.signer());
+        let tx_env = self.eth_api().evm_config().tx_env(tx);
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 

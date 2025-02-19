@@ -78,7 +78,6 @@ reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
-reth-storage-api.workspace = true
 
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
