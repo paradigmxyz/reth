@@ -15,7 +15,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmError,
+    ConfigureEvm, ConfigureEvmEnv, Database, Evm,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{
@@ -155,12 +155,7 @@ where
 
         // Execute transaction.
         let result_and_state =
-            self.evm.transact(tx_env).map_err(move |err| match err.try_into_invalid_tx_err() {
-                Ok(err) => {
-                    BlockValidationError::InvalidTx { hash: *hash, error: Box::new(err) }.into()
-                }
-                Err(err) => BlockExecutionError::other(err),
-            })?;
+            self.evm.transact(tx_env).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
         self.system_caller
             .on_state(StateChangeSource::Transaction(self.receipts.len()), &result_and_state.state);
         let ResultAndState { result, state } = result_and_state;

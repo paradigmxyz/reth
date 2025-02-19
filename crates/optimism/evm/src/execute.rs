@@ -16,7 +16,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvm, ConfigureEvmFor, Database, Evm, EvmError, HaltReasonFor,
+    ConfigureEvm, ConfigureEvmFor, Database, Evm, HaltReasonFor,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_chainspec::OpChainSpec;
@@ -203,12 +203,7 @@ where
 
         // Execute transaction.
         let result_and_state =
-            self.evm.transact(tx_env).map_err(move |err| match err.try_into_invalid_tx_err() {
-                Ok(err) => {
-                    BlockValidationError::InvalidTx { hash: *hash, error: Box::new(err) }.into()
-                }
-                Err(err) => BlockExecutionError::other(err),
-            })?;
+            self.evm.transact(tx_env).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
 
         trace!(
             target: "evm",
