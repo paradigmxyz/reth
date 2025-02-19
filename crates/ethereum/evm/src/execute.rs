@@ -155,7 +155,7 @@ where
 
         // Execute transaction.
         let result_and_state =
-            self.evm.transact(tx_env).map_err(move |err| match err.into_invalid_tx_err() {
+            self.evm.transact(tx_env).map_err(move |err| match err.try_into_invalid_tx_err() {
                 Ok(err) => {
                     BlockValidationError::InvalidTx { hash: *hash, error: Box::new(err) }.into()
                 }
