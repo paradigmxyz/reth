@@ -33,7 +33,6 @@ tracing.workspace = true
 
 [features]
 default = ["serde"]
-
 serde = [
     "dep:serde",
     "alloy-primitives/serde",
