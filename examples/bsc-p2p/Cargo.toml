@@ -24,7 +24,7 @@ reth-network-peers.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-tracing.workspace = true
-secp256k1 = { workspace = true, features = ["global-context","std", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
 tokio.workspace = true
