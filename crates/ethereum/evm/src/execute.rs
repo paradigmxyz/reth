@@ -90,7 +90,7 @@ where
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
-    system_caller: SystemCaller<EvmConfig, ChainSpec>,
+    system_caller: SystemCaller<Arc<ChainSpec>>,
 }
 
 impl<DB, EvmConfig> EthExecutionStrategy<DB, EvmConfig>
@@ -99,7 +99,7 @@ where
 {
     /// Creates a new [`EthExecutionStrategy`]
     pub fn new(state: State<DB>, chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
+        let system_caller = SystemCaller::new(chain_spec.clone());
         Self { state, chain_spec, evm_config, system_caller }
     }
 }

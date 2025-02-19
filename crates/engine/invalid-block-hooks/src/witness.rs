@@ -78,8 +78,7 @@ where
         // Setup EVM
         let mut evm = self.evm_config.evm_for_block(&mut db, block.header());
 
-        let mut system_caller =
-            SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());
+        let mut system_caller = SystemCaller::new(self.provider.chain_spec());
 
         // Apply pre-block system contract calls.
         system_caller.apply_pre_execution_changes(block.header(), &mut evm)?;
