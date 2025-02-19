@@ -82,7 +82,7 @@ where
 /// Block execution strategy for Ethereum.
 #[derive(Debug, derive_more::Deref)]
 pub struct EthExecutionStrategy<'a, Evm, EvmConfig> {
-    /// Reference to the parent factory providing access to [`SystemCaller`] and [`ChainSpec`].
+    /// Reference to the parent factory providing access to [`ChainSpec`].
     #[deref]
     factory: &'a EthExecutionStrategyFactory<EvmConfig>,
 

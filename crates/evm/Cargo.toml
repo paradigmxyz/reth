@@ -64,6 +64,7 @@ std = [
     "reth-execution-types/std",
     "reth-storage-errors/std",
     "futures-util/std",
+    "derive_more/std",
 ]
 metrics = [
     "std",

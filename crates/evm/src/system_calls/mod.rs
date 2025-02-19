@@ -1,6 +1,7 @@
 //! System contract call functions.
 
 use crate::Evm;
+use alloc::boxed::Box;
 use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests,
