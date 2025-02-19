@@ -35,7 +35,7 @@ hardfork!(
         Holocene,
         /// Isthmus: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/isthmus/overview.md>
         Isthmus,
-        /// Interop: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/interop/overview.md>
+        /// TODO: add interop hardfork overview when available
         Interop,
     }
 );
