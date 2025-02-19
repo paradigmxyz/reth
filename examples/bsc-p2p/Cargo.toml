@@ -41,5 +41,5 @@ serde = [
     "reth-eth-wire-types/serde",
     "reth-ethereum-forks/serde",
     "reth-provider/serde",
-    "secp256k1/serde"
+    "secp256k1/serde",
 ]
