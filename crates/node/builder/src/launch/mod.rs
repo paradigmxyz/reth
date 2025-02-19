@@ -4,6 +4,7 @@ pub mod common;
 mod exex;
 
 pub(crate) mod engine;
+pub(crate) mod local;
 
 pub use common::LaunchContext;
 pub use exex::ExExLauncher;

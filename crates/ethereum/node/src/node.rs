@@ -2,8 +2,9 @@
 
 pub use crate::payload::EthereumPayloadBuilder;
 use crate::{EthEngineTypes, EthEvmConfig};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
+use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_consensus::EthBeaconConsensus;
 pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_ethereum_engine_primitives::{
@@ -13,13 +14,18 @@ use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
+use reth_node_api::{
+    AddOnsContext, FullNodeComponents, NodeAddOns, PayloadAttributesBuilder, TxTy,
+};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
+    rpc::{
+        EngineValidatorAddOn, EngineValidatorBuilder, PayloadAttributesBuilderAddOn, RethRpcAddOns,
+        RpcAddOns, RpcHandle,
+    },
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
@@ -201,6 +207,31 @@ where
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         EthereumEngineValidatorBuilder::default().build(ctx).await
+    }
+}
+
+impl<N> PayloadAttributesBuilderAddOn<N> for EthereumAddOns<N>
+where
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Engine = EthEngineTypes,
+        >,
+    >,
+    <<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
+    LocalPayloadAttributesBuilder<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>:
+        PayloadAttributesBuilder<
+            <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        >,
+{
+    type PayloadAttributes =
+        <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes;
+    fn payload_attributes_builder(
+        &self,
+        ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<Box<dyn PayloadAttributesBuilder<Self::PayloadAttributes>>> {
+        Ok(Box::new(LocalPayloadAttributesBuilder::new(ctx.config.chain.clone())))
     }
 }
 
