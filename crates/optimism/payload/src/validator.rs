@@ -38,7 +38,7 @@ where
     /// The checks are done in the order that conforms with the engine-API specification.
     ///
     /// This is intended to be invoked after receiving the payload from the CLI.
-    /// The additional fields, starting with [`MaybeCancunPayloadFields`](alloy_rpc_types::engine::MaybeCancunPayloadFields), are not part of the payload, but are additional fields starting in the `engine_newPayloadV3` RPC call, See also <https://specs.optimism.io/protocol/exec-engine.html#engine_newpayloadv3>
+    /// The additional fields, starting with [`MaybeCancunPayloadFields`](alloy_rpc_types_engine::MaybeCancunPayloadFields), are not part of the payload, but are additional fields starting in the `engine_newPayloadV3` RPC call, See also <https://specs.optimism.io/protocol/exec-engine.html#engine_newpayloadv3>
     ///
     /// If the cancun fields are provided this also validates that the versioned hashes in the block
     /// are empty as well as those passed in the sidecar. If the payload fields are not provided.
