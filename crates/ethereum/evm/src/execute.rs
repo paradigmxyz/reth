@@ -149,7 +149,7 @@ where
                 .into())
             }
 
-            let tx_env = self.evm_config.tx_env(tx.tx(), tx.signer());
+            let tx_env = self.evm_config.tx_env(tx.clone());
             let hash = tx.hash();
 
             // Execute transaction.

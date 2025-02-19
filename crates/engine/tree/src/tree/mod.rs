@@ -2775,7 +2775,7 @@ where
             let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
             // create the tx env and reset nonce
-            let tx_env = evm_config.tx_env(&tx, tx.signer());
+            let tx_env = evm_config.tx_env(&tx);
 
             // exit early if execution is done
             if cancel_execution.is_cancelled() {

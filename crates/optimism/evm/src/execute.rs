@@ -199,7 +199,7 @@ where
                 .transpose()
                 .map_err(|_| OpBlockExecutionError::AccountLoadFailed(tx.signer()))?;
 
-            let tx_env = self.evm_config.tx_env(tx.tx(), tx.signer());
+            let tx_env = self.evm_config.tx_env(&tx);
             let hash = tx.tx_hash();
 
             // Execute transaction.

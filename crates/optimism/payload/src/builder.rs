@@ -929,7 +929,7 @@ where
                     ))
                 })?;
 
-            let tx_env = self.evm_config.tx_env(sequencer_tx.tx(), sequencer_tx.signer());
+            let tx_env = self.evm_config.tx_env(&sequencer_tx);
 
             let ResultAndState { result, state: _ } = match evm.transact_commit(tx_env) {
                 Ok(res) => res,
@@ -1006,7 +1006,7 @@ where
             }
 
             // Configure the environment for the tx.
-            let tx_env = self.evm_config.tx_env(tx.tx(), tx.signer());
+            let tx_env = self.evm_config.tx_env(&tx);
 
             let ResultAndState { result, state: _ } = match evm.transact_commit(tx_env) {
                 Ok(res) => res,
