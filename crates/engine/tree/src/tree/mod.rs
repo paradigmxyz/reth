@@ -671,7 +671,7 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        let num_threads = root::thread_pool_size();
+        let num_threads = root::rayon_thread_pool_size();
 
         let thread_pool = Arc::new(
             rayon::ThreadPoolBuilder::new()
