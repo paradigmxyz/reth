@@ -70,11 +70,11 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     /// The checks are done in the order that conforms with the engine-API specification.
     ///
     /// This is intended to be invoked after receiving the payload from the CLI.
-    /// The additional [`MaybeCancunPayloadFields`] are not part of the payload, but are additional fields in the `engine_newPayloadV3` RPC call, See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
+    /// The additional [`MaybeCancunPayloadFields`](alloy_rpc_types_engine::MaybeCancunPayloadFields) are not part of the payload, but are additional fields in the `engine_newPayloadV3` RPC call, See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     ///
     /// If the cancun fields are provided this also validates that the versioned hashes in the block
     /// match the versioned hashes passed in the
-    /// [`CancunPayloadFields`](alloy_rpc_types::engine::CancunPayloadFields), if the cancun payload
+    /// [`CancunPayloadFields`](alloy_rpc_types_engine::CancunPayloadFields), if the cancun payload
     /// fields are provided. If the payload fields are not provided, but versioned hashes exist
     /// in the block, this is considered an error: [`PayloadError::InvalidVersionedHashes`].
     ///
