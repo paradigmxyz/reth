@@ -34,4 +34,5 @@ std = [
     "nybbles/std",
     "revm-database-interface/std",
     "reth-storage-errors/std",
+    "alloy-evm/std",
 ]
