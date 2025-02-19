@@ -1,4 +1,4 @@
-use alloy_primitives::{map::B256HashMap, Address, Bytes, B256};
+use alloy_primitives::{map::B256Map, Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::{StorageTrieUpdates, TrieUpdates},
@@ -85,11 +85,7 @@ pub trait StateProofProvider: Send + Sync {
     ) -> ProviderResult<MultiProof>;
 
     /// Get trie witness for provided state.
-    fn witness(
-        &self,
-        input: TrieInput,
-        target: HashedPostState,
-    ) -> ProviderResult<B256HashMap<Bytes>>;
+    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<B256Map<Bytes>>;
 }
 
 /// Trie Writer
@@ -111,7 +107,7 @@ pub trait StorageTrieWriter: Send + Sync {
     /// Returns the number of entries modified.
     fn write_storage_trie_updates(
         &self,
-        storage_tries: &B256HashMap<StorageTrieUpdates>,
+        storage_tries: &B256Map<StorageTrieUpdates>,
     ) -> ProviderResult<usize>;
 
     /// Writes storage trie updates for the given hashed address.

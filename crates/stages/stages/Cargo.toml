@@ -66,6 +66,7 @@ reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-evm-ethereum.workspace = true
+reth-ethereum-consensus.workspace = true
 reth-execution-errors.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }

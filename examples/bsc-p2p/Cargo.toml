@@ -23,4 +23,5 @@ tokio-stream.workspace = true
 
 serde_json.workspace = true
 
+alloy-genesis.workspace = true
 alloy-primitives.workspace = true

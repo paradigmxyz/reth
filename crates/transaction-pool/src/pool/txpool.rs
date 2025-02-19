@@ -23,7 +23,7 @@ use alloy_consensus::constants::{
     LEGACY_TX_TYPE_ID,
 };
 use alloy_eips::{
-    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE},
     eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
     Typed2718,
 };
@@ -1832,7 +1832,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
         Self {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),

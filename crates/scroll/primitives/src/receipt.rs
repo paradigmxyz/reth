@@ -218,6 +218,19 @@ impl InMemorySize for ScrollReceipt {
 
 impl reth_primitives_traits::Receipt for ScrollReceipt {}
 
+#[cfg(feature = "serde-bincode-compat")]
+impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for ScrollReceipt {
+    type BincodeRepr<'a> = Self;
+
+    fn as_repr(&self) -> Self::BincodeRepr<'_> {
+        self.clone()
+    }
+
+    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+        repr
+    }
+}
+
 #[cfg(feature = "reth-codec")]
 mod compact {
     use super::*;

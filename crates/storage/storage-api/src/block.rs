@@ -6,7 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use core::ops::RangeInclusive;
-use reth_primitives::{RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 
 /// A helper enum that represents the origin of the requested block.

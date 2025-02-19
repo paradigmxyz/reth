@@ -1,9 +1,9 @@
 use alloy_primitives::U256;
-use alloy_rpc_types_engine::PayloadError;
+use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use reth_node_api::PayloadValidator;
 use reth_node_builder::{
     rpc::EngineValidatorBuilder, AddOnsContext, EngineApiMessageVersion,
-    EngineObjectValidationError, EngineTypes, EngineValidator, ExecutionData, FullNodeComponents,
+    EngineObjectValidationError, EngineTypes, EngineValidator, FullNodeComponents,
     PayloadOrAttributes,
 };
 use reth_node_types::NodeTypesWithEngine;

@@ -1,4 +1,5 @@
 use derive_more::{Display, From};
+use reth_consensus::ConsensusError;
 use reth_evm::execute::BlockExecutionError;
 
 /// Execution error for Scroll.
@@ -7,6 +8,21 @@ pub enum ScrollBlockExecutionError {
     /// Error occurred at fork transition.
     #[display("failed to apply fork: {_0}")]
     Fork(ForkError),
+    /// Error occurred at consensus verification.
+    #[display("failed to validate block: {_0}")]
+    Consensus(ConsensusError),
+}
+
+impl ScrollBlockExecutionError {
+    /// Build a [`ScrollBlockExecutionError::Fork`] from the provider fork error.
+    pub fn fork(error: ForkError) -> Self {
+        Self::Fork(error)
+    }
+
+    /// Build a [`ScrollBlockExecutionError::Consensus`] from the provider consensus error.
+    pub fn consensus(error: ConsensusError) -> Self {
+        Self::Consensus(error)
+    }
 }
 
 impl From<ScrollBlockExecutionError> for BlockExecutionError {
@@ -20,10 +36,4 @@ impl From<ScrollBlockExecutionError> for BlockExecutionError {
 pub enum ForkError {
     /// Error occurred at Curie fork.
     Curie(String),
-}
-
-impl From<ForkError> for BlockExecutionError {
-    fn from(value: ForkError) -> Self {
-        ScrollBlockExecutionError::Fork(value).into()
-    }
 }

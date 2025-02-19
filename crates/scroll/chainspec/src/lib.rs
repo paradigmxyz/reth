@@ -207,7 +207,7 @@ impl EthChainSpec for ScrollChainSpec {
     }
 
     fn genesis_hash(&self) -> B256 {
-        *self.genesis_hash.get_or_init(|| self.genesis_header().hash_slow())
+        self.inner.genesis_hash()
     }
 
     fn prune_delete_limit(&self) -> usize {
@@ -219,7 +219,7 @@ impl EthChainSpec for ScrollChainSpec {
     }
 
     fn genesis_header(&self) -> &Header {
-        self.inner.genesis_header.get_or_init(|| self.make_genesis_header())
+        self.inner.genesis_header()
     }
 
     fn genesis(&self) -> &Genesis {
@@ -231,36 +231,32 @@ impl EthChainSpec for ScrollChainSpec {
     }
 }
 
-impl ScrollChainSpec {
-    fn make_genesis_header(&self) -> Header {
-        Header {
-            gas_limit: self.genesis.gas_limit,
-            difficulty: self.genesis.difficulty,
-            nonce: self.genesis.nonce.into(),
-            extra_data: self.genesis.extra_data.clone(),
-            state_root: reth_trie_common::root::state_root_ref_unhashed(&self.genesis.alloc),
-            timestamp: self.genesis.timestamp,
-            mix_hash: self.genesis.mix_hash,
-            beneficiary: self.genesis.coinbase,
-            base_fee_per_gas: None,
-            withdrawals_root: None,
-            parent_beacon_block_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
-            requests_hash: None,
-            ..Default::default()
-        }
+fn make_genesis_header(genesis: &Genesis) -> Header {
+    Header {
+        gas_limit: genesis.gas_limit,
+        difficulty: genesis.difficulty,
+        nonce: genesis.nonce.into(),
+        extra_data: genesis.extra_data.clone(),
+        state_root: reth_trie_common::root::state_root_ref_unhashed(&genesis.alloc),
+        timestamp: genesis.timestamp,
+        mix_hash: genesis.mix_hash,
+        beneficiary: genesis.coinbase,
+        base_fee_per_gas: None,
+        withdrawals_root: None,
+        parent_beacon_block_root: None,
+        blob_gas_used: None,
+        excess_blob_gas: None,
+        requests_hash: None,
+        ..Default::default()
     }
 }
 
 impl Hardforks for ScrollChainSpec {
-    fn fork<H: reth_chainspec::Hardfork>(&self, fork: H) -> reth_chainspec::ForkCondition {
+    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
         self.inner.fork(fork)
     }
 
-    fn forks_iter(
-        &self,
-    ) -> impl Iterator<Item = (&dyn reth_chainspec::Hardfork, reth_chainspec::ForkCondition)> {
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.inner.forks_iter()
     }
 
@@ -404,7 +400,7 @@ mod tests {
         let scroll_sepolia =
             ScrollChainSpecBuilder::scroll_sepolia().build(ScrollChainConfig::sepolia());
         assert_eq!(
-            b256!("5e756a466b785b67e247b18c410d962866a53af97f09948016e9239b2054c94f"),
+            b256!("04414a71425e8ef2632e99a4b148c69d69bab8ffa47ee814231331a33d073df2"),
             scroll_sepolia.genesis_hash()
         );
     }

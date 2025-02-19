@@ -13,7 +13,7 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{Address, U256};
 use core::fmt::Debug;
@@ -25,7 +25,7 @@ use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::FillTxEnv;
-use reth_revm::{
+use revm::{
     inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     EvmBuilder, GetInspector,
@@ -50,7 +50,7 @@ use revm_primitives::{
 /// OP EVM implementation.
 #[derive(derive_more::Debug, derive_more::Deref, derive_more::DerefMut, derive_more::From)]
 #[debug(bound(DB::Error: Debug))]
-pub struct OpEvm<'a, EXT, DB: Database>(reth_revm::Evm<'a, EXT, DB>);
+pub struct OpEvm<'a, EXT, DB: Database>(revm::Evm<'a, EXT, DB>);
 
 impl<EXT, DB: Database> Evm for OpEvm<'_, EXT, DB> {
     type DB = DB;
@@ -297,8 +297,8 @@ mod tests {
     };
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
-    use reth_primitives::{Account, Log, RecoveredBlock};
-    use reth_revm::{
+    use reth_primitives_traits::{Account, Log, RecoveredBlock};
+    use revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
         primitives::{AccountInfo, BlockEnv, CfgEnv, SpecId},

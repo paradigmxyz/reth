@@ -1,6 +1,6 @@
 use alloy_consensus::{constants::EIP1559_TX_TYPE_ID, Transaction, Typed2718};
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
     eip2718::Encodable2718,
     eip2930::AccessList,
     eip4844::{BlobAndProofV1, BlobTransactionSidecar, BlobTransactionValidationError},
@@ -41,7 +41,7 @@ impl TransactionPool for ScrollNoopTransactionPool {
 
     fn block_info(&self) -> BlockInfo {
         BlockInfo {
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             last_seen_block_hash: Default::default(),
             last_seen_block_number: 0,
             pending_basefee: 0,

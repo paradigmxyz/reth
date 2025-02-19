@@ -1,6 +1,6 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::forward_cursor::ForwardInMemoryCursor;
-use alloy_primitives::{map::B256HashSet, B256, U256};
+use alloy_primitives::{map::B256Set, B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{HashedAccountsSorted, HashedPostStateSorted, HashedStorageSorted};
@@ -46,7 +46,7 @@ pub struct HashedPostStateAccountCursor<'a, C> {
     /// Forward-only in-memory cursor over accounts.
     post_state_cursor: ForwardInMemoryCursor<'a, B256, Account>,
     /// Reference to the collection of account keys that were destroyed.
-    destroyed_accounts: &'a B256HashSet,
+    destroyed_accounts: &'a B256Set,
     /// The last hashed account that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_account: Option<B256>,
@@ -180,7 +180,7 @@ pub struct HashedPostStateStorageCursor<'a, C> {
     /// Forward-only in-memory cursor over non zero-valued account storage slots.
     post_state_cursor: Option<ForwardInMemoryCursor<'a, B256, U256>>,
     /// Reference to the collection of storage slot keys that were cleared.
-    cleared_slots: Option<&'a B256HashSet>,
+    cleared_slots: Option<&'a B256Set>,
     /// Flag indicating whether database storage was wiped.
     storage_wiped: bool,
     /// The last slot that has been returned by the cursor.

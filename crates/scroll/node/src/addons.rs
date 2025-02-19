@@ -112,6 +112,7 @@ impl ScrollAddOnsBuilder {
             rpc_add_ons: RpcAddOns::new(
                 move |ctx| ScrollEthApi::<N>::builder().build(ctx),
                 Default::default(),
+                Default::default(),
             ),
         }
     }

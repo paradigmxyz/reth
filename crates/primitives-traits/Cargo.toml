@@ -151,6 +151,7 @@ reth-codec = [
 ]
 op = [
     "dep:op-alloy-consensus",
+    "reth-codecs?/op",
 ]
 scroll-alloy-traits = ["scroll-alloy-consensus"]
 scroll = ["revm-primitives/scroll"]

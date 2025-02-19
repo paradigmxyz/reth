@@ -13,11 +13,11 @@ use alloy_consensus::{proofs, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip2718::Decodable2718;
 use alloy_rlp::BufMut;
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
     ExecutionPayloadEnvelopeV4, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
     PayloadError,
 };
-use reth_engine_primitives::{EngineTypes, ExecutionData};
+use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives::{Block, BlockBody, Header};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
