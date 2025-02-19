@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
@@ -22,6 +22,7 @@ use reth_evm::{
     TransactionEnv,
 };
 use reth_node_api::BlockBody;
+use reth_primitives::Recovered;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockIdReader, ChainSpecProvider, ProviderHeader};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
@@ -172,8 +173,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let mut results = Vec::with_capacity(calls.len());
 
                     while let Some(call) = calls.next() {
-                        let sender = call.from.unwrap_or_default();
-
                         // Resolve transaction, populate missing fields and enforce calls
                         // correctness.
                         let tx = simulate::resolve_transaction(
@@ -185,7 +184,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             this.tx_resp_builder(),
                         )?;
 
-                        let tx_env = this.evm_config().tx_env(&tx, sender);
+                        let tx_env = this.evm_config().tx_env(&tx);
 
                         let (res, (_, tx_env)) = {
                             if trace_transfers {
@@ -324,9 +323,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
-                    let transactions = block.transactions_with_sender().take(num_txs);
-                    for (signer, tx) in transactions {
-                        let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx, *signer);
+                    let transactions = block.transactions_recovered().take(num_txs);
+                    for tx in transactions {
+                        let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
                         let (res, _) = this.transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
@@ -671,12 +670,12 @@ pub trait Call:
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-                let block_txs = block.transactions_with_sender();
+                let block_txs = block.transactions_recovered();
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
 
-                let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx.tx(), tx.signer());
+                let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
 
                 let (res, _) = this.transact(&mut db, evm_env, tx_env)?;
                 f(tx_info, res, db)
@@ -702,18 +701,18 @@ pub trait Call:
     ) -> Result<usize, Self::Error>
     where
         DB: Database<Error = ProviderError> + DatabaseCommit,
-        I: IntoIterator<Item = (&'a Address, &'a <Self::Evm as ConfigureEvmEnv>::Transaction)>,
+        I: IntoIterator<Item = Recovered<&'a <Self::Evm as ConfigureEvmEnv>::Transaction>>,
         <Self::Evm as ConfigureEvmEnv>::Transaction: SignedTransaction,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let mut index = 0;
-        for (sender, tx) in transactions {
+        for tx in transactions {
             if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
                 break
             }
 
-            let tx_env = self.evm_config().tx_env(tx, *sender);
+            let tx_env = self.evm_config().tx_env(tx);
             evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
             index += 1;
         }

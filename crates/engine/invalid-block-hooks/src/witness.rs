@@ -8,7 +8,6 @@ use reth_evm::{
     state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvmFor, Evm,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -85,10 +84,8 @@ where
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
-        for tx in block.body().transactions() {
-            let signer =
-                tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover sender"))?;
-            evm.transact_commit(self.evm_config.tx_env(tx, signer))?;
+        for tx in block.transactions_recovered() {
+            evm.transact_commit(self.evm_config.tx_env(tx))?;
         }
 
         drop(evm);

@@ -4,13 +4,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
+use alloy_eips::eip4895::Withdrawal;
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth::{
     api::{ConfigureEvm, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
+    providers::BlockExecutionResult,
     revm::{
         db::State,
         primitives::{address, Address},
@@ -20,14 +21,16 @@ use reth::{
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{
-        BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
+        BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory,
         InternalBlockExecutionError,
     },
     Database, Evm,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
+use reth_primitives::{
+    Block, EthPrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, TransactionSigned,
+};
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -90,86 +93,64 @@ pub struct CustomExecutorStrategyFactory {
 
 impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
     type Primitives = EthPrimitives;
-    type Strategy<DB: Database> = CustomExecutorStrategy<DB>;
 
-    fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
+    fn create_strategy<'a, DB>(
+        &'a mut self,
+        db: &'a mut State<DB>,
+        block: &'a RecoveredBlock<Block>,
+    ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
     where
         DB: Database,
     {
-        let state =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
-        CustomExecutorStrategy {
-            state,
-            chain_spec: self.chain_spec.clone(),
-            evm_config: self.evm_config.clone(),
-        }
+        let evm = self.evm_config.evm_for_block(db, block.header());
+        CustomExecutorStrategy { evm, factory: self, block }
     }
 }
 
-pub struct CustomExecutorStrategy<DB>
-where
-    DB: Database,
-{
-    /// The chainspec
-    chain_spec: Arc<ChainSpec>,
-    /// How to create an EVM.
-    evm_config: EthEvmConfig,
-    /// Current state for block execution.
-    state: State<DB>,
+pub struct CustomExecutorStrategy<'a, Evm> {
+    /// Reference to the parent factory.
+    factory: &'a CustomExecutorStrategyFactory,
+    /// EVM used for execution.
+    evm: Evm,
+    /// Block being executed.
+    block: &'a SealedBlock,
 }
 
-impl<DB> BlockExecutionStrategy for CustomExecutorStrategy<DB>
+impl<'db, DB, E> BlockExecutionStrategy for CustomExecutorStrategy<'_, E>
 where
-    DB: Database,
+    DB: Database + 'db,
+    E: Evm<DB = &'db mut State<DB>>,
 {
-    type DB = DB;
     type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
 
-    fn apply_pre_execution_changes(
-        &mut self,
-        block: &RecoveredBlock<reth_primitives::Block>,
-    ) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            (*self.chain_spec).is_spurious_dragon_active_at_block(block.number());
-        self.state.set_state_clear_flag(state_clear_flag);
+            (*self.factory.chain_spec).is_spurious_dragon_active_at_block(self.block.number());
+        self.evm.db_mut().set_state_clear_flag(state_clear_flag);
 
         Ok(())
     }
 
-    fn execute_transactions(
+    fn execute_transactions<'a>(
         &mut self,
-        _block: &RecoveredBlock<reth_primitives::Block>,
-    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
-        Ok(ExecuteOutput { receipts: vec![], gas_used: 0 })
+        _transactions: impl IntoIterator<Item = Recovered<&'a TransactionSigned>>,
+    ) -> Result<(), Self::Error> {
+        Ok(())
     }
 
     fn apply_post_execution_changes(
-        &mut self,
-        block: &RecoveredBlock<reth_primitives::Block>,
-        _receipts: &[Receipt],
-    ) -> Result<Requests, Self::Error> {
-        let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
-
-        if let Some(withdrawals) = block.body().withdrawals.as_ref() {
-            apply_withdrawals_contract_call(withdrawals, &mut evm)?;
+        mut self,
+    ) -> Result<BlockExecutionResult<Receipt>, Self::Error> {
+        if let Some(withdrawals) = self.block.body().withdrawals.as_ref() {
+            apply_withdrawals_contract_call(withdrawals, &mut self.evm)?;
         }
 
-        Ok(Requests::default())
+        Ok(Default::default())
     }
 
-    fn state_ref(&self) -> &State<DB> {
-        &self.state
-    }
-
-    fn state_mut(&mut self) -> &mut State<DB> {
-        &mut self.state
-    }
-
-    fn into_state(self) -> reth::revm::db::State<Self::DB> {
-        self.state
-    }
+    fn with_state_hook(&mut self, _hook: Option<Box<dyn reth_evm::system_calls::OnStateHook>>) {}
 }
 
 sol!(

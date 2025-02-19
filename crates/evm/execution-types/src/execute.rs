@@ -3,7 +3,7 @@ use alloy_eips::eip7685::Requests;
 use revm_database::BundleState;
 
 /// The result of executing a block.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlockExecutionResult<T> {
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,

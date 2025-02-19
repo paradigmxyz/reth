@@ -279,7 +279,7 @@ where
         }
 
         // Configure the environment for the tx.
-        let tx_env = evm_config.tx_env(tx.tx(), tx.signer());
+        let tx_env = evm_config.tx_env(&tx);
 
         let ResultAndState { result, state } = match evm.transact(tx_env) {
             Ok(res) => res,
