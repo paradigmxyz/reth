@@ -41,9 +41,10 @@ use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumPayloadBuilder},
     BasicBlockExecutorProvider, EthExecutionStrategyFactory, EthereumNode,
 };
-use reth_primitives::{EthPrimitives, TransactionSigned};
+use reth_primitives::{EthPrimitives, Recovered, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use std::{
+    borrow::Borrow,
     convert::Infallible,
     sync::{Arc, OnceLock},
 };
@@ -105,8 +106,11 @@ impl ConfigureEvmEnv for MyEvmConfig {
     type TxEnv = TxEnv;
     type Spec = SpecId;
 
-    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
-        self.inner.tx_env(transaction, signer)
+    fn tx_env<T: Borrow<Self::Transaction>>(
+        &self,
+        transaction: impl Borrow<Recovered<T>>,
+    ) -> Self::TxEnv {
+        self.inner.tx_env(transaction)
     }
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {

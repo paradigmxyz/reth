@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     Block, BlockTransactionsKind, Header,
 };
 use jsonrpsee_types::ErrorObject;
-use reth_primitives::RecoveredBlock;
+use reth_primitives::{Recovered, RecoveredBlock};
 use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
@@ -60,7 +60,7 @@ pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
     chain_id: u64,
     db: &mut DB,
     tx_resp_builder: &T,
-) -> Result<Tx, EthApiError>
+) -> Result<Recovered<Tx>, EthApiError>
 where
     EthApiError: From<DB::Error>,
 {
@@ -108,7 +108,11 @@ where
         }
     }
 
-    tx_resp_builder.build_simulate_v1_transaction(tx).map_err(|e| EthApiError::other(e.into()))
+    let tx = tx_resp_builder
+        .build_simulate_v1_transaction(tx)
+        .map_err(|e| EthApiError::other(e.into()))?;
+
+    Ok(Recovered::new_unchecked(tx, from))
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].

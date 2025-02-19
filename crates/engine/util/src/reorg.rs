@@ -312,7 +312,7 @@ where
         // Configure the environment for the block.
         let tx_recovered =
             tx.try_clone_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
-        let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
+        let tx_env = evm_config.tx_env(tx_recovered);
         let exec_result = match evm.transact(tx_env) {
             Ok(result) => result,
             Err(err) if err.is_invalid_tx_err() => {
