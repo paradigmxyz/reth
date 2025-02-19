@@ -22,7 +22,9 @@ use reth_execution_types::BlockExecutionResult;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt, OpPrimitives};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SignedTransaction};
+use reth_primitives_traits::{
+    BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SignedTransaction,
+};
 use revm::{context_interface::result::ResultAndState, DatabaseCommit};
 use revm_database::State;
 use tracing::trace;
@@ -171,7 +173,7 @@ where
         Ok(())
     }
 
-    fn execute_transaction(&mut self, tx: Recovered<&N::SignedTx>) -> Result<(), Self::Error> {
+    fn execute_transaction(&mut self, tx: Recovered<&N::SignedTx>) -> Result<u64, Self::Error> {
         // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block’s gasLimit.
         let block_available_gas = self.block.gas_limit() - self.gas_used;
@@ -215,8 +217,10 @@ where
         let ResultAndState { result, state } = result_and_state;
         self.evm.db_mut().commit(state);
 
+        let gas_used = result.gas_used();
+
         // append gas used
-        self.gas_used += result.gas_used();
+        self.gas_used += gas_used;
 
         self.receipts.push(
             match self.receipt_builder.build_receipt(ReceiptBuilderCtx {
@@ -251,14 +255,18 @@ where
             },
         );
 
-        Ok(())
+        Ok(gas_used)
     }
 
     fn apply_post_execution_changes(
         mut self,
     ) -> Result<BlockExecutionResult<N::Receipt>, Self::Error> {
-        let balance_increments =
-            post_block_balance_increments(&self.chain_spec.clone(), self.block);
+        let balance_increments = post_block_balance_increments(
+            &self.chain_spec.clone(),
+            self.evm.block(),
+            self.block.body().ommers().unwrap_or_default(),
+            self.block.body().withdrawals(),
+        );
         // increment balances
         self.evm
             .db_mut()

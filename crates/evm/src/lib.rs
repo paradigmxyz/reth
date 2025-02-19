@@ -24,10 +24,7 @@ pub use alloy_evm::evm::EvmFactory;
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
-use revm::{
-    context::TxEnv,
-    inspector::{Inspector, NoOpInspector},
-};
+use revm::{context::TxEnv, inspector::Inspector};
 
 pub mod batch;
 pub mod either;
@@ -76,11 +73,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv<Self::Spec>,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv<Self::Spec>) -> EvmFor<Self, DB> {
         self.evm_factory().create_evm(db, evm_env)
     }
 
@@ -91,11 +84,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_for_block<DB: Database>(
-        &self,
-        db: DB,
-        header: &Self::Header,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> EvmFor<Self, DB> {
         let evm_env = self.evm_env(header);
         self.evm_with_env(db, evm_env)
     }
@@ -111,7 +100,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, I>
+    ) -> EvmFor<Self, DB, I>
     where
         DB: Database,
         I: InspectorFor<DB, Self>,
@@ -131,19 +120,11 @@ where
         (*self).evm_factory()
     }
 
-    fn evm_for_block<DB: Database>(
-        &self,
-        db: DB,
-        header: &Self::Header,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> EvmFor<Self, DB> {
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv<Self::Spec>,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv<Self::Spec>) -> EvmFor<Self, DB> {
         (*self).evm_with_env(db, evm_env)
     }
 
@@ -152,7 +133,7 @@ where
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, I>
+    ) -> EvmFor<Self, DB, I>
     where
         DB: Database,
         I: InspectorFor<DB, Self>,
