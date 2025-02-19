@@ -10,6 +10,7 @@ use reth_eth_wire_types::{
 };
 use reth_ethereum_forks::ForkFilter;
 use std::{future::Future, pin::Pin};
+use tokio::time::{timeout, Duration};
 use tokio_stream::StreamExt;
 use tracing::debug;
 
@@ -78,11 +79,14 @@ impl Handshake for BscHandshake {
         unauth: &'a mut dyn UnauthEth,
         status: Status,
         fork_filter: ForkFilter,
+        timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
-            let negotiated_status = handshake(unauth, status, fork_filter).await?;
-            Self::upgrade_status(unauth, negotiated_status).await?;
-            Ok(negotiated_status)
+            let fut = async {
+                let negotiated_status = handshake(unauth, status, fork_filter).await?;
+                Self::upgrade_status(unauth, negotiated_status).await
+            };
+            timeout(timeout_limit, fut).await.map_err(|_| EthStreamError::StreamTimeout)?
         })
     }
 }

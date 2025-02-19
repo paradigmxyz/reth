@@ -35,7 +35,7 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::Handshake, multiplex::RlpxProtocolMultiplexer, Capabilities,
     DisconnectReason, EthStream, EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status,
-    UnauthedP2PStream,
+    UnauthedP2PStream, HANDSHAKE_TIMEOUT,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -1032,7 +1032,10 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         // Before trying status handshake, set up the version to negotiated shared version
         status.set_eth_version(eth_version);
 
-        match handshake.handshake(&mut p2p_stream, status, fork_filter.clone()).await {
+        match handshake
+            .handshake(&mut p2p_stream, status, fork_filter.clone(), HANDSHAKE_TIMEOUT)
+            .await
+        {
             Ok(their_status) => {
                 let eth_stream = EthStream::new(status.version, p2p_stream);
                 (eth_stream.into(), their_status)

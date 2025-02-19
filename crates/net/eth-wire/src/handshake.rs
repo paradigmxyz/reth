@@ -11,7 +11,8 @@ use reth_eth_wire_types::{
 };
 use reth_ethereum_forks::ForkFilter;
 use reth_primitives_traits::GotExpected;
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, time::Duration};
+use tokio::time::timeout;
 use tokio_stream::StreamExt;
 use tracing::{debug, trace};
 
@@ -23,6 +24,7 @@ pub trait Handshake: Debug + Send + Sync + 'static {
         unauth: &'a mut dyn UnauthEth,
         status: Status,
         fork_filter: ForkFilter,
+        timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>>;
 }
 
@@ -46,8 +48,13 @@ impl Handshake for EthHandshake {
         unauth: &'a mut dyn UnauthEth,
         status: Status,
         fork_filter: ForkFilter,
+        timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>> {
-        Box::pin(async move { handshake(unauth, status, fork_filter).await })
+        Box::pin(async move {
+            timeout(timeout_limit, handshake(unauth, status, fork_filter))
+                .await
+                .map_err(|_| EthStreamError::StreamTimeout)?
+        })
     }
 }
 
