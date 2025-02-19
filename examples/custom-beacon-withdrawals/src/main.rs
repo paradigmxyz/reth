@@ -133,9 +133,9 @@ where
         Ok(())
     }
 
-    fn execute_transactions<'a>(
+    fn execute_transaction(
         &mut self,
-        _transactions: impl IntoIterator<Item = Recovered<&'a TransactionSigned>>,
+        _tx: Recovered<&TransactionSigned>,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

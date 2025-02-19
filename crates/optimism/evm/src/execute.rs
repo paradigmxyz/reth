@@ -106,6 +106,10 @@ pub struct OpExecutionStrategy<'a, Evm, N: NodePrimitives, ChainSpec, EvmConfig:
     evm: Evm,
     /// Receipts of executed transactions.
     receipts: Vec<N::Receipt>,
+    /// Total gas used by executed transactions.
+    gas_used: u64,
+    /// Whether Regolith hardfork is active.
+    is_regolith: bool,
     /// Utility to call system smart contracts.
     system_caller: SystemCaller<&'a ChainSpec>,
 }
@@ -127,6 +131,8 @@ where
             factory,
             block,
             receipts: Vec::new(),
+            gas_used: 0,
+            is_regolith: factory.chain_spec.is_regolith_active_at_timestamp(block.timestamp()),
             system_caller: SystemCaller::new(&factory.chain_spec),
         }
     }
@@ -165,95 +171,87 @@ where
         Ok(())
     }
 
-    fn execute_transactions<'a>(
-        &mut self,
-        transactions: impl IntoIterator<Item = Recovered<&'a N::SignedTx>>,
-    ) -> Result<(), Self::Error> {
-        let is_regolith = self.chain_spec.is_regolith_active_at_timestamp(self.block.timestamp());
-
-        let mut cumulative_gas_used = 0;
-        for (tx_index, tx) in transactions.into_iter().enumerate() {
-            // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
-            // must be no greater than the block’s gasLimit.
-            let block_available_gas = self.block.gas_limit() - cumulative_gas_used;
-            if tx.gas_limit() > block_available_gas && (is_regolith || !tx.is_deposit()) {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: tx.gas_limit(),
-                    block_available_gas,
-                }
-                .into())
+    fn execute_transaction(&mut self, tx: Recovered<&N::SignedTx>) -> Result<(), Self::Error> {
+        // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
+        // must be no greater than the block’s gasLimit.
+        let block_available_gas = self.block.gas_limit() - self.gas_used;
+        if tx.gas_limit() > block_available_gas && (self.is_regolith || !tx.is_deposit()) {
+            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                transaction_gas_limit: tx.gas_limit(),
+                block_available_gas,
             }
-
-            // Cache the depositor account prior to the state transition for the deposit nonce.
-            //
-            // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
-            // were not introduced in Bedrock. In addition, regular transactions don't have deposit
-            // nonces, so we don't need to touch the DB for those.
-            let depositor = (is_regolith && tx.is_deposit())
-                .then(|| {
-                    self.evm
-                        .db_mut()
-                        .load_cache_account(tx.signer())
-                        .map(|acc| acc.account_info().unwrap_or_default())
-                })
-                .transpose()
-                .map_err(|_| OpBlockExecutionError::AccountLoadFailed(tx.signer()))?;
-
-            let tx_env = self.evm_config.tx_env(&tx);
-            let hash = tx.tx_hash();
-
-            // Execute transaction.
-            let result_and_state = self.evm.transact(tx_env).map_err(move |err| {
-                // Ensure hash is calculated for error log, if not already done
-                BlockValidationError::EVM { hash: *hash, error: Box::new(err) }
-            })?;
-
-            trace!(
-                target: "evm",
-                ?tx,
-                "Executed transaction"
-            );
-            self.system_caller
-                .on_state(StateChangeSource::Transaction(tx_index), &result_and_state.state);
-            let ResultAndState { result, state } = result_and_state;
-            self.evm.db_mut().commit(state);
-
-            // append gas used
-            cumulative_gas_used += result.gas_used();
-
-            self.receipts.push(
-                match self.receipt_builder.build_receipt(ReceiptBuilderCtx {
-                    tx: tx.tx(),
-                    result,
-                    cumulative_gas_used,
-                }) {
-                    Ok(receipt) => receipt,
-                    Err(ctx) => {
-                        let receipt = Receipt {
-                            // Success flag was added in `EIP-658: Embedding transaction status code
-                            // in receipts`.
-                            status: Eip658Value::Eip658(ctx.result.is_success()),
-                            cumulative_gas_used,
-                            logs: ctx.result.into_logs(),
-                        };
-
-                        self.receipt_builder.build_deposit_receipt(OpDepositReceipt {
-                            inner: receipt,
-                            deposit_nonce: depositor.map(|account| account.nonce),
-                            // The deposit receipt version was introduced in Canyon to indicate an
-                            // update to how receipt hashes should be computed
-                            // when set. The state transition process ensures
-                            // this is only set for post-Canyon deposit
-                            // transactions.
-                            deposit_receipt_version: (tx.is_deposit() &&
-                                self.chain_spec
-                                    .is_canyon_active_at_timestamp(self.block.timestamp()))
-                            .then_some(1),
-                        })
-                    }
-                },
-            );
+            .into())
         }
+
+        // Cache the depositor account prior to the state transition for the deposit nonce.
+        //
+        // Note that this *only* needs to be done post-regolith hardfork, as deposit nonces
+        // were not introduced in Bedrock. In addition, regular transactions don't have deposit
+        // nonces, so we don't need to touch the DB for those.
+        let depositor = (self.is_regolith && tx.is_deposit())
+            .then(|| {
+                self.evm
+                    .db_mut()
+                    .load_cache_account(tx.signer())
+                    .map(|acc| acc.account_info().unwrap_or_default())
+            })
+            .transpose()
+            .map_err(|_| OpBlockExecutionError::AccountLoadFailed(tx.signer()))?;
+
+        let tx_env = self.evm_config.tx_env(&tx);
+        let hash = tx.tx_hash();
+
+        // Execute transaction.
+        let result_and_state = self.evm.transact(tx_env).map_err(move |err| {
+            // Ensure hash is calculated for error log, if not already done
+            BlockValidationError::EVM { hash: *hash, error: Box::new(err) }
+        })?;
+
+        trace!(
+            target: "evm",
+            ?tx,
+            "Executed transaction"
+        );
+        self.system_caller
+            .on_state(StateChangeSource::Transaction(self.receipts.len()), &result_and_state.state);
+        let ResultAndState { result, state } = result_and_state;
+        self.evm.db_mut().commit(state);
+
+        // append gas used
+        self.gas_used += result.gas_used();
+
+        self.receipts.push(
+            match self.receipt_builder.build_receipt(ReceiptBuilderCtx {
+                tx: tx.tx(),
+                result,
+                cumulative_gas_used: self.gas_used,
+            }) {
+                Ok(receipt) => receipt,
+                Err(ctx) => {
+                    let receipt = Receipt {
+                        // Success flag was added in `EIP-658: Embedding transaction status code
+                        // in receipts`.
+                        status: Eip658Value::Eip658(ctx.result.is_success()),
+                        cumulative_gas_used: self.gas_used,
+                        logs: ctx.result.into_logs(),
+                    };
+
+                    self.receipt_builder.build_deposit_receipt(OpDepositReceipt {
+                        inner: receipt,
+                        deposit_nonce: depositor.map(|account| account.nonce),
+                        // The deposit receipt version was introduced in Canyon to indicate an
+                        // update to how receipt hashes should be computed
+                        // when set. The state transition process ensures
+                        // this is only set for post-Canyon deposit
+                        // transactions.
+                        deposit_receipt_version: (tx.is_deposit() &&
+                            self.chain_spec
+                                .is_canyon_active_at_timestamp(self.block.timestamp()))
+                        .then_some(1),
+                    })
+                }
+            },
+        );
 
         Ok(())
     }
