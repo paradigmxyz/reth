@@ -21,17 +21,16 @@ use std::{
     },
 };
 
-/// Entrypoint for starting the background processing
+/// Entrypoint for executing the payload.
 pub struct PayloadProcessor {
     executor: WorkloadExecutor,
     // TODO move all the caching stuff in here
 }
 
 impl PayloadProcessor {
-
     /// Executes the payload based on the configured settings.
     pub fn execute(&self) {
-
+        // TODO helpers for executing in sync?
     }
 
     /// Spawns all background tasks and returns a handle connected to the tasks.
@@ -39,9 +38,37 @@ impl PayloadProcessor {
     /// - Transaction prewarming task
     /// - State root task
     /// - Sparse trie task
-    fn spawn(&self) {
+    ///
+    /// # Transaction prewarming task
+    ///
+    /// Responsible for feeding state updates to the state root task.
+    ///
+    /// This task runs until:
+    ///  - externally cancelled (e.g. sequential block execution is complete)
+    ///  - all transaction have been processed
+    ///
+    /// ## State root task
+    ///
+    /// Responsible for preparing sparse trie messages for the sparse trie task.
+    /// A state update (e.g. tx output) is converted into a multiproof calculation that returns an
+    /// output back to this task.
+    ///
+    /// This task runs until it receives a shutdown signal, which should be after after the block
+    /// was fully executed.
+    ///
+    /// ## Sparse trie task
+    ///
+    /// Responsible for calculating the state root based on the received [`SparseTrieUpdate`].
+    ///
+    /// This task runs until there are no further updates to process.
+    ///
+    ///
+    /// This returns a handle to await the final state root and to interact with the tasks (e.g.
+    /// canceling)
+    fn spawn(&self, input: ()) -> PayloadTaskHandle {
+        // TODO: spawn the main tasks and wire them up
 
-        // TODO batch updates: `on_state_update`
+        todo!()
     }
 }
 
@@ -53,6 +80,16 @@ pub struct PayloadTaskHandle {
     // need channel to emit `StateUpdates` to the state root task
 
     // On drop this should also terminate the prewarm task
+
+    // must include the receiver of the state root wired to the sparse trie
+}
+
+impl PayloadTaskHandle {
+    /// Terminates the pre-warming processing
+    // TODO: does this need a config arg?
+    pub fn terminate_prewarming(&self) {
+        // TODO emit a
+    }
 }
 
 impl Drop for PayloadTaskHandle {
@@ -65,6 +102,7 @@ impl Drop for PayloadTaskHandle {
 pub struct SparseTrieTask<F> {
     executor: WorkloadExecutor,
     /// Receives updates from the state root task
+    // TODO: change to option?
     updates: mpsc::Receiver<SparseTrieUpdate>,
     factory: F,
     config: StateRootConfig<F>,
@@ -80,6 +118,7 @@ where
     /// This waits for new incoming [`SparseTrieUpdate`].
     ///
     /// This concludes once the last trie update has been received.
+    // TODO this should probably return the stateroot as response so we can wire a oneshot channel
     fn run(mut self) {
         let mut num_iterations = 0;
 

@@ -30,27 +30,33 @@
 // 1. spawn stateroot task
 // 2. spawn transaction prewarming task
 
-use crossbeam_channel::{bounded, select, unbounded, Receiver, Sender};
 use rayon::ThreadPool as RayonPool;
-use std::{cmp::Ordering, collections::BinaryHeap, sync::Arc, time::Duration};
-use tokio::{runtime::Runtime, sync::broadcast};
+use std::sync::Arc;
+use tokio::runtime::Runtime;
 
 /// An executor for mixed I/O and CPU workloads.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct WorkloadExecutor {
-    runtime: Arc<Runtime>,
-    rayon_pool: Arc<RayonPool>,
+    inner: Arc<WorkloadExecutorInner>,
 }
 
 impl WorkloadExecutor {
     pub fn new(cpu_threads: usize) -> Self {
         // Create runtime for I/O operations
-        let runtime = Arc::new(Runtime::new().unwrap());
+        let runtime = Runtime::new().unwrap();
 
         // Create Rayon thread pool for CPU work
-        let rayon_pool =
-            Arc::new(rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap());
+        let rayon_pool = rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap();
 
-        WorkloadExecutor { runtime, rayon_pool }
+        WorkloadExecutor { inner: Arc::new(WorkloadExecutorInner { runtime, rayon_pool }) }
     }
+
+    // TODO helper functions for spawning, scoping
+}
+
+#[derive(Debug)]
+struct WorkloadExecutorInner {
+    // TODO: replace with main tokio handle instead or even task executor?
+    runtime: Runtime,
+    rayon_pool: RayonPool,
 }
