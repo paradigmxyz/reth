@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
     keccak256,
-    map::{HashMap},
+    map::HashMap,
     Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
 use reth_primitives_traits::{Account, Bytecode};
