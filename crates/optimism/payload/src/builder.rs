@@ -793,6 +793,11 @@ where
         self.chain_spec.is_isthmus_active_at_timestamp(self.attributes().timestamp())
     }
 
+    /// Returns true if interop is active for the payload.
+    pub fn is_interop_active(&self) -> bool {
+        self.chain_spec.is_interop_active_at_timestamp(self.attributes().timestamp())
+    }
+
     /// Returns true if the fees are higher than the previous payload.
     pub fn is_better_payload(&self, total_fees: U256) -> bool {
         is_better_payload(self.best_payload.as_ref(), total_fees)
