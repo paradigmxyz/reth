@@ -16,6 +16,7 @@ use alloc::{
     string::{String, ToString},
 };
 use alloy_eips::BlockNumHash;
+use alloy_evm::InvalidTxError;
 use alloy_primitives::B256;
 use reth_storage_errors::provider::ProviderError;
 use thiserror::Error;
@@ -28,11 +29,11 @@ pub use trie::*;
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
-    EVM {
+    InvalidTx {
         /// The hash of the transaction
         hash: B256,
         /// The EVM error.
-        error: Box<dyn core::error::Error + Send + Sync>,
+        error: Box<dyn InvalidTxError>,
     },
     /// Error when incrementing balance in post execution
     #[error("incrementing balance in post execution failed")]

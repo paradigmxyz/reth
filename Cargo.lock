@@ -261,7 +261,6 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=b77a39a#b77a39aa954a95b1c0385905b7d39c9d096b0a1b"
 dependencies = [
  "alloy-primitives",
  "revm",
@@ -368,7 +367,6 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=b77a39a#b77a39aa954a95b1c0385905b7d39c9d096b0a1b"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -7792,6 +7790,7 @@ name = "reth-execution-errors"
 version = "1.2.0"
 dependencies = [
  "alloy-eips",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "nybbles",
