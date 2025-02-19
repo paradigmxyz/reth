@@ -471,7 +471,7 @@ where
 
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
-struct StateRootTaskMetrics {
+pub(crate) struct StateRootTaskMetrics {
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
     /// Histogram of proof calculation account targets.
