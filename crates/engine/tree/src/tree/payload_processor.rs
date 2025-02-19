@@ -24,9 +24,16 @@ use std::{
 /// Entrypoint for starting the background processing
 pub struct PayloadProcessor {
     executor: WorkloadExecutor,
+    // TODO move all the caching stuff in here
 }
 
 impl PayloadProcessor {
+
+    /// Executes the payload based on the configured settings.
+    pub fn execute(&self) {
+
+    }
+
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
     /// - Transaction prewarming task
