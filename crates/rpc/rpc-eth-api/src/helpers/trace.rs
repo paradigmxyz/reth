@@ -468,18 +468,13 @@ pub trait Trace:
         db: &mut DB,
         evm_env: &EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
     ) -> Result<(), Self::Error> {
-        let mut system_caller =
-            SystemCaller::new(self.evm_config().clone(), self.provider().chain_spec());
-        // apply relevant system calls
-        system_caller
-            .pre_block_beacon_root_contract_call(db, evm_env, block.parent_beacon_block_root())
-            .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
+        let mut system_caller = SystemCaller::new(self.provider().chain_spec());
 
+        // apply relevant system calls
+        let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
         system_caller
-            .pre_block_blockhashes_contract_call(db, evm_env, block.parent_hash())
-            .map_err(|_| {
-                EthApiError::EvmCustom("failed to apply blockhashes system call".to_string())
-            })?;
+            .apply_pre_execution_changes(block.header(), &mut evm)
+            .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
 
         Ok(())
     }
