@@ -19,7 +19,7 @@ mod op_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::Header;
+use alloy_consensus::{proofs::storage_root_unhashed, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
@@ -36,6 +36,7 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
+use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
 /// Chain spec builder for a OP stack chain.
@@ -419,6 +420,32 @@ impl OpGenesisInfo {
 
         info
     }
+}
+
+/// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
+pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
+    let mut header = reth_chainspec::make_genesis_header(genesis, hardforks);
+
+    // If Isthmus is active, overwrite the withdrawals root with the storage root of predeploy
+    // `L2ToL1MessagePasser.sol`
+    if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) {
+        match genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
+            Some(predeploy) => {
+                if let Some(ref storage) = predeploy.storage {
+                    header.withdrawals_root =
+                        Some(storage_root_unhashed(storage.iter().map(|(k, v)| (*k, (*v).into()))))
+                }
+            }
+            None =>
+                // todo: log this when no_std tracing available <https://github.com/paradigmxyz/reth/issues/14526>
+            /*debug!(target: "reth::cli",
+                "Isthmus active but predeploy L2ToL1MessagePasser.sol not found in genesis alloc"
+            ),*/
+                {}
+        }
+    }
+
+    header
 }
 
 #[cfg(test)]

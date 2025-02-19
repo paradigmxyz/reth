@@ -4,12 +4,12 @@ use alloc::{sync::Arc, vec};
 
 use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
-use reth_chainspec::{make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
+use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::{EthereumHardfork, Hardfork};
 use reth_optimism_forks::OpHardfork;
 use reth_primitives_traits::SealedHeader;
 
-use crate::{LazyLock, OpChainSpec};
+use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
 
 /// The Base mainnet spec
 pub static BASE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
@@ -20,7 +20,7 @@ pub static BASE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
         inner: ChainSpec {
             chain: Chain::base_mainnet(),
             genesis_header: SealedHeader::new(
-                make_genesis_header(&genesis, &hardforks),
+                make_op_genesis_header(&genesis, &hardforks),
                 b256!("f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"),
             ),
             genesis,

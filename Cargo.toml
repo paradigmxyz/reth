@@ -346,7 +346,7 @@ reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
 reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }
-reth-evm = { path = "crates/evm" }
+reth-evm = { path = "crates/evm", default-features = false }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-optimism-evm = { path = "crates/optimism/evm", default-features = false }
 reth-execution-errors = { path = "crates/evm/execution-errors", default-features = false }
@@ -559,7 +559,7 @@ async-stream = "0.3"
 async-trait = "0.1.68"
 futures = "0.3"
 futures-core = "0.3"
-futures-util = "0.3"
+futures-util = { version = "0.3", default-features = false }
 hyper = "1.3"
 hyper-util = "0.1.5"
 pin-project = "1.0.12"
@@ -623,23 +623,23 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 crunchy = "=0.2.2"
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "048248c" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "048248c" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "b77a39a" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "b77a39a" }
 
-revm = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-database = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-context = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-specification = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
-revm-optimism = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-specification = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-optimism = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
 
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "74b6aa4" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "8900c2b" }
 
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }

@@ -109,7 +109,7 @@ where
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
-    system_caller: SystemCaller<EvmConfig, ChainSpec>,
+    system_caller: SystemCaller<Arc<ChainSpec>>,
     /// Receipt builder.
     receipt_builder:
         Arc<dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>>,
@@ -130,7 +130,7 @@ where
             dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>,
         >,
     ) -> Self {
-        let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
+        let system_caller = SystemCaller::new(chain_spec.clone());
         Self { state, chain_spec, evm_config, system_caller, receipt_builder }
     }
 }
@@ -158,12 +158,8 @@ where
 
         let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
 
-        self.system_caller.apply_beacon_root_contract_call(
-            block.header().timestamp(),
-            block.header().number(),
-            block.header().parent_beacon_block_root(),
-            &mut evm,
-        )?;
+        self.system_caller
+            .apply_beacon_root_contract_call(block.header().parent_beacon_block_root(), &mut evm)?;
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),

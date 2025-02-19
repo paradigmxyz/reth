@@ -202,11 +202,12 @@ where
     let block_number = evm_env.block_env.number;
     let beneficiary = evm_env.block_env.beneficiary;
 
-    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
+    let mut evm = evm_config.evm_with_env(&mut db, evm_env);
+    let mut system_caller = SystemCaller::new(chain_spec.clone());
 
     // apply eip-4788 pre block contract call
     system_caller
-        .pre_block_beacon_root_contract_call(&mut db, &evm_env, attributes.parent_beacon_block_root)
+        .apply_beacon_root_contract_call(attributes.parent_beacon_block_root, &mut evm)
         .map_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_header.hash(),
@@ -217,17 +218,14 @@ where
         })?;
 
     // apply eip-2935 blockhashes update
-    system_caller.pre_block_blockhashes_contract_call(
-        &mut db,
-        &evm_env,
+    system_caller.apply_blockhashes_contract_call(
         parent_header.hash(),
+        &mut evm,
     )
     .map_err(|err| {
         warn!(target: "payload_builder", parent_hash=%parent_header.hash(), %err, "failed to update parent header blockhashes for payload");
         PayloadBuilderError::Internal(err.into())
     })?;
-
-    let mut evm = evm_config.evm_with_env(&mut db, evm_env);
 
     let mut receipts = Vec::new();
     let mut block_blob_count = 0;

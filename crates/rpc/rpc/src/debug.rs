@@ -654,21 +654,20 @@ where
             .await
     }
 
-    /// Returns the code associated with a given hash at the specified block ID.
-    /// If no block ID is provided, it defaults to the latest block.
+    /// Returns the code associated with a given hash at the specified block ID. If no code is
+    /// found, it returns None. If no block ID is provided, it defaults to the latest block.
     pub async fn debug_code_by_hash(
         &self,
         hash: B256,
         block_id: Option<BlockId>,
-    ) -> Result<Bytes, Eth::Error> {
+    ) -> Result<Option<Bytes>, Eth::Error> {
         Ok(self
             .provider()
             .state_by_block_id(block_id.unwrap_or_default())
             .map_err(Eth::Error::from_eth_err)?
             .bytecode_by_hash(&hash)
             .map_err(Eth::Error::from_eth_err)?
-            .unwrap_or_default()
-            .original_bytes())
+            .map(|b| b.original_bytes()))
     }
 
     /// Executes the configured transaction with the environment on the given database.
@@ -1051,7 +1050,11 @@ where
         Ok(())
     }
 
-    async fn debug_code_by_hash(&self, hash: B256, block_id: Option<BlockId>) -> RpcResult<Bytes> {
+    async fn debug_code_by_hash(
+        &self,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<Option<Bytes>> {
         Self::debug_code_by_hash(self, hash, block_id).await.map_err(Into::into)
     }
 

@@ -1,10 +1,10 @@
 //! Chain specification for the Optimism Sepolia testnet network.
 
-use crate::{LazyLock, OpChainSpec};
+use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
 use alloc::{sync::Arc, vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_primitives::{b256, U256};
-use reth_chainspec::{make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
+use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OpHardfork;
 use reth_primitives_traits::SealedHeader;
@@ -18,7 +18,7 @@ pub static OP_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
         inner: ChainSpec {
             chain: Chain::from_named(NamedChain::OptimismSepolia),
             genesis_header: SealedHeader::new(
-                make_genesis_header(&genesis, &hardforks),
+                make_op_genesis_header(&genesis, &hardforks),
                 b256!("102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"),
             ),
             genesis,
