@@ -8866,7 +8866,8 @@ dependencies = [
 name = "reth-payload-validator"
 version = "1.2.0"
 dependencies = [
- "alloy-rpc-types",
+ "alloy-consensus",
+ "alloy-rpc-types-engine",
  "reth-chainspec",
  "reth-primitives",
  "reth-primitives-traits",
