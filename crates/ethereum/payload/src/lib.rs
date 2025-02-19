@@ -20,7 +20,7 @@ use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardfor
 use reth_errors::RethError;
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, EvmError, InvalidTxError,
+    system_calls::SystemCaller, ConfigureEvm, Evm, EvmEnv, EvmError, InvalidTxError,
     NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
@@ -32,15 +32,17 @@ use reth_primitives_traits::{
     proofs::{self},
     Block as _, SignedTransaction,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{
+    database::StateProviderDatabase,
+    db::{states::bundle_state::BundleRetention, State},
+};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
     PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
 use revm::{
-    db::{states::bundle_state::BundleRetention, State},
-    primitives::ResultAndState,
+    context_interface::{result::ResultAndState, Block as _},
     DatabaseCommit,
 };
 use std::sync::Arc;
@@ -186,25 +188,26 @@ where
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = evm_env.block_env.gas_limit.to::<u64>();
-    let base_fee = evm_env.block_env.basefee.to::<u64>();
+    let block_gas_limit: u64 = evm_env.block_env.gas_limit;
+    let base_fee = evm_env.block_env.basefee;
 
     let mut executed_txs = Vec::new();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
-        evm_env.block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
+        evm_env.block_env.blob_gasprice().map(|gasprice| gasprice as u64),
     ));
     let mut total_fees = U256::ZERO;
 
-    let block_number = evm_env.block_env.number.to::<u64>();
-    let beneficiary = evm_env.block_env.coinbase;
+    let block_number = evm_env.block_env.number;
+    let beneficiary = evm_env.block_env.beneficiary;
 
-    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
+    let mut evm = evm_config.evm_with_env(&mut db, evm_env);
+    let mut system_caller = SystemCaller::new(chain_spec.clone());
 
     // apply eip-4788 pre block contract call
     system_caller
-        .pre_block_beacon_root_contract_call(&mut db, &evm_env, attributes.parent_beacon_block_root)
+        .apply_beacon_root_contract_call(attributes.parent_beacon_block_root, &mut evm)
         .map_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_header.hash(),
@@ -215,17 +218,14 @@ where
         })?;
 
     // apply eip-2935 blockhashes update
-    system_caller.pre_block_blockhashes_contract_call(
-        &mut db,
-        &evm_env,
+    system_caller.apply_blockhashes_contract_call(
         parent_header.hash(),
+        &mut evm,
     )
     .map_err(|err| {
         warn!(target: "payload_builder", parent_hash=%parent_header.hash(), %err, "failed to update parent header blockhashes for payload");
         PayloadBuilderError::Internal(err.into())
     })?;
-
-    let mut evm = evm_config.evm_with_env(&mut db, evm_env);
 
     let mut receipts = Vec::new();
     let mut block_blob_count = 0;
@@ -279,7 +279,7 @@ where
         }
 
         // Configure the environment for the tx.
-        let tx_env = evm_config.tx_env(tx.tx(), tx.signer());
+        let tx_env = evm_config.tx_env(&tx);
 
         let ResultAndState { result, state } = match evm.transact(tx_env) {
             Ok(res) => res,
@@ -325,13 +325,11 @@ where
         cumulative_gas_used += gas_used;
 
         // Push transaction changeset and calculate header bloom filter for receipt.
-        #[allow(clippy::needless_update)] // side-effect of optimism fields
         receipts.push(Receipt {
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
             logs: result.into_logs().into_iter().collect(),
-            ..Default::default()
         });
 
         // update add to total fees

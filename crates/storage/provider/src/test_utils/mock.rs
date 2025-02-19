@@ -16,8 +16,10 @@ use alloy_primitives::{
 };
 use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, EthChainSpec};
-use reth_db::mock::{DatabaseMock, TxMock};
-use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_db_api::{
+    mock::{DatabaseMock, TxMock},
+    models::{AccountBeforeTx, StoredBlockBodyIndices},
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives::{
@@ -729,10 +731,10 @@ impl<T: Transaction, ChainSpec: EthChainSpec> StateProofProvider for MockEthProv
     }
 }
 
-impl<T: Transaction, ChainSpec: EthChainSpec> HashedPostStateProvider
+impl<T: Transaction, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider
     for MockEthProvider<T, ChainSpec>
 {
-    fn hashed_post_state(&self, _state: &revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }

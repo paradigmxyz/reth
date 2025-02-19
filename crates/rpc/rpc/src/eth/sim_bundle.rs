@@ -3,28 +3,27 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
-use alloy_rpc_types_eth::{BlockId, BlockOverrides};
+use alloy_rpc_types_eth::BlockId;
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, Privacy, RefundConfig, SendBundleRequest, SimBundleLogs,
     SimBundleOverrides, SimBundleResponse, Validity,
 };
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_primitives::Recovered;
 use reth_provider::ProviderTx;
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
-use reth_tasks::pool::BlockingTaskGuard;
-use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{
-    db::CacheDB,
-    primitives::{Address, ResultAndState},
-    DatabaseCommit, DatabaseRef,
+use reth_rpc_eth_types::{
+    revm_utils::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
 };
+use reth_tasks::pool::BlockingTaskGuard;
+use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
+use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
 use std::{sync::Arc, time::Duration};
 use tracing::info;
 
@@ -47,9 +46,7 @@ const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
 #[derive(Clone, Debug)]
 pub struct FlattenedBundleItem<T> {
     /// The signed transaction
-    pub tx: T,
-    /// The address that signed the transaction
-    pub signer: Address,
+    pub tx: Recovered<T>,
     /// Whether the transaction is allowed to revert
     pub can_revert: bool,
     /// Item-level inclusion constraints
@@ -170,10 +167,10 @@ where
             while idx < body.len() {
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
-                        let recovered_tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
-                        let (tx, signer) = recovered_tx.into_parts();
-                        let tx: PoolConsensusTx<Eth::Pool> =
-                            <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus(tx);
+                        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
+                        let tx = tx.map_transaction(
+                            <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus,
+                        );
 
                         let refund_percent =
                             validity.as_ref().and_then(|v| v.refund.as_ref()).and_then(|refunds| {
@@ -187,7 +184,6 @@ where
                         // Create FlattenedBundleItem with current inclusion, validity, and privacy
                         let flattened_item = FlattenedBundleItem {
                             tx,
-                            signer,
                             can_revert: *can_revert,
                             inclusion: inclusion.clone(),
                             validity: validity.clone(),
@@ -229,7 +225,6 @@ where
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
         let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
-        let BlockOverrides { number, coinbase, time, gas_limit, base_fee, .. } = block_overrides;
 
         // Parse and validate bundle
         // Also, flatten the bundle here so that its easier to process
@@ -240,27 +235,6 @@ where
         let current_block = self.eth_api().block_with_senders(current_block_id).await?;
         let current_block = current_block.ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        // apply overrides
-        if let Some(block_number) = number {
-            evm_env.block_env.number = U256::from(block_number);
-        }
-
-        if let Some(coinbase) = coinbase {
-            evm_env.block_env.coinbase = coinbase;
-        }
-
-        if let Some(timestamp) = time {
-            evm_env.block_env.timestamp = U256::from(timestamp);
-        }
-
-        if let Some(gas_limit) = gas_limit {
-            evm_env.block_env.gas_limit = U256::from(gas_limit);
-        }
-
-        if let Some(base_fee) = base_fee {
-            evm_env.block_env.basefee = U256::from(base_fee);
-        }
-
         let eth_api = self.inner.eth_api.clone();
 
         let sim_response = self
@@ -269,9 +243,12 @@ where
             .spawn_with_state_at_block(current_block_id, move |state| {
                 // Setup environment
                 let current_block_number = current_block.number();
-                let coinbase = evm_env.block_env.coinbase;
+                let coinbase = evm_env.block_env.beneficiary;
                 let basefee = evm_env.block_env.basefee;
-                let db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                // apply overrides
+                apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
                     .map_err(EthApiError::from_eth_err)?
@@ -302,7 +279,7 @@ where
                     }
 
                     let ResultAndState { result, state } = evm
-                        .transact(eth_api.evm_config().tx_env(&item.tx, item.signer))
+                        .transact(eth_api.evm_config().tx_env(&item.tx))
                         .map_err(Eth::Error::from_evm_err)?;
 
                     if !result.is_success() && !item.can_revert {
@@ -350,11 +327,11 @@ where
                     if let Some(refund_percent) = item.refund_percent {
                         // Get refund configurations
                         let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
-                            vec![RefundConfig { address: item.signer, percent: 100 }]
+                            vec![RefundConfig { address: item.tx.signer(), percent: 100 }]
                         });
 
                         // Calculate payout transaction fee
-                        let payout_tx_fee = basefee *
+                        let payout_tx_fee = U256::from(basefee) *
                             U256::from(SBUNDLE_PAYOUT_MAX_COST) *
                             U256::from(refund_configs.len() as u64);
 

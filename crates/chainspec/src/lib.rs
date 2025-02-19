@@ -12,8 +12,8 @@
 extern crate alloc;
 
 /// Chain specific constants
-pub(crate) mod constants;
-pub use constants::MIN_TRANSACTION_GAS;
+mod constants;
+pub use constants::*;
 
 mod api;
 /// The chain info module.

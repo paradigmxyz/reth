@@ -4,9 +4,9 @@ use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
+    tables,
     transaction::DbTx,
 };
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError};

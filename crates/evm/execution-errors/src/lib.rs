@@ -149,6 +149,8 @@ impl From<ProviderError> for BlockExecutionError {
     }
 }
 
+impl revm_database_interface::DBErrorMarker for BlockExecutionError {}
+
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum InternalBlockExecutionError {
