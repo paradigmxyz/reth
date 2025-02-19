@@ -21,6 +21,11 @@ impl<ChainSpec> OpExecutionPayloadValidator<ChainSpec>
 where
     ChainSpec: OpHardforks,
 {
+    /// Returns reference to chain spec.
+    pub fn chain_spec(&self) -> &ChainSpec {
+        &self.inner
+    }
+
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout, like:
     ///    - missing or invalid base fee

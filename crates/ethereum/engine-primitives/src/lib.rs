@@ -100,6 +100,7 @@ impl EthereumEngineValidator {
 impl PayloadValidator for EthereumEngineValidator {
     type Block = Block;
     type ExecutionData = ExecutionData;
+    type Error = PayloadError;
 
     fn ensure_well_formed_payload(
         &self,

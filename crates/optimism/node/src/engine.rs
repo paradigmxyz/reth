@@ -1,8 +1,7 @@
-use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
-};
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 use op_alloy_rpc_types_engine::{
-    OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
+    OpExecutionData, OpExecutionPayload, OpExecutionPayloadEnvelopeV3,
+    OpExecutionPayloadEnvelopeV4, OpPayloadAttributes, OpPayloadError,
 };
 use reth_chainspec::ChainSpec;
 use reth_node_api::{
@@ -16,9 +15,10 @@ use reth_node_api::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
+use reth_optimism_payload_builder::{
+    OpBuiltPayload, OpExecutionPayloadValidator, OpPayloadBuilderAttributes,
+};
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
-use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::SealedBlock;
 use std::sync::Arc;
 
@@ -47,16 +47,16 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
-    type ExecutionData = ExecutionData;
+    type ExecutionData = OpExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> ExecutionData {
+    ) -> OpExecutionData {
         let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
+            OpExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        OpExecutionData { payload, sidecar }
     }
 }
 
@@ -74,13 +74,13 @@ impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N> {
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
 pub struct OpEngineValidator {
-    inner: ExecutionPayloadValidator<OpChainSpec>,
+    inner: OpExecutionPayloadValidator<OpChainSpec>,
 }
 
 impl OpEngineValidator {
     /// Instantiates a new validator.
     pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self { inner: ExecutionPayloadValidator::new(chain_spec) }
+        Self { inner: OpExecutionPayloadValidator::new(chain_spec) }
     }
 
     /// Returns the chain spec used by the validator.
@@ -92,19 +92,20 @@ impl OpEngineValidator {
 
 impl PayloadValidator for OpEngineValidator {
     type Block = OpBlock;
-    type ExecutionData = ExecutionData;
+    type ExecutionData = OpExecutionData;
+    type Error = OpPayloadError;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
+        payload: Self::ExecutionData,
+    ) -> Result<SealedBlock<Self::Block>, Self::Error> {
         self.inner.ensure_well_formed_payload(payload)
     }
 }
 
 impl<Types> EngineValidator<Types> for OpEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = ExecutionData>,
+    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = OpExecutionData>,
 {
     fn validate_execution_requests(
         &self,
