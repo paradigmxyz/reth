@@ -112,7 +112,7 @@ impl ProcessUID {
         system.refresh_processes_specifics(
             sysinfo::ProcessesToUpdate::Some(&[pid2]),
             true,
-            ProcessRefreshKind::new(),
+            ProcessRefreshKind::nothing(),
         );
         system.process(pid2).map(|process| Self { pid, start_time: process.start_time() })
     }
@@ -141,9 +141,11 @@ impl ProcessUID {
 
     /// Whether a process with this `pid` and `start_time` exists.
     fn is_active(&self) -> bool {
-        System::new_with_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()))
-            .process(self.pid.into())
-            .is_some_and(|p| p.start_time() == self.start_time)
+        System::new_with_specifics(
+            RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
+        )
+        .process(self.pid.into())
+        .is_some_and(|p| p.start_time() == self.start_time)
     }
 
     /// Writes `pid` and `start_time` to a file.

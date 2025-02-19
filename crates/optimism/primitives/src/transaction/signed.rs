@@ -17,6 +17,7 @@ use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
     mem,
+    ops::Deref,
 };
 use derive_more::{AsRef, Deref};
 use op_alloy_consensus::{
