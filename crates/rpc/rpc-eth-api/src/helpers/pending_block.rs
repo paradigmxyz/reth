@@ -3,7 +3,7 @@
 
 use super::SpawnBlocking;
 use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
-use alloy_consensus::{BlockHeader, Transaction};
+use alloy_consensus::{transaction::Recovered, BlockHeader, Transaction};
 use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::BlockNumberOrTag;
@@ -209,7 +209,7 @@ pub trait LoadPendingBlock:
         block_env: &BlockEnv,
         parent_hash: B256,
         state_root: B256,
-        transactions: Vec<ProviderTx<Self::Provider>>,
+        transactions: Vec<Recovered<ProviderTx<Self::Provider>>>,
         receipts: &[ProviderReceipt<Self::Provider>],
     ) -> ProviderBlock<Self::Provider>;
 
@@ -219,7 +219,7 @@ pub trait LoadPendingBlock:
         block_env: &BlockEnv,
         parent_hash: B256,
         state_root: B256,
-        transactions: Vec<ProviderTx<Self::Provider>>,
+        transactions: Vec<Recovered<ProviderTx<Self::Provider>>>,
         results: Vec<ExecutionResult<HaltReasonFor<Self::Evm>>>,
     ) -> (ProviderBlock<Self::Provider>, Vec<ProviderReceipt<Self::Provider>>) {
         let mut cumulative_gas_used = 0;
@@ -267,7 +267,6 @@ pub trait LoadPendingBlock:
         let base_fee = evm_env.block_env.basefee;
 
         let mut executed_txs = Vec::new();
-        let mut senders = Vec::new();
         let mut best_txs =
             self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
                 base_fee,
@@ -336,7 +335,7 @@ pub trait LoadPendingBlock:
                 }
             }
 
-            let tx_env = self.evm_config().tx_env(tx.tx(), tx.signer());
+            let tx_env = self.evm_config().tx_env(&tx);
 
             let ResultAndState { result, state: _ } = match evm.transact_commit(tx_env) {
                 Ok(res) => res,
@@ -377,9 +376,7 @@ pub trait LoadPendingBlock:
             cumulative_gas_used += gas_used;
 
             // append transaction to the list of executed transactions
-            let (tx, sender) = tx.into_parts();
             executed_txs.push(tx);
-            senders.push(sender);
             results.push(result);
         }
 
@@ -404,6 +401,8 @@ pub trait LoadPendingBlock:
 
         // calculate the state root
         let state_root = db.database.state_root(hashed_state).map_err(Self::Error::from_eth_err)?;
+
+        let senders = executed_txs.iter().map(|tx| tx.signer()).collect();
 
         let (block, receipts) = self.assemble_block_and_receipts(
             &evm_env.block_env,

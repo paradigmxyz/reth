@@ -17,6 +17,7 @@
 
 extern crate alloc;
 
+use alloc::borrow::Borrow;
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip2930::AccessList;
 pub use alloy_evm::evm::EvmFactory;
@@ -182,13 +183,10 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     type Spec: Debug + Copy + Send + Sync + 'static;
 
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
-    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv;
-
-    /// Returns a [`TxEnv`] from a [`Recovered`] transaction.
-    fn tx_env_from_recovered(&self, tx: Recovered<&Self::Transaction>) -> Self::TxEnv {
-        let (tx, address) = tx.into_parts();
-        self.tx_env(tx, address)
-    }
+    fn tx_env<T: Borrow<Self::Transaction>>(
+        &self,
+        transaction: impl Borrow<Recovered<T>>,
+    ) -> Self::TxEnv;
 
     /// Creates a new [`EvmEnv`] for the given header.
     fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec>;
