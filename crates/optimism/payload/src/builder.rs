@@ -55,7 +55,7 @@ use revm::{
         result::{ExecutionResult, ResultAndState},
         Block,
     },
-    DatabaseCommit,
+    Database as _, DatabaseCommit,
 };
 use std::{fmt::Display, sync::Arc};
 use tracing::{debug, trace, warn};
@@ -368,19 +368,21 @@ impl<Txs> OpBuilder<'_, Txs> {
         let Self { best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
+        let mut evm = ctx.evm_config.evm_with_env(&mut *state, ctx.evm_env.clone());
+
         // 1. apply eip-4788 pre block contract call
-        ctx.apply_pre_beacon_root_contract_call(state)?;
+        ctx.apply_pre_beacon_root_contract_call(&mut evm)?;
 
         // 2. ensure create2deployer is force deployed
-        ctx.ensure_create2_deployer(state)?;
+        ctx.ensure_create2_deployer(evm.db_mut())?;
 
         // 3. execute sequencer transactions
-        let mut info = ctx.execute_sequencer_transactions(state)?;
+        let mut info = ctx.execute_sequencer_transactions(&mut evm)?;
 
         // 4. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes());
-            if ctx.execute_best_transactions(&mut info, state, best_txs)?.is_some() {
+            if ctx.execute_best_transactions(&mut info, &mut evm, best_txs)?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
 
@@ -390,6 +392,8 @@ impl<Txs> OpBuilder<'_, Txs> {
                 return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees })
             }
         }
+
+        drop(evm);
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
@@ -822,19 +826,14 @@ where
     N: OpPayloadPrimitives,
 {
     /// apply eip-4788 pre block contract call
-    pub fn apply_pre_beacon_root_contract_call<DB>(
+    pub fn apply_pre_beacon_root_contract_call(
         &self,
-        db: &mut DB,
-    ) -> Result<(), PayloadBuilderError>
-    where
-        DB: Database + DatabaseCommit,
-        DB::Error: Display,
-    {
-        SystemCaller::new(self.evm_config.clone(), self.chain_spec.clone())
-            .pre_block_beacon_root_contract_call(
-                db,
-                &self.evm_env,
+        evm: &mut impl Evm<DB: DatabaseCommit>,
+    ) -> Result<(), PayloadBuilderError> {
+        SystemCaller::new(&self.chain_spec)
+            .apply_beacon_root_contract_call(
                 self.attributes().payload_attributes.parent_beacon_block_root,
+                evm,
             )
             .map_err(|err| {
                 warn!(target: "payload_builder",
@@ -886,15 +885,15 @@ where
     }
 
     /// Executes all sequencer transactions that are included in the payload attributes.
-    pub fn execute_sequencer_transactions<DB>(
+    pub fn execute_sequencer_transactions(
         &self,
-        db: &mut State<DB>,
-    ) -> Result<ExecutionInfo<N>, PayloadBuilderError>
-    where
-        DB: Database<Error = ProviderError>,
-    {
+        evm: &mut impl Evm<
+            DB: Database<Error = ProviderError> + DatabaseCommit,
+            Tx = EvmConfig::TxEnv,
+            HaltReason = HaltReasonFor<EvmConfig>,
+        >,
+    ) -> Result<ExecutionInfo<N>, PayloadBuilderError> {
         let mut info = ExecutionInfo::with_capacity(self.attributes().transactions.len());
-        let mut evm = self.evm_config.evm_with_env(&mut *db, self.evm_env.clone());
 
         for sequencer_tx in &self.attributes().transactions {
             // A sequencer's block should never contain blob transactions.
@@ -920,8 +919,8 @@ where
             let depositor_nonce = (self.is_regolith_active() && sequencer_tx.is_deposit())
                 .then(|| {
                     evm.db_mut()
-                        .load_cache_account(sequencer_tx.signer())
-                        .map(|acc| acc.account_info().unwrap_or_default().nonce)
+                        .basic(sequencer_tx.signer())
+                        .map(|acc| acc.unwrap_or_default().nonce)
                 })
                 .transpose()
                 .map_err(|_| {
@@ -932,7 +931,7 @@ where
 
             let tx_env = self.evm_config.tx_env(sequencer_tx.tx(), sequencer_tx.signer());
 
-            let ResultAndState { result, state } = match evm.transact(tx_env) {
+            let ResultAndState { result, state: _ } = match evm.transact_commit(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     if err.is_invalid_tx_err() {
@@ -943,9 +942,6 @@ where
                     return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                 }
             };
-
-            // commit changes
-            evm.db_mut().commit(state);
 
             let gas_used = result.gas_used();
 
@@ -971,23 +967,22 @@ where
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    pub fn execute_best_transactions<DB>(
+    pub fn execute_best_transactions(
         &self,
         info: &mut ExecutionInfo<N>,
-        db: &mut State<DB>,
+        evm: &mut impl Evm<
+            DB: DatabaseCommit,
+            Tx = EvmConfig::TxEnv,
+            HaltReason = HaltReasonFor<EvmConfig>,
+        >,
         mut best_txs: impl PayloadTransactions<
             Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>,
         >,
-    ) -> Result<Option<()>, PayloadBuilderError>
-    where
-        DB: Database<Error = ProviderError>,
-    {
+    ) -> Result<Option<()>, PayloadBuilderError> {
         let block_gas_limit = self.block_gas_limit();
         let block_da_limit = self.da_config.max_da_block_size();
         let tx_da_limit = self.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
-
-        let mut evm = self.evm_config.evm_with_env(&mut *db, self.evm_env.clone());
 
         while let Some(tx) = best_txs.next(()) {
             let tx = tx.into_consensus();
@@ -1013,7 +1008,7 @@ where
             // Configure the environment for the tx.
             let tx_env = self.evm_config.tx_env(tx.tx(), tx.signer());
 
-            let ResultAndState { result, state } = match evm.transact(tx_env) {
+            let ResultAndState { result, state: _ } = match evm.transact_commit(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     if let Some(err) = err.as_invalid_tx_err() {
@@ -1033,9 +1028,6 @@ where
                     return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                 }
             };
-
-            // commit changes
-            evm.db_mut().commit(state);
 
             let gas_used = result.gas_used();
 

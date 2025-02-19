@@ -20,12 +20,10 @@ use revm::context_interface::result::ResultAndState;
 #[inline]
 pub(crate) fn transact_beacon_root_contract_call<Halt>(
     chain_spec: impl EthereumHardforks,
-    block_timestamp: u64,
-    block_number: u64,
     parent_beacon_block_root: Option<B256>,
     evm: &mut impl Evm<Error: Display, HaltReason = Halt>,
 ) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
-    if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
+    if !chain_spec.is_cancun_active_at_timestamp(evm.block().timestamp) {
         return Ok(None)
     }
 
@@ -34,7 +32,7 @@ pub(crate) fn transact_beacon_root_contract_call<Halt>(
 
     // if the block number is zero (genesis block) then the parent beacon block root must
     // be 0x0 and no system transaction may occur as per EIP-4788
-    if block_number == 0 {
+    if evm.block().number == 0 {
         if !parent_beacon_block_root.is_zero() {
             return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
                 parent_beacon_block_root,
