@@ -20,7 +20,7 @@ use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::SealedHeader;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
 /// `reth benchmark new-payload-fcu` command
@@ -71,8 +71,14 @@ impl Command {
         // put results in a summary vec so they can be printed at the end
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
+        let mut total_wait_time = Duration::ZERO;
 
-        while let Some((block, head, safe, finalized)) = receiver.recv().await {
+        while let Some((block, head, safe, finalized)) = {
+            let wait_start = Instant::now();
+            let result = receiver.recv().await;
+            total_wait_time += wait_start.elapsed();
+            result
+        } {
             // just put gas used here
             let gas_used = block.gas_used;
             let block_number = block.number;
@@ -112,8 +118,9 @@ impl Command {
             let combined_result =
                 CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
 
-            // current duration since the start of the benchmark
-            let current_duration = total_benchmark_duration.elapsed();
+            // current duration since the start of the benchmark minus the time
+            // waiting for blocks
+            let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
 
             // convert gas used to gigagas, then compute gigagas per second
             info!(%combined_result);
