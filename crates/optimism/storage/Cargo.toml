@@ -32,10 +32,12 @@ reth-stages-types.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-primitives/std",
-    "reth-trie-common/std",
-    "reth-storage-api/std",
-    "reth-optimism-primitives/std",
-    "alloy-primitives/std",
-    "revm/std",
+	"reth-primitives/std",
+	"reth-trie-common/std",
+	"reth-storage-api/std",
+	"reth-optimism-primitives/std",
+	"alloy-primitives/std",
+	"revm/std",
+	"reth-prune-types/std",
+	"reth-stages-types/std"
 ]
