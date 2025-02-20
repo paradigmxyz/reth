@@ -1,8 +1,12 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::{Header, Transaction};
+use alloy_eips::{
+    eip6110::DEPOSIT_REQUEST_TYPE,
+    eip7685::{Requests, RequestsOrHash},
+};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState,
+    CancunPayloadFields, PraguePayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState,
     PayloadStatus,
 };
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
@@ -17,6 +21,7 @@ use reth_evm::{
     state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
     ConfigureEvm, Evm, EvmError,
 };
+use reth_evm_ethereum::eip6110::accumulate_deposits_from_receipts;
 use reth_payload_primitives::EngineApiMessageVersion;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt};
@@ -28,10 +33,7 @@ use reth_revm::{
     DatabaseCommit,
 };
 use std::{
-    collections::VecDeque,
-    future::Future,
-    pin::Pin,
-    task::{ready, Context, Poll},
+    collections::VecDeque, future::Future, hash::Hash, pin::Pin, task::{ready, Context, Poll}
 };
 use tokio::sync::oneshot;
 use tracing::*;
@@ -296,7 +298,7 @@ where
     let mut system_caller = SystemCaller::new(chain_spec.clone());
 
     system_caller
-        .apply_beacon_root_contract_call(reorg_target.parent_beacon_block_root, &mut evm)?;
+        .apply_pre_execution_changes(&reorg_target.header, &mut evm)?;
 
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
@@ -340,6 +342,25 @@ where
         // append transaction to the list of executed transactions
         transactions.push(tx);
     }
+
+    // Collect all EIP-7685 requests
+    let deposit_address = alloy_eips::eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS;
+    let mut requests = Requests::default();
+    let mut out = Vec::new();
+
+    accumulate_deposits_from_receipts(
+        deposit_address,
+        &receipts,
+        &mut out,
+    ).map_err(|err| RethError::Execution(BlockExecutionError::other(err)))?;
+    
+    if !out.is_empty() {
+        requests.push_request_with_type(DEPOSIT_REQUEST_TYPE, out);
+    }
+
+    requests.extend(system_caller
+        .apply_post_execution_changes(&mut evm)?);
+
     drop(evm);
 
     if let Some(withdrawals) = &reorg_target.body.withdrawals {
@@ -369,6 +390,8 @@ where
             (None, None)
         };
 
+    let requests_hash = Some(&requests).map(|requests| requests.requests_hash());
+
     let reorg_block = Block {
         header: Header {
             // Set same fields as the reorg target
@@ -394,7 +417,7 @@ where
             blob_gas_used,
             excess_blob_gas,
             state_root: state_provider.state_root(hashed_state)?,
-            requests_hash: None, // TODO(prague)
+            requests_hash: requests_hash,
         },
         body: BlockBody {
             transactions,
@@ -410,15 +433,18 @@ where
             &reorg_block.into_block(),
         )
         .0,
-        // todo(onbjerg): how do we support execution requests?
         sidecar: reorg_target
             .header
             .parent_beacon_block_root
             .map(|root| {
-                ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                ExecutionPayloadSidecar::v4(CancunPayloadFields {
                     parent_beacon_block_root: root,
                     versioned_hashes,
-                })
+                },
+                PraguePayloadFields {
+                    requests : RequestsOrHash::Requests(requests),
+                },
+            )
             })
             .unwrap_or_else(ExecutionPayloadSidecar::none),
     })

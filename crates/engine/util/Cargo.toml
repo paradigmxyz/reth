@@ -21,6 +21,7 @@ reth-fs-util.workspace = true
 reth-engine-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
 reth-revm.workspace = true
 reth-provider.workspace = true
 reth-ethereum-forks.workspace = true

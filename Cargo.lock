@@ -7493,6 +7493,7 @@ dependencies = [
  "reth-errors",
  "reth-ethereum-forks",
  "reth-evm",
+ "reth-evm-ethereum",
  "reth-fs-util",
  "reth-payload-primitives",
  "reth-payload-validator",
