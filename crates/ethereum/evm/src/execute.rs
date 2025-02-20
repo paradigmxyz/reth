@@ -124,7 +124,7 @@ pub struct EthExecutionStrategy<'a, Evm, EvmConfig> {
     /// How to configure the EVM.
     evm_config: EvmConfig,
 
-    /// Block being executed.
+    /// Input for block execution.
     input: EthBlockExecutionInput<'a>,
     /// The EVM used by strategy.
     evm: Evm,

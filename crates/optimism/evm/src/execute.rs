@@ -143,7 +143,7 @@ pub struct OpExecutionStrategy<'a, Evm, N: NodePrimitives, ChainSpec, EvmConfig:
     receipt_builder:
         &'a dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>,
 
-    /// Block being executed.
+    /// Input for block execution.
     input: OpBlockExecutionInput,
     /// The EVM used by strategy.
     evm: Evm,
