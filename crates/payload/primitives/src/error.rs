@@ -2,7 +2,8 @@
 
 use alloc::boxed::Box;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::ForkchoiceUpdateError;
+use alloy_rpc_types_engine::{ForkchoiceUpdateError, PayloadError};
+use core::error;
 use reth_errors::{ProviderError, RethError};
 use tokio::sync::oneshot;
 
@@ -113,6 +114,12 @@ pub enum VersionSpecificValidationError {
     /// root after Cancun
     #[error("no parent beacon block root post-cancun")]
     NoParentBeaconBlockRootPostCancun,
+    /// Payload validation error.
+    #[error(transparent)]
+    Eth(PayloadError),
+    /// Custom payload validation error.
+    #[error(transparent)]
+    Other(Box<dyn error::Error + Send + Sync>),
 }
 
 impl EngineObjectValidationError {
