@@ -11,7 +11,7 @@ pub fn ensure_well_formed_fields<T: BlockBody>(
 ) -> Result<(), PayloadError> {
     if is_shanghai_active {
         if block_body.withdrawals().is_none() {
-            // shanghai not active but withdrawals present
+            // shanghai active but no withdrawals present
             return Err(PayloadError::PostShanghaiBlockWithoutWithdrawals)
         }
     } else if block_body.withdrawals().is_some() {
