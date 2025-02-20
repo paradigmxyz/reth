@@ -154,10 +154,8 @@ where
         let hash = tx.hash();
 
         // Execute transaction.
-        let result_and_state = self.evm.transact(tx_env).map_err(move |err| {
-            // Ensure hash is calculated for error log, if not already done
-            BlockValidationError::EVM { hash: *hash, error: Box::new(err) }
-        })?;
+        let result_and_state =
+            self.evm.transact(tx_env).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
         self.system_caller
             .on_state(StateChangeSource::Transaction(self.receipts.len()), &result_and_state.state);
         let ResultAndState { result, state } = result_and_state;

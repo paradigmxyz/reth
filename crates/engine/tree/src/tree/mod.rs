@@ -648,7 +648,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
-    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx> + 'static,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
@@ -671,7 +671,7 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        let num_threads = root::thread_pool_size();
+        let num_threads = root::rayon_thread_pool_size();
 
         let thread_pool = Arc::new(
             rayon::ThreadPoolBuilder::new()

@@ -11,7 +11,7 @@ use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, OnForkChoiceUpdated,
 };
-use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
+use reth_errors::{BlockExecutionError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
     state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
@@ -320,11 +320,7 @@ where
                 continue
             }
             // Treat error as fatal
-            Err(error) => {
-                return Err(RethError::Execution(BlockExecutionError::Validation(
-                    BlockValidationError::EVM { hash: *tx.tx_hash(), error: Box::new(error) },
-                )))
-            }
+            Err(error) => return Err(RethError::Execution(BlockExecutionError::other(error))),
         };
         evm.db_mut().commit(exec_result.state);
 

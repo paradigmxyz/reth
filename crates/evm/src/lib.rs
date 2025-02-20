@@ -166,7 +166,7 @@ where
 ///
 /// Default trait method  implementation is done w.r.t. L1.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
+pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
@@ -177,7 +177,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     type TxEnv: TransactionEnv;
 
     /// The error type that is returned by [`Self::next_evm_env`].
-    type Error: core::error::Error + Send + Sync;
+    type Error: core::error::Error + Send + Sync + 'static;
 
     /// Identifier of the EVM specification.
     type Spec: Debug + Copy + Send + Sync + 'static;
