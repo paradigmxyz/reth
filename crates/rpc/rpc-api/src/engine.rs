@@ -228,13 +228,6 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
-
-    /// Metered version of get_blobs_v1
-    #[method(name = "getBlobsV1Metered")]
-    async fn get_blobs_v1_metered(
-        &self,
-        versioned_hashes: Vec<B256>,
-    ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>

@@ -115,8 +115,6 @@ pub(crate) struct BlobMetrics {
     pub(crate) blob_count: Counter,
     /// Count of blob misses
     pub(crate) blob_misses: Counter,
-    /// Ratio of missed blobs to total requested
-    pub(crate) blob_miss_ratio: Gauge,
 }
 
 impl NewPayloadStatusResponseMetrics {

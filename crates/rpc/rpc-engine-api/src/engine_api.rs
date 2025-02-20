@@ -1006,24 +1006,18 @@ where
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
+
+        let start = Instant::now();
+
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
             return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into())
         }
 
-        Ok(self
+        let res = self
             .inner
             .tx_pool
             .get_blobs_for_versioned_hashes(&versioned_hashes)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))?)
-    }
-    /// Metered version of get_blobs_v1
-    async fn get_blobs_v1_metered(
-        &self,
-        versioned_hashes: Vec<B256>,
-    ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
-        let start = Instant::now();
-
-        let res = Self::get_blobs_v1(self, versioned_hashes.clone()).await;
+            .map_err(|err| EngineApiError::Internal(Box::new(err)).into());
 
         let elapsed = start.elapsed();
         self.inner.metrics.latency.get_blobs_v1.record(elapsed);
@@ -1034,11 +1028,6 @@ where
 
             self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
             self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
-
-            if !versioned_hashes.is_empty() {
-                let miss_ratio = blobs_missed as f64 / versioned_hashes.len() as f64;
-                self.inner.metrics.blob_metrics.blob_miss_ratio.set(miss_ratio);
-            }
         }
 
         res
