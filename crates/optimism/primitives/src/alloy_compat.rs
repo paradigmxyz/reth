@@ -1,19 +1,16 @@
 //! Common conversions from alloy types.
 
 use crate::OpTransactionSigned;
-use alloc::string::ToString;
 use alloy_consensus::TxEnvelope;
 use alloy_network::{AnyRpcTransaction, AnyTxEnvelope};
-use alloy_rpc_types_eth::Transaction as AlloyRpcTransaction;
+use alloy_rpc_types_eth::{ConversionError, Transaction as AlloyRpcTransaction};
 use alloy_serde::WithOtherFields;
-use op_alloy_consensus::OpTypedTransaction;
+use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
 
 impl TryFrom<AnyRpcTransaction> for OpTransactionSigned {
-    type Error = alloy_rpc_types_eth::ConversionError;
+    type Error = ConversionError;
 
     fn try_from(tx: AnyRpcTransaction) -> Result<Self, Self::Error> {
-        use alloy_rpc_types_eth::ConversionError;
-
         let WithOtherFields { inner: tx, other: _ } = tx;
 
         let (transaction, signature, hash) = match tx.inner {
@@ -33,10 +30,11 @@ impl TryFrom<AnyRpcTransaction> for OpTransactionSigned {
                 let (tx, signature, hash) = tx.into_parts();
                 (OpTypedTransaction::Eip7702(tx), signature, hash)
             }
-            _ => {
-                // TODO: support tx deposit: <https://github.com/alloy-rs/op-alloy/pull/427>
-                return Err(ConversionError::Custom("unknown transaction type".to_string()))
+            AnyTxEnvelope::Unknown(tx) => {
+                let hash = tx.hash;
+                (OpTypedTransaction::Deposit(tx.try_into()?), TxDeposit::signature(), hash)
             }
+            _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
         };
 
         Ok(Self::new(transaction, signature, hash))

@@ -74,7 +74,7 @@ std = [
     "alloy-serde?/std",
     "revm-context/std",
 ]
-alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth"]
+alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth", "op-alloy-consensus/alloy-compat"]
 reth-codec = [
     "dep:reth-codecs",
     "std",
