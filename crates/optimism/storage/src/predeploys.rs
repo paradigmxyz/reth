@@ -1,10 +1,13 @@
 //! Utilities for accessing Optimism predeploy state
 
-use alloy_primitives::B256;
-use reth_optimism_primitives::predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
+use alloy_primitives::{address, Address, B256};
 use reth_storage_api::{errors::ProviderResult, StorageRootProvider};
 use reth_trie_common::HashedStorage;
 use revm::database::BundleState;
+
+/// The L2 contract `L2ToL1MessagePasser`, stores commitments to withdrawal transactions.
+pub const ADDRESS_L2_TO_L1_MESSAGE_PASSER: Address =
+    address!("4200000000000000000000000000000000000016");
 
 /// Computes the storage root of predeploy `L2ToL1MessagePasser.sol` with state updates from block
 /// execution.

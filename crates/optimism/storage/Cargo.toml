@@ -16,9 +16,6 @@ reth-primitives.workspace = true
 reth-trie-common.workspace = true
 reth-storage-api.workspace = true
 
-# op-reth
-reth-optimism-primitives = { workspace = true, features = ["serde"] }
-
 # ethereum
 alloy-primitives.workspace = true
 revm.workspace = true
@@ -35,7 +32,6 @@ std = [
     "reth-primitives/std",
     "reth-trie-common/std",
     "reth-storage-api/std",
-    "reth-optimism-primitives/std",
     "alloy-primitives/std",
     "revm/std",
     "reth-prune-types/std",

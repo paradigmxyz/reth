@@ -8801,7 +8801,6 @@ dependencies = [
  "alloy-primitives",
  "reth-codecs",
  "reth-db-api",
- "reth-optimism-primitives",
  "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",
