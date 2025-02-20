@@ -1,8 +1,5 @@
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
-use alloy_primitives::{
-    map::{B256Map, HashMap},
-    B256,
-};
+use alloy_primitives::map::{B256Map, HashMap};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
@@ -104,8 +101,15 @@ where
         let prefix_sets = prefix_sets.freeze();
 
         let storage_root_targets = StorageRootTargets::new(
-            prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
-            prefix_sets.storage_prefix_sets.clone(),
+            targets.keys().copied(),
+            targets.iter().filter(|&(_hashed_address, slots)| (!slots.is_empty())).map(
+                |(hashed_address, slots)| {
+                    (
+                        *hashed_address,
+                        PrefixSetMut::from(slots.iter().map(Nibbles::unpack)).freeze(),
+                    )
+                },
+            ),
         );
         let storage_root_targets_len = storage_root_targets.len();
 
