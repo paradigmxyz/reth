@@ -42,7 +42,7 @@ impl<B: Block> BlockBuffer<B> {
             blocks: Default::default(),
             parent_to_child: Default::default(),
             earliest_blocks: Default::default(),
-            block_queue: VecDeque::with_capacity(limit as usize),
+            block_queue: VecDeque::default(),
             max_blocks: limit as usize,
             metrics: Default::default(),
         }
