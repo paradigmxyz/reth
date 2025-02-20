@@ -2,7 +2,7 @@
 
 use alloc::boxed::Box;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ForkchoiceUpdateError, PayloadError};
+use alloy_rpc_types_engine::{ForkchoiceUpdateError, PayloadError, PayloadStatusEnum};
 use core::error;
 use reth_errors::{ProviderError, RethError};
 use tokio::sync::oneshot;
@@ -120,6 +120,26 @@ pub enum VersionSpecificValidationError {
     /// Custom payload validation error.
     #[error(transparent)]
     Other(Box<dyn error::Error + Send + Sync>),
+}
+
+impl VersionSpecificValidationError {
+    /// Returns `true` if the error is caused by a block hash mismatch.
+    #[inline]
+    pub const fn is_block_hash_mismatch(&self) -> bool {
+        matches!(self, Self::Eth(PayloadError::BlockHash { .. }))
+    }
+
+    /// Returns `true` if the error is caused by invalid block hashes (Cancun).
+    #[inline]
+    pub const fn is_invalid_versioned_hashes(&self) -> bool {
+        matches!(self, Self::Eth(PayloadError::InvalidVersionedHashes))
+    }
+}
+
+impl From<VersionSpecificValidationError> for PayloadStatusEnum {
+    fn from(error: VersionSpecificValidationError) -> Self {
+        Self::Invalid { validation_error: error.to_string() }
+    }
 }
 
 impl EngineObjectValidationError {
