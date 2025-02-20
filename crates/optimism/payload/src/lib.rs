@@ -9,6 +9,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
+extern crate alloc;
+
 pub mod builder;
 pub use builder::OpPayloadBuilder;
 pub mod error;
@@ -16,5 +18,7 @@ pub mod payload;
 pub use payload::{OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes};
 mod traits;
 pub use traits::*;
+pub mod validator;
+pub use validator::OpExecutionPayloadValidator;
 
 pub mod config;
