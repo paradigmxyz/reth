@@ -1016,6 +1016,33 @@ where
             .get_blobs_for_versioned_hashes(&versioned_hashes)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?)
     }
+    /// Metered version of get_blobs_v1
+    async fn get_blobs_v1_metered(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
+        let start = Instant::now();
+
+        let res = Self::get_blobs_v1(self, versioned_hashes.clone()).await;
+
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.get_blobs_v1.record(elapsed);
+
+        if let Ok(blobs) = &res {
+            let blobs_found = blobs.iter().filter(|b| b.is_some()).count();
+            let blobs_missed = versioned_hashes.len() - blobs_found;
+
+            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
+            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+
+            if !versioned_hashes.is_empty() {
+                let miss_ratio = blobs_missed as f64 / versioned_hashes.len() as f64;
+                self.inner.metrics.blob_metrics.blob_miss_ratio.set(miss_ratio);
+            }
+        }
+
+        res
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
