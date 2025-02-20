@@ -116,7 +116,7 @@ pub enum VersionSpecificValidationError {
     NoParentBeaconBlockRootPostCancun,
     /// Payload validation error.
     #[error(transparent)]
-    Eth(PayloadError),
+    Eth(#[from] PayloadError),
     /// Custom payload validation error.
     #[error(transparent)]
     Other(Box<dyn error::Error + Send + Sync>),

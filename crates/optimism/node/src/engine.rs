@@ -1,5 +1,5 @@
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
+    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1,
 };
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
@@ -97,8 +97,8 @@ impl PayloadValidator for OpEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload)
+    ) -> Result<SealedBlock<Self::Block>, VersionSpecificValidationError> {
+        Ok(self.inner.ensure_well_formed_payload(payload)?)
     }
 }
 
