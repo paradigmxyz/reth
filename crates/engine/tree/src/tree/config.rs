@@ -1,5 +1,6 @@
 //! Engine tree configuration.
 
+use crate::tree::root::has_enough_parallelism;
 use alloy_eips::merge::EPOCH_SLOTS;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
@@ -53,6 +54,8 @@ pub struct TreeConfig {
     use_caching_and_prewarming: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
+    /// Wether the host has enough parallelism to run state root task.
+    has_enough_parallelism: bool,
 }
 
 impl Default for TreeConfig {
@@ -67,6 +70,7 @@ impl Default for TreeConfig {
             always_compare_trie_updates: false,
             use_caching_and_prewarming: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
+            has_enough_parallelism: has_enough_parallelism(),
         }
     }
 }
@@ -84,6 +88,7 @@ impl TreeConfig {
         always_compare_trie_updates: bool,
         use_caching_and_prewarming: bool,
         cross_block_cache_size: u64,
+        has_enough_parallelism: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -95,6 +100,7 @@ impl TreeConfig {
             always_compare_trie_updates,
             use_caching_and_prewarming,
             cross_block_cache_size,
+            has_enough_parallelism,
         }
     }
 
@@ -210,5 +216,16 @@ impl TreeConfig {
     pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: u64) -> Self {
         self.cross_block_cache_size = cross_block_cache_size;
         self
+    }
+
+    /// Setter for has enough parallelism.
+    pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
+        self.has_enough_parallelism = has_enough_parallelism;
+        self
+    }
+
+    /// Wether or not to use state root task
+    pub(crate) fn use_state_root_task(&self) -> bool {
+        self.has_enough_parallelism && !self.legacy_state_root
     }
 }
