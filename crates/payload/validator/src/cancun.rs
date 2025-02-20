@@ -69,7 +69,7 @@ pub fn ensure_well_formed_header_and_sidecar_fields<T: Block>(
 /// Checks transactions field and sidecar w.r.t new Cancun fields and new transaction type EIP-4844.
 ///
 /// Checks that:
-/// - doesn't contains EIP-4844 transactions unless Cancun is active
+/// - doesn't contain EIP-4844 transactions unless Cancun is active
 /// - checks blob versioned hashes in block and sidecar match
 #[inline]
 pub fn ensure_well_formed_transactions_field_with_sidecar<T: Transaction + Typed2718>(
