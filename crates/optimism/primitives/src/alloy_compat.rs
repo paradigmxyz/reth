@@ -42,16 +42,16 @@ impl TryFrom<AnyRpcTransaction> for OpTransactionSigned {
                 hash,
                 inner: UnknownTypedTransaction { ty, fields, memo: _ },
             }) => match OpTxType::try_from(ty.0)
-                .map_err(|_| ConversionError::Custom("unknown transaction type".to_string()))?
+                .map_err(|e| ConversionError::Custom(e.to_string()))?
             {
                 OpTxType::Deposit => (
                     OpTypedTransaction::Deposit(fields.deserialize_into::<TxDeposit>().map_err(
-                        |_| ConversionError::Custom("invalid deposit transaction".to_string()),
+                        |e| ConversionError::Custom(format!("invalid deposit transaction: {e}")),
                     )?),
                     TxDeposit::signature(),
                     hash,
                 ),
-                _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),
+                _ => return Err(ConversionError::Custom("unknown OP transaction type".to_string())),
             },
         };
 
