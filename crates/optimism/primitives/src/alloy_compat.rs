@@ -11,9 +11,9 @@ impl TryFrom<AnyRpcTransaction> for OpTransactionSigned {
     type Error = ConversionError;
 
     fn try_from(tx: AnyRpcTransaction) -> Result<Self, Self::Error> {
-        let WithOtherFields { inner: tx, other: _ } = tx;
+        let WithOtherFields { inner: AlloyRpcTransaction { inner, from, .. }, other: _ } = tx;
 
-        let (transaction, signature, hash) = match tx.inner {
+        let (transaction, signature, hash) = match inner {
             AnyTxEnvelope::Ethereum(TxEnvelope::Legacy(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
                 (OpTypedTransaction::Legacy(tx), signature, hash)
@@ -30,7 +30,13 @@ impl TryFrom<AnyRpcTransaction> for OpTransactionSigned {
                 let (tx, signature, hash) = tx.into_parts();
                 (OpTypedTransaction::Eip7702(tx), signature, hash)
             }
-            AnyTxEnvelope::Unknown(tx) => {
+            AnyTxEnvelope::Unknown(mut tx) => {
+                // Re-insert `from` field which was consumed by outer `Transaction`.
+                // Ref hack in op-alloy <https://github.com/alloy-rs/op-alloy/blob/7d50b698631dd73f8d20f9f60ee78cd0597dc278/crates/rpc-types/src/transaction.rs#L236-L237>
+                tx.inner
+                    .fields
+                    .insert_value("from".to_string(), from)
+                    .map_err(|err| ConversionError::Custom(err.to_string()))?;
                 let hash = tx.hash;
                 (OpTypedTransaction::Deposit(tx.try_into()?), TxDeposit::signature(), hash)
             }
