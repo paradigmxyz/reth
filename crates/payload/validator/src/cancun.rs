@@ -8,7 +8,7 @@ use reth_primitives_traits::{AlloyBlockHeader, Block, SealedBlock};
 ///
 /// Checks that:
 /// - Cancun fields are present if Cancun is active
-/// - doesn't contains EIP-4844 transactions unless Cancun is active
+/// - doesn't contain EIP-4844 transactions unless Cancun is active
 /// - checks blob versioned hashes in block and sidecar match
 #[inline]
 pub fn ensure_well_formed_fields<T, B>(
