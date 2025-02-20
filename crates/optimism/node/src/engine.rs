@@ -1,5 +1,5 @@
 use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
+    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1,
 };
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
@@ -8,8 +8,8 @@ use reth_chainspec::ChainSpec;
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
-        EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
-        VersionSpecificValidationError,
+        EngineObjectValidationError, MessageValidationKind, NewPayloadError, PayloadOrAttributes,
+        PayloadTypes, VersionSpecificValidationError,
     },
     validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
     PayloadValidator,
@@ -97,8 +97,8 @@ impl PayloadValidator for OpEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload)
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        Ok(self.inner.ensure_well_formed_payload(payload)?)
     }
 }
 
