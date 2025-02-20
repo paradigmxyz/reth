@@ -143,7 +143,7 @@ impl BlockExecutionError {
         matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
     }
 
-    /// Handles an EVM error occured when executing a transaction.
+    /// Handles an EVM error occurred when executing a transaction.
     ///
     /// If an error matches [`EvmError::InvalidTransaction`], it will be wrapped into
     /// [`BlockValidationError::InvalidTx`], otherwise into [`InternalBlockExecutionError::EVM`].

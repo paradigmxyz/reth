@@ -174,10 +174,12 @@ pub trait BlockExecutionStrategy {
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error>;
 
     /// Executes a single transaction and applies execution result to internal state.
+    ///
+    /// Returns the gas used by the transaction.
     fn execute_transaction(
         &mut self,
         tx: Recovered<&<Self::Primitives as NodePrimitives>::SignedTx>,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<u64, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
@@ -449,8 +451,8 @@ mod tests {
         fn execute_transaction(
             &mut self,
             _tx: Recovered<&TransactionSigned>,
-        ) -> Result<(), Self::Error> {
-            Ok(())
+        ) -> Result<u64, Self::Error> {
+            Ok(0)
         }
 
         fn apply_post_execution_changes(

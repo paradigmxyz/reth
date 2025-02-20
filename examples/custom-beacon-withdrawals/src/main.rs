@@ -136,8 +136,8 @@ where
     fn execute_transaction(
         &mut self,
         _tx: Recovered<&TransactionSigned>,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> Result<u64, Self::Error> {
+        Ok(0)
     }
 
     fn apply_post_execution_changes(

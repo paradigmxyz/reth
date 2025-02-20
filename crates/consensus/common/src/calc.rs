@@ -21,8 +21,8 @@ use reth_chainspec::EthereumHardforks;
 /// - Definition: [Yellow Paper][yp] (page 15, 11.3)
 ///
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
-pub fn base_block_reward<ChainSpec: EthereumHardforks>(
-    chain_spec: &ChainSpec,
+pub fn base_block_reward(
+    chain_spec: impl EthereumHardforks,
     block_number: BlockNumber,
 ) -> Option<u128> {
     if chain_spec.is_paris_active_at_block(block_number).is_some_and(|active| active) {
