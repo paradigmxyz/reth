@@ -8561,6 +8561,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-optimism-node",
  "reth-optimism-primitives",
+ "reth-optimism-storage",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
@@ -8695,6 +8696,7 @@ dependencies = [
  "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-optimism-primitives",
+ "reth-optimism-storage",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
@@ -8704,7 +8706,6 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-transaction-pool",
- "reth-trie",
  "revm",
  "sha2 0.10.8",
  "thiserror 2.0.11",
@@ -8797,11 +8798,15 @@ dependencies = [
 name = "reth-optimism-storage"
 version = "1.2.0"
 dependencies = [
+ "alloy-primitives",
  "reth-codecs",
  "reth-db-api",
  "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",
+ "reth-storage-api",
+ "reth-trie-common",
+ "revm",
 ]
 
 [[package]]
