@@ -17,7 +17,7 @@ reth-trie-common.workspace = true
 reth-storage-api.workspace = true
 
 # op-reth
-reth-optimism-primitives.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
 alloy-primitives.workspace = true
