@@ -13,7 +13,7 @@ extern crate alloc;
 
 mod payload;
 use alloc::sync::Arc;
-use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, PayloadError};
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
@@ -23,7 +23,7 @@ use reth_chainspec::ChainSpec;
 use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
 use reth_payload_primitives::{
     validate_version_specific_fields, BuiltPayload, EngineApiMessageVersion,
-    EngineObjectValidationError, PayloadOrAttributes, PayloadTypes,
+    EngineObjectValidationError, NewPayloadError, PayloadOrAttributes, PayloadTypes,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, NodePrimitives, SealedBlock};
@@ -104,8 +104,8 @@ impl PayloadValidator for EthereumEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload)
+    ) -> Result<SealedBlock, NewPayloadError> {
+        Ok(self.inner.ensure_well_formed_payload(payload)?)
     }
 }
 

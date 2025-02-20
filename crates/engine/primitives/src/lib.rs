@@ -14,11 +14,11 @@ extern crate alloc;
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ExecutionData, PayloadError};
+use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::{self, Debug};
 use reth_payload_primitives::{
     validate_execution_requests, BuiltPayload, EngineApiMessageVersion,
-    EngineObjectValidationError, InvalidPayloadAttributesError, PayloadAttributes,
+    EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes,
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives::{NodePrimitives, SealedBlock};
@@ -145,7 +145,7 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
     fn ensure_well_formed_payload(
         &self,
         payload: Self::ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, PayloadError>;
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
 }
 
 /// Type that validates the payloads processed by the engine.
