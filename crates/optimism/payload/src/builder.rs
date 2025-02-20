@@ -400,7 +400,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         let withdrawals_root = if ctx.is_isthmus_active() {
             // withdrawals root field in block header is used for storage root of L2 predeploy
             // `l2tol1-message-passer`
-            Some(predeploys::withdrawals_root(state.database.as_ref(), &state.bundle_state)?)
+            Some(predeploys::withdrawals_root(&state.bundle_state, state.database.as_ref())?)
         } else if ctx.is_canyon_active() {
             Some(EMPTY_WITHDRAWALS)
         } else {

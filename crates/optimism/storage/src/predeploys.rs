@@ -12,8 +12,8 @@ pub const ADDRESS_L2_TO_L1_MESSAGE_PASSER: Address =
 /// Computes the storage root of predeploy `L2ToL1MessagePasser.sol` with state updates from block
 /// execution.
 pub fn withdrawals_root<DB: StorageRootProvider>(
-    state: DB,
     state_updates: &BundleState,
+    state: DB,
 ) -> ProviderResult<B256> {
     // if l2 withdrawals transactions were executed, use predeploy storage updates in storage root
     // computation

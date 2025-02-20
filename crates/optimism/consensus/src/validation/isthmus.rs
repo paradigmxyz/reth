@@ -33,7 +33,7 @@ where
     let header_storage_root =
         header.withdrawals_root().ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
 
-    let storage_root = withdrawals_root(state, state_updates)
+    let storage_root = withdrawals_root(state_updates, state)
         .map_err(OpConsensusError::L2WithdrawalsRootCalculationFail)?;
 
     if header_storage_root != storage_root {
