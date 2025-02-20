@@ -93,7 +93,7 @@ where
     ) -> Self
     where
         V: EngineValidator<N::Engine, Block = BlockTy<N>>,
-        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>>,
+        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>> + 'static,
     {
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
