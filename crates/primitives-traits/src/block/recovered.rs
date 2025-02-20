@@ -2,7 +2,7 @@
 
 use crate::{
     block::{error::SealedBlockRecoveryError, SealedBlock},
-    transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt},
+    transaction::signed::{RecoveryError, SignedTransaction},
     Block, BlockBody, InMemorySize, SealedHeader,
 };
 use alloc::vec::Vec;
