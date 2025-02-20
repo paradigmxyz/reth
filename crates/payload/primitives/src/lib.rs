@@ -17,8 +17,8 @@ use reth_chainspec::EthereumHardforks;
 
 mod error;
 pub use error::{
-    EngineObjectValidationError, InvalidPayloadAttributesError, PayloadBuilderError,
-    VersionSpecificValidationError,
+    EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError,
+    PayloadBuilderError, VersionSpecificValidationError,
 };
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
