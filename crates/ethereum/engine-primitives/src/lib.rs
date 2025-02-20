@@ -23,7 +23,7 @@ use reth_chainspec::ChainSpec;
 use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
 use reth_payload_primitives::{
     validate_version_specific_fields, BuiltPayload, EngineApiMessageVersion,
-    EngineObjectValidationError, PayloadOrAttributes, PayloadTypes, VersionSpecificValidationError,
+    EngineObjectValidationError, NewPayloadError, PayloadOrAttributes, PayloadTypes,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, NodePrimitives, SealedBlock};
@@ -104,7 +104,7 @@ impl PayloadValidator for EthereumEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock, VersionSpecificValidationError> {
+    ) -> Result<SealedBlock, NewPayloadError> {
         Ok(self.inner.ensure_well_formed_payload(payload)?)
     }
 }

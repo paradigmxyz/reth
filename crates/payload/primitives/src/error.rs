@@ -114,6 +114,11 @@ pub enum VersionSpecificValidationError {
     /// root after Cancun
     #[error("no parent beacon block root post-cancun")]
     NoParentBeaconBlockRootPostCancun,
+}
+
+/// Error validating payload received over `newPayload` API.
+#[derive(thiserror::Error, Debug)]
+pub enum NewPayloadError {
     /// Payload validation error.
     #[error(transparent)]
     Eth(#[from] PayloadError),
@@ -122,7 +127,15 @@ pub enum VersionSpecificValidationError {
     Other(Box<dyn error::Error + Send + Sync>),
 }
 
-impl VersionSpecificValidationError {
+impl NewPayloadError {
+    /// Creates instance of variant [`NewPayloadError::Other`].
+    #[inline]
+    pub const fn other(err: Box<dyn error::Error + Send + Sync>) -> Self {
+        Self::Other(err)
+    }
+}
+
+impl NewPayloadError {
     /// Returns `true` if the error is caused by a block hash mismatch.
     #[inline]
     pub const fn is_block_hash_mismatch(&self) -> bool {
@@ -136,8 +149,8 @@ impl VersionSpecificValidationError {
     }
 }
 
-impl From<VersionSpecificValidationError> for PayloadStatusEnum {
-    fn from(error: VersionSpecificValidationError) -> Self {
+impl From<NewPayloadError> for PayloadStatusEnum {
+    fn from(error: NewPayloadError) -> Self {
         Self::Invalid { validation_error: error.to_string() }
     }
 }

@@ -18,8 +18,8 @@ use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::{self, Debug};
 use reth_payload_primitives::{
     validate_execution_requests, BuiltPayload, EngineApiMessageVersion,
-    EngineObjectValidationError, InvalidPayloadAttributesError, PayloadAttributes,
-    PayloadOrAttributes, PayloadTypes, VersionSpecificValidationError,
+    EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes,
+    PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::Block;
@@ -145,7 +145,7 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
     fn ensure_well_formed_payload(
         &self,
         payload: Self::ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, VersionSpecificValidationError>;
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
 }
 
 /// Type that validates the payloads processed by the engine.

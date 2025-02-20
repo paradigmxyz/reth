@@ -18,7 +18,7 @@ use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_metrics::{metrics, metrics::Gauge, Metrics};
-use reth_node_api::VersionSpecificValidationError;
+use reth_node_api::NewPayloadError;
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{
     constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock, SealedHeaderFor,
@@ -556,7 +556,7 @@ pub enum ValidationApiError {
     #[error(transparent)]
     Execution(#[from] BlockExecutionError),
     #[error(transparent)]
-    Payload(#[from] VersionSpecificValidationError),
+    Payload(#[from] NewPayloadError),
 }
 
 /// Metrics for the validation endpoint.
