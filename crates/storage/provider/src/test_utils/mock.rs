@@ -23,8 +23,8 @@ use reth_db_api::{
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives::{
-    Account, Block, Bytecode, EthPrimitives, Receipt, RecoveredBlock, SealedBlock, SealedHeader,
-    TransactionSigned,
+    Account, Block, Bytecode, EthPrimitives, GotExpected, Receipt, RecoveredBlock, SealedBlock,
+    SealedHeader, TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_prune_types::PruneModes;
@@ -34,7 +34,7 @@ use reth_storage_api::{
     OmmersProvider, StageCheckpointReader, StateCommitmentProvider, StateProofProvider,
     StorageRootProvider,
 };
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -218,11 +218,17 @@ impl<T: Transaction, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProvider
     type ProviderRW = Self;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
-        Ok(self.clone())
+        // TODO: return Ok(self.clone()) when engine tests stops relying on an
+        // Error returned here https://github.com/paradigmxyz/reth/pull/14482
+        //Ok(self.clone())
+        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
-        Ok(self.clone())
+        // TODO: return Ok(self.clone()) when engine tests stops relying on an
+        // Error returned here https://github.com/paradigmxyz/reth/pull/14482
+        //Ok(self.clone())
+        Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
     }
 }
 
