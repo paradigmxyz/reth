@@ -9,7 +9,7 @@ pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
     /// The EVM config to use.
     ///
     /// This provides the node with the necessary configuration to configure an EVM.
-    type EVM: ConfigureEvmFor<PrimitivesTy<Node::Types>>;
+    type EVM: ConfigureEvmFor<PrimitivesTy<Node::Types>> + 'static;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>;
@@ -24,7 +24,7 @@ pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
 impl<Node, F, Fut, EVM, Executor> ExecutorBuilder<Node> for F
 where
     Node: FullNodeTypes,
-    EVM: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
+    EVM: ConfigureEvmFor<PrimitivesTy<Node::Types>> + 'static,
     Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<(EVM, Executor)>> + Send,
