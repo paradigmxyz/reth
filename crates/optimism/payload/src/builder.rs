@@ -374,12 +374,16 @@ impl<Txs> OpBuilder<'_, Txs> {
             ctx.receipt_builder.as_ref(),
         );
 
-        strategy.apply_pre_execution_changes().map_err(PayloadBuilderError::other)?;
+        // 1. apply pre-execution changes
+        strategy.apply_pre_execution_changes().map_err(|err| {
+            warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
+            PayloadBuilderError::Internal(err.into())
+        })?;
 
-        // 3. execute sequencer transactions
+        // 2. execute sequencer transactions
         let mut info = ctx.execute_sequencer_transactions(&mut strategy)?;
 
-        // 4. if mem pool transactions are requested we execute them
+        // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes());
             if ctx.execute_best_transactions(&mut info, &mut strategy, best_txs)?.is_some() {
@@ -393,8 +397,9 @@ impl<Txs> OpBuilder<'_, Txs> {
             }
         }
 
-        let BlockExecutionResult { receipts, .. } =
-            strategy.apply_post_execution_changes().map_err(PayloadBuilderError::other)?;
+        let BlockExecutionResult { receipts, .. } = strategy
+            .apply_post_execution_changes()
+            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call

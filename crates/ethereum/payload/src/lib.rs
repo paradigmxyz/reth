@@ -195,7 +195,10 @@ where
         &evm_config,
     );
 
-    strategy.apply_pre_execution_changes().map_err(PayloadBuilderError::other)?;
+    strategy.apply_pre_execution_changes().map_err(|err| {
+        warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     let mut block_blob_count = 0;
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
@@ -302,8 +305,9 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockExecutionResult { receipts, requests, gas_used } =
-        strategy.apply_post_execution_changes().map_err(PayloadBuilderError::other)?;
+    let BlockExecutionResult { receipts, requests, gas_used } = strategy
+        .apply_post_execution_changes()
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
     let requests =
         chain_spec.is_prague_active_at_timestamp(attributes.timestamp).then_some(requests);
