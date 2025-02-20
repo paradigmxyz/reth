@@ -27,13 +27,13 @@ reth-payload-util.workspace = true
 reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
-reth-trie.workspace = true
 
 # op-reth
 reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
+reth-optimism-storage.workspace = true
 
 # ethereum
 revm.workspace = true
