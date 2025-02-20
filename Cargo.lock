@@ -5608,8 +5608,10 @@ checksum = "621e69964165285ce750bf7ba961707e26c31df9f0b25652d6219dcee1f7f5b5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-eth",
  "alloy-serde",
  "arbitrary",
  "derive_more 1.0.0",
@@ -8739,6 +8741,7 @@ dependencies = [
  "rstest",
  "secp256k1 0.30.0",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
