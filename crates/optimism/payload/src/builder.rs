@@ -32,8 +32,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, BlockBody, NodePrimitives, Recovered,
-    SealedHeader,
+    transaction::SignedTransactionIntoRecoveredExt, BlockBody, NodePrimitives, SealedHeader,
 };
 use reth_primitives_traits::{block::Block as _, proofs, RecoveredBlock};
 use reth_provider::{
@@ -822,10 +821,7 @@ where
                 PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
             })?;
 
-            let gas_used = match strategy.execute_transaction(Recovered::new_unchecked(
-                sequencer_tx.tx(),
-                sequencer_tx.signer(),
-            )) {
+            let gas_used = match strategy.execute_transaction(sequencer_tx.as_recovered_ref()) {
                 Ok(gas_used) => gas_used,
                 Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                     error,
@@ -888,9 +884,7 @@ where
                 return Ok(Some(()))
             }
 
-            let gas_used = match strategy
-                .execute_transaction(Recovered::new_unchecked(tx.tx(), tx.signer()))
-            {
+            let gas_used = match strategy.execute_transaction(tx.as_recovered_ref()) {
                 Ok(gas_used) => gas_used,
                 Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                     error,

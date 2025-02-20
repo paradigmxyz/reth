@@ -9,9 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-use alloy_consensus::{
-    transaction::Recovered, BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH,
-};
+use alloy_consensus::{BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
@@ -250,9 +248,7 @@ where
             }
         }
 
-        let gas_used = match strategy
-            .execute_transaction(Recovered::new_unchecked(tx.tx(), tx.signer()))
-        {
+        let gas_used = match strategy.execute_transaction(tx.as_recovered_ref()) {
             Ok(gas_used) => gas_used,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
