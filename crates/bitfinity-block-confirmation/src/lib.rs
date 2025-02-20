@@ -1,7 +1,9 @@
 //! Bitfinity block validator.
 use alloy_primitives::TxKind;
-use did::BlockConfirmationData;
-use evm_canister_client::{CanisterClient, EvmCanisterClient};
+use did::{BlockConfirmationData, BlockConfirmationResult};
+use ethereum_json_rpc_client::{Client, EthJsonRpcClient};
+
+use eyre::eyre;
 use eyre::Ok;
 use reth_chain_state::MemoryOverlayStateProvider;
 use reth_evm::env::EvmEnv;
@@ -77,7 +79,12 @@ where
         &self,
         confirmation_data: BlockConfirmationData,
     ) -> eyre::Result<()> {
-        match self.evm_client.send_confirm_block(confirmation_data).await.map_err(|e| eyre!("{e}"))? {
+        match self
+            .evm_client
+            .send_confirm_block(confirmation_data)
+            .await
+            .map_err(|e| eyre!("{e}"))?
+        {
             BlockConfirmationResult::NotConfirmed => Err(eyre!("confirmation request rejected")),
             _ => Ok(()),
         }
@@ -167,7 +174,7 @@ where
 
         cfg_env_with_handler_cfg.cfg_env.disable_balance_check = true;
         let base_fee = block.base_fee_per_gas;
-        let pow_tx = did::utils::pow_transaction(base_fee.map(Into::into));
+        let pow_tx = did::utils::block_confirmation_pow_transaction(base_fee.map(Into::into));
         // Simple transaction
         let to = match pow_tx.to {
             Some(to) => TxKind::Call(to.0),
@@ -209,18 +216,14 @@ where
 
 #[cfg(test)]
 mod tests {
-
-    use std::sync::Arc;
-
-    use candid::Principal;
-
-    use evm_canister_client::{EvmCanisterClient, IcCanisterClient};
+    use ethereum_json_rpc_client::reqwest::ReqwestClient;
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::ChainSpec;
     use reth_db::test_utils::TempDatabase;
     use reth_db::DatabaseEnv;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_engine_primitives::EthEngineTypes;
+    use std::sync::Arc;
 
     use reth_node_types::{AnyNodeTypesWithEngine, NodeTypesWithDBAdapter};
     use reth_primitives::{EthPrimitives, SealedBlockWithSenders};
@@ -238,8 +241,8 @@ mod tests {
 
     // Common test setup function to initialize the test environment.
     fn setup_test_block_validator() -> (
-        BitfinityBlockValidator<
-            IcCanisterClient,
+        BitfinityBlockConfirmation<
+            ReqwestClient,
             NodeTypesWithDBAdapter<
                 AnyNodeTypesWithEngine<
                     EthPrimitives,
@@ -266,9 +269,9 @@ mod tests {
         provider_rw.insert_block(genesis_block.clone(), StorageLocation::Database).unwrap();
         provider_rw.commit().unwrap();
 
-        let canister_client = EvmCanisterClient::new(IcCanisterClient::new(Principal::anonymous()));
+        let canister_client = EthJsonRpcClient::new(ReqwestClient::new("".to_string()));
         let block_validator =
-            BitfinityBlockValidator::new(canister_client, provider_factory.clone());
+            BitfinityBlockConfirmation::new(canister_client, provider_factory.clone());
 
         (block_validator, genesis_block)
     }
