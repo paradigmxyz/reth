@@ -46,13 +46,14 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
-proptest-arbitrary-interop.workspace = true
-reth-codecs = { workspace = true, features = ["test-utils", "op"] }
-rstest.workspace = true
 arbitrary.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
+proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils", "op"] }
+rstest.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
+serde_json.workspace = true
 
 [features]
 default = ["std"]
@@ -73,8 +74,9 @@ std = [
     "alloy-rpc-types-eth?/std",
     "alloy-serde?/std",
     "revm-context/std",
+    "serde_json/std",
 ]
-alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth"]
+alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth", "op-alloy-consensus/alloy-compat"]
 reth-codec = [
     "dep:reth-codecs",
     "std",
