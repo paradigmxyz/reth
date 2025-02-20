@@ -1,6 +1,6 @@
 //! Error types emitted by types or implementations of this crate.
 
-use alloc::boxed::Box;
+use alloc::{boxed::Box, string::ToString};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceUpdateError, PayloadError, PayloadStatusEnum};
 use core::error;
