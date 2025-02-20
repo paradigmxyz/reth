@@ -695,14 +695,17 @@ impl OpNetworkBuilder {
                     builder = builder.disable_discv4_discovery();
                 }
                 if !args.discovery.disable_discovery {
+                    let mut bootnodes = ctx.config().network.resolved_bootnodes()
+                    .or_else(|| ctx.chain_spec().bootnodes())
+                    .unwrap_or_default();
+                    
+                    if bootnodes.is_empty() {
+                    bootnodes = get_all_op_bootnodes(ctx);
+                    }
                     builder = builder.discovery_v5(
                         args.discovery.discovery_v5_builder(
                             rlpx_socket,
-                            ctx.config()
-                                .network
-                                .resolved_bootnodes()
-                                .or_else(|| ctx.chain_spec().bootnodes())
-                                .unwrap_or_default(),
+                            bootnodes,
                         ),
                     );
                 }
@@ -718,6 +721,19 @@ impl OpNetworkBuilder {
         network_config.tx_gossip_disabled = disable_txpool_gossip;
 
         Ok(network_config)
+    }
+}
+
+fn get_all_op_bootnodes<Node>(ctx: &BuilderContext<Node>) -> Vec<Bootnode>
+where
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
+{
+    let network_name = ctx.config().chain.chain.clone().to_lowercase();
+
+    if network_name.contains("mainnet") {
+        params::V5OPBootnodes.to_vec()
+    } else {
+        params::V5OPTestnetBootnodes.to_vec()
     }
 }
 
