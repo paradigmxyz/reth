@@ -202,10 +202,8 @@ where
         let hash = tx.tx_hash();
 
         // Execute transaction.
-        let result_and_state = self.evm.transact(tx_env).map_err(move |err| {
-            // Ensure hash is calculated for error log, if not already done
-            BlockValidationError::EVM { hash: *hash, error: Box::new(err) }
-        })?;
+        let result_and_state =
+            self.evm.transact(tx_env).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
 
         trace!(
             target: "evm",
