@@ -138,7 +138,9 @@ pub use size::InMemorySize;
 
 /// Node traits
 pub mod node;
-pub use node::{BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy};
+pub use node::{
+    BlockTy, BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy, SignedTxTy,
+};
 
 /// Helper trait that requires de-/serialize implementation since `serde` feature is enabled.
 #[cfg(feature = "serde")]

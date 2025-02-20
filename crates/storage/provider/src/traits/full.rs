@@ -14,7 +14,7 @@ use reth_storage_api::NodePrimitivesProvider;
 pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<DB = N::DB>
     + NodePrimitivesProvider<Primitives = N::Primitives>
-    + StaticFileProviderFactory
+    + StaticFileProviderFactory<Primitives = N::Primitives>
     + BlockReaderIdExt<
         Transaction = TxTy<N>,
         Block = BlockTy<N>,
@@ -36,7 +36,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<DB = N::DB>
         + NodePrimitivesProvider<Primitives = N::Primitives>
-        + StaticFileProviderFactory
+        + StaticFileProviderFactory<Primitives = N::Primitives>
         + BlockReaderIdExt<
             Transaction = TxTy<N>,
             Block = BlockTy<N>,
