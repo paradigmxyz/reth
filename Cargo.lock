@@ -2808,7 +2808,7 @@ dependencies = [
 [[package]]
 name = "did"
 version = "0.42.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1132_block_validation#f2f6650129275cabe67df0743cf344f1752e8e30"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=feat/ephermal-tx#49ec54d7298472f7617733af6deb9d486f453acb"
 dependencies = [
  "alloy",
  "bincode",
@@ -3163,7 +3163,7 @@ dependencies = [
 [[package]]
 name = "ethereum-json-rpc-client"
 version = "0.42.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1132_block_validation#f2f6650129275cabe67df0743cf344f1752e8e30"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=feat/ephermal-tx#49ec54d7298472f7617733af6deb9d486f453acb"
 dependencies = [
  "alloy",
  "anyhow",
@@ -3249,7 +3249,7 @@ dependencies = [
 [[package]]
 name = "evm-canister-client"
 version = "0.42.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1132_block_validation#f2f6650129275cabe67df0743cf344f1752e8e30"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=feat/ephermal-tx#49ec54d7298472f7617733af6deb9d486f453acb"
 dependencies = [
  "candid",
  "did",
