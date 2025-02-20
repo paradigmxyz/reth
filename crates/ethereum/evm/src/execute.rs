@@ -244,7 +244,7 @@ where
         };
 
         let mut balance_increments = post_block_balance_increments(
-            &self.chain_spec,
+            self.chain_spec,
             self.evm.block(),
             self.input.ommers,
             self.input.withdrawals,

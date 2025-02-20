@@ -12,20 +12,19 @@ use revm::context::BlockEnv;
 /// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
 /// state changes (DAO fork).
 #[inline]
-pub fn post_block_balance_increments<ChainSpec, H>(
-    chain_spec: &ChainSpec,
+pub fn post_block_balance_increments<H>(
+    chain_spec: impl EthereumHardforks,
     block_env: &BlockEnv,
     ommers: &[H],
     withdrawals: Option<&Withdrawals>,
 ) -> HashMap<Address, u128>
 where
-    ChainSpec: EthereumHardforks,
     H: BlockHeader,
 {
     let mut balance_increments = HashMap::default();
 
     // Add block rewards if they are enabled.
-    if let Some(base_block_reward) = calc::base_block_reward(chain_spec, block_env.number) {
+    if let Some(base_block_reward) = calc::base_block_reward(&chain_spec, block_env.number) {
         // Ommer rewards
         for ommer in ommers {
             *balance_increments.entry(ommer.beneficiary()).or_default() +=
@@ -74,8 +73,8 @@ pub fn post_block_withdrawals_balance_increments<ChainSpec: EthereumHardforks>(
 ///
 /// Zero-valued withdrawals are filtered out.
 #[inline]
-pub fn insert_post_block_withdrawals_balance_increments<ChainSpec: EthereumHardforks>(
-    chain_spec: &ChainSpec,
+pub fn insert_post_block_withdrawals_balance_increments(
+    chain_spec: impl EthereumHardforks,
     block_timestamp: u64,
     withdrawals: Option<&[Withdrawal]>,
     balance_increments: &mut HashMap<Address, u128>,

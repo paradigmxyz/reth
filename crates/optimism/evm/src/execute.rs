@@ -6,7 +6,7 @@ use crate::{
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
-    transaction::Recovered, BlockHeader, Eip658Value, Receipt, Transaction as _, TxReceipt,
+    transaction::Recovered, BlockHeader, Eip658Value, Header, Receipt, Transaction as _, TxReceipt,
 };
 use op_alloy_consensus::OpDepositReceipt;
 use reth_evm::{
@@ -23,10 +23,11 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt, OpPrimitives};
 use reth_primitives_traits::{
-    BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SignedTransaction,
+    Block, NodePrimitives, RecoveredBlock, SealedBlock, SignedTransaction,
 };
 use revm::{context_interface::result::ResultAndState, DatabaseCommit};
 use revm_database::State;
+use revm_primitives::{Address, B256};
 use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
@@ -91,19 +92,59 @@ where
         DB: Database,
     {
         let evm = self.evm_config.evm_for_block(db, block.header());
-        OpExecutionStrategy::new(evm, block.sealed_block(), self)
+        OpExecutionStrategy::new(
+            evm,
+            block.sealed_block(),
+            &self.chain_spec,
+            &self.evm_config,
+            self.receipt_builder.as_ref(),
+        )
+    }
+}
+
+/// Input for block execution.
+#[derive(Debug, Clone, Copy)]
+pub struct OpBlockExecutionInput {
+    /// Block number.
+    pub number: u64,
+    /// Block timestamp.
+    pub timestamp: u64,
+    /// Parent block hash.
+    pub parent_hash: B256,
+    /// Block gas limit.
+    pub gas_limit: u64,
+    /// Parent beacon block root.
+    pub parent_beacon_block_root: Option<B256>,
+    /// Block beneficiary.
+    pub beneficiary: Address,
+}
+
+impl<'a, B: Block> From<&'a SealedBlock<B>> for OpBlockExecutionInput {
+    fn from(block: &'a SealedBlock<B>) -> Self {
+        Self {
+            number: block.header().number(),
+            timestamp: block.header().timestamp(),
+            parent_hash: block.header().parent_hash(),
+            gas_limit: block.header().gas_limit(),
+            parent_beacon_block_root: block.header().parent_beacon_block_root(),
+            beneficiary: block.header().beneficiary(),
+        }
     }
 }
 
 /// Block execution strategy for Optimism.
-#[derive(Debug, derive_more::Deref)]
+#[derive(Debug)]
 pub struct OpExecutionStrategy<'a, Evm, N: NodePrimitives, ChainSpec, EvmConfig: ConfigureEvm> {
-    /// Reference to the parent factory.
-    #[deref]
-    factory: &'a OpExecutionStrategyFactory<N, ChainSpec, EvmConfig>,
+    /// Chainspec.
+    chain_spec: ChainSpec,
+    /// How to configure the EVM.
+    evm_config: EvmConfig,
+    /// Receipt builder.
+    receipt_builder:
+        &'a dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>,
 
     /// Block being executed.
-    block: &'a SealedBlock<N::Block>,
+    input: OpBlockExecutionInput,
     /// The EVM used by strategy.
     evm: Evm,
     /// Receipts of executed transactions.
@@ -113,7 +154,7 @@ pub struct OpExecutionStrategy<'a, Evm, N: NodePrimitives, ChainSpec, EvmConfig:
     /// Whether Regolith hardfork is active.
     is_regolith: bool,
     /// Utility to call system smart contracts.
-    system_caller: SystemCaller<&'a ChainSpec>,
+    system_caller: SystemCaller<ChainSpec>,
 }
 
 impl<'a, Evm, N, ChainSpec, EvmConfig> OpExecutionStrategy<'a, Evm, N, ChainSpec, EvmConfig>
@@ -125,17 +166,26 @@ where
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(
         evm: Evm,
-        block: &'a SealedBlock<N::Block>,
-        factory: &'a OpExecutionStrategyFactory<N, ChainSpec, EvmConfig>,
+        input: impl Into<OpBlockExecutionInput>,
+        chain_spec: ChainSpec,
+        evm_config: EvmConfig,
+        receipt_builder: &'a dyn OpReceiptBuilder<
+            N::SignedTx,
+            HaltReasonFor<EvmConfig>,
+            Receipt = N::Receipt,
+        >,
     ) -> Self {
+        let input = input.into();
         Self {
+            is_regolith: chain_spec.is_regolith_active_at_timestamp(input.timestamp),
             evm,
-            factory,
-            block,
+            system_caller: SystemCaller::new(chain_spec.clone()),
+            chain_spec,
+            evm_config,
+            receipt_builder,
             receipts: Vec::new(),
             gas_used: 0,
-            is_regolith: factory.chain_spec.is_regolith_active_at_timestamp(block.timestamp()),
-            system_caller: SystemCaller::new(&factory.chain_spec),
+            input,
         }
     }
 }
@@ -155,19 +205,17 @@ where
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            (*self.chain_spec).is_spurious_dragon_active_at_block(self.block.number());
+            self.chain_spec.is_spurious_dragon_active_at_block(self.input.number);
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
 
-        self.system_caller.apply_beacon_root_contract_call(
-            self.block.parent_beacon_block_root(),
-            &mut self.evm,
-        )?;
+        self.system_caller
+            .apply_beacon_root_contract_call(self.input.parent_beacon_block_root, &mut self.evm)?;
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),
         // so we can safely assume that this will always be triggered upon the transition and that
         // the above check for empty blocks will never be hit on OP chains.
-        ensure_create2_deployer(self.chain_spec.clone(), self.block.timestamp(), self.evm.db_mut())
+        ensure_create2_deployer(self.chain_spec.clone(), self.input.timestamp, self.evm.db_mut())
             .map_err(|_| OpBlockExecutionError::ForceCreate2DeployerFail)?;
 
         Ok(())
@@ -176,7 +224,7 @@ where
     fn execute_transaction(&mut self, tx: Recovered<&N::SignedTx>) -> Result<u64, Self::Error> {
         // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block’s gasLimit.
-        let block_available_gas = self.block.gas_limit() - self.gas_used;
+        let block_available_gas = self.input.gas_limit - self.gas_used;
         if tx.gas_limit() > block_available_gas && (self.is_regolith || !tx.is_deposit()) {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                 transaction_gas_limit: tx.gas_limit(),
@@ -247,8 +295,7 @@ where
                         // this is only set for post-Canyon deposit
                         // transactions.
                         deposit_receipt_version: (tx.is_deposit() &&
-                            self.chain_spec
-                                .is_canyon_active_at_timestamp(self.block.timestamp()))
+                            self.chain_spec.is_canyon_active_at_timestamp(self.input.timestamp))
                         .then_some(1),
                     })
                 }
@@ -261,11 +308,11 @@ where
     fn apply_post_execution_changes(
         mut self,
     ) -> Result<BlockExecutionResult<N::Receipt>, Self::Error> {
-        let balance_increments = post_block_balance_increments(
+        let balance_increments = post_block_balance_increments::<Header>(
             &self.chain_spec.clone(),
             self.evm.block(),
-            self.block.body().ommers().unwrap_or_default(),
-            self.block.body().withdrawals(),
+            &[],
+            None,
         );
         // increment balances
         self.evm
