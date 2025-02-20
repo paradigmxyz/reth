@@ -22,7 +22,7 @@ where
     ChainSpec: OpHardforks,
 {
     /// Returns reference to chain spec.
-    pub fn chain_spec(&self) -> &ChainSpec {
+    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.inner
     }
 
