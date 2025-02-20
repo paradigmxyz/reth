@@ -40,10 +40,7 @@ use reth::{
     payload::ExecutionPayloadValidator,
     primitives::{Block, EthPrimitives, SealedBlock, TransactionSigned},
     providers::{EthStorage, StateProviderFactory},
-    rpc::{
-        eth::EthApi,
-        types::engine::{ExecutionPayload, PayloadError},
-    },
+    rpc::{eth::EthApi, types::engine::ExecutionPayload},
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
     version::default_extra_data_bytes,
@@ -55,7 +52,8 @@ use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
     validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
-    FullNodeComponents, PayloadAttributes, PayloadBuilderAttributes, PayloadValidator,
+    FullNodeComponents, NewPayloadError, PayloadAttributes, PayloadBuilderAttributes,
+    PayloadValidator,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -207,8 +205,8 @@ impl PayloadValidator for CustomEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload)
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        Ok(self.inner.ensure_well_formed_payload(payload)?)
     }
 }
 

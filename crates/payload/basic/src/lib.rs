@@ -9,22 +9,18 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
-use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_eips::{eip4895::Withdrawals, merge::SLOT_DURATION};
+use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
-use reth_chainspec::EthereumHardforks;
-use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
 use reth_primitives::{NodePrimitives, SealedHeader};
-use reth_primitives_traits::{proofs, HeaderTy};
+use reth_primitives_traits::HeaderTy;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
-use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop, db::State};
+use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_tasks::TaskSpawner;
-use revm::Database;
 use std::{
     fmt,
     future::Future,
@@ -879,37 +875,6 @@ impl<Payload> Default for MissingPayloadBehaviour<Payload> {
     fn default() -> Self {
         Self::RaceEmptyPayload
     }
-}
-
-/// Executes the withdrawals and commits them to the _runtime_ Database and `BundleState`.
-///
-/// Returns the withdrawals root.
-///
-/// Returns `None` values pre shanghai
-pub fn commit_withdrawals<DB, ChainSpec>(
-    db: &mut State<DB>,
-    chain_spec: &ChainSpec,
-    timestamp: u64,
-    withdrawals: &Withdrawals,
-) -> Result<Option<B256>, DB::Error>
-where
-    DB: Database,
-    ChainSpec: EthereumHardforks,
-{
-    if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-        return Ok(None)
-    }
-
-    if withdrawals.is_empty() {
-        return Ok(Some(EMPTY_WITHDRAWALS))
-    }
-
-    let balance_increments =
-        post_block_withdrawals_balance_increments(chain_spec, timestamp, withdrawals);
-
-    db.increment_balances(balance_increments)?;
-
-    Ok(Some(proofs::calculate_withdrawals_root(withdrawals)))
 }
 
 /// Checks if the new payload is better than the current best.
