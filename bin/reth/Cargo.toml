@@ -98,7 +98,7 @@ similar-asserts.workspace = true
 
 # bitfinity dependencies
 async-channel.workspace = true
-bitfinity-block-validator.workspace = true
+bitfinity-block-confirmation.workspace = true
 candid.workspace = true
 did.workspace = true
 evm-canister-client = { workspace = true, features = ["ic-agent-client"] }

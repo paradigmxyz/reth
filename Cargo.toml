@@ -128,7 +128,7 @@ members = [
     "crates/trie/parallel/",
     "crates/trie/sparse",
     "crates/trie/trie",
-    "crates/bitfinity-block-validator/",
+    "crates/bitfinity-block-confirmation",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -650,7 +650,7 @@ tracy-client = "0.17.3"
 
 # Bitfinity Deps
 async-channel = "2"
-bitfinity-block-validator = { path = "crates/bitfinity-block-validator" }
+bitfinity-block-confirmation = { path = "crates/bitfinity-block-confirmation" }
 candid = "0.10"
 did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", branch= "feat/ephermal-tx" }
 dirs = "5.0.1"

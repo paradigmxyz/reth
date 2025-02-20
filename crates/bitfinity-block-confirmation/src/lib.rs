@@ -28,35 +28,36 @@ use reth_trie::{HashedPostState, KeccakKeyHasher};
 
 use std::collections::HashSet;
 
-/// Block validator for Bitfinity.
+/// Block confirmation for Bitfinity.
 ///
-/// The validator validates the block by executing it and then
-/// confirming it on the EVM.
-#[derive(Clone, Debug)]
-pub struct BitfinityBlockValidator<C, DB>
+/// Uses custom Bitfinity logic to prove that the block was executed and sends confirmation request
+/// to the EVM canister.
+#[derive(Clone)]
+#[allow(missing_debug_implementations)]
+pub struct BitfinityBlockConfirmation<C, DB>
 where
-    C: CanisterClient,
+    C: Client,
     DB: NodeTypesWithDB + Clone,
 {
-    evm_client: EvmCanisterClient<C>,
+    evm_client: EthJsonRpcClient<C>,
     provider_factory: ProviderFactory<DB>,
 }
 
-impl<C, DB> BitfinityBlockValidator<C, DB>
+impl<C, DB> BitfinityBlockConfirmation<C, DB>
 where
-    C: CanisterClient,
+    C: Client,
     DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
 {
-    /// Create a new [`BitfinityBlockValidator`].
+    /// Create a new [`BitfinityBlockConfirmation`].
     pub const fn new(
-        evm_client: EvmCanisterClient<C>,
+        evm_client: EthJsonRpcClient<C>,
         provider_factory: ProviderFactory<DB>,
     ) -> Self {
         Self { evm_client, provider_factory }
     }
 
-    /// Validate a block.
-    pub async fn validate_blocks(&self, blocks: &[Block]) -> eyre::Result<()> {
+    /// Execute the block and send the confirmation request to the EVM.
+    pub async fn confirm_blocks(&self, blocks: &[Block]) -> eyre::Result<()> {
         if blocks.is_empty() {
             return Ok(());
         }
@@ -76,9 +77,10 @@ where
         &self,
         confirmation_data: BlockConfirmationData,
     ) -> eyre::Result<()> {
-        self.evm_client.confirm_block(confirmation_data).await??;
-
-        Ok(())
+        match self.evm_client.send_confirm_block(confirmation_data).await.map_err(|e| eyre!("{e}"))? {
+            BlockConfirmationResult::NotConfirmed => Err(eyre!("confirmation request rejected")),
+            _ => Ok(()),
+        }
     }
 
     /// Calculates confirmation data for a block based on execution result.
@@ -97,7 +99,7 @@ where
         })
     }
 
-    /// Execute block and return validation arguments.
+    /// Execute block and return execution result.
     fn execute_blocks(&self, blocks: &[Block]) -> eyre::Result<ExecutionOutcome> {
         let executor = self.executor();
         let blocks_with_senders: Vec<_> = blocks.iter().map(Self::convert_block).collect();

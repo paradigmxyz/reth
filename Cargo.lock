@@ -1457,7 +1457,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
-name = "bitfinity-block-validator"
+name = "bitfinity-block-confirmation"
 version = "1.1.5"
 dependencies = [
  "alloy-consensus",
@@ -2201,7 +2201,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2808,6 +2808,7 @@ dependencies = [
 [[package]]
 name = "did"
 version = "0.42.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1132_block_validation#f2f6650129275cabe67df0743cf344f1752e8e30"
 dependencies = [
  "alloy",
  "bincode",
@@ -3162,6 +3163,7 @@ dependencies = [
 [[package]]
 name = "ethereum-json-rpc-client"
 version = "0.42.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1132_block_validation#f2f6650129275cabe67df0743cf344f1752e8e30"
 dependencies = [
  "alloy",
  "anyhow",
@@ -3247,6 +3249,7 @@ dependencies = [
 [[package]]
 name = "evm-canister-client"
 version = "0.42.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1132_block_validation#f2f6650129275cabe67df0743cf344f1752e8e30"
 dependencies = [
  "candid",
  "did",
@@ -5431,7 +5434,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -7267,7 +7270,7 @@ dependencies = [
  "async-channel 2.3.1",
  "async-trait",
  "backon",
- "bitfinity-block-validator",
+ "bitfinity-block-confirmation",
  "candid",
  "clap",
  "did",
@@ -12014,7 +12017,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69fff37da548239c3bf9e64a12193d261e8b22b660991c6fd2df057c168f435f"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -12468,7 +12471,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -12991,11 +12994,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "eth-signer"
-version = "0.42.0"
-
-[[patch.unused]]
-name = "signature-verification-canister-client"
-version = "0.42.0"

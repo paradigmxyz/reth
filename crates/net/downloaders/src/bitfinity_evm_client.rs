@@ -4,7 +4,7 @@ use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use candid::Principal;
 use did::certified::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
-use eyre::{OptionExt, Result};
+use eyre::Result;
 use ic_cbor::{CertificateToCbor, HashTreeToCbor};
 use ic_certificate_verification::VerifyCertificate;
 use ic_certification::{Certificate, HashTree, LookupResult};
@@ -270,6 +270,11 @@ impl BitfinityEvmClient {
         }
 
         Err(eyre::eyre!("Block {tip} not found"))
+    }
+
+    /// Returns the number of the given block
+    pub fn get_block_number(&self, block_hash: &B256) -> Option<u64> {
+        self.hash_to_number.get(block_hash).copied()
     }
 
     /// Returns the hash of the first block after the latest safe block. If the tip of the chain is

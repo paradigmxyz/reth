@@ -14,7 +14,7 @@ use alloy_primitives::BlockNumber;
 use lightspeed_scheduler::JobExecutor;
 use parking_lot::Mutex;
 use reth::{
-    args::{BitfinityImportArgs, IC_MAINNET_KEY, IC_MAINNET_URL},
+    args::{BitfinityImportArgs, IC_MAINNET_KEY},
     commands::bitfinity_import::BitfinityImportCommand,
     dirs::{ChainPath, DataDirPath, PlatformPath},
 };
@@ -50,7 +50,7 @@ pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     let mut tracer = RethTracer::new();
     let stdout = LayerInfo::new(
         LogFormat::Terminal,
-        "info".to_string(),
+        "debug".to_string(),
         String::new(),
         Some("always".to_string()),
     );
@@ -172,8 +172,7 @@ pub async fn bitfinity_import_config_data(
         retry_delay_secs: 3,
         check_evm_state_before_importing: false,
         max_block_age_secs: 600,
-        validate_unsafe_blocks: false,
-        evm_network: IC_MAINNET_URL.to_string(),
+        confirm_unsafe_blocks: false,
     };
 
     Ok((

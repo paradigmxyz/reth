@@ -343,11 +343,19 @@ pub async fn start_reth_node(
 /// Start a local Eth server.
 /// Reth requests will be forwarded to this server
 pub async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, SocketAddr) {
+    mock_multi_server_start([methods.into()]).await
+}
+
+/// Starts a local mock server that combines methods from different sources.
+pub async fn mock_multi_server_start(methods: impl IntoIterator<Item = Methods>) -> (ServerHandle, SocketAddr) {
     let addr = SocketAddr::from(([127, 0, 0, 1], 0));
     let server = Server::builder().build(addr).await.unwrap();
 
     let mut module = RpcModule::new(());
-    module.merge(methods).unwrap();
+
+    for method_group in methods {
+        module.merge(method_group).unwrap();
+    }
 
     let server_address = server.local_addr().unwrap();
     let handle = server.start(module);
@@ -362,7 +370,7 @@ pub mod eth_server {
 
     use alloy_consensus::constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS};
     use alloy_rlp::Bytes;
-    use did::{keccak, BlockNumber, H256, U64};
+    use did::{keccak, BlockConfirmationData, BlockConfirmationResult, BlockNumber, H256, U64};
     use ethereum_json_rpc_client::CertifiedResult;
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
     use reth_trie::EMPTY_ROOT_HASH;
@@ -412,6 +420,13 @@ pub mod eth_server {
         async fn get_evm_global_state(&self) -> RpcResult<did::evm_state::EvmGlobalState>;
     }
 
+    #[rpc(server, namespace = "ic")]
+    trait BfEvm {
+        /// Send block confirmation request.
+        #[method(name = "sendConfirmBlock")]
+        async fn confirm_block(&self, data: BlockConfirmationData) -> RpcResult<BlockConfirmationResult>;
+    }
+
     /// Eth server implementation for local testing
     #[derive(Debug)]
     pub struct EthImpl {
@@ -430,11 +445,18 @@ pub mod eth_server {
         block_task: Option<tokio::task::JoinHandle<()>>,
         /// Genesis Balances
         pub genesis_balances: Vec<(Address, U256)>,
+        /// Unsafe blocks count
+        pub unsafe_blocks_count: u64,
     }
 
     impl EthImpl {
         /// Create a new Eth server implementation
         pub fn new() -> Self {
+            Self::new_with_max_block(u64::MAX)
+        }
+
+        /// Creates a new Eth server implementation that will mint blocks until `max_block` number
+        pub fn new_with_max_block(max_block: u64) -> Self {
             // Fake block counter
             let current_block = Arc::new(std::sync::atomic::AtomicU64::new(1));
             let block_counter = current_block.clone();
@@ -445,6 +467,10 @@ pub mod eth_server {
                     interval.tick().await;
                     let block = block_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     tracing::info!("Minted block {}", block + 1);
+
+                    if block + 1 >= max_block {
+                        break;
+                    }
                 }
             }));
 
@@ -456,6 +482,7 @@ pub mod eth_server {
                 state: did::evm_state::EvmGlobalState::Staging { max_block_number: None },
                 block_task,
                 genesis_balances: vec![],
+                unsafe_blocks_count: 0,
             }
         }
 
@@ -471,6 +498,14 @@ pub mod eth_server {
             let mut instance = Self::new();
             instance.genesis_balances = balances;
             instance
+        }
+
+        /// Returns an implementation of Bitfinity EVM canister API
+        pub fn bf_impl(&mut self, unsafe_blocks_count: u64) -> BfEvmImpl {
+            self.unsafe_blocks_count = unsafe_blocks_count;
+            BfEvmImpl {
+                confirm_until: u64::MAX,
+            }
         }
     }
 
@@ -495,14 +530,13 @@ pub mod eth_server {
             &self,
             number: BlockNumber,
         ) -> RpcResult<Option<did::Block<did::H256>>> {
-            tracing::info!("Requested block {:?}", number);
-
             let current_block = self.current_block.load(Ordering::Relaxed);
             let block_num = match number {
-                BlockNumber::Latest | BlockNumber::Finalized | BlockNumber::Safe => current_block,
+                BlockNumber::Safe => current_block - self.unsafe_blocks_count,
+                BlockNumber::Latest | BlockNumber::Finalized => current_block,
                 BlockNumber::Earliest => 0,
                 BlockNumber::Pending => {
-                    self.current_block.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    self.current_block.load(std::sync::atomic::Ordering::Relaxed) + 1
                 }
                 BlockNumber::Number(num) => num.as_u64(),
             };
@@ -579,6 +613,24 @@ pub mod eth_server {
                 witness: vec![],
                 certificate: vec![1u8, 3, 11],
             })
+        }
+    }
+
+    /// Mock implementation of Bitfinity EVM canister API
+    #[derive(Debug)]
+    pub struct BfEvmImpl {
+        /// Will allow confirming block until this block number
+        pub confirm_until: u64,
+    }
+
+    #[async_trait::async_trait]
+    impl BfEvmServer for BfEvmImpl {
+        async fn confirm_block(&self, data: BlockConfirmationData) -> RpcResult<BlockConfirmationResult> {
+            if data.block_number > self.confirm_until {
+                Ok(BlockConfirmationResult::NotConfirmed)
+            } else {
+                Ok(BlockConfirmationResult::Confirmed)
+            }
         }
     }
 }
