@@ -41,10 +41,9 @@ use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumPayloadBuilder},
     BasicBlockExecutorProvider, EthExecutionStrategyFactory, EthereumNode,
 };
-use reth_primitives::{EthPrimitives, Recovered, TransactionSigned};
+use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use std::{
-    borrow::Borrow,
     convert::Infallible,
     sync::{Arc, OnceLock},
 };

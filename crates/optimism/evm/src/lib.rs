@@ -11,10 +11,10 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
-use alloy_consensus::{transaction::Recovered, BlockHeader, Header};
+use alloy_consensus::{BlockHeader, Header};
 use alloy_op_evm::OpEvmFactory;
 use alloy_primitives::U256;
-use core::{borrow::Borrow, fmt::Debug};
+use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
@@ -22,7 +22,6 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives_traits::FillTxEnv;
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,

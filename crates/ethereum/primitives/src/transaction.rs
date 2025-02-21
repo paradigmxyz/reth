@@ -754,7 +754,7 @@ impl reth_codecs::Compact for TransactionSigned {
 impl FromRecoveredTx<TransactionSigned> for TxEnv {
     fn from_recovered_tx(tx: &TransactionSigned, sender: Address) -> Self {
         match tx.as_ref() {
-            Transaction::Legacy(tx) => TxEnv {
+            Transaction::Legacy(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.gas_price,
                 gas_priority_fee: None,
@@ -770,7 +770,7 @@ impl FromRecoveredTx<TransactionSigned> for TxEnv {
                 tx_type: 0,
                 caller: sender,
             },
-            Transaction::Eip2930(tx) => TxEnv {
+            Transaction::Eip2930(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.gas_price,
                 gas_priority_fee: None,
@@ -786,7 +786,7 @@ impl FromRecoveredTx<TransactionSigned> for TxEnv {
                 tx_type: 1,
                 caller: sender,
             },
-            Transaction::Eip1559(tx) => TxEnv {
+            Transaction::Eip1559(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.max_fee_per_gas,
                 gas_priority_fee: Some(tx.max_priority_fee_per_gas),
@@ -802,7 +802,7 @@ impl FromRecoveredTx<TransactionSigned> for TxEnv {
                 tx_type: 2,
                 caller: sender,
             },
-            Transaction::Eip4844(tx) => TxEnv {
+            Transaction::Eip4844(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.max_fee_per_gas,
                 gas_priority_fee: Some(tx.max_priority_fee_per_gas),
@@ -818,7 +818,7 @@ impl FromRecoveredTx<TransactionSigned> for TxEnv {
                 tx_type: 3,
                 caller: sender,
             },
-            Transaction::Eip7702(tx) => TxEnv {
+            Transaction::Eip7702(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.max_fee_per_gas,
                 gas_priority_fee: Some(tx.max_priority_fee_per_gas),

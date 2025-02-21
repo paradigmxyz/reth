@@ -10,10 +10,10 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
+use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{
     keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
 };
-use alloy_evm::FromRecoveredTx;
 use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
@@ -30,7 +30,7 @@ use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
-    FillTxEnv, InMemorySize, SignedTransaction,
+    InMemorySize, SignedTransaction,
 };
 use revm_context::TxEnv;
 use revm_optimism::transaction::deposit::DepositTransactionParts;
@@ -301,7 +301,7 @@ impl FromRecoveredTx<OpTransactionSigned> for revm_optimism::OpTransaction<TxEnv
             },
         };
 
-        revm_optimism::OpTransaction {
+        Self {
             base,
             enveloped_tx: Some(envelope.into()),
             deposit: if let OpTypedTransaction::Deposit(tx) = &tx.transaction {
