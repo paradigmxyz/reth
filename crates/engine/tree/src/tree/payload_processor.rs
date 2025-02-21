@@ -6,7 +6,7 @@ use crate::tree::{
     StateProviderBuilder,
 };
 use alloy_consensus::transaction::Recovered;
-use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives};
+use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, RecoveredBlock};
 use reth_provider::{
     BlockReader, DatabaseProviderFactory, HashedPostStateProvider, StateCommitmentProvider,
     StateProviderFactory, StateReader, StateRootProvider,
@@ -20,14 +20,20 @@ use std::{
         mpsc::{Receiver, Sender},
     },
 };
+use std::sync::{Arc, RwLock};
+use reth_provider::providers::ConsistentDbView;
+use reth_trie_sparse::SparseStateTrie;
+use crate::tree::root2::StateRootResult;
 
 /// Entrypoint for executing the payload.
-pub struct PayloadProcessor {
+pub struct PayloadProcessor<N> {
     executor: WorkloadExecutor,
     // TODO move all the caching stuff in here
 }
 
-impl PayloadProcessor {
+impl<N> PayloadProcessor<N>
+    where N: NodePrimitives
+{
     /// Executes the payload based on the configured settings.
     pub fn execute(&self) {
         // TODO helpers for executing in sync?
@@ -41,7 +47,7 @@ impl PayloadProcessor {
     ///
     /// # Transaction prewarming task
     ///
-    /// Responsible for feeding state updates to the state root task.
+    /// Responsible for feeding state updates to the multi proof task.
     ///
     /// This task runs until:
     ///  - externally cancelled (e.g. sequential block execution is complete)
@@ -53,6 +59,7 @@ impl PayloadProcessor {
     /// A state update (e.g. tx output) is converted into a multiproof calculation that returns an
     /// output back to this task.
     ///
+    /// Receives updates from sequential execution.
     /// This task runs until it receives a shutdown signal, which should be after after the block
     /// was fully executed.
     ///
@@ -65,8 +72,10 @@ impl PayloadProcessor {
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    fn spawn(&self, input: ()) -> PayloadTaskHandle {
+    fn spawn(&self, block: RecoveredBlock<N>) -> PayloadTaskHandle {
         // TODO: spawn the main tasks and wire them up
+
+
 
         todo!()
     }
@@ -82,19 +91,30 @@ pub struct PayloadTaskHandle {
     // On drop this should also terminate the prewarm task
 
     // must include the receiver of the state root wired to the sparse trie
+    prewarm: Option<Sender<PrewarmTaskEvent>>,
+
+    /// Receiver for the state root
+    state_root: Option<mpsc::Receiver<StateRootResult>>
 }
 
 impl PayloadTaskHandle {
+
+    /// Awaits the state root
+    pub fn state_root(&self) -> StateRootResult {
+        todo!()
+    }
+
+
     /// Terminates the pre-warming processing
-    // TODO: does this need a config arg?
-    pub fn terminate_prewarming(&self) {
-        // TODO emit a
+    pub fn terminate_prewarming(&mut self) {
+       self.prewarm.take().map(|tx|tx.send(PrewarmTaskEvent::Terminate).ok());
     }
 }
 
 impl Drop for PayloadTaskHandle {
     fn drop(&mut self) {
-        // TODO: terminate all tasks explicitly
+       // TODO: terminate all tasks
+       self.terminate_prewarming();
     }
 }
 
@@ -103,10 +123,12 @@ pub struct SparseTrieTask<F> {
     executor: WorkloadExecutor,
     /// Receives updates from the state root task
     // TODO: change to option?
-    updates: mpsc::Receiver<SparseTrieUpdate>,
+    updates: mpsc::Receiver<SparseTrieEvent>,
     factory: F,
     config: StateRootConfig<F>,
     metrics: StateRootTaskMetrics,
+    /// How many sparse trie jobs should be executed in parallel
+    max_concurrency: usize,
 }
 
 impl<F> SparseTrieTask<F>
@@ -119,20 +141,41 @@ where
     ///
     /// This concludes once the last trie update has been received.
     // TODO this should probably return the stateroot as response so we can wire a oneshot channel
-    fn run(mut self) {
+    fn run(mut self) -> StateRootResult {
         let mut num_iterations = 0;
+        // let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
+
+        // TODO setup
+
 
         // run
         while let Ok(mut update) = self.updates.recv() {
-            num_iterations += 1;
-            let mut num_updates = 1;
 
-            while let Ok(next) = self.updates.try_recv() {
-                update.extend(next);
-                num_updates += 1;
+            match update {
+                SparseTrieEvent::Update(_) => {}
+                SparseTrieEvent::Processed() => {
+                    // TODO apply update to trie, needs shared access?
+                }
             }
+
+            // num_iterations += 1;
+            // let mut num_updates = 1;
+            //
+            // while let Ok(next) = self.updates.try_recv() {
+            //     // update.extend(next);
+            //     // num_updates += 1;
+            // }
         }
+
+        todo!()
     }
+}
+
+enum SparseTrieEvent {
+    /// Updates received from the multiproof task
+    Update(Option<SparseTrieUpdate>),
+    /// Updates processed from the spawned trie updates jobs (update_sparse_trie)
+    Processed(),
 }
 
 /// A task that executes transactions individually in parallel.
@@ -146,11 +189,10 @@ pub struct PrewarmTask<N: NodePrimitives, P, C> {
     in_progress: usize,
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
-    /// Sender to emit Stateroot messages
-    to_state_root: (),
+    /// Sender to emit evm state outcome messages
+    to_multi_proof: mpsc::Sender<()>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
-
     /// Sender the transactions use to send their result back
     actions_tx: Sender<PrewarmTaskEvent>,
 }
@@ -183,10 +225,6 @@ where
         self.spawn_next();
 
         while let Ok(event) = self.actions_rx.recv() {
-            if self.ctx.is_cancelled() {
-                // terminate
-                break
-            }
             match event {
                 PrewarmTaskEvent::Terminate => {
                     // received terminate signal
@@ -210,16 +248,11 @@ struct PrewarmContext<N: NodePrimitives, P, C> {
     evm_config: C,
     caches: ProviderCaches,
     cache_metrics: CachedStateMetrics,
-    cancelled: ManualCancel,
     /// Provider to obtain the state
     provider: StateProviderBuilder<N, P>,
 }
 
 impl<N: NodePrimitives, P, C> PrewarmContext<N, P, C> {
-    /// Returns true if the task is cancelled
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.is_cancelled()
-    }
 }
 
 enum PrewarmTaskEvent {
