@@ -724,7 +724,7 @@ impl OpNetworkBuilder {
     }
 }
 
-fn get_all_op_bootnodes<Node>(ctx: &BuilderContext<Node>) -> Vec<Bootnode>
+pub fn get_all_op_bootnodes<Node>(ctx: &BuilderContext<Node>) -> Vec<Bootnode>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
 {
