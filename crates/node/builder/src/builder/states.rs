@@ -26,7 +26,11 @@ pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
     adapter: NodeTypesAdapter<T>,
 }
 
-impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
+impl<T> NodeBuilderWithTypes<T>
+where
+    T: FullNodeTypes + NodeTypes,
+    T::Types: NodeTypes<ChainSpec = <T as NodeTypes>::ChainSpec>,
+{
     /// Creates a new instance of the node builder with the given configuration and types.
     pub const fn new(
         config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
@@ -36,18 +40,19 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB, ()>
+    pub fn with_components<CB>(
+        self,
+        components_builder: CB,
+    ) -> NodeBuilderWithComponents<BuilderComponentsAdapter<T, CB>>
     where
         CB: NodeComponentsBuilder<T>,
     {
-        let Self { config, adapter } = self;
+        let Self { config, adapter: types_adapter } = self;
 
-        NodeBuilderWithComponents {
-            config,
-            adapter,
-            components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
-        }
+        let adapter =
+            BuilderComponentsAdapter::new(types_adapter.database, config, components_builder);
+
+        NodeBuilderWithComponents { adapter }
     }
 }
 
@@ -149,7 +154,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
 /// A fully type configured node builder.
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents<
+pub struct NodeBuilderWithComponents2<
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
@@ -167,7 +172,7 @@ pub struct NodeBuilderWithComponents<
 /// A fully type configured node builder.
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents2<T: BuilderInternals> {
+pub struct NodeBuilderWithComponents<T: BuilderInternals> {
     /// All settings for how the node should be configured.
     pub adapter: T,
 }
@@ -193,12 +198,6 @@ pub trait BuilderInternals {
     fn components_builder(
         &self,
     ) -> &impl NodeComponentsBuilder<Self::Types, Components = Self::Components>;
-
-    /// Returns the task executor for the node
-    fn task_executor(&self) -> &TaskExecutor;
-
-    /// Returns the provider for the node
-    fn provider(&self) -> &<Self::Types as FullNodeTypes>::Provider;
 }
 
 /// An adapter that manages the components and configuration for building a node.
@@ -208,10 +207,6 @@ pub struct BuilderComponentsAdapter<T: FullNodeTypes, C> {
     database: T::DB,
     /// The node configuration
     config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
-    /// The provider instance
-    provider: T::Provider,
-    /// Task executor for managing async tasks
-    task_executor: TaskExecutor,
     /// The components builder
     components_builder: C,
 }
@@ -225,26 +220,14 @@ where
     pub fn new(
         database: T::DB,
         config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
-        provider: T::Provider,
-        task_executor: TaskExecutor,
         components_builder: C,
     ) -> Self {
-        Self { database, config, provider, task_executor, components_builder }
+        Self { database, config, components_builder }
     }
 
     /// Access the database instance
     pub fn database(&self) -> &T::DB {
         &self.database
-    }
-
-    /// Access the provider instance
-    pub fn provider(&self) -> &T::Provider {
-        &self.provider
-    }
-
-    /// Access the task executor
-    pub fn task_executor(&self) -> &TaskExecutor {
-        &self.task_executor
     }
 
     /// Access the components builder
@@ -276,14 +259,6 @@ where
         &self,
     ) -> &impl NodeComponentsBuilder<Self::Types, Components = Self::Components> {
         &self.components_builder
-    }
-
-    fn task_executor(&self) -> &TaskExecutor {
-        &self.task_executor
-    }
-
-    fn provider(&self) -> &<Self::Types as FullNodeTypes>::Provider {
-        &self.provider
     }
 }
 
