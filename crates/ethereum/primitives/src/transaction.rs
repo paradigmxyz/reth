@@ -10,6 +10,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
+use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
@@ -19,7 +20,7 @@ use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
-    FillTxEnv, InMemorySize, SignedTransaction,
+    InMemorySize, SignedTransaction,
 };
 use revm_context::TxEnv;
 use serde::{Deserialize, Serialize};
@@ -750,9 +751,9 @@ impl reth_codecs::Compact for TransactionSigned {
     }
 }
 
-impl FillTxEnv<TxEnv> for TransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
-        *tx_env = match self.as_ref() {
+impl FromRecoveredTx<TransactionSigned> for TxEnv {
+    fn from_recovered_tx(tx: &TransactionSigned, sender: Address) -> Self {
+        match tx.as_ref() {
             Transaction::Legacy(tx) => TxEnv {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.gas_price,

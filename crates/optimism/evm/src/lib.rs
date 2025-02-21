@@ -74,17 +74,6 @@ impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvmEnv for OpEvmC
     type TxEnv = OpTransaction<TxEnv>;
     type Spec = OpSpecId;
 
-    fn tx_env<T: Borrow<Self::Transaction>>(
-        &self,
-        transaction: impl Borrow<Recovered<T>>,
-    ) -> Self::TxEnv {
-        let transaction = transaction.borrow();
-
-        let mut tx_env = Default::default();
-        transaction.tx().borrow().fill_tx_env(&mut tx_env, transaction.signer());
-        tx_env
-    }
-
     fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
         let spec = config::revm_spec(self.chain_spec(), header);
 

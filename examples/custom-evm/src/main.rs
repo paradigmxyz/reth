@@ -106,13 +106,6 @@ impl ConfigureEvmEnv for MyEvmConfig {
     type TxEnv = TxEnv;
     type Spec = SpecId;
 
-    fn tx_env<T: Borrow<Self::Transaction>>(
-        &self,
-        transaction: impl Borrow<Recovered<T>>,
-    ) -> Self::TxEnv {
-        self.inner.tx_env(transaction)
-    }
-
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         self.inner.evm_env(header)
     }

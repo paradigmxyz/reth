@@ -13,6 +13,7 @@ use alloy_eips::{
 use alloy_primitives::{
     keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
 };
+use alloy_evm::FromRecoveredTx;
 use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
@@ -213,11 +214,11 @@ impl OpTransaction for OpTransactionSigned {
     }
 }
 
-impl FillTxEnv<revm_optimism::OpTransaction<TxEnv>> for OpTransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut revm_optimism::OpTransaction<TxEnv>, sender: Address) {
-        let envelope = self.encoded_2718();
+impl FromRecoveredTx<OpTransactionSigned> for revm_optimism::OpTransaction<TxEnv> {
+    fn from_recovered_tx(tx: &OpTransactionSigned, sender: Address) -> Self {
+        let envelope = tx.encoded_2718();
 
-        let base = match &self.transaction {
+        let base = match &tx.transaction {
             OpTypedTransaction::Legacy(tx) => TxEnv {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.gas_price,
@@ -300,10 +301,10 @@ impl FillTxEnv<revm_optimism::OpTransaction<TxEnv>> for OpTransactionSigned {
             },
         };
 
-        *tx_env = revm_optimism::OpTransaction {
+        revm_optimism::OpTransaction {
             base,
             enveloped_tx: Some(envelope.into()),
-            deposit: if let OpTypedTransaction::Deposit(tx) = &self.transaction {
+            deposit: if let OpTypedTransaction::Deposit(tx) = &tx.transaction {
                 DepositTransactionParts {
                     is_system_transaction: tx.is_system_transaction,
                     source_hash: tx.source_hash,
@@ -312,7 +313,7 @@ impl FillTxEnv<revm_optimism::OpTransaction<TxEnv>> for OpTransactionSigned {
             } else {
                 Default::default()
             },
-        };
+        }
     }
 }
 
