@@ -18,7 +18,7 @@ reth-consensus.workspace = true
 reth-db.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["metrics"] }
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true

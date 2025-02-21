@@ -65,7 +65,7 @@ rustc-hash.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 rand.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 derive_more.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
@@ -96,6 +96,7 @@ alloy-consensus.workspace = true
 serial_test.workspace = true
 tempfile.workspace = true
 url.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 
 ## Benchmarks
 pprof = { workspace = true, features = ["criterion", "flamegraph"] }

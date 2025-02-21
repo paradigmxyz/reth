@@ -648,7 +648,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
-    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx> + 'static,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
@@ -671,7 +671,7 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        let num_threads = root::thread_pool_size();
+        let num_threads = root::rayon_thread_pool_size();
 
         let thread_pool = Arc::new(
             rayon::ThreadPoolBuilder::new()
@@ -919,7 +919,7 @@ where
         let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
             let num_hash = block.num_hash();
-            match self.insert_block_without_senders(block) {
+            match self.insert_block(block) {
                 Ok(status) => {
                     let status = match status {
                         InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -942,7 +942,7 @@ where
                 }
                 Err(error) => self.on_insert_block_error(error)?,
             }
-        } else if let Err(error) = self.buffer_block_without_senders(block) {
+        } else if let Err(error) = self.buffer_block(block) {
             self.on_insert_block_error(error)?
         } else {
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
@@ -1991,19 +1991,6 @@ where
         Ok(())
     }
 
-    /// Attempts to recover the block's senders and then buffers it.
-    ///
-    /// Returns an error if sender recovery failed or inserting into the buffer failed.
-    fn buffer_block_without_senders(
-        &mut self,
-        block: SealedBlock<N::Block>,
-    ) -> Result<(), InsertBlockError<N::Block>> {
-        match block.try_recover() {
-            Ok(block) => self.buffer_block(block),
-            Err(err) => Err(InsertBlockError::sender_recovery_error(err.into_inner())),
-        }
-    }
-
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
@@ -2350,16 +2337,6 @@ where
         self.most_recent_cache.take_if(|cache| cache.executed_block_hash() == parent_hash)
     }
 
-    fn insert_block_without_senders(
-        &mut self,
-        block: SealedBlock<N::Block>,
-    ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
-        match block.try_recover() {
-            Ok(block) => self.insert_block(block),
-            Err(err) => Err(InsertBlockError::sender_recovery_error(err.into_inner())),
-        }
-    }
-
     fn insert_block(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2431,11 +2408,8 @@ where
         // Atomic bool for letting the prewarm tasks know when to stop
         let cancel_execution = ManualCancel::default();
 
-        let use_legacy_state_root =
-            self.config.legacy_state_root() || !root::has_enough_parallelism();
-
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
-            if is_descendant_of_persisting_blocks && !use_legacy_state_root {
+            if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
                 // Compute trie input
@@ -2560,7 +2534,21 @@ where
         // a different database transaction per thread and it might end up with a
         // different view of the database.
         let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks {
-            if use_legacy_state_root {
+            if self.config.use_state_root_task() {
+                let state_root_handle = state_root_handle
+                    .expect("state root handle must exist if legacy_state_root is false");
+                let state_root_config = state_root_task_config.expect("task config is present");
+
+                // Handle state root result from task using handle
+                self.handle_state_root_result(
+                    state_root_handle,
+                    state_root_config,
+                    block.sealed_block(),
+                    &hashed_state,
+                    &state_provider,
+                    root_time,
+                )?
+            } else {
                 match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
                 {
                     Ok(result) => {
@@ -2580,20 +2568,6 @@ where
                     }
                     Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
                 }
-            } else {
-                let state_root_handle = state_root_handle
-                    .expect("state root handle must exist if legacy_state_root is false");
-                let state_root_config = state_root_task_config.expect("task config is present");
-
-                // Handle state root result from task using handle
-                self.handle_state_root_result(
-                    state_root_handle,
-                    state_root_config,
-                    block.sealed_block(),
-                    &hashed_state,
-                    &state_provider,
-                    root_time,
-                )?
             }
         } else {
             debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
@@ -2775,7 +2749,7 @@ where
             let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
             // create the tx env and reset nonce
-            let tx_env = evm_config.tx_env(&tx, tx.signer());
+            let tx_env = evm_config.tx_env(&tx);
 
             // exit early if execution is done
             if cancel_execution.is_cancelled() {
@@ -3384,7 +3358,10 @@ mod tests {
                 PersistenceState::default(),
                 payload_builder,
                 // TODO: fix tests for state root task https://github.com/paradigmxyz/reth/issues/14376
-                TreeConfig::default().with_legacy_state_root(true),
+                // always assume enough parallelism for tests
+                TreeConfig::default()
+                    .with_legacy_state_root(true)
+                    .with_has_enough_parallelism(true),
                 EngineApiKind::Ethereum,
                 evm_config,
             );
@@ -3833,11 +3810,11 @@ mod tests {
         let s = include_str!("../../test-data/holesky/2.rlp");
         let data = Bytes::from_str(s).unwrap();
         let block = Block::decode(&mut data.as_ref()).unwrap();
-        let sealed = block.seal_slow();
+        let sealed = block.seal_slow().try_recover().unwrap();
 
         let mut test_harness = TestHarness::new(HOLESKY.clone());
 
-        let outcome = test_harness.tree.insert_block_without_senders(sealed.clone()).unwrap();
+        let outcome = test_harness.tree.insert_block(sealed.clone()).unwrap();
         assert_eq!(
             outcome,
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {

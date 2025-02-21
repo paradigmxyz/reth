@@ -23,18 +23,16 @@ use revm::context_interface::result::ResultAndState;
 #[inline]
 pub(crate) fn transact_blockhashes_contract_call<Halt>(
     chain_spec: impl EthereumHardforks,
-    block_timestamp: u64,
-    block_number: u64,
     parent_block_hash: B256,
     evm: &mut impl Evm<HaltReason = Halt>,
 ) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
-    if !chain_spec.is_prague_active_at_timestamp(block_timestamp) {
+    if !chain_spec.is_prague_active_at_timestamp(evm.block().timestamp) {
         return Ok(None)
     }
 
     // if the block number is zero (genesis block) then no system transaction may occur as per
     // EIP-2935
-    if block_number == 0 {
+    if evm.block().number == 0 {
         return Ok(None)
     }
 

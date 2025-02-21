@@ -186,10 +186,6 @@ impl ConfigureEvmEnv for MyEvmConfig {
     type TxEnv = TxEnv;
     type Spec = SpecId;
 
-    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
-        self.inner.tx_env(transaction, signer)
-    }
-
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         self.inner.evm_env(header)
     }

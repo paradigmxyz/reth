@@ -19,13 +19,13 @@ mod op_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::Header;
+use alloy_consensus::{proofs::storage_root_unhashed, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
-use derive_more::{Constructor, Deref, Display, From, Into};
+use derive_more::{Constructor, Deref, From, Into};
 pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
@@ -36,6 +36,7 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
+use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
 /// Chain spec builder for a OP stack chain.
@@ -158,6 +159,13 @@ impl OpChainSpecBuilder {
         self
     }
 
+    /// Enable Interop at genesis
+    pub fn interop_activated(mut self) -> Self {
+        self = self.isthmus_activated();
+        self.inner = self.inner.with_fork(OpHardfork::Interop, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`OpChainSpec`].
     ///
     /// # Panics
@@ -214,7 +222,7 @@ impl EthChainSpec for OpChainSpec {
         self.inner.prune_delete_limit()
     }
 
-    fn display_hardforks(&self) -> Box<dyn Display> {
+    fn display_hardforks(&self) -> Box<dyn core::fmt::Display> {
         Box::new(ChainSpec::display_hardforks(self))
     }
 
@@ -328,6 +336,7 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Granite.boxed(), genesis_info.granite_time),
             (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
             (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
+            // (OpHardfork::Interop.boxed(), genesis_info.interop_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -419,6 +428,24 @@ impl OpGenesisInfo {
 
         info
     }
+}
+
+/// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
+pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
+    let mut header = reth_chainspec::make_genesis_header(genesis, hardforks);
+
+    // If Isthmus is active, overwrite the withdrawals root with the storage root of predeploy
+    // `L2ToL1MessagePasser.sol`
+    if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) {
+        if let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
+            if let Some(storage) = &predeploy.storage {
+                header.withdrawals_root =
+                    Some(storage_root_unhashed(storage.iter().map(|(k, v)| (*k, (*v).into()))))
+            }
+        }
+    }
+
+    header
 }
 
 #[cfg(test)]
@@ -955,6 +982,7 @@ mod tests {
             OpHardfork::Granite.boxed(),
             OpHardfork::Holocene.boxed(),
             // OpHardfork::Isthmus.boxed(),
+            // OpHardfork::Interop.boxed(),
         ];
 
         for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {

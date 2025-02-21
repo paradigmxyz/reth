@@ -11,7 +11,7 @@ use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, OnForkChoiceUpdated,
 };
-use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
+use reth_errors::{BlockExecutionError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
     state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
@@ -293,14 +293,10 @@ where
     let mut evm = evm_config.evm_for_block(&mut state, &reorg_target.header);
 
     // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
+    let mut system_caller = SystemCaller::new(chain_spec.clone());
 
-    system_caller.apply_beacon_root_contract_call(
-        reorg_target.timestamp,
-        reorg_target.number,
-        reorg_target.parent_beacon_block_root,
-        &mut evm,
-    )?;
+    system_caller
+        .apply_beacon_root_contract_call(reorg_target.parent_beacon_block_root, &mut evm)?;
 
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
@@ -316,7 +312,7 @@ where
         // Configure the environment for the block.
         let tx_recovered =
             tx.try_clone_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
-        let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
+        let tx_env = evm_config.tx_env(tx_recovered);
         let exec_result = match evm.transact(tx_env) {
             Ok(result) => result,
             Err(err) if err.is_invalid_tx_err() => {
@@ -324,11 +320,7 @@ where
                 continue
             }
             // Treat error as fatal
-            Err(error) => {
-                return Err(RethError::Execution(BlockExecutionError::Validation(
-                    BlockValidationError::EVM { hash: *tx.tx_hash(), error: Box::new(error) },
-                )))
-            }
+            Err(error) => return Err(RethError::Execution(BlockExecutionError::other(error))),
         };
         evm.db_mut().commit(exec_result.state);
 

@@ -42,14 +42,21 @@ use tracing::{debug, error, trace, trace_span};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
-/// Determines the size of the thread pool to be used in [`StateRootTask`].
-/// It should be at least three, one for multiproof calculations  plus two to be
-/// used internally in [`StateRootTask`].
+/// Determines the size of the rayon thread pool to be used in [`StateRootTask`].
+///
+/// The value is determined as `max(NUM_THREADS - 2, 3)`:
+/// - It should leave at least 2 threads to the rest of the system to be used in:
+///     - Engine
+///     - State Root Task spawned in [`StateRootTask::spawn`]
+/// - It should heave at least 3 threads to be used in:
+///     - Sparse Trie spawned in [`run_sparse_trie`]
+///     - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+///     - Storage root computation spawned in [`ParallelProof::multiproof`]
 ///
 /// NOTE: this value can be greater than the available cores in the host, it
 /// represents the maximum number of threads that can be handled by the pool.
-pub(crate) fn thread_pool_size() -> usize {
-    std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
+pub(crate) fn rayon_thread_pool_size() -> usize {
+    std::thread::available_parallelism().map_or(3, |num| (num.get().saturating_sub(2).max(3)))
 }
 
 /// Determines if the host has enough parallelism to run the state root task.
@@ -490,6 +497,25 @@ struct StateRootTaskMetrics {
     pub proofs_processed_histogram: Histogram,
     /// Histogram of state root update iterations.
     pub state_root_iterations_histogram: Histogram,
+
+    /// Histogram of the number of updated state nodes.
+    pub nodes_sorted_account_nodes_histogram: Histogram,
+    /// Histogram of the number of emoved state nodes.
+    pub nodes_sorted_removed_nodes_histogram: Histogram,
+    /// Histogram of the number of storage tries.
+    pub nodes_sorted_storage_tries_histogram: Histogram,
+
+    /// Histogram of the number of updated state of accounts.
+    pub state_sorted_accounts_histogram: Histogram,
+    /// Histogram of the number of hashed storages.
+    pub state_sorted_storages_histogram: Histogram,
+
+    /// Histogram of the number of account prefixes that have changed.
+    pub prefix_sets_accounts_histogram: Histogram,
+    /// Histogram of the number of storage prefixes that have changed.
+    pub prefix_sets_storages_histogram: Histogram,
+    /// Histogram of the number of destroyed accounts.
+    pub prefix_sets_destroyed_accounts_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -535,7 +561,7 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             thread_pool: thread_pool.clone(),
-            multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
+            multiproof_manager: MultiproofManager::new(thread_pool, rayon_thread_pool_size()),
             metrics: StateRootTaskMetrics::default(),
         }
     }
@@ -577,12 +603,59 @@ where
             .spawn(move || {
                 debug!(target: "engine::tree", "State root task starting");
 
+                self.observe_config();
+
                 let result = self.run(sparse_trie_tx);
                 let _ = tx.send(result);
             })
             .expect("failed to spawn state root thread");
 
         StateRootHandle::new(rx)
+    }
+
+    /// Logs and records in metrics the state root config parameters.
+    fn observe_config(&self) {
+        let nodes_sorted_account_nodes = self.config.nodes_sorted.account_nodes.len();
+        let nodes_sorted_removed_nodes = self.config.nodes_sorted.removed_nodes.len();
+        let nodes_sorted_storage_tries = self.config.nodes_sorted.storage_tries.len();
+        let state_sorted_accounts = self.config.state_sorted.accounts.accounts.len();
+        let state_sorted_destroyed_accounts =
+            self.config.state_sorted.accounts.destroyed_accounts.len();
+        let state_sorted_storages = self.config.state_sorted.storages.len();
+        let prefix_sets_accounts = self.config.prefix_sets.account_prefix_set.len();
+        let prefix_sets_storages = self
+            .config
+            .prefix_sets
+            .storage_prefix_sets
+            .values()
+            .map(|set| set.len())
+            .sum::<usize>();
+        let prefix_sets_destroyed_accounts = self.config.prefix_sets.destroyed_accounts.len();
+
+        debug!(
+            target: "engine::tree",
+            ?nodes_sorted_account_nodes,
+            ?nodes_sorted_removed_nodes,
+            ?nodes_sorted_storage_tries,
+            ?state_sorted_accounts,
+            ?state_sorted_destroyed_accounts,
+            ?state_sorted_storages,
+            ?prefix_sets_accounts,
+            ?prefix_sets_storages,
+            ?prefix_sets_destroyed_accounts,
+            "State root config"
+        );
+
+        self.metrics.nodes_sorted_account_nodes_histogram.record(nodes_sorted_account_nodes as f64);
+        self.metrics.nodes_sorted_removed_nodes_histogram.record(nodes_sorted_removed_nodes as f64);
+        self.metrics.nodes_sorted_storage_tries_histogram.record(nodes_sorted_storage_tries as f64);
+        self.metrics.state_sorted_accounts_histogram.record(state_sorted_accounts as f64);
+        self.metrics.state_sorted_storages_histogram.record(state_sorted_storages as f64);
+        self.metrics.prefix_sets_accounts_histogram.record(prefix_sets_accounts as f64);
+        self.metrics.prefix_sets_storages_histogram.record(prefix_sets_storages as f64);
+        self.metrics
+            .prefix_sets_destroyed_accounts_histogram
+            .record(prefix_sets_destroyed_accounts as f64);
     }
 
     /// Spawn long running sparse trie task that forwards the final result upon completion.
@@ -1286,7 +1359,7 @@ mod tests {
             + Clone
             + 'static,
     {
-        let num_threads = thread_pool_size();
+        let num_threads = rayon_thread_pool_size();
 
         let thread_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
@@ -1361,7 +1434,7 @@ mod tests {
             prefix_sets: Arc::new(input.prefix_sets),
         };
 
-        let num_threads = thread_pool_size();
+        let num_threads = rayon_thread_pool_size();
 
         let state_root_task_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
