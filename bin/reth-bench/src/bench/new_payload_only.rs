@@ -37,7 +37,7 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         // TODO: this could be just a function I guess, but destructuring makes the code slightly
         // more readable than a 4 element tuple.
-        let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
+        let BenchContext { benchmark_mode, block_provider, auth_provider, metrics_client: _metrics_client, mut next_block } =
             BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);

@@ -6,6 +6,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
+use eyre::eyre;
 use reqwest::Url;
 use reth_node_core::args::BenchmarkArgs;
 use tracing::info;
@@ -18,6 +19,8 @@ use tracing::info;
 pub(crate) struct BenchContext {
     /// The auth provider is used for engine API queries.
     pub(crate) auth_provider: RootProvider<AnyNetwork>,
+    /// client to get metrics information
+    pub(crate) metrics_client: Option<MetricsClient>,
     /// The block provider is used for block queries.
     pub(crate) block_provider: RootProvider<AnyNetwork>,
     /// The benchmark mode, which defines whether the benchmark should run for a closed or open
@@ -25,6 +28,13 @@ pub(crate) struct BenchContext {
     pub(crate) benchmark_mode: BenchMode,
     /// The next block to fetch.
     pub(crate) next_block: u64,
+}
+
+/// Client for retrieving and analyzing reth metrics
+/// 
+/// Should this be in its own file?
+pub(crate) struct MetricsClient {
+    pub(crate) metrics_url: Url,
 }
 
 impl BenchContext {
@@ -63,6 +73,14 @@ impl BenchContext {
         // get engine url
         let auth_url = Url::parse(&bench_args.engine_rpc_url)?;
 
+        let metrics_client = bench_args.metrics.map(|e| -> eyre::Result<MetricsClient> {
+            let mut metrics_url = auth_url.clone();
+            // message could probably be better
+            metrics_url.set_port(Some(e.port())).map_err(|_| eyre!("failed to set port of metrics endpoint"))?;
+            eyre::Result::Ok(MetricsClient{ metrics_url })
+        }).transpose()?;
+
+
         // construct the authed transport
         info!("Connecting to Engine RPC at {} for replay", auth_url);
         let auth_transport = AuthenticatedTransportConnect::new(auth_url, jwt);
@@ -96,6 +114,6 @@ impl BenchContext {
         };
 
         let next_block = first_block.header.number + 1;
-        Ok(Self { auth_provider, block_provider, benchmark_mode, next_block })
+        Ok(Self { auth_provider, metrics_client, block_provider, benchmark_mode, next_block })
     }
 }

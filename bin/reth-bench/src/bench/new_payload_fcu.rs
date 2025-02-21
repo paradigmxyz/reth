@@ -20,6 +20,7 @@ use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::SealedHeader;
+use tokio::fs;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -37,7 +38,7 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
+        let BenchContext { benchmark_mode, block_provider, auth_provider, metrics_client, mut next_block } =
             BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
@@ -121,6 +122,13 @@ impl Command {
             // record the current result
             let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
+        }
+
+        // see what we get back from the metrics endpoint, so that we can figure out how to parse later.
+        if let Some(client) = metrics_client {
+            let metrics = reqwest::get(client.metrics_url).await?;
+            let text = metrics.text().await?;
+            fs::write("/tmp/reth_prometheus_metrics", text).await?;
         }
 
         let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =

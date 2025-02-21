@@ -17,6 +17,10 @@ pub struct BenchmarkArgs {
     pub to: Option<u64>,
 
     /// fetch metrics from the specified metrics endpoint
+    /// value here is a socket address in order to mirror
+    /// the argumentd in node.rs but it seems that we only
+    /// care about the port number so maybe this value should
+    /// be a u16?
     #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
     pub metrics: Option<SocketAddr>,
 
