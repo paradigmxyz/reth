@@ -29,7 +29,7 @@ impl BscHandshake {
             let upgrade_msg = UpgradeStatus {
                 extension: UpgradeStatusExtension { disable_peer_tx_broadcast: false },
             };
-            unauth.send(upgrade_msg.into_rlp_bytes()).await?;
+            unauth.start_send_unpin(upgrade_msg.into_rlpx())?;
 
             // Receive peer's upgrade status response
             let their_msg = match unauth.next().await {
@@ -51,7 +51,6 @@ impl BscHandshake {
                     return Ok(negotiated_status);
                 }
                 Err(_) => {
-                    // handshake failed
                     unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
                     return Err(EthStreamError::EthHandshakeError(
                         EthHandshakeError::NonStatusMessageInHandshake,

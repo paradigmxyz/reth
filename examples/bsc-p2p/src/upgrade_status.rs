@@ -1,13 +1,15 @@
 //! Implement BSC upgrade message which is required during handshake with other BSC clients, e.g.,
 //! geth.
-
-use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
-use bytes::{Bytes, BytesMut};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use bytes::{BufMut, Bytes, BytesMut};
 use reth_codecs_derive::add_arbitrary_tests;
+
+/// The message id for the upgrade status message, used in the BSC handshake.
+const UPGRADE_STATUS_MESSAGE_ID: u8 = 0x0b;
 
 /// UpdateStatus packet introduced in BSC to notify peers whether to broadcast transaction or not.
 /// It is used during the p2p handshake.
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -16,9 +18,27 @@ pub struct UpgradeStatus {
     pub extension: UpgradeStatusExtension,
 }
 
+impl Encodable for UpgradeStatus {
+    fn encode(&self, out: &mut dyn BufMut) {
+        UPGRADE_STATUS_MESSAGE_ID.encode(out);
+        self.extension.encode(out);
+    }
+}
+
+impl Decodable for UpgradeStatus {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let message_id = u8::decode(buf)?;
+        if message_id != UPGRADE_STATUS_MESSAGE_ID {
+            return Err(alloy_rlp::Error::Custom("Invalid message ID"));
+        }
+        let extension = UpgradeStatusExtension::decode(buf)?;
+        Ok(Self { extension })
+    }
+}
+
 impl UpgradeStatus {
-    /// Encode the upgrade status message into RLP bytes.
-    pub fn into_rlp_bytes(self) -> Bytes {
+    /// Encode the upgrade status message into RLPx bytes.
+    pub fn into_rlpx(self) -> Bytes {
         let mut out = BytesMut::new();
         self.encode(&mut out);
         out.freeze()
@@ -40,19 +60,12 @@ pub struct UpgradeStatusExtension {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::hex;
-    use alloy_rlp::Encodable;
 
     #[test]
-    fn test_encode_upgrade_status() {
-        let extension = UpgradeStatusExtension { disable_peer_tx_broadcast: true };
-        let mut buffer = Vec::<u8>::new();
-        extension.encode(&mut buffer);
-        assert_eq!("c101", hex::encode(buffer.clone()));
-
-        let upgrade_status = UpgradeStatus { extension };
-        let mut buffer = Vec::<u8>::new();
-        upgrade_status.encode(&mut buffer);
-        assert_eq!("c2c101", hex::encode(buffer.clone()));
+    fn test_decode_encode() {
+        let upgrade_status =
+            UpgradeStatus { extension: UpgradeStatusExtension { disable_peer_tx_broadcast: true } };
+        let rlp_bytes = upgrade_status.into_rlpx();
+        UpgradeStatus::decode(&mut rlp_bytes.as_ref()).unwrap();
     }
 }
