@@ -20,13 +20,13 @@ reth-primitives-traits.workspace = true
 reth-chain-state.workspace = true
 reth-trie.workspace = true
 reth-errors.workspace = true
+reth-trie-common.workspace = true
 
-# ethereum
+# alloy
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-eips.workspace = true
-revm.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -43,6 +43,7 @@ std = [
     "reth-execution-types/std",
     "reth-primitives/std",
     "reth-primitives-traits/std",
+    "reth-trie-common/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-rpc-types-engine/std",
@@ -50,5 +51,4 @@ std = [
     "serde/std",
     "thiserror/std",
     "alloy-eips/std",
-    "revm/std",
 ]

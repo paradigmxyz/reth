@@ -22,10 +22,9 @@ use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::{OpBlock, OpPrimitives, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::SealedBlock;
+use reth_primitives::{RecoveredBlock, SealedBlock};
 use reth_provider::StateProviderFactory;
-use reth_trie_common::KeyHasher;
-use revm::database::BundleState;
+use reth_trie_common::{HashedPostState, KeyHasher};
 use std::sync::Arc;
 
 /// The types used in the optimism beacon consensus engine.
@@ -79,7 +78,6 @@ impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N> {
 
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
-#[expect(dead_code)]
 pub struct OpEngineValidator<P> {
     inner: ExecutionPayloadValidator<OpChainSpec>,
     provider: P,
@@ -118,17 +116,20 @@ where
         Ok(self.inner.ensure_well_formed_payload(payload)?)
     }
 
-    fn validate_block_post_execution_with_state_updates(
+    fn validate_block_post_execution_with_hashed_state_updates(
         &self,
-        state_updates: &BundleState,
-        block: Self::Block,
+        state_updates: &HashedPostState,
+        block: &RecoveredBlock<Self::Block>,
     ) -> Result<(), ConsensusError> {
         let state = self.provider.latest().map_err(|err| {
             ConsensusError::Other(format!("failed to verify block post-execution: {err}"))
         })?;
-        isthmus::verify_withdrawals_storage_root(state_updates, state, block.header).map_err(
-            |err| ConsensusError::Other(format!("failed to verify block post-execution: {err}")),
-        )
+        let predeploy_storage_updates =
+            state_updates.storages.get(&self.hashed_addr_l2tol1_msg_passer).cloned();
+        isthmus::verify_withdrawals_root_prehashed(predeploy_storage_updates, state, block.header())
+            .map_err(|err| {
+                ConsensusError::Other(format!("failed to verify block post-execution: {err}"))
+            })
     }
 }
 
