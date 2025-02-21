@@ -19,14 +19,18 @@ use reth_tasks::TaskExecutor;
 use std::{fmt, future::Future};
 
 /// A node builder that also has the configured types.
-pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
+pub struct NodeBuilderWithTypes<T: FullNodeTypes + NodeTypes> {
     /// All settings for how the node should be configured.
     config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
     /// The configured database for the node.
     adapter: NodeTypesAdapter<T>,
 }
 
-impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
+impl<T> NodeBuilderWithTypes<T>
+where
+    T: FullNodeTypes + NodeTypes,
+    T::Types: NodeTypes<ChainSpec = <T as NodeTypes>::ChainSpec>,
+{
     /// Creates a new instance of the node builder with the given configuration and types.
     pub const fn new(
         config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
@@ -34,20 +38,27 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     ) -> Self {
         Self { config, adapter: NodeTypesAdapter::new(database) }
     }
+}
 
+impl<T> NodeBuilderWithTypes<T>
+where
+    T: FullNodeTypes + NodeTypes,
+    T::Types: NodeTypes<ChainSpec = <T as NodeTypes>::ChainSpec>,
+{
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB, ()>
+    pub fn with_components<CB>(
+        self,
+        components_builder: CB,
+    ) -> NodeBuilderWithComponents<BuilderComponentsAdapter<T, CB>>
     where
-        CB: NodeComponentsBuilder<T>,
+        CB: NodeComponentsBuilder<T> + Clone,
     {
-        let Self { config, adapter } = self;
+        let Self { config, adapter: types_adapter } = self;
 
-        NodeBuilderWithComponents {
-            config,
-            adapter,
-            components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
-        }
+        let adapter =
+            BuilderComponentsAdapter::new(types_adapter.database, config, components_builder);
+
+        NodeBuilderWithComponents { adapter }
     }
 }
 
@@ -149,66 +160,188 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
 /// A fully type configured node builder.
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents<
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-> {
+pub struct NodeBuilderWithComponents<T: BuilderInternals> {
     /// All settings for how the node should be configured.
-    pub config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
-    /// Adapter for the underlying node types and database
-    pub adapter: NodeTypesAdapter<T>,
-    /// container for type specific components
-    pub components_builder: CB,
-    /// Additional node extensions.
-    pub add_ons: AddOns<NodeAdapter<T, CB::Components>, AO>,
+    pub adapter: T,
 }
 
-impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
+/// Marker trait to represent the lack of [`AddOns`].
+pub trait NoAddOns {}
+
+/// Helper trait that encapsulates the internal types and functionality required for node building.
+pub trait BuilderInternals {
+    /// The node types that this builder works with
+    type Types: FullNodeTypes + NodeTypes;
+
+    /// The components that will be built
+    type Components: NodeComponents<Self::Types>;
+
+    /// The add-ons that will be attached to the node
+    type AddOns: NodeAddOns<NodeAdapter<Self::Types, Self::Components>>;
+
+    /// The components builder type
+    type ComponentsBuilder: NodeComponentsBuilder<Self::Types, Components = Self::Components>
+        + Clone;
+
+    /// Returns a reference to the node configuration
+    fn config(&self) -> &NodeConfig<<Self::Types as NodeTypes>::ChainSpec>;
+
+    /// Returns a reference to the database
+    fn database(&self) -> &<Self::Types as FullNodeTypes>::DB;
+
+    /// Returns a reference to the components builder
+    fn components_builder(&self) -> &Self::ComponentsBuilder;
+
+    /// Returns a mutable reference to the add-ons.
+    ///
+    /// This method is intended to be used only by the builder implementation
+    /// for managing add-ons state during the node building process.
+    fn add_ons_mut(
+        &mut self,
+    ) -> &mut AddOns<NodeAdapter<Self::Types, Self::Components>, Self::AddOns>;
+}
+
+/// Extension trait for [`BuilderInternals`] that adds RPC capabilities to a
+/// node builder.
+pub trait BuilderInternalsWithRpc: BuilderInternals
 where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
+    Self::AddOns: RethRpcAddOns<NodeAdapter<Self::Types, Self::Components>>,
+{
+}
+
+impl<T> BuilderInternalsWithRpc for T
+where
+    T: BuilderInternals,
+    T::AddOns: RethRpcAddOns<NodeAdapter<T::Types, T::Components>>,
+{
+}
+
+/// An adapter that manages the components and configuration for building a node.
+/// This replaces [`NodeTypesAdapter`] with a more focused and component-oriented design.
+pub struct BuilderComponentsAdapter<T, C, AO = ()>
+where
+    T: FullNodeTypes + NodeTypes,
+    C: NodeComponentsBuilder<T> + Clone,
+    AO: NodeAddOns<NodeAdapter<T, C::Components>>,
+{
+    /// The node configuration
+    config: NodeConfig<<T as NodeTypes>::ChainSpec>,
+    /// The database
+    database: T::DB,
+    /// The components builder
+    components_builder: C,
+    /// The add-ons for the node
+    add_ons: AddOns<NodeAdapter<T, C::Components>, AO>,
+}
+
+impl<T, C> BuilderComponentsAdapter<T, C>
+where
+    T: FullNodeTypes + NodeTypes,
+    C: NodeComponentsBuilder<T> + Clone,
+{
+    /// Creates a new [`BuilderComponentsAdapter`] with the given configuration and components
+    pub fn new(
+        database: T::DB,
+        config: NodeConfig<<T as NodeTypes>::ChainSpec>,
+        components_builder: C,
+    ) -> Self {
+        Self {
+            config,
+            database,
+            components_builder,
+            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
+        }
+    }
+
+    /// Access the components builder
+    pub fn components_builder(&self) -> &C {
+        &self.components_builder
+    }
+}
+
+impl<T, C, AO> BuilderInternals for BuilderComponentsAdapter<T, C, AO>
+where
+    T: FullNodeTypes + NodeTypes,
+    C: NodeComponentsBuilder<T> + Clone,
+    AO: NodeAddOns<NodeAdapter<T, C::Components>>,
+{
+    type Types = T;
+    type Components = C::Components;
+    type AddOns = AO;
+    type ComponentsBuilder = C;
+
+    fn config(&self) -> &NodeConfig<<Self::Types as NodeTypes>::ChainSpec> {
+        &self.config
+    }
+
+    fn database(&self) -> &<Self::Types as FullNodeTypes>::DB {
+        &self.database
+    }
+
+    fn components_builder(&self) -> &Self::ComponentsBuilder {
+        &self.components_builder
+    }
+
+    fn add_ons_mut(
+        &mut self,
+    ) -> &mut AddOns<NodeAdapter<Self::Types, Self::Components>, Self::AddOns> {
+        &mut self.add_ons
+    }
+}
+
+impl<T, C> NoAddOns for BuilderComponentsAdapter<T, C, ()>
+where
+    T: FullNodeTypes + NodeTypes,
+    C: NodeComponentsBuilder<T> + Clone,
+{
+}
+
+impl<T> NodeBuilderWithComponents<T>
+where
+    T: BuilderInternals + NoAddOns,
 {
     /// Advances the state of the node builder to the next state where all customizable
     /// [`NodeAddOns`] types are configured.
-    pub fn with_add_ons<AO>(self, add_ons: AO) -> NodeBuilderWithComponents<T, CB, AO>
+    pub fn with_add_ons<AO>(
+        self,
+        add_ons: AO,
+    ) -> NodeBuilderWithComponents<BuilderComponentsAdapter<T::Types, T::ComponentsBuilder, AO>>
     where
-        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+        AO: NodeAddOns<NodeAdapter<T::Types, T::Components>>,
     {
-        let Self { config, adapter, components_builder, .. } = self;
-
+        let Self { adapter } = self;
         NodeBuilderWithComponents {
-            config,
-            adapter,
-            components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
+            adapter: BuilderComponentsAdapter {
+                config: adapter.config().clone(),
+                database: adapter.database().clone(),
+                components_builder: adapter.components_builder().clone(),
+                add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
+            },
         }
     }
 }
 
-impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
+impl<T> NodeBuilderWithComponents<T>
 where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+    T: BuilderInternals,
 {
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(NodeAdapter<T, CB::Components>) -> eyre::Result<()> + Send + 'static,
+        F: FnOnce(NodeAdapter<T::Types, T::Components>) -> eyre::Result<()> + Send + 'static,
     {
-        self.add_ons.hooks.set_on_component_initialized(hook);
+        self.adapter.add_ons_mut().hooks.set_on_component_initialized(hook);
         self
     }
 
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(FullNode<NodeAdapter<T, CB::Components>, AO>) -> eyre::Result<()>
+        F: FnOnce(FullNode<NodeAdapter<T::Types, T::Components>, T::AddOns>) -> eyre::Result<()>
             + Send
             + 'static,
     {
-        self.add_ons.hooks.set_on_node_started(hook);
+        self.adapter.add_ons_mut().hooks.set_on_node_started(hook);
         self
     }
 
@@ -219,12 +352,20 @@ where
     /// The `ExEx` ID must be unique.
     pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
-        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        F: FnOnce(ExExContext<NodeAdapter<T::Types, T::Components>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.add_ons.exexs.push((exex_id.into(), Box::new(exex)));
+        self.adapter.add_ons_mut().exexs.push((exex_id.into(), Box::new(exex)));
         self
+    }
+
+    /// Launches the node with the given launcher.
+    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
+    where
+        L: LaunchNode<Self>,
+    {
+        launcher.launch_node(self).await
     }
 
     /// Launches the node with the given closure.
@@ -245,53 +386,54 @@ where
     /// Modifies the addons with the given closure.
     pub fn map_add_ons<F>(mut self, f: F) -> Self
     where
-        F: FnOnce(AO) -> AO,
+        F: FnOnce(&mut T::AddOns),
     {
-        self.add_ons.add_ons = f(self.add_ons.add_ons);
+        f(&mut self.adapter.add_ons_mut().add_ons);
         self
     }
 }
 
-impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
+impl<T> NodeBuilderWithComponents<T>
 where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
+    T: BuilderInternalsWithRpc,
+    <T as BuilderInternals>::AddOns: RethRpcAddOns<
+        NodeAdapter<<T as BuilderInternals>::Types, <T as BuilderInternals>::Components>,
+    >,
 {
-    /// Launches the node with the given launcher.
-    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
-    where
-        L: LaunchNode<Self>,
-    {
-        launcher.launch_node(self).await
-    }
-
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(self, hook: F) -> Self
     where
         F: FnOnce(
-                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
+                RpcContext<
+                    '_,
+                    NodeAdapter<T::Types, T::Components>,
+                    <T::AddOns as RethRpcAddOns<NodeAdapter<T::Types, T::Components>>>::EthApi,
+                >,
                 RethRpcServerHandles,
             ) -> eyre::Result<()>
             + Send
             + 'static,
     {
-        self.map_add_ons(|mut add_ons| {
+        self.map_add_ons(|add_ons| {
             add_ons.hooks_mut().set_on_rpc_started(hook);
-            add_ons
         })
     }
 
     /// Sets the hook that is run to configure the rpc modules.
     pub fn extend_rpc_modules<F>(self, hook: F) -> Self
     where
-        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
+        F: FnOnce(
+                RpcContext<
+                    '_,
+                    NodeAdapter<T::Types, T::Components>,
+                    <T::AddOns as RethRpcAddOns<NodeAdapter<T::Types, T::Components>>>::EthApi,
+                >,
+            ) -> eyre::Result<()>
             + Send
             + 'static,
     {
-        self.map_add_ons(|mut add_ons| {
+        self.map_add_ons(|add_ons| {
             add_ons.hooks_mut().set_extend_rpc_modules(hook);
-            add_ons
         })
     }
 }

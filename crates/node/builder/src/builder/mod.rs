@@ -254,21 +254,7 @@ where
     {
         NodeBuilderWithTypes::new(self.config, self.database)
     }
-
-    /// Preconfigures the node with a specific node implementation.
-    ///
-    /// This is a convenience method that sets the node's types and components in one call.
-    pub fn node<N>(
-        self,
-        node: N,
-    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
-    where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
-    {
-        self.with_types().with_components(node.components_builder()).with_add_ons(node.add_ons())
-    }
 }
-
 /// A [`NodeBuilder`] with it's launch context already configured.
 ///
 /// This exposes the same methods as [`NodeBuilder`] but with the launch context already configured,
@@ -326,12 +312,24 @@ where
         self,
         node: N,
     ) -> WithLaunchContext<
-        NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        NodeBuilderWithComponents<
+            BuilderComponentsAdapter<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >,
     >
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider + NodeTypes,
+        N::ComponentsBuilder: NodeComponentsBuilder<RethFullAdapter<DB, N>> + Clone,
+        BuilderComponentsAdapter<RethFullAdapter<DB, N>, N::ComponentsBuilder>: NoAddOns,
     {
-        self.with_types().with_components(node.components_builder()).with_add_ons(node.add_ons())
+        // Here we have access to task_executor from self
+        WithLaunchContext {
+            builder: self
+                .builder
+                .with_types()
+                .with_components(node.components_builder())
+                .with_add_ons(node.add_ons()),
+            task_executor: self.task_executor,
+        }
     }
 
     /// Launches a preconfigured [Node]
@@ -344,11 +342,14 @@ where
         node: N,
     ) -> eyre::Result<
         <EngineNodeLauncher as LaunchNode<
-            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+            NodeBuilderWithComponents<
+                BuilderComponentsAdapter<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+            >,
         >>::Node,
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
+        N::ComponentsBuilder: NodeComponentsBuilder<RethFullAdapter<DB, N>> + Clone,
         N::AddOns: RethRpcAddOns<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
@@ -357,21 +358,28 @@ where
         >,
         N::Primitives: FullNodePrimitives,
         EngineNodeLauncher: LaunchNode<
-            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+            NodeBuilderWithComponents<
+                BuilderComponentsAdapter<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+            >,
         >,
     {
         self.node(node).launch().await
     }
 }
 
-impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
-    /// Advances the state of the node builder to the next state where all components are configured
+impl<T> WithLaunchContext<NodeBuilderWithTypes<T>>
+where
+    T: FullNodeTypes + NodeTypes,
+    T::Types: NodeTypes<ChainSpec = <T as NodeTypes>::ChainSpec>,
+{
+    /// Advances the state of the node builder to the next state where all components are
+    /// configured.
     pub fn with_components<CB>(
         self,
         components_builder: CB,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<T, CB, ()>>
+    ) -> WithLaunchContext<NodeBuilderWithComponents<BuilderComponentsAdapter<T, CB>>>
     where
-        CB: NodeComponentsBuilder<T>,
+        CB: NodeComponentsBuilder<T> + Clone,
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
@@ -380,19 +388,20 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
     }
 }
 
-impl<T, CB> WithLaunchContext<NodeBuilderWithComponents<T, CB, ()>>
+impl<T> WithLaunchContext<NodeBuilderWithComponents<T>>
 where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
+    T: BuilderInternals + NoAddOns,
 {
     /// Advances the state of the node builder to the next state where all customizable
     /// [`NodeAddOns`] types are configured.
     pub fn with_add_ons<AO>(
         self,
         add_ons: AO,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
+    ) -> WithLaunchContext<
+        NodeBuilderWithComponents<BuilderComponentsAdapter<T::Types, T::ComponentsBuilder, AO>>,
+    >
     where
-        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+        AO: NodeAddOns<NodeAdapter<T::Types, T::Components>>,
     {
         WithLaunchContext {
             builder: self.builder.with_add_ons(add_ons),
@@ -401,15 +410,40 @@ where
     }
 }
 
-impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
+impl<T> WithLaunchContext<NodeBuilderWithComponents<T>>
 where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
+    T: BuilderInternals,
+{
+    /// Launches the node.
+    pub async fn launch(
+        self,
+    ) -> eyre::Result<<EngineNodeLauncher as LaunchNode<NodeBuilderWithComponents<T>>>::Node>
+    where
+        EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<T>>,
+    {
+        let Self { builder, task_executor } = self;
+
+        let config = builder.adapter.config();
+        let engine_tree_config = TreeConfig::default()
+            .with_persistence_threshold(config.engine.persistence_threshold)
+            .with_memory_block_buffer_target(config.engine.memory_block_buffer_target)
+            .with_legacy_state_root(config.engine.legacy_state_root_task_enabled)
+            .with_caching_and_prewarming(config.engine.caching_and_prewarming_enabled)
+            .with_always_compare_trie_updates(config.engine.state_root_task_compare_updates)
+            .with_cross_block_cache_size(config.engine.cross_block_cache_size * 1024 * 1024);
+
+        let launcher = EngineNodeLauncher::new(task_executor, config.datadir(), engine_tree_config);
+        builder.launch_with(launcher).await
+    }
+}
+
+impl<T> WithLaunchContext<NodeBuilderWithComponents<T>>
+where
+    T: BuilderInternals,
 {
     /// Returns a reference to the node builder's config.
-    pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
-        &self.builder.config
+    pub fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
+        self.builder.adapter.config()
     }
 
     /// Apply a function to the builder
@@ -435,7 +469,7 @@ where
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(self, hook: F) -> Self
     where
-        F: FnOnce(NodeAdapter<T, CB::Components>) -> eyre::Result<()> + Send + 'static,
+        F: FnOnce(NodeAdapter<T::Types, T::Components>) -> eyre::Result<()> + Send + 'static,
     {
         Self {
             builder: self.builder.on_component_initialized(hook),
@@ -446,7 +480,7 @@ where
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(self, hook: F) -> Self
     where
-        F: FnOnce(FullNode<NodeAdapter<T, CB::Components>, AO>) -> eyre::Result<()>
+        F: FnOnce(FullNode<NodeAdapter<T::Types, T::Components>, T::AddOns>) -> eyre::Result<()>
             + Send
             + 'static,
     {
@@ -456,32 +490,9 @@ where
     /// Modifies the addons with the given closure.
     pub fn map_add_ons<F>(self, f: F) -> Self
     where
-        F: FnOnce(AO) -> AO,
+        F: FnOnce(&mut T::AddOns),
     {
         Self { builder: self.builder.map_add_ons(f), task_executor: self.task_executor }
-    }
-
-    /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(self, hook: F) -> Self
-    where
-        F: FnOnce(
-                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
-                RethRpcServerHandles,
-            ) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
-    }
-
-    /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
-    where
-        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
     }
 
     /// Installs an `ExEx` (Execution Extension) in the node.
@@ -491,7 +502,7 @@ where
     /// The `ExEx` ID must be unique.
     pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
     where
-        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        F: FnOnce(ExExContext<NodeAdapter<T::Types, T::Components>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
@@ -508,7 +519,7 @@ where
     /// The `ExEx` ID must be unique.
     pub fn install_exex_if<F, R, E>(self, cond: bool, exex_id: impl Into<String>, exex: F) -> Self
     where
-        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        F: FnOnce(ExExContext<NodeAdapter<T::Types, T::Components>>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
@@ -522,7 +533,7 @@ where
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
     where
-        L: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
+        L: LaunchNode<NodeBuilderWithComponents<T>>,
     {
         launcher.launch_node(self.builder).await
     }
@@ -543,37 +554,42 @@ where
     }
 }
 
-impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
+impl<T> WithLaunchContext<NodeBuilderWithComponents<T>>
 where
-    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-    T: NodeTypesWithEngine + NodeTypesForProvider,
-    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
-    AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-    EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
+    T: BuilderInternalsWithRpc,
+    T::AddOns: RethRpcAddOns<NodeAdapter<T::Types, T::Components>>,
 {
-    /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
-    pub async fn launch(
-        self,
-    ) -> eyre::Result<
-        <EngineNodeLauncher as LaunchNode<
-            NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
-        >>::Node,
-    > {
-        let Self { builder, task_executor } = self;
+    /// Sets the hook that is run once the rpc server is started.
+    pub fn on_rpc_started<F>(self, hook: F) -> Self
+    where
+        F: FnOnce(
+                RpcContext<
+                    '_,
+                    NodeAdapter<T::Types, T::Components>,
+                    <T::AddOns as RethRpcAddOns<NodeAdapter<T::Types, T::Components>>>::EthApi,
+                >,
+                RethRpcServerHandles,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
+    }
 
-        let engine_tree_config = TreeConfig::default()
-            .with_persistence_threshold(builder.config.engine.persistence_threshold)
-            .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
-            .with_legacy_state_root(builder.config.engine.legacy_state_root_task_enabled)
-            .with_caching_and_prewarming(builder.config.engine.caching_and_prewarming_enabled)
-            .with_always_compare_trie_updates(builder.config.engine.state_root_task_compare_updates)
-            .with_cross_block_cache_size(
-                builder.config.engine.cross_block_cache_size * 1024 * 1024,
-            );
-
-        let launcher =
-            EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
-        builder.launch_with(launcher).await
+    /// Sets the hook that is run to configure the rpc modules.
+    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
+    where
+        F: FnOnce(
+                RpcContext<
+                    '_,
+                    NodeAdapter<T::Types, T::Components>,
+                    <T::AddOns as RethRpcAddOns<NodeAdapter<T::Types, T::Components>>>::EthApi,
+                >,
+            ) -> eyre::Result<()>
+            + Send
+            + 'static,
+    {
+        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
     }
 }
 
