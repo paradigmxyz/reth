@@ -61,17 +61,25 @@ pub use withdrawals::*;
 mod ommers;
 pub use ommers::*;
 
+#[cfg(feature = "db-api")]
 mod database_provider;
+#[cfg(feature = "db-api")]
 pub use database_provider::*;
 
 pub mod noop;
 
+#[cfg(feature = "db-api")]
 mod history;
+#[cfg(feature = "db-api")]
 pub use history::*;
 
+#[cfg(feature = "db-api")]
 mod hashing;
+#[cfg(feature = "db-api")]
 pub use hashing::*;
+
 mod stats;
+#[cfg(feature = "db-api")]
 pub use stats::*;
 
 mod legacy;
