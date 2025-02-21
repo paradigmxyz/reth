@@ -919,7 +919,7 @@ where
         let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
             let num_hash = block.num_hash();
-            match self.insert_block_without_senders(block) {
+            match self.insert_block(block) {
                 Ok(status) => {
                     let status = match status {
                         InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -942,7 +942,7 @@ where
                 }
                 Err(error) => self.on_insert_block_error(error)?,
             }
-        } else if let Err(error) = self.buffer_block_without_senders(block) {
+        } else if let Err(error) = self.buffer_block(block) {
             self.on_insert_block_error(error)?
         } else {
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
@@ -1991,19 +1991,6 @@ where
         Ok(())
     }
 
-    /// Attempts to recover the block's senders and then buffers it.
-    ///
-    /// Returns an error if sender recovery failed or inserting into the buffer failed.
-    fn buffer_block_without_senders(
-        &mut self,
-        block: SealedBlock<N::Block>,
-    ) -> Result<(), InsertBlockError<N::Block>> {
-        match block.try_recover() {
-            Ok(block) => self.buffer_block(block),
-            Err(err) => Err(InsertBlockError::sender_recovery_error(err.into_inner())),
-        }
-    }
-
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
@@ -2348,16 +2335,6 @@ where
     /// This `take`s the cache, to avoid cloning the entire cache.
     fn take_latest_cache(&mut self, parent_hash: B256) -> Option<SavedCache> {
         self.most_recent_cache.take_if(|cache| cache.executed_block_hash() == parent_hash)
-    }
-
-    fn insert_block_without_senders(
-        &mut self,
-        block: SealedBlock<N::Block>,
-    ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
-        match block.try_recover() {
-            Ok(block) => self.insert_block(block),
-            Err(err) => Err(InsertBlockError::sender_recovery_error(err.into_inner())),
-        }
     }
 
     fn insert_block(
@@ -3833,11 +3810,11 @@ mod tests {
         let s = include_str!("../../test-data/holesky/2.rlp");
         let data = Bytes::from_str(s).unwrap();
         let block = Block::decode(&mut data.as_ref()).unwrap();
-        let sealed = block.seal_slow();
+        let sealed = block.seal_slow().try_recover().unwrap();
 
         let mut test_harness = TestHarness::new(HOLESKY.clone());
 
-        let outcome = test_harness.tree.insert_block_without_senders(sealed.clone()).unwrap();
+        let outcome = test_harness.tree.insert_block(sealed.clone()).unwrap();
         assert_eq!(
             outcome,
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
