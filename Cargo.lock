@@ -9578,6 +9578,7 @@ dependencies = [
  "auto_impl",
  "reth-chainspec",
  "reth-db-api",
+ "reth-db-models",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-primitives-traits",
