@@ -147,7 +147,7 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     fn ensure_well_formed_payload(
         &self,
         payload: Self::ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
     fn validate_block_post_execution_with_hashed_state(

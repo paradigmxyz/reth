@@ -112,8 +112,9 @@ where
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
-        Ok(self.inner.ensure_well_formed_payload(payload)?)
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 
     fn validate_block_post_execution_with_hashed_state(
