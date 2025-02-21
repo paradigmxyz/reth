@@ -18,7 +18,7 @@ jsonrpsee-http-client.workspace = true
 pin-project.workspace = true
 tower.workspace = true
 tower-http = { workspace = true, features = ["full"] }
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 
 [dev-dependencies]
 reqwest.workspace = true
