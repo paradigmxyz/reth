@@ -9,7 +9,7 @@ use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives_traits::{
     transaction::signed::SignedTransactionIntoRecoveredExt, Block, BlockBody, NodePrimitives,
-    RecoveredBlock, SealedHeader, SignedTransaction,
+    RecoveredBlock, SealedHeader, SignedTransaction,serde_bincode_compat::SerdeBincodeCompat
 };
 use reth_trie_common::updates::TrieUpdates;
 use revm_database::BundleState;
@@ -554,17 +554,32 @@ pub(super) mod serde_bincode_compat {
     ///     chain: Chain,
     /// }
     /// ```
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct Chain<'a, N = EthPrimitives>
-    where
-        N: NodePrimitives<
-            Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
-        >,
-    {
-        blocks: RecoveredBlocks<'a, N::Block>,
-        execution_outcome: Cow<'a, ExecutionOutcome<N::Receipt>>,
-        trie_updates: Option<TrieUpdates<'a>>,
-    }
+    // #[derive(Debug, Serialize, Deserialize)]
+    // pub struct Chain<'a, N = EthPrimitives>
+    // where
+    //     N: NodePrimitives<
+    //         Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+    //     >,
+    // {
+    //     blocks: RecoveredBlocks<'a, N::Block>,
+    //     execution_outcome: Cow<'a, ExecutionOutcome<N::Receipt>>,
+    //     trie_updates: Option<TrieUpdates<'a>>,
+    // }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Chain<'a, N = EthPrimitives>
+where
+    N: NodePrimitives<
+        Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+        Receipt: SerdeBincodeCompat,
+    >,
+    <N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>: Clone,
+{
+    blocks: RecoveredBlocks<'a, N::Block>,
+    execution_outcome: Cow<'a, ExecutionOutcome<<N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>>>,
+    trie_updates: Option<TrieUpdates<'a>>,
+}
+
 
     #[derive(Debug)]
     struct RecoveredBlocks<
