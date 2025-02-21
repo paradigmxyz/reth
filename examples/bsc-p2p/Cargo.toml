@@ -52,4 +52,6 @@ serde = [
     "reth-ethereum-forks/serde",
     "reth-provider/serde",
     "secp256k1/serde",
+    "bytes/serde",
+    "rand/serde",
 ]
