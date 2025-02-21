@@ -42,7 +42,7 @@ jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
 serde.workspace = true
 thiserror.workspace = true
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 parking_lot.workspace = true
 
 [dev-dependencies]
