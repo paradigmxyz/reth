@@ -1,20 +1,17 @@
 //! Helpers for testing.
 
 use crate::{
-    execute::{
-        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionOutput,
-        BlockExecutionStrategy, BlockExecutorProvider, Executor,
-    },
+    execute::{BasicBlockExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
     Database,
 };
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives::{EthPrimitives, NodePrimitives, RecoveredBlock};
-use revm::State;
-use std::sync::Arc;
+use revm_database::State;
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
@@ -34,16 +31,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
 
     type Executor<DB: Database> = Self;
 
-    type BatchExecutor<DB: Database> = Self;
-
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
-    where
-        DB: Database,
-    {
-        self.clone()
-    }
-
-    fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database,
     {
@@ -92,12 +80,14 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
             self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
-            receipts: receipts.into_iter().flatten().collect(),
-            requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {
-                reqs.extend(req);
-                reqs
-            }),
-            gas_used: 0,
+            result: BlockExecutionResult {
+                receipts: receipts.into_iter().flatten().collect(),
+                requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {
+                    reqs.extend(req);
+                    reqs
+                }),
+                gas_used: 0,
+            },
         })
     }
 
@@ -107,7 +97,7 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         _f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&revm::db::State<DB>),
+        F: FnMut(&revm_database::State<DB>),
     {
         <Self as Executor<DB>>::execute(self, block)
     }
@@ -123,7 +113,7 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         <Self as Executor<DB>>::execute(self, block)
     }
 
-    fn into_state(self) -> revm::db::State<DB> {
+    fn into_state(self) -> revm_database::State<DB> {
         unreachable!()
     }
 
@@ -132,67 +122,20 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
     }
 }
 
-impl<DB> BatchExecutor<DB> for MockExecutorProvider {
-    type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
-    type Output = ExecutionOutcome;
-    type Error = BlockExecutionError;
-
-    fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn finalize(self) -> Self::Output {
-        self.exec_results.lock().pop().unwrap()
-    }
-
-    fn size_hint(&self) -> Option<usize> {
-        None
-    }
-}
-
-impl<S> BasicBlockExecutor<S>
-where
-    S: BlockExecutionStrategy,
-{
+impl<Factory, DB> BasicBlockExecutor<Factory, DB> {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&State<S::DB>) -> R,
+        F: FnOnce(&State<DB>) -> R,
     {
-        f(self.strategy.state_ref())
+        f(&self.db)
     }
 
     /// Provides safe write access to the state
     pub fn with_state_mut<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&mut State<S::DB>) -> R,
+        F: FnOnce(&mut State<DB>) -> R,
     {
-        f(self.strategy.state_mut())
-    }
-}
-
-impl<S> BasicBatchExecutor<S>
-where
-    S: BlockExecutionStrategy,
-{
-    /// Provides safe read access to the state
-    pub fn with_state<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&State<S::DB>) -> R,
-    {
-        f(self.strategy.state_ref())
-    }
-
-    /// Provides safe write access to the state
-    pub fn with_state_mut<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&mut State<S::DB>) -> R,
-    {
-        f(self.strategy.state_mut())
-    }
-
-    /// Accessor for batch executor receipts.
-    pub const fn receipts(&self) -> &Vec<Vec<<S::Primitives as NodePrimitives>::Receipt>> {
-        self.batch_record.receipts()
+        f(&mut self.db)
     }
 }

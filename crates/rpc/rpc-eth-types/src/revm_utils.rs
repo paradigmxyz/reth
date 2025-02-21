@@ -6,23 +6,11 @@ use alloy_rpc_types_eth::{
     BlockOverrides,
 };
 use reth_evm::TransactionEnv;
-use revm::{
-    db::CacheDB,
-    precompile::{PrecompileSpecId, Precompiles},
-    primitives::{db::DatabaseRef, Bytecode, SpecId},
-    Database,
-};
-use revm_primitives::BlockEnv;
+use revm::{context::BlockEnv, state::Bytecode, Database, DatabaseRef};
+use revm_database::CacheDB;
 use std::cmp::min;
 
 use super::{EthApiError, EthResult, RpcInvalidTransactionError};
-
-/// Returns the addresses of the precompiles corresponding to the `SpecId`.
-#[inline]
-pub fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
-    let spec = PrecompileSpecId::from_spec_id(spec_id);
-    Precompiles::new(spec).addresses().copied()
-}
 
 /// Calculates the caller gas allowance.
 ///
@@ -33,7 +21,7 @@ pub fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
 ///
 /// Note: this takes the mut [Database] trait because the loaded sender can be reused for the
 /// following operation like `eth_call`.
-pub fn caller_gas_allowance<DB>(db: &mut DB, env: &impl TransactionEnv) -> EthResult<U256>
+pub fn caller_gas_allowance<DB>(db: &mut DB, env: &impl TransactionEnv) -> EthResult<u64>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
@@ -52,9 +40,10 @@ where
 
     Ok(balance
         // Calculate the amount of gas the caller can afford with the specified gas price.
-        .checked_div(env.gas_price())
+        .checked_div(U256::from(env.gas_price()))
         // This will be 0 if gas price is 0. It is fine, because we check it before.
-        .unwrap_or_default())
+        .unwrap_or_default()
+        .saturating_to())
 }
 
 /// Helper type for representing the fees of a `TransactionRequest`
@@ -220,25 +209,25 @@ pub fn apply_block_overrides<DB>(
     }
 
     if let Some(number) = number {
-        env.number = number;
+        env.number = number.saturating_to();
     }
     if let Some(difficulty) = difficulty {
         env.difficulty = difficulty;
     }
     if let Some(time) = time {
-        env.timestamp = U256::from(time);
+        env.timestamp = time;
     }
     if let Some(gas_limit) = gas_limit {
-        env.gas_limit = U256::from(gas_limit);
+        env.gas_limit = gas_limit;
     }
     if let Some(coinbase) = coinbase {
-        env.coinbase = coinbase;
+        env.beneficiary = coinbase;
     }
     if let Some(random) = random {
         env.prevrandao = Some(random);
     }
     if let Some(base_fee) = base_fee {
-        env.basefee = base_fee;
+        env.basefee = base_fee.saturating_to();
     }
 }
 

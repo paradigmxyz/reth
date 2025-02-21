@@ -43,6 +43,9 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
+  reth-optimism-chain-registry
+  reth-optimism-consensus
+  reth-optimism-evm
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -58,7 +61,7 @@ exclude_crates=(
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
-  reth-payload-builder # reth-metrics 
+  reth-payload-builder # reth-metrics
   reth-provider # tokio
   reth-prune # tokio
   reth-stages-api # reth-provider, reth-prune

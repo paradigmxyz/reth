@@ -1,13 +1,13 @@
 use alloy_consensus::Header;
 use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
-use reth_db::{
-    static_file::{
-        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
-    },
+use reth_db::static_file::{
+    ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+};
+use reth_db_api::{
+    table::{Decompress, DupSort, Table},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
-use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
 use reth_node_api::{ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
@@ -207,8 +207,10 @@ mod tests {
     use super::*;
     use alloy_primitives::{Address, B256};
     use clap::{Args, Parser};
-    use reth_db::{AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory};
-    use reth_db_api::models::{storage_sharded_key::StorageShardedKey, ShardedKey};
+    use reth_db_api::{
+        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+        AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory,
+    };
     use std::str::FromStr;
 
     /// A helper type to parse Args more easily

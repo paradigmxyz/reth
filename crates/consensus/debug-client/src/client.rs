@@ -16,7 +16,8 @@ use tokio::sync::mpsc;
 pub trait BlockProvider: Send + Sync + 'static {
     /// Runs a block provider to send new blocks to the given sender.
     ///
-    /// Note: This is expected to be spawned in a separate task.
+    /// Note: This is expected to be spawned in a separate task, and as such it should ignore
+    /// errors.
     fn subscribe_blocks(&self, tx: mpsc::Sender<Block>) -> impl Future<Output = ()> + Send;
 
     /// Get a past block by number.

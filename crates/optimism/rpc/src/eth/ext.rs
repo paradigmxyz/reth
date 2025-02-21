@@ -113,9 +113,9 @@ where
             .map_err(|_| header_not_found())?
             .ok_or_else(header_not_found)?;
 
-        // check condition against header
-        if !condition.has_exceeded_block_number(header.header().number()) ||
-            !condition.has_exceeded_timestamp(header.header().timestamp())
+        // Ensure that the condition can still be met by checking the max bounds
+        if condition.has_exceeded_block_number(header.header().number()) ||
+            condition.has_exceeded_timestamp(header.header().timestamp())
         {
             return Err(TxConditionalErr::InvalidCondition.into());
         }

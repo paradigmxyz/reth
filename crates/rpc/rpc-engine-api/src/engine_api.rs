@@ -9,18 +9,16 @@ use alloy_eips::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields, TransitionConfiguration,
+    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload,
+    ExecutionPayloadBodiesV1, ExecutionPayloadBodyV1, ExecutionPayloadInputV2,
+    ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields, TransitionConfiguration,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use parking_lot::Mutex;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
-use reth_engine_primitives::{
-    BeaconConsensusEngineHandle, EngineTypes, EngineValidator, ExecutionData,
-};
+use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes, EngineValidator};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
@@ -1008,15 +1006,30 @@ where
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
+        let start = Instant::now();
+
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
             return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into())
         }
 
-        Ok(self
+        let res = self
             .inner
             .tx_pool
             .get_blobs_for_versioned_hashes(&versioned_hashes)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))?)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)).into());
+
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.get_blobs_v1.record(elapsed);
+
+        if let Ok(blobs) = &res {
+            let blobs_found = blobs.iter().flatten().count();
+            let blobs_missed = versioned_hashes.len() - blobs_found;
+
+            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
+            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+        }
+
+        res
     }
 }
 

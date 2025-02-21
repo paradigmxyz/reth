@@ -20,9 +20,11 @@ use core::{
     ops::{RangeBounds, RangeInclusive},
 };
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
-use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_primitives::{EthPrimitives, RecoveredBlock, SealedBlock};
-use reth_primitives_traits::{Account, Bytecode, NodePrimitives, SealedHeader};
+use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_primitives_traits::{
+    Account, Bytecode, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -445,7 +447,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
 }
 
 impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider<C, N> {
-    fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _bundle_state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }

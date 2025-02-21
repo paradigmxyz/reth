@@ -10,12 +10,12 @@ use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
-use reth_db::{
+use reth_db::static_file::{
+    BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,
+    StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalsMask,
+};
+use reth_db_api::{
     models::StoredBlockBodyIndices,
-    static_file::{
-        BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,
-        StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalsMask,
-    },
     table::{Decompress, Value},
 };
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
