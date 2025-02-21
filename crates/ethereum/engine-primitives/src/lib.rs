@@ -106,7 +106,7 @@ impl PayloadValidator for EthereumEngineValidator {
         payload: ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
-        Ok(sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))?)
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 }
 
