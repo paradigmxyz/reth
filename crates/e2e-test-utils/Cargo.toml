@@ -54,5 +54,5 @@ alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-network.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 derive_more.workspace = true
