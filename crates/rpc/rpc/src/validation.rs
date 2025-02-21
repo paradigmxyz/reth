@@ -11,6 +11,7 @@ use alloy_rpc_types_engine::{
     PraguePayloadFields,
 };
 use async_trait::async_trait;
+use core::fmt;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus};
@@ -471,7 +472,6 @@ where
     }
 }
 
-#[derive(Debug)]
 pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     /// The provider that can interact with the chain.
     provider: Provider,
@@ -499,6 +499,12 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     task_spawner: Box<dyn TaskSpawner>,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+impl<Proivder, E: BlockExecutorProvider> fmt::Debug for ValidationApiInner<Proivder, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValidationApiInner").finish_non_exhaustive()
+    }
 }
 
 /// Configuration for validation API.

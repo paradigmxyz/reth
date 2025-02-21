@@ -15,7 +15,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
-use core::fmt::{self, Debug};
+use core::fmt::Debug;
 use reth_payload_primitives::{
     validate_execution_requests, BuiltPayload, EngineApiMessageVersion,
     EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes,
@@ -127,7 +127,7 @@ pub trait EngineTypes:
 
 /// Type that validates an [`ExecutionPayload`].
 #[auto_impl::auto_impl(&, Arc)]
-pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
+pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
 
