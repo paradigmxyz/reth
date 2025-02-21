@@ -32,6 +32,7 @@ use tracing::info;
 
 mod chainspec;
 mod handshake;
+mod upgrade_status;
 
 #[tokio::main]
 async fn main() {

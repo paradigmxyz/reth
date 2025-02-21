@@ -1,18 +1,18 @@
+use alloy_rlp::Decodable;
 use derive_more::Debug;
 use futures::SinkExt;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     handshake::{handshake, Handshake, UnauthEth},
 };
-use reth_eth_wire_types::{
-    upgrade_status::{UpgradeStatus, UpgradeStatusExtension},
-    DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage, Status,
-};
+use reth_eth_wire_types::{DisconnectReason, EthVersion, Status};
 use reth_ethereum_forks::ForkFilter;
 use std::{future::Future, pin::Pin};
 use tokio::time::{timeout, Duration};
 use tokio_stream::StreamExt;
 use tracing::debug;
+
+use crate::upgrade_status::{UpgradeStatus, UpgradeStatusExtension};
 
 #[derive(Debug)]
 /// The Binance Smart Chain (BSC) P2P handshake.
@@ -25,17 +25,11 @@ impl BscHandshake {
         negotiated_status: Status,
     ) -> Result<Status, EthStreamError> {
         if negotiated_status.version > EthVersion::Eth66 {
-            // Send upgrade status message
-            let upgrade_msg =
-                alloy_rlp::encode(ProtocolMessage::<EthNetworkPrimitives>::from(EthMessage::<
-                    EthNetworkPrimitives,
-                >::UpgradeStatus(
-                    UpgradeStatus {
-                        extension: UpgradeStatusExtension { disable_peer_tx_broadcast: false },
-                    },
-                )))
-                .into();
-            unauth.send(upgrade_msg).await?;
+            // Send upgrade status message allowing peer to broadcast transactions
+            let upgrade_msg = UpgradeStatus {
+                extension: UpgradeStatusExtension { disable_peer_tx_broadcast: false },
+            };
+            unauth.send(upgrade_msg.into_rlp_bytes()).await?;
 
             // Receive peer's upgrade status response
             let their_msg = match unauth.next().await {
@@ -48,25 +42,22 @@ impl BscHandshake {
             };
 
             // Decode their response
-            let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
-                negotiated_status.version,
-                &mut their_msg.as_ref(),
-            )
-            .map_err(|err| {
+            match UpgradeStatus::decode(&mut their_msg.as_ref()).map_err(|e| {
                 debug!("Decode error in BSC handshake: msg={their_msg:x}");
-                EthStreamError::InvalidMessage(err)
-            })?;
-
-            // Validate their response
-            if let EthMessage::UpgradeStatus(_) = msg.message {
-                return Ok(negotiated_status);
+                EthStreamError::InvalidMessage(e.into())
+            }) {
+                Ok(_) => {
+                    // Successful handshake
+                    return Ok(negotiated_status);
+                }
+                Err(_) => {
+                    // handshake failed
+                    unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
+                    return Err(EthStreamError::EthHandshakeError(
+                        EthHandshakeError::NonStatusMessageInHandshake,
+                    ));
+                }
             }
-
-            // if they sent a non-upgrade status message, disconnect
-            unauth.disconnect(DisconnectReason::ProtocolBreach).await?;
-            return Err(EthStreamError::EthHandshakeError(
-                EthHandshakeError::NonStatusMessageInHandshake,
-            ));
         }
 
         Ok(negotiated_status)

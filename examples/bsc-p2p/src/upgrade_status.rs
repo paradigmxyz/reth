@@ -1,7 +1,8 @@
 //! Implement BSC upgrade message which is required during handshake with other BSC clients, e.g.,
 //! geth.
 
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
+use bytes::{Bytes, BytesMut};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// UpdateStatus packet introduced in BSC to notify peers whether to broadcast transaction or not.
@@ -13,6 +14,15 @@ use reth_codecs_derive::add_arbitrary_tests;
 pub struct UpgradeStatus {
     /// Extension for support customized features for BSC.
     pub extension: UpgradeStatusExtension,
+}
+
+impl UpgradeStatus {
+    /// Encode the upgrade status message into RLP bytes.
+    pub fn into_rlp_bytes(self) -> Bytes {
+        let mut out = BytesMut::new();
+        self.encode(&mut out);
+        out.freeze()
+    }
 }
 
 /// The extension to define whether to enable or disable the flag.
