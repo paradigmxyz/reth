@@ -392,7 +392,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
         input.prepend(self.revert_state()?);
         TrieWitness::overlay_witness(self.tx(), input, target)
             .map_err(ProviderError::from)
-            .map(|hm| hm.values().cloned().collect())
+            .map(|hm| hm.into_values().collect())
     }
 }
 
