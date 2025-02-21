@@ -150,7 +150,7 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
-    fn validate_block_post_execution_with_hashed_state_updates(
+    fn validate_block_post_execution_with_hashed_state(
         &self,
         _state_updates: &HashedPostState,
         _block: &RecoveredBlock<Self::Block>,

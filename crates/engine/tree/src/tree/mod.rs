@@ -2552,7 +2552,7 @@ where
 
         if let Err(err) = self
             .payload_validator
-            .validate_block_post_execution_with_hashed_state_updates(&hashed_state, &block)
+            .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
         {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);

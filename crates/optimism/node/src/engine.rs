@@ -116,7 +116,7 @@ where
         Ok(self.inner.ensure_well_formed_payload(payload)?)
     }
 
-    fn validate_block_post_execution_with_hashed_state_updates(
+    fn validate_block_post_execution_with_hashed_state(
         &self,
         state_updates: &HashedPostState,
         block: &RecoveredBlock<Self::Block>,
