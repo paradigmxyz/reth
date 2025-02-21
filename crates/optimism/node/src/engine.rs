@@ -125,8 +125,11 @@ where
         let state = self.provider.latest().map_err(|err| {
             ConsensusError::Other(format!("failed to verify block post-execution: {err}"))
         })?;
-        let predeploy_storage_updates =
-            state_updates.storages.get(&self.hashed_addr_l2tol1_msg_passer).cloned();
+        let predeploy_storage_updates = state_updates
+            .storages
+            .get(&self.hashed_addr_l2tol1_msg_passer)
+            .cloned()
+            .unwrap_or_default();
         isthmus::verify_withdrawals_root_prehashed(predeploy_storage_updates, state, block.header())
             .map_err(|err| {
                 ConsensusError::Other(format!("failed to verify block post-execution: {err}"))

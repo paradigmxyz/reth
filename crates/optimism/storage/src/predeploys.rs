@@ -19,12 +19,16 @@ pub fn withdrawals_root<DB: StorageRootProvider>(
     // if l2 withdrawals transactions were executed there will be storage updates for
     // `L2ToL1MessagePasser.sol` predeploy
     withdrawals_root_prehashed(
-        state_updates.state().get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER).map(|acc| {
-            HashedStorage::from_plain_storage(
-                acc.status,
-                acc.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-            )
-        }),
+        state_updates
+            .state()
+            .get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER)
+            .map(|acc| {
+                HashedStorage::from_plain_storage(
+                    acc.status,
+                    acc.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                )
+            })
+            .unwrap_or_default(),
         state,
     )
 }
@@ -32,11 +36,10 @@ pub fn withdrawals_root<DB: StorageRootProvider>(
 /// Computes the storage root of predeploy `L2ToL1MessagePasser.sol`.
 ///
 /// Uses pre-hashed storage updates of `L2ToL1MessagePasser.sol` predeploy, resulting from
-/// execution of L2 withdrawals transactions.
+/// execution of L2 withdrawals transactions. If none, takes empty [`HashedStorage::default`].
 pub fn withdrawals_root_prehashed<DB: StorageRootProvider>(
-    hashed_storage_updates: Option<HashedStorage>,
+    hashed_storage_updates: HashedStorage,
     state: DB,
 ) -> ProviderResult<B256> {
-    let hashed_storage_updates = hashed_storage_updates.unwrap_or_default();
     state.storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, hashed_storage_updates)
 }
