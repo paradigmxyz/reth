@@ -8,6 +8,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::Recovered, BlockHeader, Eip658Value, Header, Receipt, Transaction as _, TxReceipt,
 };
+use alloy_evm::FromRecoveredTx;
 use op_alloy_consensus::OpDepositReceipt;
 use reth_evm::{
     execute::{
@@ -96,7 +97,6 @@ where
             evm,
             block.sealed_block(),
             &self.chain_spec,
-            &self.evm_config,
             self.receipt_builder.as_ref(),
         )
     }
@@ -134,19 +134,16 @@ impl<'a, B: Block> From<&'a SealedBlock<B>> for OpBlockExecutionInput {
 
 /// Block execution strategy for Optimism.
 #[derive(Debug)]
-pub struct OpExecutionStrategy<'a, Evm, N: NodePrimitives, ChainSpec, EvmConfig: ConfigureEvm> {
+pub struct OpExecutionStrategy<'a, E: Evm, N: NodePrimitives, ChainSpec> {
     /// Chainspec.
     chain_spec: ChainSpec,
-    /// How to configure the EVM.
-    evm_config: EvmConfig,
     /// Receipt builder.
-    receipt_builder:
-        &'a dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>,
+    receipt_builder: &'a dyn OpReceiptBuilder<N::SignedTx, E::HaltReason, Receipt = N::Receipt>,
 
     /// Input for block execution.
     input: OpBlockExecutionInput,
     /// The EVM used by strategy.
-    evm: Evm,
+    evm: E,
     /// Receipts of executed transactions.
     receipts: Vec<N::Receipt>,
     /// Total gas used by executed transactions.
@@ -157,23 +154,18 @@ pub struct OpExecutionStrategy<'a, Evm, N: NodePrimitives, ChainSpec, EvmConfig:
     system_caller: SystemCaller<ChainSpec>,
 }
 
-impl<'a, Evm, N, ChainSpec, EvmConfig> OpExecutionStrategy<'a, Evm, N, ChainSpec, EvmConfig>
+impl<'a, E, N, ChainSpec> OpExecutionStrategy<'a, E, N, ChainSpec>
 where
+    E: Evm,
     N: NodePrimitives,
     ChainSpec: OpHardforks,
-    EvmConfig: ConfigureEvm,
 {
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(
-        evm: Evm,
+        evm: E,
         input: impl Into<OpBlockExecutionInput>,
         chain_spec: ChainSpec,
-        evm_config: EvmConfig,
-        receipt_builder: &'a dyn OpReceiptBuilder<
-            N::SignedTx,
-            HaltReasonFor<EvmConfig>,
-            Receipt = N::Receipt,
-        >,
+        receipt_builder: &'a dyn OpReceiptBuilder<N::SignedTx, E::HaltReason, Receipt = N::Receipt>,
     ) -> Self {
         let input = input.into();
         Self {
@@ -181,7 +173,6 @@ where
             evm,
             system_caller: SystemCaller::new(chain_spec.clone()),
             chain_spec,
-            evm_config,
             receipt_builder,
             receipts: Vec::new(),
             gas_used: 0,
@@ -190,14 +181,12 @@ where
     }
 }
 
-impl<'db, DB, E, N, ChainSpec, EvmConfig> BlockExecutionStrategy
-    for OpExecutionStrategy<'_, E, N, ChainSpec, EvmConfig>
+impl<'db, DB, E, N, ChainSpec> BlockExecutionStrategy for OpExecutionStrategy<'_, E, N, ChainSpec>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = EvmConfig::TxEnv, HaltReason = HaltReasonFor<EvmConfig>>,
+    E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<N::SignedTx>>,
     N: NodePrimitives<SignedTx: OpTransaction, Receipt: DepositReceipt>,
     ChainSpec: OpHardforks,
-    EvmConfig: ConfigureEvmFor<N>,
 {
     type Primitives = N;
     type Error = BlockExecutionError;
@@ -248,12 +237,11 @@ where
             .transpose()
             .map_err(|_| OpBlockExecutionError::AccountLoadFailed(tx.signer()))?;
 
-        let tx_env = self.evm_config.tx_env(&tx);
         let hash = tx.tx_hash();
 
         // Execute transaction.
         let result_and_state =
-            self.evm.transact(tx_env).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
+            self.evm.transact(&tx).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
 
         trace!(
             target: "evm",
