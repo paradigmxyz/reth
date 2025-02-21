@@ -26,7 +26,7 @@ use reth_payload_primitives::{
     EngineObjectValidationError, NewPayloadError, PayloadOrAttributes, PayloadTypes,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, NodePrimitives, SealedBlock};
+use reth_primitives::{Block, NodePrimitives, RecoveredBlock, SealedBlock};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -104,8 +104,9 @@ impl PayloadValidator for EthereumEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock, NewPayloadError> {
-        Ok(self.inner.ensure_well_formed_payload(payload)?)
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 }
 
