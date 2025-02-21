@@ -19,13 +19,9 @@ use reth_db_api::{
 use reth_db_models::StoredBlockWithdrawals;
 use reth_ethereum_primitives::TransactionSigned;
 
-use reth_primitives_traits::{
-    Block, BlockBody, FullNodePrimitives
-};
+use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives};
 #[cfg(feature = "db-api")]
-use reth_primitives_traits::{
-    FullBlockHeader, SignedTransaction,
-};
+use reth_primitives_traits::{FullBlockHeader, SignedTransaction};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Trait that implements how block bodies are written to the storage.
