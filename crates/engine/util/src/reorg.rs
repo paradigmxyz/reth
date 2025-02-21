@@ -33,7 +33,7 @@ use reth_revm::{
     DatabaseCommit,
 };
 use std::{
-    collections::VecDeque, future::Future, hash::Hash, pin::Pin, task::{ready, Context, Poll}
+    collections::VecDeque, future::Future, pin::Pin, task::{ready, Context, Poll}
 };
 use tokio::sync::oneshot;
 use tracing::*;
@@ -417,7 +417,7 @@ where
             blob_gas_used,
             excess_blob_gas,
             state_root: state_provider.state_root(hashed_state)?,
-            requests_hash: requests_hash,
+            requests_hash,
         },
         body: BlockBody {
             transactions,
