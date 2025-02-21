@@ -21,7 +21,6 @@ use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::SealedHeader;
 use tokio::fs;
-use std::time::Instant;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
