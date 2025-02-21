@@ -38,7 +38,7 @@ revm.workspace = true
 op-alloy-consensus.workspace = true
 
 # misc
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
