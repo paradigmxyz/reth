@@ -37,4 +37,4 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 
 # misc
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
