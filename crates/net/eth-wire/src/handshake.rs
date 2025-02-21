@@ -17,7 +17,7 @@ use tokio_stream::StreamExt;
 use tracing::{debug, trace};
 
 /// A trait that knows how to perform the P2P handshake.
-pub trait Handshake: Debug + Send + Sync + 'static {
+pub trait EthRlpxHandshake: Debug + Send + Sync + 'static {
     /// Perform the P2P handshake.
     fn handshake<'a>(
         &'a self,
@@ -37,12 +37,11 @@ pub trait UnauthEth:
     + Send
 {
 }
-
-#[derive(Debug)]
 /// The Ethereum P2P handshake.
+#[derive(Debug, Default, Clone)]
 pub struct EthHandshake;
 
-impl Handshake for EthHandshake {
+impl EthRlpxHandshake for EthHandshake {
     fn handshake<'a>(
         &'a self,
         unauth: &'a mut dyn UnauthEth,
@@ -51,7 +50,7 @@ impl Handshake for EthHandshake {
         timeout_limit: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
-            timeout(timeout_limit, handshake(unauth, status, fork_filter))
+            timeout(timeout_limit, eth_handshake(unauth, status, fork_filter))
                 .await
                 .map_err(|_| EthStreamError::StreamTimeout)?
         })
@@ -59,7 +58,7 @@ impl Handshake for EthHandshake {
 }
 
 /// A **shared helper function** that performs the common handshake logic.
-pub async fn handshake(
+pub async fn eth_handshake(
     unauth: &mut dyn UnauthEth,
     status: Status,
     fork_filter: ForkFilter,

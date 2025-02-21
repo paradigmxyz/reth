@@ -11,7 +11,7 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOV
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
-    handshake::{EthHandshake, Handshake},
+    handshake::{EthHandshake, EthRlpxHandshake},
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, Status,
 };
 use reth_ethereum_forks::{ForkFilter, Head};
@@ -84,8 +84,11 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
     pub nat: Option<NatResolver>,
-    /// The P2P handshake
-    pub handshake: Arc<dyn Handshake>,
+    /// The Ethereum P2P handshake, see also:
+    /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
+    /// This can be overridden to support custom handshake logic via the
+    /// [`NetworkConfigBuilder`].
+    pub handshake: Arc<dyn EthRlpxHandshake>,
 }
 
 // === impl NetworkConfig ===
@@ -210,8 +213,9 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
     nat: Option<NatResolver>,
-    /// The P2P handshake
-    handshake: Arc<dyn Handshake>,
+    /// The Ethereum P2P handshake, see also:
+    /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
+    handshake: Arc<dyn EthRlpxHandshake>,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -251,7 +255,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             block_import: None,
             transactions_manager_config: Default::default(),
             nat: None,
-            handshake: Arc::new(EthHandshake),
+            handshake: Arc::new(EthHandshake::default()),
         }
     }
 
@@ -539,8 +543,8 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
-    /// Overrides the default handshake.
-    pub fn handshake(mut self, handshake: Arc<dyn Handshake>) -> Self {
+    /// Overrides the default Eth `RLPx` handshake.
+    pub fn eth_rlpx_handshake(mut self, handshake: Arc<dyn EthRlpxHandshake>) -> Self {
         self.handshake = handshake;
         self
     }

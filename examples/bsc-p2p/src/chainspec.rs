@@ -1,3 +1,5 @@
+//! Chain specification for BSC, credits to: <https://github.com/bnb-chain/reth/blob/main/crates/bsc/chainspec/src/bsc.rs>
+
 use alloy_primitives::{BlockHash, U256};
 use reth_chainspec::{
     hardfork, make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks,
