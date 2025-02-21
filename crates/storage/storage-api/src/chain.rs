@@ -4,7 +4,6 @@ use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_db_models::StoredBlockWithdrawals;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::StoredBlockOmmers,
@@ -12,6 +11,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
+use reth_db_models::StoredBlockWithdrawals;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{
     Block, BlockBody, FullBlockHeader, FullNodePrimitives, SignedTransaction,
