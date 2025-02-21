@@ -35,7 +35,6 @@ pub trait StorageReader: Send + Sync {
 }
 
 /// Storage ChangeSet reader
-
 #[cfg(feature = "db-api")]
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageChangeSetReader: Send + Sync {
