@@ -1,3 +1,4 @@
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1,
@@ -122,7 +123,7 @@ where
         state_updates: &HashedPostState,
         block: &RecoveredBlock<Self::Block>,
     ) -> Result<(), ConsensusError> {
-        let state = self.provider.latest().map_err(|err| {
+        let state = self.provider.state_by_block_hash(block.parent_hash()).map_err(|err| {
             ConsensusError::Other(format!("failed to verify block post-execution: {err}"))
         })?;
         let predeploy_storage_updates = state_updates
