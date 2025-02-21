@@ -52,5 +52,5 @@ std = [
 ]
 
 db-api = [
-    "dep:reth-db-api"
+    "dep:reth-db-api",
 ]
