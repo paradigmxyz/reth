@@ -18,6 +18,7 @@ reth-codecs = { workspace = true, optional = true, features = ["op"] }
 reth-zstd-compressors = { workspace = true, optional = true }
 
 # ethereum
+alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
@@ -75,6 +76,7 @@ std = [
     "alloy-serde?/std",
     "revm-context/std",
     "serde_json/std",
+    "alloy-evm/std",
 ]
 alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth", "op-alloy-consensus/alloy-compat"]
 reth-codec = [

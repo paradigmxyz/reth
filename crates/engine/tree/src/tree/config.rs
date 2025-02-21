@@ -54,7 +54,7 @@ pub struct TreeConfig {
     use_caching_and_prewarming: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
-    /// Wether the host has enough parallelism to run state root task.
+    /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
 }
 
@@ -224,7 +224,7 @@ impl TreeConfig {
         self
     }
 
-    /// Wether or not to use state root task
+    /// Whether or not to use state root task
     pub(crate) fn use_state_root_task(&self) -> bool {
         self.has_enough_parallelism && !self.legacy_state_root
     }
