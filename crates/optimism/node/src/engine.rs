@@ -1,5 +1,5 @@
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError,
+    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1,
 };
 use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
@@ -8,18 +8,18 @@ use reth_chainspec::ChainSpec;
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
-        EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
-        VersionSpecificValidationError,
+        EngineObjectValidationError, MessageValidationKind, NewPayloadError, PayloadOrAttributes,
+        PayloadTypes, VersionSpecificValidationError,
     },
-    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, ExecutionData,
-    NodePrimitives, PayloadValidator,
+    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
+    PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::SealedBlock;
+use reth_primitives::{RecoveredBlock, SealedBlock};
 use std::sync::Arc;
 
 /// The types used in the optimism beacon consensus engine.
@@ -97,8 +97,9 @@ impl PayloadValidator for OpEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload)
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 }
 
@@ -232,7 +233,7 @@ mod test {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,
                 genesis: BASE_SEPOLIA.inner.genesis.clone(),
-                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
+                genesis_header: BASE_SEPOLIA.inner.genesis_header.clone(),
                 paris_block_and_final_difficulty: BASE_SEPOLIA
                     .inner
                     .paris_block_and_final_difficulty,

@@ -1,5 +1,5 @@
 //! Implements a state provider that has a shared cache in front of it.
-use alloy_primitives::{map::B256HashMap, Address, StorageKey, StorageValue, B256};
+use alloy_primitives::{map::B256Map, Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
 use mini_moka::sync::CacheBuilder;
 use reth_errors::ProviderResult;
@@ -273,7 +273,7 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
         &self,
         input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<B256HashMap<alloy_primitives::Bytes>> {
+    ) -> ProviderResult<B256Map<alloy_primitives::Bytes>> {
         self.state_provider.witness(input, target)
     }
 }
@@ -356,11 +356,12 @@ impl ProviderCaches {
         key: StorageKey,
         value: Option<StorageValue>,
     ) {
-        let account_cache = self.storage_cache.get(&address).unwrap_or_default();
-
+        let account_cache = self.storage_cache.get(&address).unwrap_or_else(|| {
+            let account_cache = AccountStorageCache::default();
+            self.storage_cache.insert(address, account_cache.clone());
+            account_cache
+        });
         account_cache.insert_storage(key, value);
-
-        self.storage_cache.insert(address, account_cache);
     }
 
     /// Invalidate storage for specific account
@@ -377,29 +378,27 @@ impl ProviderCaches {
 /// A builder for [`ProviderCaches`].
 #[derive(Debug)]
 pub(crate) struct ProviderCacheBuilder {
-    /// Code cache size
-    code_cache_size: u64,
+    /// Code cache entries
+    code_cache_entries: u64,
 
-    /// Storage cache size
-    storage_cache_size: u64,
+    /// Storage cache entries
+    storage_cache_entries: u64,
 
-    /// Account cache size
-    account_cache_size: u64,
+    /// Account cache entries
+    account_cache_entries: u64,
 }
 
 impl ProviderCacheBuilder {
     /// Build a [`ProviderCaches`] struct, so that provider caches can be easily cloned.
-    pub(crate) fn build_caches(self) -> ProviderCaches {
-        // TODO: the total cache size could be a CLI configuration parameter.
-        const TOTAL_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024; // 4GB
-        let storage_cache_size = (TOTAL_CACHE_SIZE * 8888) / 10000; // 88.88% of total
-        let account_cache_size = (TOTAL_CACHE_SIZE * 556) / 10000; // 5.56% of total
-        let code_cache_size = (TOTAL_CACHE_SIZE * 556) / 10000; // 5.56% of total
+    pub(crate) fn build_caches(self, total_cache_size: u64) -> ProviderCaches {
+        let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
+        let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
+        let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
 
         const EXPIRY_TIME: Duration = Duration::from_secs(7200); // 2 hours
         const TIME_TO_IDLE: Duration = Duration::from_secs(3600); // 1 hour
 
-        let storage_cache = CacheBuilder::new(self.storage_cache_size)
+        let storage_cache = CacheBuilder::new(self.storage_cache_entries)
             .weigher(|_key: &Address, value: &AccountStorageCache| -> u32 {
                 // values based on results from measure_storage_cache_overhead test
                 let base_weight = 39_000;
@@ -411,7 +410,7 @@ impl ProviderCacheBuilder {
             .time_to_idle(TIME_TO_IDLE)
             .build_with_hasher(DefaultHashBuilder::default());
 
-        let account_cache = CacheBuilder::new(self.account_cache_size)
+        let account_cache = CacheBuilder::new(self.account_cache_entries)
             .weigher(|_key: &Address, value: &Option<Account>| -> u32 {
                 match value {
                     Some(account) => {
@@ -437,7 +436,7 @@ impl ProviderCacheBuilder {
             .time_to_idle(TIME_TO_IDLE)
             .build_with_hasher(DefaultHashBuilder::default());
 
-        let code_cache = CacheBuilder::new(self.code_cache_size)
+        let code_cache = CacheBuilder::new(self.code_cache_entries)
             .weigher(|_key: &B256, value: &Option<Bytecode>| -> u32 {
                 match value {
                     Some(bytecode) => {
@@ -466,9 +465,9 @@ impl Default for ProviderCacheBuilder {
         // Storage cache: up to 10M accounts but limited to 8GB
         // Account cache: up to 10M accounts but limited to 0.5GB
         Self {
-            code_cache_size: 10_000_000,
-            storage_cache_size: 10_000_000,
-            account_cache_size: 10_000_000,
+            code_cache_entries: 10_000_000,
+            storage_cache_entries: 10_000_000,
+            account_cache_entries: 10_000_000,
         }
     }
 }

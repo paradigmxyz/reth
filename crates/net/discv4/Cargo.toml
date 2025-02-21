@@ -22,7 +22,7 @@ reth-network-peers = { workspace = true, features = ["secp256k1"] }
 alloy-primitives = { workspace = true, features = ["rand"] }
 alloy-rlp = { workspace = true, features = ["derive"] }
 discv5.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery", "serde"] }
 enr.workspace = true
 
 # async/futures

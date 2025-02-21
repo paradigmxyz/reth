@@ -1,5 +1,6 @@
 //! Engine tree configuration.
 
+use crate::tree::root::has_enough_parallelism;
 use alloy_eips::merge::EPOCH_SLOTS;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
@@ -19,6 +20,8 @@ const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
+
+const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
 
 /// The configuration of the engine tree.
 #[derive(Debug)]
@@ -41,13 +44,18 @@ pub struct TreeConfig {
     /// This is used as a cutoff to prevent long-running sequential block execution when we receive
     /// a batch of downloaded blocks.
     max_execute_block_batch_size: usize,
-    /// Whether to use the new state root task calculation method instead of parallel calculation
-    use_state_root_task: bool,
+    /// Whether to use the legacy state root calculation method instead of the
+    /// new state root task
+    legacy_state_root: bool,
     /// Whether to always compare trie updates from the state root task to the trie updates from
     /// the regular state root calculation.
     always_compare_trie_updates: bool,
     /// Whether to use cross-block caching and parallel prewarming
     use_caching_and_prewarming: bool,
+    /// Cross-block cache size in bytes.
+    cross_block_cache_size: u64,
+    /// Wether the host has enough parallelism to run state root task.
+    has_enough_parallelism: bool,
 }
 
 impl Default for TreeConfig {
@@ -58,9 +66,11 @@ impl Default for TreeConfig {
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
-            use_state_root_task: false,
+            legacy_state_root: false,
             always_compare_trie_updates: false,
             use_caching_and_prewarming: false,
+            cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
+            has_enough_parallelism: has_enough_parallelism(),
         }
     }
 }
@@ -74,9 +84,11 @@ impl TreeConfig {
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
         max_execute_block_batch_size: usize,
-        use_state_root_task: bool,
+        legacy_state_root: bool,
         always_compare_trie_updates: bool,
         use_caching_and_prewarming: bool,
+        cross_block_cache_size: u64,
+        has_enough_parallelism: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -84,9 +96,11 @@ impl TreeConfig {
             block_buffer_limit,
             max_invalid_header_cache_length,
             max_execute_block_batch_size,
-            use_state_root_task,
+            legacy_state_root,
             always_compare_trie_updates,
             use_caching_and_prewarming,
+            cross_block_cache_size,
+            has_enough_parallelism,
         }
     }
 
@@ -115,9 +129,10 @@ impl TreeConfig {
         self.max_execute_block_batch_size
     }
 
-    /// Returns whether to use the state root task calculation method.
-    pub const fn use_state_root_task(&self) -> bool {
-        self.use_state_root_task
+    /// Returns whether to use the legacy state root calculation method instead
+    /// of the new state root task
+    pub const fn legacy_state_root(&self) -> bool {
+        self.legacy_state_root
     }
 
     /// Returns whether or not cross-block caching and parallel prewarming should be used.
@@ -129,6 +144,11 @@ impl TreeConfig {
     /// from the regular state root calculation.
     pub const fn always_compare_trie_updates(&self) -> bool {
         self.always_compare_trie_updates
+    }
+
+    /// Return the cross-block cache size.
+    pub const fn cross_block_cache_size(&self) -> u64 {
+        self.cross_block_cache_size
     }
 
     /// Setter for persistence threshold.
@@ -170,9 +190,9 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether to use the new state root task calculation method.
-    pub const fn with_state_root_task(mut self, use_state_root_task: bool) -> Self {
-        self.use_state_root_task = use_state_root_task;
+    /// Setter for whether to use the legacy state root calculation method.
+    pub const fn with_legacy_state_root(mut self, legacy_state_root: bool) -> Self {
+        self.legacy_state_root = legacy_state_root;
         self
     }
 
@@ -190,5 +210,22 @@ impl TreeConfig {
     ) -> Self {
         self.always_compare_trie_updates = always_compare_trie_updates;
         self
+    }
+
+    /// Setter for cross block cache size.
+    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: u64) -> Self {
+        self.cross_block_cache_size = cross_block_cache_size;
+        self
+    }
+
+    /// Setter for has enough parallelism.
+    pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
+        self.has_enough_parallelism = has_enough_parallelism;
+        self
+    }
+
+    /// Wether or not to use state root task
+    pub(crate) fn use_state_root_task(&self) -> bool {
+        self.has_enough_parallelism && !self.legacy_state_root
     }
 }

@@ -637,6 +637,48 @@ async fn test_trusted_peer_only() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_network_state_change() {
+    let net = Testnet::create(1).await;
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let peers_config =
+        PeersConfig::default().with_refill_slots_interval(Duration::from_millis(500));
+
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .peer_config(peers_config)
+        .build(NoopProvider::default());
+
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    // Set network state to Hibernate.
+    handle.set_network_hibernate();
+
+    handle.add_peer(*handle0.peer_id(), handle0.local_addr());
+
+    // wait 2 seconds, the number of connections is still 0, because network is Hibernate.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(handle.num_connected_peers(), 0);
+
+    // Set network state to Active.
+    handle.set_network_active();
+
+    // wait 2 seconds, the number of connections should be 1, because network is Active and outbound
+    // slot should be filled.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(handle.num_connected_peers(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_exceed_outgoing_connections() {
     let net = Testnet::create(2).await;
     let secret_key = SecretKey::new(&mut rand::thread_rng());

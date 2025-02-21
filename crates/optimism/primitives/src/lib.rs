@@ -11,6 +11,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "alloy-compat")]
+mod alloy_compat;
+
 pub mod bedrock;
 
 pub mod predeploys;
@@ -30,9 +33,9 @@ pub type OpBlockBody = <OpBlock as reth_primitives_traits::Block>::Body;
 
 /// Primitive types for Optimism Node.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OpPrimitives;
 
-#[cfg(feature = "optimism")]
 impl reth_primitives_traits::NodePrimitives for OpPrimitives {
     type Block = OpBlock;
     type BlockHeader = alloy_consensus::Header;

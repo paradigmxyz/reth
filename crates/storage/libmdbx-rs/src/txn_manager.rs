@@ -5,10 +5,7 @@ use crate::{
 };
 use std::{
     ptr,
-    sync::{
-        mpsc::{sync_channel, Receiver, SyncSender},
-        Arc,
-    },
+    sync::mpsc::{sync_channel, Receiver, SyncSender},
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -31,7 +28,7 @@ pub(crate) enum TxnManagerMessage {
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
     #[cfg(feature = "read-tx-timeouts")]
-    read_transactions: Option<Arc<read_transactions::ReadTransactions>>,
+    read_transactions: Option<std::sync::Arc<read_transactions::ReadTransactions>>,
 }
 
 impl TxnManager {

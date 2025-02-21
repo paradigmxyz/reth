@@ -11,8 +11,6 @@
 
 extern crate alloc;
 
-pub mod batch;
-
 /// Cache database that reads from an underlying [`DatabaseRef`].
 /// Database adapters for payload building.
 pub mod cached;
@@ -22,6 +20,9 @@ pub mod cancelled;
 
 /// Contains glue code for integrating reth database into revm's [Database].
 pub mod database;
+
+pub use revm_database as db;
+pub use revm_inspector as inspector;
 
 /// Common test helpers
 #[cfg(any(test, feature = "test-utils"))]

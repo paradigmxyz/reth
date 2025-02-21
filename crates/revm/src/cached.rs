@@ -4,10 +4,7 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use core::cell::RefCell;
-use revm::primitives::{
-    db::{Database, DatabaseRef},
-    AccountInfo, Bytecode,
-};
+use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 
 /// A container type that caches reads from an underlying [`DatabaseRef`].
 ///
@@ -17,8 +14,7 @@ use revm::primitives::{
 /// # Example
 ///
 /// ```
-/// use reth_revm::cached::CachedReads;
-/// use revm::db::{DatabaseRef, State};
+/// use reth_revm::{cached::CachedReads, DatabaseRef, db::State};
 ///
 /// fn build_payload<DB: DatabaseRef>(db: DB) {
 ///     let mut cached_reads = CachedReads::default();

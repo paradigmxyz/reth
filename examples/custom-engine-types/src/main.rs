@@ -22,8 +22,9 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
     engine::{
-        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-        ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
+        ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+        ExecutionPayloadEnvelopeV4, ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
+        PayloadId,
     },
     Withdrawal,
 };
@@ -37,12 +38,9 @@ use reth::{
     },
     network::NetworkHandle,
     payload::ExecutionPayloadValidator,
-    primitives::{Block, EthPrimitives, SealedBlock, TransactionSigned},
+    primitives::{Block, EthPrimitives, RecoveredBlock, SealedBlock, TransactionSigned},
     providers::{EthStorage, StateProviderFactory},
-    rpc::{
-        eth::EthApi,
-        types::engine::{ExecutionPayload, PayloadError},
-    },
+    rpc::{eth::EthApi, types::engine::ExecutionPayload},
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
     version::default_extra_data_bytes,
@@ -53,8 +51,9 @@ use reth_engine_local::payload::UnsupportedLocalAttributes;
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-    validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator, ExecutionData,
-    FullNodeComponents, PayloadAttributes, PayloadBuilderAttributes, PayloadValidator,
+    validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
+    FullNodeComponents, NewPayloadError, PayloadAttributes, PayloadBuilderAttributes,
+    PayloadValidator,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -206,8 +205,9 @@ impl PayloadValidator for CustomEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload)
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 }
 

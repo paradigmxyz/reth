@@ -1,8 +1,7 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
 use reth_codecs::Compact;
-use reth_db::{table::Value, tables};
-use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, table::Value, tables, transaction::DbTx};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{providers::StaticFileWriter, DBProvider, StaticFileProviderFactory};
 use reth_static_file_types::StaticFileSegment;

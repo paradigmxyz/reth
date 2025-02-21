@@ -4,7 +4,7 @@ use crate::{
     args::RollupArgs,
     engine::OpEngineValidator,
     txpool::{OpTransactionPool, OpTransactionValidator},
-    OpEngineTypes,
+    OpEngineApiBuilder, OpEngineTypes,
 };
 use op_alloy_consensus::OpPooledTransaction;
 use reth_chainspec::{EthChainSpec, Hardforks};
@@ -34,11 +34,14 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
+    eth::ext::OpEthExtApi,
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
 };
-use reth_provider::{CanonStateSubscriptions, EthStorage};
+use reth_optimism_txpool::conditional::MaybeConditionalTransaction;
+use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -47,7 +50,7 @@ use reth_transaction_pool::{
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-use revm::primitives::TxEnv;
+use revm::context::TxEnv;
 use std::sync::Arc;
 
 /// Storage implementation for Optimism.
@@ -104,7 +107,10 @@ impl OpNode {
             self.args;
         ComponentsBuilder::default()
             .node_types::<Node>()
-            .pool(OpPoolBuilder::default())
+            .pool(
+                OpPoolBuilder::default()
+                    .with_enable_tx_conditional(self.args.enable_tx_conditional),
+            )
             .payload(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
             )
@@ -114,6 +120,40 @@ impl OpNode {
             })
             .executor(OpExecutorBuilder::default())
             .consensus(OpConsensusBuilder::default())
+    }
+
+    /// Instantiates the [`ProviderFactoryBuilder`] for an opstack node.
+    ///
+    /// # Open a Providerfactory in read-only mode from a datadir
+    ///
+    /// See also: [`ProviderFactoryBuilder`] and
+    /// [`ReadOnlyConfig`](reth_provider::providers::ReadOnlyConfig).
+    ///
+    /// ```no_run
+    /// use reth_optimism_chainspec::BASE_MAINNET;
+    /// use reth_optimism_node::OpNode;
+    ///
+    /// let factory =
+    ///     OpNode::provider_factory_builder().open_read_only(BASE_MAINNET.clone(), "datadir").unwrap();
+    /// ```
+    ///
+    /// # Open a Providerfactory manually with with all required components
+    ///
+    /// ```no_run
+    /// use reth_db::open_db_read_only;
+    /// use reth_optimism_chainspec::OpChainSpecBuilder;
+    /// use reth_optimism_node::OpNode;
+    /// use reth_provider::providers::StaticFileProvider;
+    /// use std::sync::Arc;
+    ///
+    /// let factory = OpNode::provider_factory_builder()
+    ///     .db(Arc::new(open_db_read_only("db", Default::default()).unwrap()))
+    ///     .chainspec(OpChainSpecBuilder::base_mainnet().build().into())
+    ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
+    ///     .build_provider_factory();
+    /// ```
+    pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
+        ProviderFactoryBuilder::default()
     }
 }
 
@@ -148,6 +188,7 @@ where
         Self::AddOns::builder()
             .with_sequencer(self.args.sequencer_http.clone())
             .with_da_config(self.da_config.clone())
+            .with_enable_tx_conditional(self.args.enable_tx_conditional)
             .build()
     }
 }
@@ -168,9 +209,19 @@ impl NodeTypesWithEngine for OpNode {
 pub struct OpAddOns<N: FullNodeComponents> {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
     /// and eth-api.
-    pub rpc_add_ons: RpcAddOns<N, OpEthApi<N>, OpEngineValidatorBuilder>,
+    pub rpc_add_ons: RpcAddOns<
+        N,
+        OpEthApi<N>,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >,
     /// Data availability configuration for the OP builder.
     pub da_config: OpDAConfig,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    pub sequencer_client: Option<SequencerClient>,
+    /// Enable transaction conditionals.
+    enable_tx_conditional: bool,
 }
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default for OpAddOns<N> {
@@ -195,9 +246,10 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
+        Evm: ConfigureEvmEnv<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
+    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -205,7 +257,7 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        let Self { rpc_add_ons, da_config } = self;
+        let Self { rpc_add_ons, da_config, sequencer_client, enable_tx_conditional } = self;
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
             ctx.node.pool().clone(),
@@ -221,6 +273,11 @@ where
         );
         let miner_ext = OpMinerExtApi::new(da_config);
 
+        let tx_conditional_ext: OpEthExtApi<N::Pool, N::Provider> = OpEthExtApi::new(
+            sequencer_client,
+            ctx.node.pool().clone(),
+            ctx.node.provider().clone(),
+        );
         rpc_add_ons
             .launch_add_ons_with(ctx, move |modules, auth_modules| {
                 debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
@@ -238,6 +295,14 @@ where
                     auth_modules.merge_auth_methods(miner_ext.into_rpc())?;
                 }
 
+                if enable_tx_conditional {
+                    // extend the eth namespace if configured in the regular http server
+                    modules.merge_if_module_configured(
+                        RethRpcModule::Eth,
+                        tx_conditional_ext.into_rpc(),
+                    )?;
+                }
+
                 Ok(())
             })
             .await
@@ -253,9 +318,10 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv>,
+        Evm: ConfigureEvm<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
+    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
 {
     type EthApi = OpEthApi<N>;
 
@@ -290,6 +356,8 @@ pub struct OpAddOnsBuilder {
     sequencer_client: Option<SequencerClient>,
     /// Data availability configuration for the OP builder.
     da_config: Option<OpDAConfig>,
+    /// Enable transaction conditionals.
+    enable_tx_conditional: bool,
 }
 
 impl OpAddOnsBuilder {
@@ -304,6 +372,12 @@ impl OpAddOnsBuilder {
         self.da_config = Some(da_config);
         self
     }
+
+    /// Configure if transaction conditional should be enabled.
+    pub fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+        self.enable_tx_conditional = enable_tx_conditional;
+        self
+    }
 }
 
 impl OpAddOnsBuilder {
@@ -312,14 +386,20 @@ impl OpAddOnsBuilder {
     where
         N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
     {
-        let Self { sequencer_client, da_config } = self;
+        let Self { sequencer_client, da_config, enable_tx_conditional } = self;
 
+        let sequencer_client_clone = sequencer_client.clone();
         OpAddOns {
             rpc_add_ons: RpcAddOns::new(
-                move |ctx| OpEthApi::<N>::builder().with_sequencer(sequencer_client).build(ctx),
+                move |ctx| {
+                    OpEthApi::<N>::builder().with_sequencer(sequencer_client_clone).build(ctx)
+                },
+                Default::default(),
                 Default::default(),
             ),
             da_config: da_config.unwrap_or_default(),
+            sequencer_client,
+            enable_tx_conditional,
         }
     }
 }
@@ -356,20 +436,33 @@ where
 pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
+    /// Enable transaction conditionals.
+    pub enable_tx_conditional: bool,
     /// Marker for the pooled transaction type.
     _pd: core::marker::PhantomData<T>,
 }
 
 impl<T> Default for OpPoolBuilder<T> {
     fn default() -> Self {
-        Self { pool_config_overrides: Default::default(), _pd: Default::default() }
+        Self {
+            pool_config_overrides: Default::default(),
+            enable_tx_conditional: false,
+            _pd: Default::default(),
+        }
+    }
+}
+
+impl<T> OpPoolBuilder<T> {
+    fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+        self.enable_tx_conditional = enable_tx_conditional;
+        self
     }
 }
 
 impl<Node, T> PoolBuilder<Node> for OpPoolBuilder<T>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
-    T: EthPoolTransaction<Consensus = TxTy<Node::Types>>,
+    T: EthPoolTransaction<Consensus = TxTy<Node::Types>> + MaybeConditionalTransaction,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
@@ -404,7 +497,7 @@ where
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 
-        // spawn txpool maintenance task
+        // spawn txpool maintenance tasks
         {
             let pool = transaction_pool.clone();
             let chain_events = ctx.provider().canonical_state_stream();
@@ -423,18 +516,31 @@ where
                 },
             );
 
-            // spawn the maintenance task
+            // spawn the main maintenance task
             ctx.task_executor().spawn_critical(
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
-                    pool,
+                    pool.clone(),
                     chain_events,
                     ctx.task_executor().clone(),
                     Default::default(),
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
+
+            if self.enable_tx_conditional {
+                // spawn the Op txpool maintenance task
+                let chain_events = ctx.provider().canonical_state_stream();
+                ctx.task_executor().spawn_critical(
+                    "Op txpool maintenance task",
+                    reth_optimism_txpool::maintain::maintain_transaction_pool_future(
+                        pool,
+                        chain_events,
+                    ),
+                );
+                debug!(target: "reth::cli", "Spawned Op txpool maintenance task");
+            }
         }
 
         Ok(transaction_pool)

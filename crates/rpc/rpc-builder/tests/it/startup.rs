@@ -1,9 +1,7 @@
 //! Startup tests
 
-use std::{io, sync::Arc};
+use std::io;
 
-use reth_chainspec::MAINNET;
-use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_rpc::EthApi;
 use reth_rpc_builder::{
     error::{RpcError, ServerKind, WsHttpSamePortError},
@@ -32,7 +30,6 @@ async fn test_http_addr_in_use() {
     let server = builder.build(
         TransportRpcModuleConfig::set_http(vec![RethRpcModule::Admin]),
         Box::new(EthApi::with_spawner),
-        Arc::new(EthereumEngineValidator::new(MAINNET.clone())),
     );
     let result =
         RpcServerConfig::http(Default::default()).with_http_address(addr).start(&server).await;
@@ -48,7 +45,6 @@ async fn test_ws_addr_in_use() {
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin]),
         Box::new(EthApi::with_spawner),
-        Arc::new(EthereumEngineValidator::new(MAINNET.clone())),
     );
     let result = RpcServerConfig::ws(Default::default()).with_ws_address(addr).start(&server).await;
     let err = result.unwrap_err();
@@ -70,7 +66,6 @@ async fn test_launch_same_port_different_modules() {
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin])
             .with_http(vec![RethRpcModule::Eth]),
         Box::new(EthApi::with_spawner),
-        Arc::new(EthereumEngineValidator::new(MAINNET.clone())),
     );
     let addr = test_address();
     let res = RpcServerConfig::ws(Default::default())
@@ -93,7 +88,6 @@ async fn test_launch_same_port_same_cors() {
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Eth])
             .with_http(vec![RethRpcModule::Eth]),
         Box::new(EthApi::with_spawner),
-        Arc::new(EthereumEngineValidator::new(MAINNET.clone())),
     );
     let addr = test_address();
     let res = RpcServerConfig::ws(Default::default())
@@ -114,7 +108,6 @@ async fn test_launch_same_port_different_cors() {
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Eth])
             .with_http(vec![RethRpcModule::Eth]),
         Box::new(EthApi::with_spawner),
-        Arc::new(EthereumEngineValidator::new(MAINNET.clone())),
     );
     let addr = test_address();
     let res = RpcServerConfig::ws(Default::default())

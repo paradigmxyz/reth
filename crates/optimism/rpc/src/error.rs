@@ -1,12 +1,13 @@
 //! RPC errors specific to OP.
 
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
-use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
+use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
-use revm::primitives::{EVMError, HaltReason, InvalidTransaction, OptimismInvalidTransaction};
+use revm::context_interface::result::{EVMError, InvalidTransaction};
+use revm_optimism::{OpHaltReason, OpTransactionError};
 
 /// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]
@@ -62,6 +63,9 @@ pub enum OpInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
+    /// Transaction conditional errors.
+    #[error(transparent)]
+    TxConditionalErr(#[from] TxConditionalErr),
 }
 
 impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
@@ -71,25 +75,43 @@ impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'st
             OpInvalidTransactionError::HaltedDepositPostRegolith => {
                 rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
+            OpInvalidTransactionError::TxConditionalErr(_) => err.into(),
         }
     }
 }
 
-impl TryFrom<InvalidTransaction> for OpInvalidTransactionError {
+impl TryFrom<OpTransactionError> for OpInvalidTransactionError {
     type Error = InvalidTransaction;
 
-    fn try_from(err: InvalidTransaction) -> Result<Self, Self::Error> {
+    fn try_from(err: OpTransactionError) -> Result<Self, Self::Error> {
         match err {
-            InvalidTransaction::OptimismError(err) => match err {
-                OptimismInvalidTransaction::DepositSystemTxPostRegolith => {
-                    Ok(Self::DepositSystemTxPostRegolith)
-                }
-                OptimismInvalidTransaction::HaltedDepositPostRegolith => {
-                    Ok(Self::HaltedDepositPostRegolith)
-                }
-            },
-            _ => Err(err),
+            OpTransactionError::DepositSystemTxPostRegolith => {
+                Ok(Self::DepositSystemTxPostRegolith)
+            }
+            OpTransactionError::HaltedDepositPostRegolith => Ok(Self::HaltedDepositPostRegolith),
+            OpTransactionError::Base(err) => Err(err),
         }
+    }
+}
+
+/// Transaction conditional related error type
+#[derive(Debug, thiserror::Error)]
+pub enum TxConditionalErr {
+    /// Transaction conditional cost exceeded maximum allowed
+    #[error("conditional cost exceeded maximum allowed")]
+    ConditionalCostExceeded,
+    /// Invalid conditional parameters
+    #[error("invalid conditional parameters")]
+    InvalidCondition,
+}
+
+impl From<TxConditionalErr> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(err: TxConditionalErr) -> Self {
+        jsonrpsee_types::error::ErrorObject::owned(
+            INVALID_PARAMS_CODE,
+            err.to_string(),
+            None::<String>,
+        )
     }
 }
 
@@ -120,17 +142,31 @@ impl From<BlockError> for OpEthApiError {
     }
 }
 
-impl<DB> From<EVMError<DB>> for OpEthApiError
+impl<T> From<EVMError<T, OpTransactionError>> for OpEthApiError
 where
-    EthApiError: From<EVMError<DB>>,
+    T: Into<EthApiError>,
 {
-    fn from(error: EVMError<DB>) -> Self {
-        Self::Eth(error.into())
+    fn from(error: EVMError<T, OpTransactionError>) -> Self {
+        match error {
+            EVMError::Transaction(err) => match err.try_into() {
+                Ok(err) => Self::InvalidTransaction(err),
+                Err(err) => Self::Eth(EthApiError::InvalidTransaction(err.into())),
+            },
+            EVMError::Database(err) => Self::Eth(err.into()),
+            EVMError::Header(err) => Self::Eth(err.into()),
+            EVMError::Precompile(err) => Self::Eth(EthApiError::EvmPrecompile(err)),
+            EVMError::Custom(err) => Self::Eth(EthApiError::EvmCustom(err)),
+        }
     }
 }
 
-impl FromEvmHalt for OpEthApiError {
-    fn from_evm_halt(halt: HaltReason, gas_limit: u64) -> Self {
-        EthApiError::from_evm_halt(halt, gas_limit).into()
+impl FromEvmHalt<OpHaltReason> for OpEthApiError {
+    fn from_evm_halt(halt: OpHaltReason, gas_limit: u64) -> Self {
+        match halt {
+            OpHaltReason::FailedDeposit => {
+                OpInvalidTransactionError::HaltedDepositPostRegolith.into()
+            }
+            OpHaltReason::Base(halt) => EthApiError::from_evm_halt(halt, gas_limit).into(),
+        }
     }
 }

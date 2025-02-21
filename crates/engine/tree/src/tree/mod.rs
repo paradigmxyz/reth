@@ -26,7 +26,7 @@ use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
-use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
+use reth_consensus::{Consensus, FullConsensus};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
@@ -37,7 +37,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
-    ConfigureEvm, Evm, TransactionEnv,
+    ConfigureEvm, Evm,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
@@ -58,7 +58,6 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::ResultAndState;
 use root::{
     StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
 };
@@ -649,7 +648,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
-    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx> + 'static,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
@@ -672,7 +671,7 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        let num_threads = root::thread_pool_size();
+        let num_threads = root::rayon_thread_pool_size();
 
         let thread_pool = Arc::new(
             rayon::ThreadPoolBuilder::new()
@@ -912,7 +911,7 @@ where
 
         // now check the block itself
         if let Some(status) =
-            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_hash)?
+            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, &block)?
         {
             return Ok(TreeOutcome::new(status))
         }
@@ -920,7 +919,7 @@ where
         let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
             let num_hash = block.num_hash();
-            match self.insert_block_without_senders(block) {
+            match self.insert_block(block) {
                 Ok(status) => {
                     let status = match status {
                         InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -943,18 +942,21 @@ where
                 }
                 Err(error) => self.on_insert_block_error(error)?,
             }
-        } else if let Err(error) = self.buffer_block_without_senders(block) {
+        } else if let Err(error) = self.buffer_block(block) {
             self.on_insert_block_error(error)?
         } else {
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
 
         let mut outcome = TreeOutcome::new(status);
+        // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
-            // if the block is valid and it is the sync target head, make it canonical
-            outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
-                sync_target_head: block_hash,
-            }));
+            // but only if it isn't already the canonical head
+            if self.state.tree_state.canonical_block_hash() != block_hash {
+                outcome = outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical {
+                    sync_target_head: block_hash,
+                }));
+            }
         }
 
         Ok(outcome)
@@ -1392,14 +1394,10 @@ where
                             self.canonical_in_memory_state.set_pending_block(block.clone());
                         }
 
-                        let sealed_block = Arc::new(block.sealed_block().clone());
-                        self.state.tree_state.insert_executed(block);
+                        self.state.tree_state.insert_executed(block.clone());
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
-                            BeaconConsensusEngineEvent::CanonicalBlockAdded(
-                                sealed_block,
-                                now.elapsed(),
-                            ),
+                            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, now.elapsed()),
                         ));
                     }
                     EngineApiRequest::Beacon(request) => {
@@ -1440,7 +1438,12 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
-                                let output = self.on_new_payload(payload);
+                                let mut output = self.on_new_payload(payload);
+
+                                let maybe_event =
+                                    output.as_mut().ok().and_then(|out| out.event.take());
+
+                                // emit response
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(|e| {
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
@@ -1452,6 +1455,9 @@ where
                                         .failed_new_payload_response_deliveries
                                         .increment(1);
                                 }
+
+                                // handle the event if any
+                                self.on_maybe_tree_event(maybe_event)?;
                             }
                             BeaconEngineMessage::TransitionConfigurationExchanged => {
                                 // triggering this hook will record that we received a request from
@@ -1596,6 +1602,8 @@ where
     }
 
     /// Handles a tree event.
+    ///
+    /// Returns an error if a [`TreeAction::MakeCanonical`] results in a fatal error.
     fn on_tree_event(&mut self, event: TreeEvent) -> ProviderResult<()> {
         match event {
             TreeEvent::TreeAction(action) => match action {
@@ -1891,7 +1899,7 @@ where
     fn check_invalid_ancestor_with_head(
         &mut self,
         check: B256,
-        head: B256,
+        head: &SealedBlock<N::Block>,
     ) -> ProviderResult<Option<PayloadStatus>> {
         // check if the check hash was previously marked as invalid
         let Some(header) = self.state.invalid_headers.get(&check) else { return Ok(None) };
@@ -1900,7 +1908,8 @@ where
         let status = self.prepare_invalid_response(header.parent)?;
 
         // insert the head block into the invalid header cache
-        self.state.invalid_headers.insert_with_invalid_ancestor(head, header);
+        self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), header);
+        self.emit_event(BeaconConsensusEngineEvent::InvalidBlock(Box::new(head.clone())));
 
         Ok(Some(status))
     }
@@ -1980,19 +1989,6 @@ where
 
         debug!(target: "engine::tree", elapsed = ?now.elapsed(), %block_count, "connected buffered blocks");
         Ok(())
-    }
-
-    /// Attempts to recover the block's senders and then buffers it.
-    ///
-    /// Returns an error if sender recovery failed or inserting into the buffer failed.
-    fn buffer_block_without_senders(
-        &mut self,
-        block: SealedBlock<N::Block>,
-    ) -> Result<(), InsertBlockError<N::Block>> {
-        match block.try_recover() {
-            Ok(block) => self.buffer_block(block),
-            Err(err) => Err(InsertBlockError::sender_recovery_error(err.into_inner())),
-        }
     }
 
     /// Pre-validates the block and inserts it into the buffer.
@@ -2280,7 +2276,7 @@ where
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
         if self
-            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_num_hash.hash)?
+            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.sealed_block())?
             .is_some()
         {
             return Ok(None)
@@ -2341,16 +2337,6 @@ where
         self.most_recent_cache.take_if(|cache| cache.executed_block_hash() == parent_hash)
     }
 
-    fn insert_block_without_senders(
-        &mut self,
-        block: SealedBlock<N::Block>,
-    ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
-        match block.try_recover() {
-            Ok(block) => self.insert_block(block),
-            Err(err) => Err(InsertBlockError::sender_recovery_error(err.into_inner())),
-        }
-    }
-
     fn insert_block(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2409,8 +2395,6 @@ where
             return Err(e.into())
         }
 
-        let sealed_block = Arc::new(block.clone_sealed_block());
-
         // We only run the parallel state root if we are currently persisting blocks that are all
         // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
         // trie updates being committed are a subset of the in-memory trie updates collected before
@@ -2465,12 +2449,16 @@ where
                 (None, None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
             };
 
-        let (caches, cache_metrics) =
-            if let Some(cache) = self.take_latest_cache(block.parent_hash()) {
-                cache.split()
-            } else {
-                (ProviderCacheBuilder::default().build_caches(), CachedStateMetrics::zeroed())
-            };
+        let (caches, cache_metrics) = if let Some(cache) =
+            self.take_latest_cache(block.parent_hash())
+        {
+            cache.split()
+        } else {
+            (
+                ProviderCacheBuilder::default().build_caches(self.config.cross_block_cache_size()),
+                CachedStateMetrics::zeroed(),
+            )
+        };
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
@@ -2528,10 +2516,7 @@ where
         // Ensure that prewarm tasks don't send proof messages after state root sender is dropped
         cancel_execution.cancel();
 
-        if let Err(err) = self.consensus.validate_block_post_execution(
-            &block,
-            PostExecutionInput::new(&output.receipts, &output.requests),
-        ) {
+        if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
             return Err(err.into())
@@ -2551,14 +2536,14 @@ where
         let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks {
             if self.config.use_state_root_task() {
                 let state_root_handle = state_root_handle
-                    .expect("state root handle must exist if use_state_root_task is true");
+                    .expect("state root handle must exist if legacy_state_root is false");
                 let state_root_config = state_root_task_config.expect("task config is present");
 
                 // Handle state root result from task using handle
                 self.handle_state_root_result(
                     state_root_handle,
                     state_root_config,
-                    sealed_block.as_ref(),
+                    block.sealed_block(),
                     &hashed_state,
                     &state_provider,
                     root_time,
@@ -2617,8 +2602,7 @@ where
             // prewarm tasks are still running at this point however
             drop(prewarm_task_lock.write().unwrap());
             // apply state updates to cache and save it (if saving was successful)
-            self.most_recent_cache =
-                state_provider.save_cache(sealed_block.hash(), &output.state).ok();
+            self.most_recent_cache = state_provider.save_cache(block.hash(), &output.state).ok();
             let elapsed = save_cache_start.elapsed();
 
             // record how long it took to save caches
@@ -2641,15 +2625,15 @@ where
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
-        self.state.tree_state.insert_executed(executed);
+        self.state.tree_state.insert_executed(executed.clone());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event
         let elapsed = start.elapsed();
         let engine_event = if self.is_fork(block_num_hash.hash)? {
-            BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block, elapsed)
+            BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, elapsed)
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
@@ -2722,7 +2706,11 @@ where
     ) -> Result<(), InsertBlockErrorKind> {
         // Get the builder once, outside the thread
         let Some(state_provider_builder) = self.state_provider_builder(block.parent_hash())? else {
-            trace!(target: "engine::tree", parent=%block.parent_hash(), "Could not get state provider builder for prewarm");
+            trace!(
+                target: "engine::tree",
+                parent=%block.parent_hash(),
+                "Could not get state provider builder for prewarm",
+            );
             return Ok(())
         };
 
@@ -2738,26 +2726,30 @@ where
             let state_provider = match state_provider_builder.build() {
                 Ok(provider) => provider,
                 Err(err) => {
-                    trace!(target: "engine::tree", %err, "Failed to build state provider in prewarm thread");
+                    trace!(
+                        target: "engine::tree",
+                        %err,
+                        "Failed to build state provider in prewarm thread"
+                    );
                     return
                 }
             };
 
             // Use the caches to create a new provider with caching
-            let state_provider = CachedStateProvider::new_with_caches(
-                state_provider,
-                caches,
-                cache_metrics,
-            );
+            let state_provider =
+                CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
             let state_provider = StateProviderDatabase::new(&state_provider);
 
+            let mut evm_env = evm_config.evm_env(&block);
+
+            evm_env.cfg_env.disable_nonce_check = true;
+
             // create a new executor and disable nonce checks in the env
-            let mut evm = evm_config.evm_for_block(state_provider, &block);
+            let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
             // create the tx env and reset nonce
-            let mut tx_env = evm_config.tx_env(&tx, tx.signer());
-            tx_env.unset_nonce();
+            let tx_env = evm_config.tx_env(&tx);
 
             // exit early if execution is done
             if cancel_execution.is_cancelled() {
@@ -2765,10 +2757,16 @@ where
             }
 
             let execution_start = Instant::now();
-            let ResultAndState { state, .. } = match evm.transact(tx_env) {
+            let res = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    trace!(target: "engine::tree", %err, tx_hash=%tx.tx_hash(), sender=%tx.signer(), "Error when executing prewarm transaction");
+                    trace!(
+                        target: "engine::tree",
+                        %err,
+                        tx_hash=%tx.tx_hash(),
+                        sender=%tx.signer(),
+                        "Error when executing prewarm transaction",
+                    );
                     return
                 }
             };
@@ -2782,18 +2780,25 @@ where
                 return
             }
 
-            let Some(state_root_sender) = state_root_sender else {
-                return
-            };
+            let Some(state_root_sender) = state_root_sender else { return };
 
-            let mut targets = MultiProofTargets::default();
-            for (addr, account) in state {
-                // if account was not touched, do not fetch for it
-                if !account.is_touched() {
+            let mut targets =
+                MultiProofTargets::with_capacity_and_hasher(res.state.len(), Default::default());
+            let mut storage_targets = 0;
+            for (addr, account) in res.state {
+                // if the account was not touched, or if the account was selfdestructed, do not
+                // fetch proofs for it
+                //
+                // Since selfdestruct can only happen in the same transaction, we can skip
+                // prefetching proofs for selfdestructed accounts
+                //
+                // See: https://eips.ethereum.org/EIPS/eip-6780
+                if !account.is_touched() || account.is_selfdestructed() {
                     continue
                 }
 
-                let mut storage_set = B256Set::default();
+                let mut storage_set =
+                    B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
                 for (key, slot) in account.storage {
                     // do nothing if unchanged
                     if !slot.is_changed() {
@@ -2803,10 +2808,10 @@ where
                     storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
                 }
 
+                storage_targets += storage_set.len();
                 targets.insert(keccak256(addr), storage_set);
             }
 
-            let storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>();
             debug!(
                 target: "engine::tree",
                 tx_hash = ?tx.tx_hash(),
@@ -2843,11 +2848,20 @@ where
         // If the error was due to an invalid payload, the payload is added to the
         // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
         // returned.
-        warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number(), %validation_err, "Invalid block error on new payload");
+        warn!(
+            target: "engine::tree",
+            invalid_hash=%block.hash(),
+            invalid_number=block.number(),
+            %validation_err,
+            "Invalid block error on new payload",
+        );
         let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
 
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
+        self.emit_event(EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(
+            Box::new(block),
+        )));
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
@@ -2876,7 +2890,7 @@ where
                     block = ?sealed_block.num_hash(),
                     ?task_state_root,
                     task_elapsed = ?time_from_last_update,
-                    "Task state root finished"
+                    "State root task finished"
                 );
 
                 if task_state_root != sealed_block.header().state_root() ||
@@ -2898,11 +2912,16 @@ where
                         compare_trie_updates(
                             in_memory_trie_cursor,
                             task_trie_updates.clone(),
-                            regular_updates,
+                            regular_updates.clone(),
                         )
                         .map_err(ProviderError::from)?;
+                        if task_state_root != sealed_block.header().state_root() {
+                            return Ok((regular_root, regular_updates, time_from_last_update));
+                        }
                     } else {
-                        debug!(target: "engine::tree", "Regular state root does not match block state root");
+                        debug!(target: "engine::tree",
+                            "Regular state root does not match block state root"
+                        );
                     }
                 }
 
@@ -3196,12 +3215,13 @@ mod tests {
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{
-        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+        CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1,
+        ExecutionPayloadV3,
     };
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-    use reth_engine_primitives::{ExecutionData, ForkchoiceStatus};
+    use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -3337,7 +3357,11 @@ mod tests {
                 persistence_handle,
                 PersistenceState::default(),
                 payload_builder,
-                TreeConfig::default(),
+                // TODO: fix tests for state root task https://github.com/paradigmxyz/reth/issues/14376
+                // always assume enough parallelism for tests
+                TreeConfig::default()
+                    .with_legacy_state_root(true)
+                    .with_has_enough_parallelism(true),
                 EngineApiKind::Ethereum,
                 evm_config,
             );
@@ -3540,9 +3564,9 @@ mod tests {
             let event = self.from_tree_rx.recv().await.unwrap();
             match event {
                 EngineApiEvent::BeaconConsensus(
-                    BeaconConsensusEngineEvent::CanonicalBlockAdded(block, _),
+                    BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, _),
                 ) => {
-                    assert_eq!(block.hash(), expected_hash);
+                    assert_eq!(executed.recovered_block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }
@@ -3552,8 +3576,20 @@ mod tests {
             let event = self.from_tree_rx.recv().await.unwrap();
             match event {
                 EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
-                    block,
+                    executed,
                     _,
+                )) => {
+                    assert_eq!(executed.recovered_block.hash(), expected_hash);
+                }
+                _ => panic!("Unexpected event: {:#?}", event),
+            }
+        }
+
+        async fn check_invalid_block(&mut self, expected_hash: B256) {
+            let event = self.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(
+                    block,
                 )) => {
                     assert_eq!(block.hash(), expected_hash);
                 }
@@ -3774,11 +3810,11 @@ mod tests {
         let s = include_str!("../../test-data/holesky/2.rlp");
         let data = Bytes::from_str(s).unwrap();
         let block = Block::decode(&mut data.as_ref()).unwrap();
-        let sealed = block.seal_slow();
+        let sealed = block.seal_slow().try_recover().unwrap();
 
         let mut test_harness = TestHarness::new(HOLESKY.clone());
 
-        let outcome = test_harness.tree.insert_block_without_senders(sealed.clone()).unwrap();
+        let outcome = test_harness.tree.insert_block(sealed.clone()).unwrap();
         assert_eq!(
             outcome,
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
@@ -4772,6 +4808,9 @@ mod tests {
                 chain_a[..chain_a.len() - invalid_index - 1].iter().cloned(),
             )
             .await;
+        for block in &chain_a[chain_a.len() - invalid_index - 1..] {
+            test_harness.check_invalid_block(block.hash()).await;
+        }
 
         // send FCU to make the tip of chain A, expect invalid
         let chain_a_tip_hash = chain_a.last().unwrap().hash();

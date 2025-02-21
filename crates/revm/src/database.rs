@@ -1,14 +1,10 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 use reth_storage_api::{AccountReader, BlockHashReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use revm::{
-    db::DatabaseRef,
-    primitives::{AccountInfo, Bytecode},
-    Database,
-};
+use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///
@@ -27,7 +23,7 @@ pub trait EvmStateProvider: Send + Sync {
     fn bytecode_by_hash(
         &self,
         code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives::Bytecode>>;
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>>;
 
     /// Get storage of the given account.
     fn storage(
@@ -50,7 +46,7 @@ impl<T: StateProvider> EvmStateProvider for T {
     fn bytecode_by_hash(
         &self,
         code_hash: &B256,
-    ) -> ProviderResult<Option<reth_primitives::Bytecode>> {
+    ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         <T as StateProvider>::bytecode_by_hash(self, code_hash)
     }
 

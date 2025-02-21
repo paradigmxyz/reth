@@ -295,7 +295,7 @@ impl<B: Block> RecoveredBlock<B> {
     #[inline]
     pub fn transactions_recovered(
         &self,
-    ) -> impl Iterator<Item = Recovered<&'_ <B::Body as BlockBody>::Transaction>> {
+    ) -> impl Iterator<Item = Recovered<&'_ <B::Body as BlockBody>::Transaction>> + '_ {
         self.transactions_with_sender().map(|(sender, tx)| Recovered::new_unchecked(tx, *sender))
     }
 
@@ -605,6 +605,10 @@ pub(super) mod serde_bincode_compat {
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
         }
     }
 }

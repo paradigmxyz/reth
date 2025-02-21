@@ -3,11 +3,13 @@
 
 #![allow(missing_docs)]
 
+use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
 use reth_engine_tree::tree::root::{StateRootConfig, StateRootTask};
-use reth_evm::system_calls::OnStateHook;
+use reth_evm::system_calls::{OnStateHook, StateChangeSource};
 use reth_primitives_traits::{Account as RethAccount, StorageEntry};
 use reth_provider::{
     providers::ConsistentDbView,
@@ -15,10 +17,8 @@ use reth_provider::{
     AccountReader, HashingWriter, ProviderFactory,
 };
 use reth_trie::TrieInput;
-use revm_primitives::{
-    Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
-    B256, KECCAK_EMPTY, U256,
-};
+use revm_primitives::{HashMap, U256};
+use revm_state::{Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 use std::{hint::black_box, sync::Arc};
 
 #[derive(Debug, Clone)]
@@ -225,8 +225,8 @@ fn bench_state_root(c: &mut Criterion) {
                             let mut hook = task.state_hook();
                             let handle = task.spawn();
 
-                            for update in state_updates {
-                                hook.on_state(&update)
+                            for (i, update) in state_updates.into_iter().enumerate() {
+                                hook.on_state(StateChangeSource::Transaction(i), &update)
                             }
                             drop(hook);
 

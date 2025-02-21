@@ -1,15 +1,12 @@
 //! [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) system call implementation.
 
-use core::fmt::Display;
-
+use crate::Evm;
 use alloc::string::ToString;
 use alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS;
-
-use crate::Evm;
 use alloy_primitives::B256;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use revm_primitives::ResultAndState;
+use revm::context_interface::result::ResultAndState;
 
 /// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
 /// chain specification, and EVM.
@@ -24,20 +21,18 @@ use revm_primitives::ResultAndState;
 ///
 /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
 #[inline]
-pub(crate) fn transact_blockhashes_contract_call(
+pub(crate) fn transact_blockhashes_contract_call<Halt>(
     chain_spec: impl EthereumHardforks,
-    block_timestamp: u64,
-    block_number: u64,
     parent_block_hash: B256,
-    evm: &mut impl Evm<Error: Display>,
-) -> Result<Option<ResultAndState>, BlockExecutionError> {
-    if !chain_spec.is_prague_active_at_timestamp(block_timestamp) {
+    evm: &mut impl Evm<HaltReason = Halt>,
+) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
+    if !chain_spec.is_prague_active_at_timestamp(evm.block().timestamp) {
         return Ok(None)
     }
 
     // if the block number is zero (genesis block) then no system transaction may occur as per
     // EIP-2935
-    if block_number == 0 {
+    if evm.block().number == 0 {
         return Ok(None)
     }
 
@@ -58,7 +53,7 @@ pub(crate) fn transact_blockhashes_contract_call(
     // There should be no state changes to these addresses anyways as a result of this system call,
     // so we can just remove them from the state returned.
     res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
-    res.state.remove(&evm.block().coinbase);
+    res.state.remove(&evm.block().beneficiary);
 
     Ok(Some(res))
 }
