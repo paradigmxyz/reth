@@ -57,7 +57,7 @@ thiserror.workspace = true
 derive_more.workspace = true
 schnellru.workspace = true
 rand.workspace = true
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 itertools.workspace = true
 
 [dev-dependencies]
