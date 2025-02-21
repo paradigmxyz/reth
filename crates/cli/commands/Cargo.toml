@@ -66,7 +66,7 @@ eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 serde.workspace = true
 serde_json.workspace = true
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 backon.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 
