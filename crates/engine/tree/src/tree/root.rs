@@ -1,6 +1,10 @@
 //! State root task related functionality.
 
-use alloy_primitives::map::HashSet;
+use alloy_primitives::{
+    keccak256,
+    map::{B256Map, HashSet},
+    B256,
+};
 use derive_more::derive::Deref;
 use itertools::Itertools;
 use metrics::Histogram;
@@ -30,7 +34,6 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
-use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
@@ -706,30 +709,46 @@ where
         // storage slots per account.
         let mut state_updates = Vec::new();
 
-        // Iterate over updated accounts in chunks
-        for accounts_chunk in
-            &hashed_state_update.accounts.into_iter().chunks(MULTIPROOF_ACCOUNTS_CHUNK_SIZE)
+        // Iterate over updated accounts with associated storages in chunks
+        let accounts_with_storages = hashed_state_update
+            .accounts
+            .into_iter()
+            .map(|(address, account)| {
+                (
+                    address,
+                    Some(account),
+                    hashed_state_update.storages.remove(&address).unwrap_or_default(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for accounts_chunk in &accounts_with_storages
+            .into_iter()
+            .chain(
+                hashed_state_update
+                    .storages
+                    .into_iter()
+                    .map(|(address, storage)| (address, None, storage)),
+            )
+            .map(|(address, account, storage)| (address, account, storage.storage))
+            .chunks(MULTIPROOF_ACCOUNTS_CHUNK_SIZE)
         {
             // Outer vector is a list of chunks. Inner vectors represent accounts with storage slots
             // that we need to fetch multiproofs for.
             //
             // We will have at least one chunk per account. If it has no storage slots, it will be
             // the only chunk.
-            let mut state_update_chunks: Vec<Vec<(B256, Option<Account>, HashedStorage)>> =
+            let mut state_update_chunks: Vec<Vec<(B256, Option<Option<Account>>, HashedStorage)>> =
                 vec![vec![]; 1];
 
-            for (address, account) in accounts_chunk {
-                let storages =
-                    hashed_state_update.storages.remove(&address).unwrap_or_default().storage;
-
+            for (address, account, storage) in accounts_chunk {
                 // Increase the length of the chunks vector if needed.
-                let chunks_num = storages.len().div_ceil(MULTIPROOF_STORAGES_CHUNK_SIZE);
+                let chunks_num = storage.len().div_ceil(MULTIPROOF_STORAGES_CHUNK_SIZE);
                 if state_update_chunks.len() < chunks_num {
                     state_update_chunks.resize(chunks_num, Vec::new());
                 }
 
                 // Iterate over updated storage slots in chunks
-                let storages = storages.into_iter().chunks(MULTIPROOF_STORAGES_CHUNK_SIZE);
+                let storages = storage.into_iter().chunks(MULTIPROOF_STORAGES_CHUNK_SIZE);
                 let mut storages_iter = storages.into_iter();
 
                 // Each account will have at least one chunk.
@@ -756,22 +775,18 @@ where
             // Transform chunks into separate lists of account updates and storage updates, and add
             // them to the list of state updates.
             for chunk in state_update_chunks {
-                let (accounts, storages) = chunk
+                let (accounts, storages): (Vec<_>, B256Map<_>) = chunk
                     .into_iter()
                     .map(|(address, account, storages)| ((address, account), (address, storages)))
                     .unzip();
-                state_updates.push(HashedPostState { accounts, storages });
+                state_updates.push(HashedPostState {
+                    accounts: accounts
+                        .into_iter()
+                        .filter_map(|(address, account)| account.map(|account| (address, account)))
+                        .collect(),
+                    storages,
+                });
             }
-        }
-
-        // If there are any accounts with storages that were not present in
-        // `hashed_state_update.accounts`, add them all as a single state update.
-        // TODO: chunk them as well
-        if !hashed_state_update.storages.is_empty() {
-            state_updates.push(HashedPostState {
-                accounts: Default::default(),
-                storages: hashed_state_update.storages,
-            });
         }
 
         // Spawn multiproofs for each of the chunked state updates.
