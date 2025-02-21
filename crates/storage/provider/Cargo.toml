@@ -46,7 +46,7 @@ revm-state = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 # tracing
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 
 # metrics
 reth-metrics.workspace = true
