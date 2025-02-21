@@ -21,11 +21,12 @@ reth-chain-state.workspace = true
 reth-trie.workspace = true
 reth-errors.workspace = true
 
-# alloy
+# ethereum
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-eips.workspace = true
+revm.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -49,4 +50,5 @@ std = [
     "serde/std",
     "thiserror/std",
     "alloy-eips/std",
+    "revm/std",
 ]

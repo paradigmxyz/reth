@@ -6,6 +6,7 @@ use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
 };
 use reth_chainspec::ChainSpec;
+use reth_consensus::ConsensusError;
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
@@ -16,6 +17,7 @@ use reth_node_api::{
     PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::{OpBlock, OpPrimitives, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
@@ -23,6 +25,7 @@ use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::SealedBlock;
 use reth_provider::StateProviderFactory;
 use reth_trie_common::KeyHasher;
+use revm::database::BundleState;
 use std::sync::Arc;
 
 /// The types used in the optimism beacon consensus engine.
@@ -113,6 +116,19 @@ where
         payload: ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
         Ok(self.inner.ensure_well_formed_payload(payload)?)
+    }
+
+    fn validate_block_post_execution_with_state_updates(
+        &self,
+        state_updates: &BundleState,
+        block: Self::Block,
+    ) -> Result<(), ConsensusError> {
+        let state = self.provider.latest().map_err(|err| {
+            ConsensusError::Other(format!("failed to verify block post-execution: {err}"))
+        })?;
+        isthmus::verify_withdrawals_storage_root(state_updates, state, block.header).map_err(
+            |err| ConsensusError::Other(format!("failed to verify block post-execution: {err}")),
+        )
     }
 }
 

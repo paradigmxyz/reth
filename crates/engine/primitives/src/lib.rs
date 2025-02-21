@@ -16,6 +16,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
+use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     validate_execution_requests, BuiltPayload, EngineApiMessageVersion,
     EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes,
@@ -23,6 +24,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::Block;
+use revm::database::BundleState;
 use serde::{de::DeserializeOwned, Serialize};
 
 mod error;
@@ -146,6 +148,20 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
         &self,
         payload: Self::ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
+
+    /// Verifies payload post-execution w.r.t. _hashed_ state.
+    ///
+    /// NOTE: This method operates on hashed state, hence it won't return a correct result if called
+    /// with execution outcome in pipeline sync's execution stage, since state hashing is its own
+    /// stages which hasn't run until after execution stage completes.
+    fn validate_block_post_execution_with_state_updates(
+        &self,
+        _state_updates: &BundleState,
+        _block: Self::Block,
+    ) -> Result<(), ConsensusError> {
+        // method not used by l1
+        Ok(())
+    }
 }
 
 /// Type that validates the payloads processed by the engine.
