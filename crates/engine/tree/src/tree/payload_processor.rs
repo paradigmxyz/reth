@@ -47,7 +47,7 @@ impl PayloadProcessor {
     ///  - externally cancelled (e.g. sequential block execution is complete)
     ///  - all transaction have been processed
     ///
-    /// ## State root task
+    /// ## Multi proof task
     ///
     /// Responsible for preparing sparse trie messages for the sparse trie task.
     /// A state update (e.g. tx output) is converted into a multiproof calculation that returns an
