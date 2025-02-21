@@ -44,7 +44,7 @@ metrics.workspace = true
 # misc
 aquamarine.workspace = true
 thiserror.workspace = true
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 rustc-hash.workspace = true
 schnellru.workspace = true
 serde = { workspace = true, features = ["derive", "rc"], optional = true }
