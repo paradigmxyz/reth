@@ -19,7 +19,7 @@ use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::{OpBlock, OpPrimitives};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::SealedBlock;
+use reth_primitives::{RecoveredBlock, SealedBlock};
 use std::sync::Arc;
 
 /// The types used in the optimism beacon consensus engine.
@@ -97,8 +97,9 @@ impl PayloadValidator for OpEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
-        Ok(self.inner.ensure_well_formed_payload(payload)?)
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 }
 
