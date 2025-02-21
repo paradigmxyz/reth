@@ -25,7 +25,7 @@ alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 
 # tracing
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 
 # misc
 derive_more.workspace = true
