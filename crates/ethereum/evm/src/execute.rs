@@ -7,6 +7,7 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip4895::Withdrawals, eip6110, eip7685::Requests};
+use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{Address, B256};
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_evm::{
@@ -16,7 +17,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvm, ConfigureEvmEnv, Database, Evm,
+    ConfigureEvm, Database, Evm,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{
@@ -76,7 +77,7 @@ where
         DB: Database,
     {
         let evm = self.evm_config.evm_for_block(db, block.header());
-        EthExecutionStrategy::new(evm, block.sealed_block(), &self.chain_spec, &self.evm_config)
+        EthExecutionStrategy::new(evm, block.sealed_block(), &self.chain_spec)
     }
 }
 
@@ -118,11 +119,9 @@ impl<'a> From<&'a SealedBlock> for EthBlockExecutionInput<'a> {
 
 /// Block execution strategy for Ethereum.
 #[derive(Debug)]
-pub struct EthExecutionStrategy<'a, Evm, EvmConfig> {
+pub struct EthExecutionStrategy<'a, Evm> {
     /// Reference to the [`ChainSpec`].
     chain_spec: &'a ChainSpec,
-    /// How to configure the EVM.
-    evm_config: EvmConfig,
 
     /// Input for block execution.
     input: EthBlockExecutionInput<'a>,
@@ -137,18 +136,16 @@ pub struct EthExecutionStrategy<'a, Evm, EvmConfig> {
     gas_used: u64,
 }
 
-impl<'a, Evm, EvmConfig> EthExecutionStrategy<'a, Evm, EvmConfig> {
+impl<'a, Evm> EthExecutionStrategy<'a, Evm> {
     /// Creates a new [`EthExecutionStrategy`]
     pub fn new(
         evm: Evm,
         input: impl Into<EthBlockExecutionInput<'a>>,
         chain_spec: &'a ChainSpec,
-        evm_config: EvmConfig,
     ) -> Self {
         Self {
             evm,
             chain_spec,
-            evm_config,
             input: input.into(),
             receipts: Vec::new(),
             gas_used: 0,
@@ -157,11 +154,10 @@ impl<'a, Evm, EvmConfig> EthExecutionStrategy<'a, Evm, EvmConfig> {
     }
 }
 
-impl<'db, DB, E, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<'_, E, EvmConfig>
+impl<'db, DB, E> BlockExecutionStrategy for EthExecutionStrategy<'_, E>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = EvmConfig::TxEnv>,
-    EvmConfig: ConfigureEvmEnv<Transaction = TransactionSigned>,
+    E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<TransactionSigned>>,
 {
     type Error = BlockExecutionError;
     type Primitives = EthPrimitives;
@@ -194,12 +190,11 @@ where
             .into())
         }
 
-        let tx_env = self.evm_config.tx_env(tx.clone());
         let hash = tx.hash();
 
         // Execute transaction.
         let result_and_state =
-            self.evm.transact(tx_env).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
+            self.evm.transact(&tx).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
         self.system_caller
             .on_state(StateChangeSource::Transaction(self.receipts.len()), &result_and_state.state);
         let ResultAndState { result, state } = result_and_state;
