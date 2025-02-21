@@ -438,7 +438,7 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
     // `L2ToL1MessagePasser.sol`
     if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) {
         if let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
-            if let Some(ref storage) = predeploy.storage {
+            if let Some(storage) = &predeploy.storage {
                 header.withdrawals_root =
                     Some(storage_root_unhashed(storage.iter().map(|(k, v)| (*k, (*v).into()))))
             }
