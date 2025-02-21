@@ -7,12 +7,12 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
+    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders,
     EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
     NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
     SharedTransactions, Transactions,
 };
-use reth_network_api::PeerRequest;
+use reth_network_api::{message::NetworkMessage, PeerRequest};
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_primitives::ReceiptWithBloom;
 use std::{
@@ -158,35 +158,28 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
 // === impl PeerResponseResult ===
 
 impl<N: NetworkPrimitives> PeerResponseResult<N> {
-    /// Converts this response into an [`EthMessage`]
-    pub fn try_into_message(self, id: u64) -> RequestResult<EthMessage<N>> {
+    /// Converts this response into a generic [`NetworkMessage`]
+    pub fn try_into_message<M: NetworkMessage<N>>(self, id: u64) -> RequestResult<M> {
         macro_rules! to_message {
-            ($response:ident, $item:ident, $request_id:ident) => {
+            ($response:ident, $wrapper:expr, $method:ident, $request_id:ident) => {
                 match $response {
                     Ok(res) => {
-                        let request = RequestPair { request_id: $request_id, message: $item(res) };
-                        Ok(EthMessage::$item(request))
+                        let wrapped = $wrapper(res);
+                        let request = RequestPair { request_id: $request_id, message: wrapped };
+                        Ok(M::$method(request))
                     }
                     Err(err) => Err(err),
                 }
             };
         }
         match self {
-            Self::BlockHeaders(resp) => {
-                to_message!(resp, BlockHeaders, id)
-            }
-            Self::BlockBodies(resp) => {
-                to_message!(resp, BlockBodies, id)
-            }
+            Self::BlockHeaders(resp) => to_message!(resp, BlockHeaders, block_headers, id),
+            Self::BlockBodies(resp) => to_message!(resp, BlockBodies, block_bodies, id),
             Self::PooledTransactions(resp) => {
-                to_message!(resp, PooledTransactions, id)
+                to_message!(resp, PooledTransactions, pooled_transactions, id)
             }
-            Self::NodeData(resp) => {
-                to_message!(resp, NodeData, id)
-            }
-            Self::Receipts(resp) => {
-                to_message!(resp, Receipts, id)
-            }
+            Self::NodeData(resp) => to_message!(resp, NodeData, node_data, id),
+            Self::Receipts(resp) => to_message!(resp, Receipts, receipts, id),
         }
     }
 

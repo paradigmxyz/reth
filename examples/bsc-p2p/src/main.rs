@@ -14,7 +14,9 @@
 
 use chainspec::{boot_nodes, bsc_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
-use reth_network::{NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager};
+use reth_network::{
+    EthNetworkProtocol, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
+};
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     PeersInfo,
@@ -55,6 +57,7 @@ async fn main() {
         .listener_addr(local_addr)
         // we need to explicitly set the network mode to PoW to allow block propagation, see docs
         .with_pow()
+        .eth_protocol(EthNetworkProtocol)
         .build_with_noop_provider(bsc_chain_spec())
         .set_discovery_v4(
             Discv4ConfigBuilder::default()

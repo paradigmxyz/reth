@@ -1,4 +1,5 @@
 use crate::{
+    eth_protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     listener::{ConnectionListener, ListenerEvent},
     message::PeerMessage,
     peers::InboundConnectionError,
@@ -48,22 +49,25 @@ use tracing::trace;
 /// `include_mmd!("docs/mermaid/swarm.mmd`")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
-pub(crate) struct Swarm<N: NetworkPrimitives = EthNetworkPrimitives> {
+pub(crate) struct Swarm<
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    P: NetworkProtocolHandler<N> = EthNetworkProtocol,
+> {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
-    sessions: SessionManager<N>,
+    sessions: SessionManager<N, P>,
     /// Tracks the entire state of the network and handles events received from the sessions.
     state: NetworkState<N>,
 }
 
 // === impl Swarm ===
 
-impl<N: NetworkPrimitives> Swarm<N> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> Swarm<N, P> {
     /// Configures a new swarm instance.
     pub(crate) const fn new(
         incoming: ConnectionListener,
-        sessions: SessionManager<N>,
+        sessions: SessionManager<N, P>,
         state: NetworkState<N>,
     ) -> Self {
         Self { incoming, sessions, state }
@@ -90,17 +94,17 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 
     /// Access to the [`SessionManager`].
-    pub(crate) const fn sessions(&self) -> &SessionManager<N> {
+    pub(crate) const fn sessions(&self) -> &SessionManager<N, P> {
         &self.sessions
     }
 
     /// Mutable access to the [`SessionManager`].
-    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<N> {
+    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<N, P> {
         &mut self.sessions
     }
 }
 
-impl<N: NetworkPrimitives> Swarm<N> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> Swarm<N, P> {
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -281,7 +285,7 @@ impl<N: NetworkPrimitives> Swarm<N> {
     }
 }
 
-impl<N: NetworkPrimitives> Stream for Swarm<N> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> Stream for Swarm<N, P> {
     type Item = SwarmEvent<N>;
 
     /// This advances all components.
