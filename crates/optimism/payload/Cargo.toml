@@ -49,6 +49,6 @@ alloy-consensus.workspace = true
 
 # misc
 derive_more.workspace = true
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
