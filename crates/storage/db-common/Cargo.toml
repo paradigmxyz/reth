@@ -37,7 +37,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 # tracing
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["mdbx"] }
