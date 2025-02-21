@@ -47,7 +47,7 @@ tokio = { workspace = true, features = ["sync"] }
 futures-util.workspace = true
 
 # observability
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 
 # misc
 thiserror.workspace = true
