@@ -44,7 +44,7 @@ metrics.workspace = true
 # misc
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
-tracing = { workspace = true, features = ["std"] }
+tracing.workspace = true
 tokio-util = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 alloy-provider = { workspace = true, features = ["ws", "ipc"] }
