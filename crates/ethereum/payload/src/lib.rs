@@ -190,7 +190,6 @@ where
             withdrawals: Some(&attributes.withdrawals),
         },
         &chain_spec,
-        &evm_config,
     );
 
     strategy.apply_pre_execution_changes().map_err(|err| {
