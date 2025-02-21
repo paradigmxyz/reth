@@ -17,16 +17,14 @@
 
 extern crate alloc;
 
+use alloc::borrow::Borrow;
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip2930::AccessList;
 pub use alloy_evm::evm::EvmFactory;
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
-use revm::{
-    context::TxEnv,
-    inspector::{Inspector, NoOpInspector},
-};
+use revm::{context::TxEnv, inspector::Inspector};
 
 pub mod batch;
 pub mod either;
@@ -75,11 +73,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv<Self::Spec>,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv<Self::Spec>) -> EvmFor<Self, DB> {
         self.evm_factory().create_evm(db, evm_env)
     }
 
@@ -90,11 +84,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_for_block<DB: Database>(
-        &self,
-        db: DB,
-        header: &Self::Header,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> EvmFor<Self, DB> {
         let evm_env = self.evm_env(header);
         self.evm_with_env(db, evm_env)
     }
@@ -110,7 +100,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, I>
+    ) -> EvmFor<Self, DB, I>
     where
         DB: Database,
         I: InspectorFor<DB, Self>,
@@ -130,19 +120,11 @@ where
         (*self).evm_factory()
     }
 
-    fn evm_for_block<DB: Database>(
-        &self,
-        db: DB,
-        header: &Self::Header,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> EvmFor<Self, DB> {
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv<Self::Spec>,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv<Self::Spec>) -> EvmFor<Self, DB> {
         (*self).evm_with_env(db, evm_env)
     }
 
@@ -151,7 +133,7 @@ where
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, I>
+    ) -> EvmFor<Self, DB, I>
     where
         DB: Database,
         I: InspectorFor<DB, Self>,
@@ -165,7 +147,7 @@ where
 ///
 /// Default trait method  implementation is done w.r.t. L1.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
+pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
@@ -176,19 +158,16 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     type TxEnv: TransactionEnv;
 
     /// The error type that is returned by [`Self::next_evm_env`].
-    type Error: core::error::Error + Send + Sync;
+    type Error: core::error::Error + Send + Sync + 'static;
 
     /// Identifier of the EVM specification.
     type Spec: Debug + Copy + Send + Sync + 'static;
 
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
-    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv;
-
-    /// Returns a [`TxEnv`] from a [`Recovered`] transaction.
-    fn tx_env_from_recovered(&self, tx: Recovered<&Self::Transaction>) -> Self::TxEnv {
-        let (tx, address) = tx.into_parts();
-        self.tx_env(tx, address)
-    }
+    fn tx_env<T: Borrow<Self::Transaction>>(
+        &self,
+        transaction: impl Borrow<Recovered<T>>,
+    ) -> Self::TxEnv;
 
     /// Creates a new [`EvmEnv`] for the given header.
     fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec>;

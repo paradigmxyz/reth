@@ -42,14 +42,21 @@ use tracing::{debug, error, trace, trace_span};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
-/// Determines the size of the thread pool to be used in [`StateRootTask`].
-/// It should be at least three, one for multiproof calculations  plus two to be
-/// used internally in [`StateRootTask`].
+/// Determines the size of the rayon thread pool to be used in [`StateRootTask`].
+///
+/// The value is determined as `max(NUM_THREADS - 2, 3)`:
+/// - It should leave at least 2 threads to the rest of the system to be used in:
+///     - Engine
+///     - State Root Task spawned in [`StateRootTask::spawn`]
+/// - It should heave at least 3 threads to be used in:
+///     - Sparse Trie spawned in [`run_sparse_trie`]
+///     - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+///     - Storage root computation spawned in [`ParallelProof::multiproof`]
 ///
 /// NOTE: this value can be greater than the available cores in the host, it
 /// represents the maximum number of threads that can be handled by the pool.
-pub(crate) fn thread_pool_size() -> usize {
-    std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
+pub(crate) fn rayon_thread_pool_size() -> usize {
+    std::thread::available_parallelism().map_or(3, |num| (num.get().saturating_sub(2).max(3)))
 }
 
 /// Determines if the host has enough parallelism to run the state root task.
@@ -535,7 +542,7 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             thread_pool: thread_pool.clone(),
-            multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
+            multiproof_manager: MultiproofManager::new(thread_pool, rayon_thread_pool_size()),
             metrics: StateRootTaskMetrics::default(),
         }
     }
@@ -1286,7 +1293,7 @@ mod tests {
             + Clone
             + 'static,
     {
-        let num_threads = thread_pool_size();
+        let num_threads = rayon_thread_pool_size();
 
         let thread_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
@@ -1361,7 +1368,7 @@ mod tests {
             prefix_sets: Arc::new(input.prefix_sets),
         };
 
-        let num_threads = thread_pool_size();
+        let num_threads = rayon_thread_pool_size();
 
         let state_root_task_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)

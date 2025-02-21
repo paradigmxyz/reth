@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-consensus.workspace = true
 reth-consensus-common.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
@@ -34,6 +33,7 @@ alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
 auto_impl.workspace = true
+derive_more.workspace = true
 futures-util.workspace = true
 metrics = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
@@ -47,7 +47,6 @@ metrics-util = { workspace = true, features = ["debugging"] }
 [features]
 default = ["std"]
 std = [
-    "reth-consensus/std",
     "reth-primitives/std",
     "reth-primitives-traits/std",
     "alloy-eips/std",
@@ -65,6 +64,7 @@ std = [
     "reth-execution-types/std",
     "reth-storage-errors/std",
     "futures-util/std",
+    "derive_more/std",
 ]
 metrics = [
     "std",
@@ -74,7 +74,6 @@ metrics = [
 test-utils = [
     "dep:parking_lot",
     "reth-chainspec/test-utils",
-    "reth-consensus/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",

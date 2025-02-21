@@ -1,10 +1,7 @@
 //! Helpers for testing.
 
 use crate::{
-    execute::{
-        BasicBlockExecutor, BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider,
-        Executor,
-    },
+    execute::{BasicBlockExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
     Database,
 };
@@ -125,23 +122,20 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
     }
 }
 
-impl<S> BasicBlockExecutor<S>
-where
-    S: BlockExecutionStrategy,
-{
+impl<Factory, DB> BasicBlockExecutor<Factory, DB> {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&State<S::DB>) -> R,
+        F: FnOnce(&State<DB>) -> R,
     {
-        f(self.strategy.state_ref())
+        f(&self.db)
     }
 
     /// Provides safe write access to the state
     pub fn with_state_mut<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&mut State<S::DB>) -> R,
+        F: FnOnce(&mut State<DB>) -> R,
     {
-        f(self.strategy.state_mut())
+        f(&mut self.db)
     }
 }

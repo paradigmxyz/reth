@@ -2,8 +2,8 @@
 
 use crate::OpEthApi;
 use alloy_consensus::{
-    constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, Eip658Value, Header,
-    Transaction as _, TxReceipt, EMPTY_OMMER_ROOT_HASH,
+    constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, transaction::Recovered,
+    Eip658Value, Header, Transaction as _, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE, BlockNumberOrTag};
 use alloy_primitives::{B256, U256};
@@ -100,7 +100,7 @@ where
         block_env: &BlockEnv,
         parent_hash: B256,
         state_root: B256,
-        transactions: Vec<ProviderTx<Self::Provider>>,
+        transactions: Vec<Recovered<ProviderTx<Self::Provider>>>,
         receipts: &[ProviderReceipt<Self::Provider>],
     ) -> reth_provider::ProviderBlock<Self::Provider> {
         let chain_spec = self.provider().chain_spec();
@@ -144,7 +144,11 @@ where
         // seal the block
         reth_primitives::Block {
             header,
-            body: BlockBody { transactions, ommers: vec![], withdrawals: None },
+            body: BlockBody {
+                transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
+                ommers: vec![],
+                withdrawals: None,
+            },
         }
     }
 

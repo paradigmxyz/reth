@@ -2,8 +2,10 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256,
 };
-use core::{marker::PhantomData, ops::RangeInclusive};
-use derive_more::Deref;
+use core::{
+    marker::PhantomData,
+    ops::{Deref, RangeInclusive},
+};
 use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},

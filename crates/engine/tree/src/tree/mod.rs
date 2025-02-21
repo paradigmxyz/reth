@@ -650,7 +650,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
-    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx> + 'static,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
@@ -673,7 +673,7 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        let num_threads = root::thread_pool_size();
+        let num_threads = root::rayon_thread_pool_size();
 
         let thread_pool = Arc::new(
             rayon::ThreadPoolBuilder::new()
@@ -2777,7 +2777,7 @@ where
             let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
             // create the tx env and reset nonce
-            let tx_env = evm_config.tx_env(&tx, tx.signer());
+            let tx_env = evm_config.tx_env(&tx);
 
             // exit early if execution is done
             if cancel_execution.is_cancelled() {

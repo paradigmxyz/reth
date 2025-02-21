@@ -11,10 +11,10 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::{transaction::Recovered, BlockHeader, Header};
 use alloy_op_evm::OpEvmFactory;
-use alloy_primitives::{Address, U256};
-use core::fmt::Debug;
+use alloy_primitives::U256;
+use core::{borrow::Borrow, fmt::Debug};
 use op_alloy_consensus::EIP1559ParamError;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
@@ -74,9 +74,14 @@ impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvmEnv for OpEvmC
     type TxEnv = OpTransaction<TxEnv>;
     type Spec = OpSpecId;
 
-    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
+    fn tx_env<T: Borrow<Self::Transaction>>(
+        &self,
+        transaction: impl Borrow<Recovered<T>>,
+    ) -> Self::TxEnv {
+        let transaction = transaction.borrow();
+
         let mut tx_env = Default::default();
-        transaction.fill_tx_env(&mut tx_env, signer);
+        transaction.tx().borrow().fill_tx_env(&mut tx_env, transaction.signer());
         tx_env
     }
 

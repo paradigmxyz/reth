@@ -1006,15 +1006,30 @@ where
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
+        let start = Instant::now();
+
         if versioned_hashes.len() > MAX_BLOB_LIMIT {
             return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into())
         }
 
-        Ok(self
+        let res = self
             .inner
             .tx_pool
             .get_blobs_for_versioned_hashes(&versioned_hashes)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))?)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)).into());
+
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.get_blobs_v1.record(elapsed);
+
+        if let Ok(blobs) = &res {
+            let blobs_found = blobs.iter().flatten().count();
+            let blobs_missed = versioned_hashes.len() - blobs_found;
+
+            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
+            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+        }
+
+        res
     }
 }
 
