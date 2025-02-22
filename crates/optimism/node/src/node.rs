@@ -728,13 +728,7 @@ pub fn get_all_op_bootnodes<Node>(ctx: &BuilderContext<Node>) -> Vec<Bootnode>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
 {
-    let network_name = ctx.config().chain.chain.clone().to_lowercase();
-
-    if network_name.contains("mainnet") {
-        params::V5OPBootnodes.to_vec()
-    } else {
-        params::V5OPTestnetBootnodes.to_vec()
-    }
+    ctx.config().chain.bootnodes().unwrap_or_default()
 }
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
