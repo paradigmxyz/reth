@@ -1,7 +1,8 @@
 //! clap [Args](clap::Args) for benchmark configuration
 
 use clap::Args;
-use std::path::PathBuf;
+use reth_cli_util::parse_socket_address;
+use std::{net::SocketAddr, path::PathBuf};
 
 /// Parameters for benchmark configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
@@ -14,6 +15,14 @@ pub struct BenchmarkArgs {
     /// Run the benchmark to a specific block.
     #[arg(long, verbatim_doc_comment)]
     pub to: Option<u64>,
+
+    /// fetch metrics from the specified metrics endpoint
+    /// value here is a socket address in order to mirror
+    /// the argumentd in node.rs but it seems that we only
+    /// care about the port number so maybe this value should
+    /// be a u16?
+    #[arg(long, value_name = "SOCKET", value_parser = parse_socket_address, help_heading = "Metrics")]
+    pub metrics: Option<SocketAddr>,
 
     /// Path to a JWT secret to use for the authenticated engine-API RPC server.
     ///
