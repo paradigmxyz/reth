@@ -3012,4 +3012,14 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn test_update_event_emission_on_bootnode() {
+        reth_tracing::init_test_tracing();
+
+        let (bootnode, mut service1) = create_discv4().await;
+        let (discv4_instance, mut service2) = create_discv4().await;
+
+
+    }
 }
