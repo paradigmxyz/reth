@@ -20,7 +20,7 @@ reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
 reth-fs-util.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
-reth-storage-api = { workspace = true, features = ["std"] }
+reth-storage-api = { workspace = true, features = ["std", "db-api"] }
 reth-network-p2p.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
