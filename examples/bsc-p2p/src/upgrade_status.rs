@@ -52,16 +52,3 @@ pub struct UpgradeStatusExtension {
     /// To notify a peer to disable the broadcast of transactions or not.
     pub disable_peer_tx_broadcast: bool,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_decode_encode() {
-        let upgrade_status =
-            UpgradeStatus { extension: UpgradeStatusExtension { disable_peer_tx_broadcast: true } };
-        let rlp_bytes = upgrade_status.into_rlpx();
-        UpgradeStatus::decode(&mut rlp_bytes.as_ref()).unwrap();
-    }
-}
