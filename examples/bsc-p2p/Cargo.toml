@@ -59,7 +59,6 @@ serde = [
     "bytes/serde",
     "rand/serde",
 ]
-
 arbitrary = [
     "dep:arbitrary",
     "alloy-primitives/arbitrary",
