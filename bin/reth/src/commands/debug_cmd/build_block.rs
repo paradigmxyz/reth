@@ -11,7 +11,7 @@ use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
@@ -201,8 +201,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             prev_randao: self.prev_randao,
             timestamp: self.timestamp,
             suggested_fee_recipient: self.suggested_fee_recipient,
-            // TODO: add support for withdrawals
-            withdrawals: None,
+            // Set empty withdrawals vector if Shanghai is active, None otherwise
+            withdrawals: provider_factory
+                .chain_spec()
+                .is_shanghai_active_at_timestamp(self.timestamp)
+                .then(Vec::new),
         };
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
