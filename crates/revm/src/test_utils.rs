@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
     keccak256,
-    map::{B256Map, HashMap},
+    map::HashMap,
     Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
 use reth_primitives_traits::{Account, Bytecode};
@@ -145,7 +145,7 @@ impl StateProofProvider for StateProviderTest {
         &self,
         _input: TrieInput,
         _target: HashedPostState,
-    ) -> ProviderResult<B256Map<Bytes>> {
+    ) -> ProviderResult<Vec<Bytes>> {
         unimplemented!("witness generation is not supported")
     }
 }
