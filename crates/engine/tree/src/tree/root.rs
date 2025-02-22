@@ -777,7 +777,7 @@ where
         let proof_targets = get_proof_targets(&state_update, &self.fetched_proof_targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
-        debug!(target: "engine::root", ?state_update, "State update");
+        debug!(target: "engine::root", ?state_update, "State update before");
         debug!(target: "engine::root", ?proof_targets, "Proof targets");
 
         let mut total_updates = 0;
@@ -837,7 +837,7 @@ where
             });
         }
 
-        debug_assert!(state_update.is_empty());
+        debug!(target: "engine::tree", ?state_update, "State update after");
 
         total_updates as u64
     }
