@@ -1201,10 +1201,10 @@ impl Iterator for ChunkedProofTargets {
 
         let mut chunks = vec![MultiProofTargets::default(); 1];
 
-        let accounts_chunk: MultiProofTargets =
-            self.proof_targets.drain().take(self.accounts_chunk_size).collect();
-
-        for (address, storage_slots) in accounts_chunk {
+        let keys: Vec<B256> =
+            self.proof_targets.keys().take(self.accounts_chunk_size).copied().collect();
+        for address in keys {
+            let storage_slots = self.proof_targets.remove(&address).unwrap();
             let storage_chunks = storage_slots.into_iter().chunks(self.storages_chunk_size);
 
             for (i, chunk) in storage_chunks.into_iter().enumerate() {
