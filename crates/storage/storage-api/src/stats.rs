@@ -1,8 +1,6 @@
-#[cfg(feature = "db-api")]
 use reth_db_api::table::Table;
 
 /// The trait for fetching provider statistics.
-#[cfg(feature = "db-api")]
 #[auto_impl::auto_impl(&, Arc)]
 pub trait StatsReader: Send + Sync {
     /// Fetch the number of entries in the corresponding [Table]. Depending on the provider, it may
