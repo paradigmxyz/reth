@@ -1,8 +1,7 @@
 //! Utilities for accessing Optimism predeploy state
 
 use alloy_primitives::{address, Address, B256};
-use reth_errors::ProviderResult;
-use reth_storage_api::StorageRootProvider;
+use reth_storage_api::{errors::ProviderResult, StorageRootProvider};
 use reth_trie_common::HashedStorage;
 use revm::database::BundleState;
 
