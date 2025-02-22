@@ -7434,6 +7434,7 @@ dependencies = [
  "itertools 0.14.0",
  "metrics",
  "mini-moka",
+ "pretty_assertions",
  "proptest",
  "rand 0.8.5",
  "rayon",

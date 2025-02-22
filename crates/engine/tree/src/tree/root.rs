@@ -1278,6 +1278,8 @@ impl Iterator for ChunkedProofTargets {
             let storage_slots = self.proof_targets.remove(&address).unwrap();
             let storage_chunks = storage_slots.into_iter().chunks(self.storages_chunk_size);
 
+            chunks[0].entry(address).or_default();
+
             for (i, chunk) in storage_chunks.into_iter().enumerate() {
                 if i >= chunks.len() {
                     chunks.push(B256Map::default());
@@ -1910,24 +1912,36 @@ mod tests {
     fn test_chunked_proof_targets() {
         let address1 = B256::from([1; 32]);
         let address2 = B256::from([2; 32]);
+        let address3 = B256::from([3; 32]);
 
         let slot1 = B256::from([1; 32]);
         let slot2 = B256::from([2; 32]);
         let slot3 = B256::from([3; 32]);
 
-        let targets = MultiProofTargets::from_iter([
+        let mut targets = MultiProofTargets::from_iter([
             (address1, vec![slot1, slot2, slot3].into_iter().collect::<B256Set>()),
             (address2, vec![slot2, slot3].into_iter().collect::<B256Set>()),
+            (address3, B256Set::default()),
         ]);
-        let chunks = ChunkedProofTargets::new(targets, 1, 2).flatten().collect::<Vec<_>>();
+        let chunks = ChunkedProofTargets::new(targets.clone(), 1, 2);
 
-        assert_eq!(
-            chunks,
-            vec![
-                MultiProofTargets::from_iter([(address1, B256Set::from_iter([slot1, slot2]))]),
-                MultiProofTargets::from_iter([(address1, B256Set::from_iter([slot3]))]),
-                MultiProofTargets::from_iter([(address2, B256Set::from_iter([slot2, slot3]))])
-            ]
-        );
+        for chunk in chunks.flatten() {
+            assert_eq!(chunk.len(), 1);
+            for (address, slots) in chunk {
+                assert!(slots.len() <= 2);
+
+                let Entry::Occupied(mut entry) = targets.entry(address) else {
+                    panic!("address not found");
+                };
+                let entry_mut = entry.get_mut();
+                for slot in slots {
+                    entry_mut.remove(&slot);
+                }
+                if entry_mut.is_empty() {
+                    entry.remove();
+                }
+            }
+        }
+        assert!(targets.is_empty());
     }
 }
