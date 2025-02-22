@@ -25,7 +25,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 
 use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
+use reth_evm::execute::{BlockExecutionStrategyFactory, BlockExecutorProvider};
 use reth_network::{NetworkHandle, NetworkPrimitives};
 use reth_network_api::FullNetwork;
 use reth_node_api::{
@@ -44,7 +44,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<T::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvmFor<<T::Types as NodeTypes>::Primitives>;
+    type Evm: BlockExecutionStrategyFactory<Primitives = <T::Types as NodeTypes>::Primitives>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider<Primitives = <T::Types as NodeTypes>::Primitives>;
@@ -127,7 +127,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>> + 'static,
+    EVM: BlockExecutionStrategyFactory<Primitives = PrimitivesTy<Node::Types>> + 'static,
     Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
     Cons:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
