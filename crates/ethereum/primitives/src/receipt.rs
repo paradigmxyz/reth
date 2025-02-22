@@ -195,14 +195,14 @@ impl reth_primitives_traits::Receipt for Receipt {}
 
 #[cfg(feature = "serde-bincode-compat")]
 impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for Receipt {
-    type BincodeRepr<'a> = Self;
+    type BincodeRepr<'a> = alloc::borrow::Cow<'a, Self>;
 
     fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        self.clone()
+        alloc::borrow::Cow::Borrowed(self)
     }
 
     fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        repr
+        repr.into_owned()
     }
 }
 
