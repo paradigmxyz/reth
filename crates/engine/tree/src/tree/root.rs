@@ -837,6 +837,8 @@ where
             });
         }
 
+        debug_assert!(state_update.is_empty());
+
         total_updates as u64
     }
 
