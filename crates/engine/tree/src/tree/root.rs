@@ -1270,14 +1270,18 @@ impl Iterator for ChunkedProofTargets {
             return None;
         }
 
+        // Every address will be added to at least first chunk
         let mut chunks = vec![MultiProofTargets::default(); 1];
 
         let keys: Vec<B256> =
             self.proof_targets.keys().take(self.accounts_chunk_size).copied().collect();
         for address in keys {
-            let storage_slots = self.proof_targets.remove(&address).unwrap();
+            let storage_slots = self.proof_targets.remove(&address).expect("address not found");
             let storage_chunks = storage_slots.into_iter().chunks(self.storages_chunk_size);
 
+            // Initialize the chunk with an address with no storage slots. We need to do this,
+            // because the account may have no storage slots in the targets, but we still need to
+            // add it to the chunk.
             chunks[0].entry(address).or_default();
 
             for (i, chunk) in storage_chunks.into_iter().enumerate() {
