@@ -248,6 +248,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             tx_gossip_disabled,
             transactions_manager_config: _,
             nat,
+            handshake,
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);
@@ -299,6 +300,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             hello_message,
             fork_filter,
             extra_protocols,
+            handshake,
         );
 
         let state = NetworkState::new(
