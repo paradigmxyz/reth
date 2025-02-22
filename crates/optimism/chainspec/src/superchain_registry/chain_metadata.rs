@@ -1,7 +1,7 @@
 use crate::alloc::string::String;
 use alloy_chains::NamedChain;
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{Address, ChainId, B256};
+use alloy_primitives::{Address, ChainId, B256, U256};
 use serde::{Deserialize, Serialize};
 
 /// The chain metadata stored in a superchain toml config file.
@@ -187,9 +187,30 @@ impl From<&OptimismConfig> for ChainConfigExtraFieldsOptimism {
 pub(crate) fn to_genesis_chain_config(chain_config: &ChainMetadata) -> ChainConfig {
     let mut res = ChainConfig {
         chain_id: chain_config.chain_id,
+        homestead_block: Some(0),
+        dao_fork_block: None,
+        dao_fork_support: false,
+        eip150_block: Some(0),
+        eip155_block: Some(0),
+        eip158_block: Some(0),
+        byzantium_block: Some(0),
+        constantinople_block: Some(0),
+        petersburg_block: Some(0),
+        istanbul_block: Some(0),
+        muir_glacier_block: Some(0),
+        berlin_block: Some(0),
+        london_block: Some(0),
+        arrow_glacier_block: Some(0),
+        gray_glacier_block: Some(0),
+        merge_netsplit_block: Some(0),
         shanghai_time: chain_config.hardforks.canyon_time, // Shanghai activates with Canyon
         cancun_time: chain_config.hardforks.ecotone_time,  // Cancun activates with Ecotone
         prague_time: chain_config.hardforks.isthmus_time,  // Prague activates with Isthmus
+        osaka_time: None,
+        terminal_total_difficulty: Some(U256::ZERO),
+        terminal_total_difficulty_passed: true,
+        ethash: None,
+        clique: None,
         ..Default::default()
     };
 
@@ -204,8 +225,11 @@ pub(crate) fn to_genesis_chain_config(chain_config: &ChainMetadata) -> ChainConf
 
     // Add extra fields for ChainConfig from Genesis
     let extra_fields = ChainConfigExtraFields {
-        bedrock_block: (chain_config.chain_id == NamedChain::Optimism as ChainId)
-            .then_some(105235063),
+        bedrock_block: if chain_config.chain_id == NamedChain::Optimism as ChainId {
+            Some(105235063)
+        } else {
+            Some(0)
+        },
         regolith_time: Some(0),
         canyon_time: chain_config.hardforks.canyon_time,
         delta_time: chain_config.hardforks.delta_time,
@@ -489,10 +513,31 @@ mod tests {
         let config: ChainMetadata = serde_json::from_str(BASE_CHAIN_METADATA).unwrap();
         let chain_config = to_genesis_chain_config(&config);
         assert_eq!(chain_config.chain_id, 8453);
+        assert_eq!(chain_config.homestead_block, Some(0));
+        assert_eq!(chain_config.dao_fork_block, None);
+        assert!(!chain_config.dao_fork_support);
+        assert_eq!(chain_config.eip150_block, Some(0));
+        assert_eq!(chain_config.eip155_block, Some(0));
+        assert_eq!(chain_config.eip158_block, Some(0));
+        assert_eq!(chain_config.byzantium_block, Some(0));
+        assert_eq!(chain_config.constantinople_block, Some(0));
+        assert_eq!(chain_config.petersburg_block, Some(0));
+        assert_eq!(chain_config.istanbul_block, Some(0));
+        assert_eq!(chain_config.muir_glacier_block, Some(0));
+        assert_eq!(chain_config.berlin_block, Some(0));
+        assert_eq!(chain_config.london_block, Some(0));
+        assert_eq!(chain_config.arrow_glacier_block, Some(0));
+        assert_eq!(chain_config.gray_glacier_block, Some(0));
+        assert_eq!(chain_config.merge_netsplit_block, Some(0));
         assert_eq!(chain_config.shanghai_time, Some(1704992401));
         assert_eq!(chain_config.cancun_time, Some(1710374401));
         assert_eq!(chain_config.prague_time, None);
-        assert_eq!(chain_config.extra_fields.get("bedrockBlock"), None);
+        assert_eq!(chain_config.osaka_time, None);
+        assert_eq!(chain_config.terminal_total_difficulty, Some(U256::ZERO));
+        assert!(chain_config.terminal_total_difficulty_passed);
+        assert_eq!(chain_config.ethash, None);
+        assert_eq!(chain_config.clique, None);
+        assert_eq!(chain_config.extra_fields.get("bedrockBlock").unwrap(), 0);
         assert_eq!(chain_config.extra_fields.get("regolithTime").unwrap(), 0);
         assert_eq!(chain_config.extra_fields.get("canyonTime").unwrap(), 1704992401);
         assert_eq!(chain_config.extra_fields.get("deltaTime").unwrap(), 1708560000);
