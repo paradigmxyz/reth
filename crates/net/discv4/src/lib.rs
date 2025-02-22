@@ -3017,9 +3017,23 @@ mod tests {
     async fn test_update_event_emission_on_bootnode() {
         reth_tracing::init_test_tracing();
 
-        let (_, bootnode_service) = create_discv4().await;
+        let (_, mut bootnode_service) = create_discv4().await;
         let (_discv4_instance, _discv4_service) = create_discv4_with_config(Discv4Config::builder().add_boot_node(bootnode_service.local_node_record).build()).await;
 
+        let mut updates = bootnode_service.update_stream();
 
+        let timeout_duration = tokio::time::Duration::from_secs(1);
+        let timeout = tokio::time::sleep(timeout_duration);
+        tokio::pin!(timeout);
+
+        while let Some(update) = tokio::select! {
+            Some(update) = updates.next() => Some(update),
+            _ = &mut timeout => None,
+        } {
+            match update {
+                DiscoveryUpdate::Added(_) => panic!("Bootnode should not emit DiscoveryUpdate::Added"),
+                _ => {}
+            }
+        }
     }
 }
