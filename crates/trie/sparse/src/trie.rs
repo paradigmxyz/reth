@@ -1046,7 +1046,6 @@ impl RevealedSparseTrie {
 }
 
 impl RevealedSparseTrie {
-
     /// Update the leaf node with provided value.
     pub fn update_leaf<P: BlindedProvider>(
         &mut self,
