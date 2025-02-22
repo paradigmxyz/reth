@@ -825,10 +825,12 @@ where
                 }
             }
 
+            let hashed_state_update = HashedPostState { accounts, storages };
+            debug!(target: "engine::tree", ?hashed_state_update, ?chunk, "Spawning multiproof");
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
                 config: self.config.clone(),
                 source: Some(source),
-                hashed_state_update: HashedPostState { accounts, storages },
+                hashed_state_update,
                 proof_targets: chunk,
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
