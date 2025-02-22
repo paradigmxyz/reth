@@ -120,13 +120,13 @@ where
         let Some(tip_block_number) =
             self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
         else {
-            return Ok(PruneProgress::Finished.into())
+            return Ok(PruneProgress::Finished.into());
         };
         if tip_block_number == 0 {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::Finished.into())
+            return Ok(PruneProgress::Finished.into());
         }
 
         self.event_sender.notify(PrunerEvent::Started { tip_block_number });
@@ -189,7 +189,7 @@ where
 
         for segment in &self.segments {
             if limiter.is_limit_reached() {
-                break
+                break;
             }
 
             if let Some((to_block, prune_mode)) = segment
@@ -264,12 +264,13 @@ where
     }
 
     /// Returns `true` if the pruning is needed at the provided tip block number.
-    /// This is determined by the check against minimum pruning interval and last pruned block number.
+    /// This is determined by the check against minimum pruning interval and last pruned block
+    /// number.
     pub fn is_pruning_needed(&self, tip_block_number: BlockNumber) -> bool {
         let Some(tip_block_number) =
             self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
         else {
-            return false
+            return false;
         };
 
         // Saturating subtraction is needed for the case when the chain was reverted, meaning
