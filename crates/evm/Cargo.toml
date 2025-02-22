@@ -18,7 +18,6 @@ reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 reth-primitives.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-errors.workspace = true
 
@@ -43,6 +42,7 @@ parking_lot.workspace = true
 reth-ethereum-forks.workspace = true
 alloy-consensus.workspace = true
 metrics-util = { workspace = true, features = ["debugging"] }
+reth-ethereum-primitives.workspace = true
 
 [features]
 default = ["std"]
