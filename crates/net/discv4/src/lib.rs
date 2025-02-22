@@ -3017,8 +3017,8 @@ mod tests {
     async fn test_update_event_emission_on_bootnode() {
         reth_tracing::init_test_tracing();
 
-        let (bootnode, mut service1) = create_discv4().await;
-        let (discv4_instance, mut service2) = create_discv4().await;
+        let (_, bootnode_service) = create_discv4().await;
+        let (_discv4_instance, _discv4_service) = create_discv4_with_config(Discv4Config::builder().add_boot_node(bootnode_service.local_node_record).build()).await;
 
 
     }
