@@ -1926,8 +1926,10 @@ mod tests {
         let chunks = ChunkedProofTargets::new(targets.clone(), 1, 2);
 
         for chunk in chunks.flatten() {
+            // Every chunk should have at most one address
             assert_eq!(chunk.len(), 1);
             for (address, slots) in chunk {
+                // Every chunk should have at most two slots per address
                 assert!(slots.len() <= 2);
 
                 let Entry::Occupied(mut entry) = targets.entry(address) else {
@@ -1942,6 +1944,7 @@ mod tests {
                 }
             }
         }
+        // Verify that chunked iterator had all targets from the original list
         assert!(targets.is_empty());
     }
 }
