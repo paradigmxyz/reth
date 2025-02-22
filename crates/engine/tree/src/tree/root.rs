@@ -1198,35 +1198,23 @@ impl Iterator for ChunkedProofTargets {
     type Item = Vec<MultiProofTargets>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut chunks = vec![MultiProofTargets::default(); 1];
-
-        let address_keys =
-            self.proof_targets.keys().take(self.accounts_chunk_size).copied().collect::<Vec<_>>();
-        if address_keys.is_empty() {
+        if self.proof_targets.is_empty() {
             return None;
         }
 
-        for address in address_keys {
-            let Entry::Occupied(mut storage) = self.proof_targets.entry(address) else {
-                unreachable!()
-            };
-            let storage_mut = storage.get_mut();
-            let storage_keys =
-                storage_mut.iter().take(self.storages_chunk_size).copied().collect::<Vec<_>>();
-            let storage_slots = storage_keys
-                .into_iter()
-                .map(|slot| storage_mut.remove(&slot).then_some(slot).unwrap());
+        let mut chunks = vec![MultiProofTargets::default(); 1];
 
+        let keys: Vec<B256> =
+            self.proof_targets.keys().take(self.accounts_chunk_size).copied().collect();
+        for address in keys {
+            let storage_slots = self.proof_targets.remove(&address).unwrap();
             let storage_chunks = storage_slots.into_iter().chunks(self.storages_chunk_size);
+
             for (i, chunk) in storage_chunks.into_iter().enumerate() {
                 if i >= chunks.len() {
                     chunks.push(B256Map::default());
                 }
                 chunks[i].entry(address).or_default().extend(chunk);
-            }
-
-            if storage_mut.is_empty() {
-                storage.remove();
             }
         }
 
