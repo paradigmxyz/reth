@@ -118,6 +118,7 @@ where
     ) -> EngineApiResult<Vec<ClientVersionV1>> {
         Ok(vec![self.inner.client.clone()])
     }
+
     /// Fetches the attributes for the payload with the given id.
     async fn get_payload_attributes(
         &self,
