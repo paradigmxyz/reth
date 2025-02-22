@@ -711,6 +711,9 @@ where
         let proof_targets = get_proof_targets(&state_update, &self.fetched_proof_targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
+        debug!(target: "engine::root", ?state_update, "State update");
+        debug!(target: "engine::root", ?proof_targets, "Proof targets");
+
         let mut total_updates = 0;
 
         for chunk in ChunkedProofTargets::new(
@@ -720,6 +723,8 @@ where
         )
         .flatten()
         {
+            debug!(target: "engine::root", ?chunk, "Chunk");
+
             total_updates += 1;
 
             let mut accounts = B256Map::with_capacity_and_hasher(chunk.len(), Default::default());
