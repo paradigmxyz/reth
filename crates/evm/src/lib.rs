@@ -24,6 +24,7 @@ use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{context::TxEnv, inspector::Inspector};
+use reth_ethereum_primitives as _;
 
 pub mod either;
 /// EVM environment configuration.
