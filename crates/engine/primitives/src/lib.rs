@@ -15,7 +15,8 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
-use core::fmt::{self, Debug};
+use core::fmt::Debug;
+use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     validate_execution_requests, BuiltPayload, EngineApiMessageVersion,
     EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes,
@@ -23,6 +24,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock};
 use reth_primitives_traits::Block;
+use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
 mod error;
@@ -127,7 +129,7 @@ pub trait EngineTypes:
 
 /// Type that validates an [`ExecutionPayload`].
 #[auto_impl::auto_impl(&, Arc)]
-pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
+pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
 
@@ -146,6 +148,16 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
         &self,
         payload: Self::ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
+
+    /// Verifies payload post-execution w.r.t. hashed state updates.
+    fn validate_block_post_execution_with_hashed_state(
+        &self,
+        _state_updates: &HashedPostState,
+        _block: &RecoveredBlock<Self::Block>,
+    ) -> Result<(), ConsensusError> {
+        // method not used by l1
+        Ok(())
+    }
 }
 
 /// Type that validates the payloads processed by the engine.

@@ -2524,6 +2524,15 @@ where
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
 
+        if let Err(err) = self
+            .payload_validator
+            .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
+        {
+            // call post-block hook
+            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            return Err(err.into())
+        }
+
         trace!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
         let root_time = Instant::now();
 
