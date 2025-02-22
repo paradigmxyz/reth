@@ -36,7 +36,7 @@ impl RawCapabilityMessage {
     ///
     /// See also  [`EthMessage`](crate::EthMessage)
     pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
-        Self::new(id as usize, payload)
+        Self::new(id.to_u8() as usize, payload)
     }
 }
 
