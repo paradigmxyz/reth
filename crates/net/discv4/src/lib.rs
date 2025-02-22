@@ -3030,10 +3030,7 @@ mod tests {
             Some(update) = updates.next() => Some(update),
             _ = &mut timeout => None,
         } {
-            match update {
-                DiscoveryUpdate::Added(_) => panic!("Bootnode should not emit DiscoveryUpdate::Added"),
-                _ => {}
-            }
+            if let DiscoveryUpdate::Added(_) = update { panic!("Bootnode should not emit DiscoveryUpdate::Added") }
         }
     }
 }
