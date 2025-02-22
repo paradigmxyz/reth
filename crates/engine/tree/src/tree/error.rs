@@ -73,11 +73,6 @@ impl<B: Block> InsertBlockError<B> {
         Self::new(block, InsertBlockErrorKind::Consensus(error))
     }
 
-    /// Create a new `InsertInvalidBlockError` from a consensus error
-    pub fn sender_recovery_error(block: SealedBlock<B>) -> Self {
-        Self::new(block, InsertBlockErrorKind::SenderRecovery)
-    }
-
     /// Consumes the error and returns the block that resulted in the error
     #[inline]
     pub fn into_block(self) -> SealedBlock<B> {
@@ -113,9 +108,6 @@ impl<B: Block> std::fmt::Debug for InsertBlockError<B> {
 /// All error variants possible when inserting a block
 #[derive(Debug, thiserror::Error)]
 pub enum InsertBlockErrorKind {
-    /// Failed to recover senders for the block
-    #[error("failed to recover senders for block")]
-    SenderRecovery,
     /// Block violated consensus rules.
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
@@ -142,7 +134,6 @@ impl InsertBlockErrorKind {
         self,
     ) -> Result<InsertBlockValidationError, InsertBlockFatalError> {
         match self {
-            Self::SenderRecovery => Ok(InsertBlockValidationError::SenderRecovery),
             Self::Consensus(err) => Ok(InsertBlockValidationError::Consensus(err)),
             // other execution errors that are considered internal errors
             Self::Execution(err) => {
@@ -176,9 +167,6 @@ pub enum InsertBlockFatalError {
 /// Error variants that are caused by invalid blocks
 #[derive(Debug, thiserror::Error)]
 pub enum InsertBlockValidationError {
-    /// Failed to recover senders for the block
-    #[error("failed to recover senders for block")]
-    SenderRecovery,
     /// Block violated consensus rules.
     #[error(transparent)]
     Consensus(#[from] ConsensusError),

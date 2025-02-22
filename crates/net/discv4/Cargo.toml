@@ -40,6 +40,7 @@ serde = { workspace = true, optional = true }
 itertools.workspace = true
 
 [dev-dependencies]
+secp256k1 = { workspace = true, features = ["rand"] }
 assert_matches.workspace = true
 rand.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

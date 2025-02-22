@@ -10,6 +10,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
+use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
@@ -19,7 +20,7 @@ use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
-    FillTxEnv, InMemorySize, SignedTransaction,
+    InMemorySize, SignedTransaction,
 };
 use revm_context::TxEnv;
 use serde::{Deserialize, Serialize};
@@ -750,10 +751,10 @@ impl reth_codecs::Compact for TransactionSigned {
     }
 }
 
-impl FillTxEnv<TxEnv> for TransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
-        *tx_env = match self.as_ref() {
-            Transaction::Legacy(tx) => TxEnv {
+impl FromRecoveredTx<TransactionSigned> for TxEnv {
+    fn from_recovered_tx(tx: &TransactionSigned, sender: Address) -> Self {
+        match tx.as_ref() {
+            Transaction::Legacy(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.gas_price,
                 gas_priority_fee: None,
@@ -769,7 +770,7 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 tx_type: 0,
                 caller: sender,
             },
-            Transaction::Eip2930(tx) => TxEnv {
+            Transaction::Eip2930(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.gas_price,
                 gas_priority_fee: None,
@@ -785,7 +786,7 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 tx_type: 1,
                 caller: sender,
             },
-            Transaction::Eip1559(tx) => TxEnv {
+            Transaction::Eip1559(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.max_fee_per_gas,
                 gas_priority_fee: Some(tx.max_priority_fee_per_gas),
@@ -801,7 +802,7 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 tx_type: 2,
                 caller: sender,
             },
-            Transaction::Eip4844(tx) => TxEnv {
+            Transaction::Eip4844(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.max_fee_per_gas,
                 gas_priority_fee: Some(tx.max_priority_fee_per_gas),
@@ -817,7 +818,7 @@ impl FillTxEnv<TxEnv> for TransactionSigned {
                 tx_type: 3,
                 caller: sender,
             },
-            Transaction::Eip7702(tx) => TxEnv {
+            Transaction::Eip7702(tx) => Self {
                 gas_limit: tx.gas_limit,
                 gas_price: tx.max_fee_per_gas,
                 gas_priority_fee: Some(tx.max_priority_fee_per_gas),

@@ -17,10 +17,9 @@
 
 extern crate alloc;
 
-use alloc::borrow::Borrow;
-use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip2930::AccessList;
 pub use alloy_evm::evm::EvmFactory;
+use alloy_evm::{FromRecoveredTx, IntoTxEnv};
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
@@ -155,7 +154,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     type Transaction: SignedTransaction;
 
     /// Transaction environment used by EVM.
-    type TxEnv: TransactionEnv;
+    type TxEnv: TransactionEnv + FromRecoveredTx<Self::Transaction> + IntoTxEnv<Self::TxEnv>;
 
     /// The error type that is returned by [`Self::next_evm_env`].
     type Error: core::error::Error + Send + Sync + 'static;
@@ -164,10 +163,9 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     type Spec: Debug + Copy + Send + Sync + 'static;
 
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
-    fn tx_env<T: Borrow<Self::Transaction>>(
-        &self,
-        transaction: impl Borrow<Recovered<T>>,
-    ) -> Self::TxEnv;
+    fn tx_env(&self, transaction: impl IntoTxEnv<Self::TxEnv>) -> Self::TxEnv {
+        transaction.into_tx_env()
+    }
 
     /// Creates a new [`EvmEnv`] for the given header.
     fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec>;

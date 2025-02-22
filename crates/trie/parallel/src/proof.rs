@@ -1,4 +1,7 @@
-use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
+use crate::{
+    metrics::ParallelTrieMetrics, root::ParallelStateRootError, stats::ParallelTrieTracker,
+    StorageRootTargets,
+};
 use alloy_primitives::{
     map::{B256Map, HashMap},
     B256,
@@ -48,11 +51,13 @@ pub struct ParallelProof<Factory> {
     collect_branch_node_masks: bool,
     /// Thread pool for local tasks
     thread_pool: Arc<rayon::ThreadPool>,
+    #[cfg(feature = "metrics")]
+    metrics: ParallelTrieMetrics,
 }
 
 impl<Factory> ParallelProof<Factory> {
     /// Create new state proof generator.
-    pub const fn new(
+    pub fn new(
         view: ConsistentDbView<Factory>,
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
@@ -66,6 +71,8 @@ impl<Factory> ParallelProof<Factory> {
             prefix_sets,
             collect_branch_node_masks: false,
             thread_pool,
+            #[cfg(feature = "metrics")]
+            metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
     }
 
@@ -291,6 +298,10 @@ where
         }
         let _ = hash_builder.root();
 
+        let stats = tracker.finish();
+        #[cfg(feature = "metrics")]
+        self.metrics.record(stats);
+
         let account_subtree = hash_builder.take_proof_nodes();
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
@@ -307,6 +318,17 @@ where
         } else {
             (HashMap::default(), HashMap::default())
         };
+
+        debug!(
+            target: "trie::parallel_proof",
+            total_targets = storage_root_targets_len,
+            duration = ?stats.duration(),
+            branches_added = stats.branches_added(),
+            leaves_added = stats.leaves_added(),
+            missed_leaves = stats.missed_leaves(),
+            precomputed_storage_roots = stats.precomputed_storage_roots(),
+            "Calculated proof"
+        );
 
         Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }

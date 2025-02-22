@@ -18,6 +18,7 @@ reth-primitives-traits.workspace = true
 reth-zstd-compressors = { workspace = true, optional = true }
 
 # ethereum
+alloy-evm.workspace = true
 alloy-eips = { workspace = true, features = ["k256"] }
 alloy-primitives.workspace = true
 alloy-network = { workspace = true, optional = true }
@@ -68,6 +69,7 @@ std = [
     "alloy-serde?/std",
     "alloy-rpc-types-eth?/std",
     "revm-context/std",
+    "alloy-evm/std",
 ]
 reth-codec = [
     "std",

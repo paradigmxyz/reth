@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-db-models.workspace = true
 reth-chainspec.workspace = true
 reth-db-api.workspace = true
 reth-execution-types.workspace = true

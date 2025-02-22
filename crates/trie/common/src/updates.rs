@@ -357,8 +357,7 @@ pub struct TrieUpdatesSorted {
     pub account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
     /// The set of removed state node keys.
     pub removed_nodes: HashSet<Nibbles>,
-    /// Storage tries storage stored by hashed address of the account
-    /// the trie belongs to.
+    /// Storage tries stored by hashed address of the account the trie belongs to.
     pub storage_tries: B256Map<StorageTrieUpdatesSorted>,
 }
 

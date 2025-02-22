@@ -369,7 +369,6 @@ impl<Txs> OpBuilder<'_, Txs> {
                 beneficiary: ctx.evm_env.block_env.beneficiary,
             },
             &ctx.chain_spec,
-            &ctx.evm_config,
             ctx.receipt_builder.as_ref(),
         );
 

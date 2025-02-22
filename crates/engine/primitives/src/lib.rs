@@ -21,7 +21,7 @@ use reth_payload_primitives::{
     EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes,
     PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives::{NodePrimitives, SealedBlock};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock};
 use reth_primitives_traits::Block;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -145,7 +145,7 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
     fn ensure_well_formed_payload(
         &self,
         payload: Self::ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
 }
 
 /// Type that validates the payloads processed by the engine.

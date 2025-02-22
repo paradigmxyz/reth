@@ -497,6 +497,25 @@ struct StateRootTaskMetrics {
     pub proofs_processed_histogram: Histogram,
     /// Histogram of state root update iterations.
     pub state_root_iterations_histogram: Histogram,
+
+    /// Histogram of the number of updated state nodes.
+    pub nodes_sorted_account_nodes_histogram: Histogram,
+    /// Histogram of the number of emoved state nodes.
+    pub nodes_sorted_removed_nodes_histogram: Histogram,
+    /// Histogram of the number of storage tries.
+    pub nodes_sorted_storage_tries_histogram: Histogram,
+
+    /// Histogram of the number of updated state of accounts.
+    pub state_sorted_accounts_histogram: Histogram,
+    /// Histogram of the number of hashed storages.
+    pub state_sorted_storages_histogram: Histogram,
+
+    /// Histogram of the number of account prefixes that have changed.
+    pub prefix_sets_accounts_histogram: Histogram,
+    /// Histogram of the number of storage prefixes that have changed.
+    pub prefix_sets_storages_histogram: Histogram,
+    /// Histogram of the number of destroyed accounts.
+    pub prefix_sets_destroyed_accounts_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -584,12 +603,59 @@ where
             .spawn(move || {
                 debug!(target: "engine::tree", "State root task starting");
 
+                self.observe_config();
+
                 let result = self.run(sparse_trie_tx);
                 let _ = tx.send(result);
             })
             .expect("failed to spawn state root thread");
 
         StateRootHandle::new(rx)
+    }
+
+    /// Logs and records in metrics the state root config parameters.
+    fn observe_config(&self) {
+        let nodes_sorted_account_nodes = self.config.nodes_sorted.account_nodes.len();
+        let nodes_sorted_removed_nodes = self.config.nodes_sorted.removed_nodes.len();
+        let nodes_sorted_storage_tries = self.config.nodes_sorted.storage_tries.len();
+        let state_sorted_accounts = self.config.state_sorted.accounts.accounts.len();
+        let state_sorted_destroyed_accounts =
+            self.config.state_sorted.accounts.destroyed_accounts.len();
+        let state_sorted_storages = self.config.state_sorted.storages.len();
+        let prefix_sets_accounts = self.config.prefix_sets.account_prefix_set.len();
+        let prefix_sets_storages = self
+            .config
+            .prefix_sets
+            .storage_prefix_sets
+            .values()
+            .map(|set| set.len())
+            .sum::<usize>();
+        let prefix_sets_destroyed_accounts = self.config.prefix_sets.destroyed_accounts.len();
+
+        debug!(
+            target: "engine::tree",
+            ?nodes_sorted_account_nodes,
+            ?nodes_sorted_removed_nodes,
+            ?nodes_sorted_storage_tries,
+            ?state_sorted_accounts,
+            ?state_sorted_destroyed_accounts,
+            ?state_sorted_storages,
+            ?prefix_sets_accounts,
+            ?prefix_sets_storages,
+            ?prefix_sets_destroyed_accounts,
+            "State root config"
+        );
+
+        self.metrics.nodes_sorted_account_nodes_histogram.record(nodes_sorted_account_nodes as f64);
+        self.metrics.nodes_sorted_removed_nodes_histogram.record(nodes_sorted_removed_nodes as f64);
+        self.metrics.nodes_sorted_storage_tries_histogram.record(nodes_sorted_storage_tries as f64);
+        self.metrics.state_sorted_accounts_histogram.record(state_sorted_accounts as f64);
+        self.metrics.state_sorted_storages_histogram.record(state_sorted_storages as f64);
+        self.metrics.prefix_sets_accounts_histogram.record(prefix_sets_accounts as f64);
+        self.metrics.prefix_sets_storages_histogram.record(prefix_sets_storages as f64);
+        self.metrics
+            .prefix_sets_destroyed_accounts_histogram
+            .record(prefix_sets_destroyed_accounts as f64);
     }
 
     /// Spawn long running sparse trie task that forwards the final result upon completion.

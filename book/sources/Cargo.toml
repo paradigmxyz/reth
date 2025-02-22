@@ -13,8 +13,8 @@ reth-tracing = { path = "../../crates/tracing" }
 reth-node-api = { path = "../../crates/node/api" }
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "3a57c0d" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "3a57c0d" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "beb6832" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "beb6832" }
 
 revm = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a8b9b1e" }

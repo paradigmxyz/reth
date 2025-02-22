@@ -17,8 +17,8 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Borrow, sync::Arc};
-use alloy_consensus::{transaction::Recovered, BlockHeader, Header};
+use alloc::sync::Arc;
+use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
 use alloy_evm::EthEvmFactory;
 use alloy_primitives::U256;
@@ -26,7 +26,6 @@ use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
-use reth_primitives_traits::transaction::execute::FillTxEnv;
 use reth_revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
@@ -76,17 +75,6 @@ impl ConfigureEvmEnv for EthEvmConfig {
     type Error = Infallible;
     type TxEnv = TxEnv;
     type Spec = SpecId;
-
-    fn tx_env<T: Borrow<Self::Transaction>>(
-        &self,
-        transaction: impl Borrow<Recovered<T>>,
-    ) -> Self::TxEnv {
-        let transaction = transaction.borrow();
-
-        let mut tx_env = TxEnv::default();
-        transaction.tx().borrow().fill_tx_env(&mut tx_env, transaction.signer());
-        tx_env
-    }
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         let spec = config::revm_spec(self.chain_spec(), header);

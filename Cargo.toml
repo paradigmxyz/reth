@@ -623,8 +623,8 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 crunchy = "=0.2.2"
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "3a57c0d" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "3a57c0d" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "beb6832" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "beb6832" }
 
 revm = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }

@@ -33,10 +33,10 @@ use reth_node_ethereum::{
     evm::EthEvm, node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig,
     EthExecutionStrategyFactory, EthereumNode,
 };
-use reth_primitives::{EthPrimitives, Recovered, TransactionSigned};
+use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
-use std::{borrow::Borrow, collections::HashMap, convert::Infallible, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
 type PrecompileLRUCache = LruMap<(SpecId, Bytes, u64), Result<InterpreterResult, PrecompileErrors>>;
@@ -185,13 +185,6 @@ impl ConfigureEvmEnv for MyEvmConfig {
     type Error = Infallible;
     type TxEnv = TxEnv;
     type Spec = SpecId;
-
-    fn tx_env<T: Borrow<Self::Transaction>>(
-        &self,
-        transaction: impl Borrow<Recovered<T>>,
-    ) -> Self::TxEnv {
-        self.inner.tx_env(transaction)
-    }
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         self.inner.evm_env(header)
