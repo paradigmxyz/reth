@@ -723,8 +723,7 @@ where
             total_updates += 1;
 
             let mut accounts = B256Map::with_capacity_and_hasher(chunk.len(), Default::default());
-            let mut storages =
-                B256Map::<HashedStorage>::with_capacity_and_hasher(chunk.len(), Default::default());
+            let mut storages = B256Map::with_capacity_and_hasher(chunk.len(), Default::default());
 
             for (&address, storage_slots) in &chunk {
                 if let Some(account) = state_update.accounts.remove(&address) {
@@ -733,7 +732,7 @@ where
 
                 if !storage_slots.is_empty() {
                     let state_storage = state_update.storages.entry(address);
-                    let mut hashed_storage = B256Map::default();
+                    let mut hashed_storage = HashedStorage::default();
                     match state_storage {
                         Entry::Occupied(mut entry) => {
                             for storage_slot in storage_slots {
@@ -742,7 +741,7 @@ where
                                     .storage
                                     .remove(storage_slot)
                                     .expect("storage slot should be present");
-                                hashed_storage.insert(*storage_slot, value);
+                                hashed_storage.storage.insert(*storage_slot, value);
                             }
 
                             if entry.get_mut().storage.is_empty() {
@@ -751,7 +750,7 @@ where
                         }
                         Entry::Vacant(_) => unreachable!(),
                     }
-                    storages.entry(address).or_default().storage.extend(hashed_storage);
+                    storages.insert(address, hashed_storage);
                 }
             }
 
