@@ -6,6 +6,10 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+pub mod predeploys;
+pub use predeploys::withdrawals_root;
 
 #[cfg(test)]
 mod tests {

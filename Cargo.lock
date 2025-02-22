@@ -261,8 +261,9 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=b77a39a#b77a39aa954a95b1c0385905b7d39c9d096b0a1b"
+source = "git+https://github.com/alloy-rs/evm?rev=beb6832#beb68324d7e05ae2eafad9f726a94cb0b63d15a5"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "revm",
  "revm-optimism",
@@ -368,7 +369,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=b77a39a#b77a39aa954a95b1c0385905b7d39c9d096b0a1b"
+source = "git+https://github.com/alloy-rs/evm?rev=beb6832#beb68324d7e05ae2eafad9f726a94cb0b63d15a5"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -5608,8 +5609,10 @@ checksum = "621e69964165285ce750bf7ba961707e26c31df9f0b25652d6219dcee1f7f5b5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-eth",
  "alloy-serde",
  "arbitrary",
  "derive_more 1.0.0",
@@ -6718,8 +6721,6 @@ dependencies = [
  "futures-core",
  "futures-util",
  "metrics",
- "reth-chainspec",
- "reth-evm",
  "reth-metrics",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
@@ -6729,7 +6730,6 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-tasks",
- "revm",
  "tokio",
  "tracing",
 ]
@@ -7704,6 +7704,7 @@ version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
@@ -7775,7 +7776,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-sol-types",
- "derive_more 2.0.1",
  "reth-chainspec",
  "reth-ethereum-forks",
  "reth-evm",
@@ -7793,6 +7793,7 @@ name = "reth-execution-errors"
 version = "1.2.0"
 dependencies = [
  "alloy-eips",
+ "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
  "nybbles",
@@ -8561,6 +8562,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-optimism-node",
  "reth-optimism-primitives",
+ "reth-optimism-storage",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
@@ -8695,16 +8697,17 @@ dependencies = [
  "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-optimism-primitives",
+ "reth-optimism-storage",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
  "reth-payload-util",
+ "reth-payload-validator",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-transaction-pool",
- "reth-trie",
  "revm",
  "sha2 0.10.8",
  "thiserror 2.0.11",
@@ -8717,6 +8720,7 @@ version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-evm",
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
@@ -8738,6 +8742,7 @@ dependencies = [
  "rstest",
  "secp256k1 0.30.0",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -8797,11 +8802,15 @@ dependencies = [
 name = "reth-optimism-storage"
 version = "1.2.0"
 dependencies = [
+ "alloy-primitives",
  "reth-codecs",
  "reth-db-api",
  "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",
+ "reth-storage-api",
+ "reth-trie-common",
+ "revm",
 ]
 
 [[package]]
@@ -9570,6 +9579,7 @@ dependencies = [
  "auto_impl",
  "reth-chainspec",
  "reth-db-api",
+ "reth-db-models",
  "reth-ethereum-primitives",
  "reth-execution-types",
  "reth-primitives-traits",

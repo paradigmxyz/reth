@@ -296,7 +296,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 unreachable!("Not emitted by network")
             }
             PeerMessage::Other(other) => {
-                debug!(target: "net::session", message_id=%other.id, "Ignoring unsupported message");
                 self.queued_outgoing.push_back(OutgoingMessage::Raw(other));
             }
         }
