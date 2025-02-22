@@ -45,7 +45,7 @@ async fn main() -> eyre::Result<()> {
     while let Some(update) = discv4_stream.next().await {
         tokio::spawn(async move {
             if let DiscoveryUpdate::Added(peer) = update {
-                // Boot nodes hard at work, lets not disturb them
+                // Boot nodes hard at work, let's not disturb them
                 if MAINNET_BOOT_NODES.contains(&peer) {
                     return
                 }
