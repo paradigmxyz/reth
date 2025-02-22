@@ -2,7 +2,7 @@
 
 use alloy_primitives::{
     keccak256,
-    map::{B256Map, B256Set, HashSet},
+    map::{B256Map, HashSet},
     B256,
 };
 use derive_more::derive::Deref;
@@ -629,7 +629,13 @@ where
         let proof_targets = self.get_prefetch_proof_targets(targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
-        for chunk in ChunkedProofTargets::new(proof_targets).flatten() {
+        for chunk in ChunkedProofTargets::new(
+            proof_targets,
+            MULTIPROOF_ACCOUNTS_CHUNK_SIZE,
+            MULTIPROOF_STORAGES_CHUNK_SIZE,
+        )
+        .flatten()
+        {
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
                 config: self.config.clone(),
                 source: None,
@@ -707,7 +713,13 @@ where
 
         let mut total_updates = 0;
 
-        for chunk in ChunkedProofTargets::new(proof_targets).flatten() {
+        for chunk in ChunkedProofTargets::new(
+            proof_targets,
+            MULTIPROOF_ACCOUNTS_CHUNK_SIZE,
+            MULTIPROOF_STORAGES_CHUNK_SIZE,
+        )
+        .flatten()
+        {
             total_updates += 1;
 
             let mut accounts = B256Map::with_capacity_and_hasher(chunk.len(), Default::default());
@@ -1165,29 +1177,35 @@ fn get_proof_targets(
 /// length of [`MULTIPROOF_STORAGES_CHUNK_SIZE`].
 struct ChunkedProofTargets {
     proof_targets: MultiProofTargets,
+    accounts_chunk_size: usize,
+    storages_chunk_size: usize,
 }
 
 impl ChunkedProofTargets {
-    fn new(proof_targets: MultiProofTargets) -> Self {
-        Self { proof_targets }
+    fn new(
+        proof_targets: MultiProofTargets,
+        accounts_chunk_size: usize,
+        storages_chunk_size: usize,
+    ) -> Self {
+        Self { proof_targets, accounts_chunk_size, storages_chunk_size }
     }
 }
 
 impl Iterator for ChunkedProofTargets {
-    type Item = Vec<B256Map<B256Set>>;
+    type Item = Vec<MultiProofTargets>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.proof_targets.is_empty() {
             return None;
         }
 
-        let mut chunks = vec![B256Map::<B256Set>::default(); 1];
+        let mut chunks = vec![MultiProofTargets::default(); 1];
 
-        let accounts_chunk: B256Map<B256Set> =
-            self.proof_targets.drain().take(MULTIPROOF_ACCOUNTS_CHUNK_SIZE).collect();
+        let accounts_chunk: MultiProofTargets =
+            self.proof_targets.drain().take(self.accounts_chunk_size).collect();
 
         for (address, storage_slots) in accounts_chunk {
-            let storage_chunks = storage_slots.into_iter().chunks(MULTIPROOF_STORAGES_CHUNK_SIZE);
+            let storage_chunks = storage_slots.into_iter().chunks(self.storages_chunk_size);
 
             for (i, chunk) in storage_chunks.into_iter().enumerate() {
                 if i >= chunks.len() {
@@ -1814,6 +1832,31 @@ mod tests {
         assert_eq!(
             *prefetch_proof_targets.get(&addr2).unwrap(),
             vec![slot2].into_iter().collect::<B256Set>()
+        );
+    }
+
+    #[test]
+    fn test_chunked_proof_targets() {
+        let address1 = B256::from([1; 32]);
+        let address2 = B256::from([2; 32]);
+
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+        let slot3 = B256::from([3; 32]);
+
+        let targets = MultiProofTargets::from_iter([
+            (address1, vec![slot1, slot2, slot3].into_iter().collect::<B256Set>()),
+            (address2, vec![slot2, slot3].into_iter().collect::<B256Set>()),
+        ]);
+        let chunks = ChunkedProofTargets::new(targets, 1, 2).flatten().collect::<Vec<_>>();
+
+        assert_eq!(
+            chunks,
+            vec![
+                MultiProofTargets::from_iter([(address1, B256Set::from_iter([slot1, slot2]))]),
+                MultiProofTargets::from_iter([(address1, B256Set::from_iter([slot3]))]),
+                MultiProofTargets::from_iter([(address2, B256Set::from_iter([slot2, slot3]))])
+            ]
         );
     }
 }
