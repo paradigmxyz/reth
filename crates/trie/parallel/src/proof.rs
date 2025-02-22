@@ -51,6 +51,7 @@ pub struct ParallelProof<Factory> {
     collect_branch_node_masks: bool,
     /// Thread pool for local tasks
     thread_pool: Arc<rayon::ThreadPool>,
+    #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
 
@@ -70,6 +71,7 @@ impl<Factory> ParallelProof<Factory> {
             prefix_sets,
             collect_branch_node_masks: false,
             thread_pool,
+            #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
     }
