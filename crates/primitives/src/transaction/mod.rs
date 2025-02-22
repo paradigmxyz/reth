@@ -11,7 +11,7 @@ pub use reth_primitives_traits::{
         error::{
             InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
         },
-        signed::SignedTransactionIntoRecoveredExt,
+        signed::SignedTransaction,
     },
     FillTxEnv, WithEncoded,
 };

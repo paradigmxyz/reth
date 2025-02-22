@@ -4,9 +4,7 @@ use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2718::Encodable2718, eip2930
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use rand::Rng;
 use reth_chainspec::MAINNET;
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, Transaction, TransactionSigned,
-};
+use reth_primitives::{transaction::SignedTransaction, Transaction, TransactionSigned};
 use reth_primitives_traits::crypto::secp256k1::sign_message;
 
 /// A generator for transactions for testing purposes.

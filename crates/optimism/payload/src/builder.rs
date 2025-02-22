@@ -31,9 +31,7 @@ use reth_optimism_storage::predeploys;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, BlockBody, NodePrimitives, SealedHeader,
-};
+use reth_primitives::{transaction::SignedTransaction, BlockBody, NodePrimitives, SealedHeader};
 use reth_primitives_traits::{block::Block as _, proofs, RecoveredBlock};
 use reth_provider::{
     BlockExecutionResult, HashedPostStateProvider, ProviderError, StateProofProvider,
