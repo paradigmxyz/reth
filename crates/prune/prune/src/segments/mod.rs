@@ -122,7 +122,7 @@ impl PruneInput {
         let from_block = self.get_start_next_block_range();
         let range = from_block..=self.to_block;
         if range.is_empty() {
-            return None;
+            return None
         }
 
         Some(range)
