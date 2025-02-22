@@ -102,7 +102,7 @@ impl BscHardfork {
     }
 }
 
-pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
+pub fn bsc_chain_spec() -> Arc<ChainSpec> {
     let genesis = serde_json::from_str(include_str!("genesis.json"))
         .expect("Can't deserialize BSC Mainnet genesis json");
     let hardforks = BscHardfork::bsc_mainnet();
@@ -138,17 +138,16 @@ static BOOTNODES : [&str; 6] = [
 
 ];
 
-pub(crate) fn boot_nodes() -> Vec<NodeRecord> {
+pub fn boot_nodes() -> Vec<NodeRecord> {
     BOOTNODES[..].iter().map(|s| s.parse().unwrap()).collect()
 }
 
-pub(crate) fn head() -> Head {
+pub fn head() -> Head {
     Head { number: 40_000_000, timestamp: 1727317200, ..Default::default() }
 }
 #[cfg(test)]
 mod tests {
-
-    use crate::{bsc_chain_spec, chainspec::head};
+    use crate::chainspec::{bsc_chain_spec, head};
     use alloy_primitives::hex;
     use reth_chainspec::{ForkHash, ForkId};
 

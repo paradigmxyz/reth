@@ -1,7 +1,7 @@
 //! Implement BSC upgrade message which is required during handshake with other BSC clients, e.g.,
 //! geth.
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// The message id for the upgrade status message, used in the BSC handshake.
@@ -31,6 +31,7 @@ impl Decodable for UpgradeStatus {
         if message_id != UPGRADE_STATUS_MESSAGE_ID {
             return Err(alloy_rlp::Error::Custom("Invalid message ID"));
         }
+        buf.advance(1);
         let extension = UpgradeStatusExtension::decode(buf)?;
         Ok(Self { extension })
     }
