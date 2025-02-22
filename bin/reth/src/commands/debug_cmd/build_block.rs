@@ -6,8 +6,10 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
-use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
-use alloy_rpc_types::Withdrawal;
+use alloy_rpc_types::{
+    engine::{BlobsBundleV1, PayloadAttributes},
+    Withdrawal,
+};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
@@ -205,7 +207,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             timestamp: self.timestamp,
             suggested_fee_recipient: self.suggested_fee_recipient,
             // Set empty withdrawals vector if Shanghai is active, None otherwise
-            withdrawals: provider_factory.chain_spec().is_shanghai_active_at_timestamp(self.timestamp)
+            withdrawals: provider_factory
+                .chain_spec()
+                .is_shanghai_active_at_timestamp(self.timestamp)
                 .then(Vec::new),
         };
         let payload_config = PayloadConfig::new(
