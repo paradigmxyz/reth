@@ -17,9 +17,7 @@ use revm as _;
 pub use reth_ethereum_engine_primitives::EthEngineTypes;
 
 pub mod evm;
-pub use evm::{
-    BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory, EthExecutorProvider,
-};
+pub use evm::{BasicBlockExecutorProvider, EthEvmConfig, EthExecutorProvider};
 
 pub use reth_ethereum_consensus as consensus;
 pub mod node;

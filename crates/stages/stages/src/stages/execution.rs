@@ -680,7 +680,7 @@ mod tests {
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_evm::execute::BasicBlockExecutorProvider;
-    use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
@@ -691,10 +691,9 @@ mod tests {
     use reth_stages_api::StageUnitCheckpoint;
     use std::collections::BTreeMap;
 
-    fn stage() -> ExecutionStage<BasicBlockExecutorProvider<EthExecutionStrategyFactory>> {
-        let strategy_factory = EthExecutionStrategyFactory::ethereum(Arc::new(
-            ChainSpecBuilder::mainnet().berlin_activated().build(),
-        ));
+    fn stage() -> ExecutionStage<BasicBlockExecutorProvider<EthEvmConfig>> {
+        let strategy_factory =
+            EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
         let executor_provider = BasicBlockExecutorProvider::new(strategy_factory);
         let consensus = Arc::new(EthBeaconConsensus::new(Arc::new(
             ChainSpecBuilder::mainnet().berlin_activated().build(),

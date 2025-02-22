@@ -19,7 +19,6 @@ reth-evm.workspace = true
 alloy-evm.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
 
 eyre.workspace = true
 tokio.workspace = true

@@ -9,7 +9,7 @@ use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip4895::Withdrawals, eip6110, eip7685::Requests};
 use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{Address, B256};
-use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
+use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_evm::{
     execute::{
         balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
@@ -17,54 +17,25 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvm, Database, Evm,
+    ConfigureEvm, Database, Evm, EvmEnv, EvmFactory, TransactionEnv,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{
     EthPrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, TransactionSigned,
 };
 use reth_primitives_traits::NodePrimitives;
-use reth_revm::{context_interface::result::ResultAndState, db::State, DatabaseCommit};
+use reth_revm::{
+    context_interface::result::ResultAndState, db::State, specification::hardfork::SpecId,
+    DatabaseCommit,
+};
 
-/// Factory for [`EthExecutionStrategy`].
-#[derive(Debug, Clone)]
-pub struct EthExecutionStrategyFactory<EvmConfig = EthEvmConfig> {
-    /// The chainspec
-    chain_spec: Arc<ChainSpec>,
-    /// How to create an EVM.
-    evm_config: EvmConfig,
-}
-
-impl EthExecutionStrategyFactory {
-    /// Creates a new default ethereum executor strategy factory.
-    pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(chain_spec.clone(), EthEvmConfig::new(chain_spec))
-    }
-
-    /// Returns a new factory for the mainnet.
-    pub fn mainnet() -> Self {
-        Self::ethereum(MAINNET.clone())
-    }
-}
-
-impl<EvmConfig> EthExecutionStrategyFactory<EvmConfig> {
-    /// Creates a new executor strategy factory.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        Self { chain_spec, evm_config }
-    }
-}
-
-impl<EvmConfig> BlockExecutionStrategyFactory for EthExecutionStrategyFactory<EvmConfig>
+impl<EvmF> BlockExecutionStrategyFactory for EthEvmConfig<EvmF>
 where
-    EvmConfig: Clone
-        + Unpin
-        + Sync
+    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
         + Send
-        + 'static
-        + ConfigureEvm<
-            Header = alloy_consensus::Header,
-            Transaction = reth_primitives::TransactionSigned,
-        >,
+        + Sync
+        + Unpin
+        + Clone,
 {
     type Primitives = EthPrimitives;
 
@@ -76,7 +47,7 @@ where
     where
         DB: Database,
     {
-        let evm = self.evm_config.evm_for_block(db, block.header());
+        let evm = self.evm_for_block(db, block.header());
         EthExecutionStrategy::new(evm, block.sealed_block(), &self.chain_spec)
     }
 }
@@ -287,15 +258,13 @@ pub struct EthExecutorProvider;
 
 impl EthExecutorProvider {
     /// Creates a new default ethereum executor provider.
-    pub fn ethereum(
-        chain_spec: Arc<ChainSpec>,
-    ) -> BasicBlockExecutorProvider<EthExecutionStrategyFactory> {
-        BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::ethereum(chain_spec))
+    pub fn ethereum(chain_spec: Arc<ChainSpec>) -> BasicBlockExecutorProvider<EthEvmConfig> {
+        BasicBlockExecutorProvider::new(EthEvmConfig::new(chain_spec))
     }
 
     /// Returns a new provider for the mainnet.
-    pub fn mainnet() -> BasicBlockExecutorProvider<EthExecutionStrategyFactory> {
-        BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::mainnet())
+    pub fn mainnet() -> BasicBlockExecutorProvider<EthEvmConfig> {
+        BasicBlockExecutorProvider::new(EthEvmConfig::mainnet())
     }
 }
 
@@ -311,7 +280,7 @@ mod tests {
         eip7685::EMPTY_REQUESTS_HASH,
     };
     use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
-    use reth_chainspec::{ChainSpecBuilder, ForkCondition};
+    use reth_chainspec::{ChainSpecBuilder, ForkCondition, MAINNET};
     use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives::{Account, Block, BlockBody, Transaction};
@@ -366,13 +335,8 @@ mod tests {
         db
     }
 
-    fn executor_provider(
-        chain_spec: Arc<ChainSpec>,
-    ) -> BasicBlockExecutorProvider<EthExecutionStrategyFactory> {
-        let strategy_factory =
-            EthExecutionStrategyFactory::new(chain_spec.clone(), EthEvmConfig::new(chain_spec));
-
-        BasicBlockExecutorProvider::new(strategy_factory)
+    fn executor_provider(chain_spec: Arc<ChainSpec>) -> BasicBlockExecutorProvider<EthEvmConfig> {
+        BasicBlockExecutorProvider::new(EthEvmConfig::new(chain_spec))
     }
 
     #[test]

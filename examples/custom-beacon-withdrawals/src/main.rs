@@ -24,14 +24,14 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory,
         InternalBlockExecutionError,
     },
-    Database, Evm,
+    ConfigureEvmEnv, Database, Evm, EvmEnv, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
 use reth_primitives::{
     Block, EthPrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, TransactionSigned,
 };
-use std::{fmt::Display, sync::Arc};
+use std::fmt::Display;
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
 pub const WITHDRAWALS_ADDRESS: Address = address!("4200000000000000000000000000000000000000");
@@ -66,32 +66,54 @@ where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
-    type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<CustomExecutorStrategyFactory>;
+    type EVM = CustomEvmConfig;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let chain_spec = ctx.chain_spec();
-        let evm_config = EthEvmConfig::new(ctx.chain_spec());
-        let strategy_factory =
-            CustomExecutorStrategyFactory { chain_spec, evm_config: evm_config.clone() };
-        let executor = BasicBlockExecutorProvider::new(strategy_factory);
+        let evm_config = CustomEvmConfig { inner: EthEvmConfig::new(ctx.chain_spec()) };
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
     }
 }
 
-#[derive(Clone)]
-pub struct CustomExecutorStrategyFactory {
-    /// The chainspec
-    chain_spec: Arc<ChainSpec>,
-    /// How to create an EVM.
-    evm_config: EthEvmConfig,
+#[derive(Debug, Clone)]
+pub struct CustomEvmConfig {
+    inner: EthEvmConfig,
 }
 
-impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
+impl ConfigureEvmEnv for CustomEvmConfig {
+    type Error = <EthEvmConfig as ConfigureEvmEnv>::Error;
+    type Header = <EthEvmConfig as ConfigureEvmEnv>::Header;
+    type Spec = <EthEvmConfig as ConfigureEvmEnv>::Spec;
+    type Transaction = <EthEvmConfig as ConfigureEvmEnv>::Transaction;
+    type TxEnv = <EthEvmConfig as ConfigureEvmEnv>::TxEnv;
+
+    fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
+        self.inner.evm_env(header)
+    }
+
+    fn next_evm_env(
+        &self,
+        parent: &Self::Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> Result<EvmEnv<Self::Spec>, Self::Error> {
+        self.inner.next_evm_env(parent, attributes)
+    }
+}
+
+impl ConfigureEvm for CustomEvmConfig {
+    type EvmFactory = <EthEvmConfig as ConfigureEvm>::EvmFactory;
+
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        self.inner.evm_factory()
+    }
+}
+
+impl BlockExecutionStrategyFactory for CustomEvmConfig {
     type Primitives = EthPrimitives;
 
     fn create_strategy<'a, DB>(
@@ -102,14 +124,14 @@ impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
     where
         DB: Database,
     {
-        let evm = self.evm_config.evm_for_block(db, block.header());
-        CustomExecutorStrategy { evm, factory: self, block }
+        let evm = self.evm_for_block(db, block.header());
+        CustomExecutorStrategy { evm, chain_spec: self.inner.chain_spec(), block }
     }
 }
 
 pub struct CustomExecutorStrategy<'a, Evm> {
-    /// Reference to the parent factory.
-    factory: &'a CustomExecutorStrategyFactory,
+    /// Chainspec.
+    chain_spec: &'a ChainSpec,
     /// EVM used for execution.
     evm: Evm,
     /// Block being executed.
@@ -127,7 +149,7 @@ where
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            (*self.factory.chain_spec).is_spurious_dragon_active_at_block(self.block.number());
+            self.chain_spec.is_spurious_dragon_active_at_block(self.block.number());
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
 
         Ok(())
