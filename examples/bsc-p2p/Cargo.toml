@@ -32,12 +32,9 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # misc
-arbitrary = { workspace = true, optional = true }
 bytes.workspace = true
 derive_more.workspace = true
 futures.workspace = true
-proptest = { workspace = true, optional = true }
-proptest-arbitrary-interop = { workspace = true, optional = true }
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -58,13 +55,4 @@ serde = [
     "secp256k1/serde",
     "bytes/serde",
     "rand/serde",
-]
-arbitrary = [
-    "dep:arbitrary",
-    "alloy-primitives/arbitrary",
-    "reth-chainspec/arbitrary",
-    "reth-eth-wire/arbitrary",
-    "reth-eth-wire-types/arbitrary",
-    "reth-ethereum-forks/arbitrary",
-    "reth-primitives/arbitrary",
 ]

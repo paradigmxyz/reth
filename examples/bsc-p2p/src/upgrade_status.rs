@@ -2,7 +2,6 @@
 //! geth.
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use reth_codecs_derive::add_arbitrary_tests;
 
 /// The message id for the upgrade status message, used in the BSC handshake.
 const UPGRADE_STATUS_MESSAGE_ID: u8 = 0x0b;
@@ -11,8 +10,6 @@ const UPGRADE_STATUS_MESSAGE_ID: u8 = 0x0b;
 /// It is used during the p2p handshake.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
 pub struct UpgradeStatus {
     /// Extension for support customized features for BSC.
     pub extension: UpgradeStatusExtension,
@@ -50,8 +47,6 @@ impl UpgradeStatus {
 /// This flag currently is ignored, and will be supported later.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
 pub struct UpgradeStatusExtension {
     // TODO: support disable_peer_tx_broadcast flag
     /// To notify a peer to disable the broadcast of transactions or not.
