@@ -61,26 +61,7 @@ pub use withdrawals::*;
 mod ommers;
 pub use ommers::*;
 
-#[cfg(feature = "db-api")]
-mod database_provider;
-#[cfg(feature = "db-api")]
-pub use database_provider::*;
-
 pub mod noop;
-
-#[cfg(feature = "db-api")]
-mod history;
-#[cfg(feature = "db-api")]
-pub use history::*;
-
-#[cfg(feature = "db-api")]
-mod hashing;
-#[cfg(feature = "db-api")]
-pub use hashing::*;
-
-mod stats;
-#[cfg(feature = "db-api")]
-pub use stats::*;
 
 mod legacy;
 pub use legacy::*;
@@ -90,3 +71,20 @@ pub use primitives::*;
 
 mod block_indices;
 pub use block_indices::*;
+
+mod database_provider;
+mod history;
+mod hashing;
+mod stats;
+
+/// Group all `db-api` related modules into a single `db` module.
+#[cfg(feature = "db-api")]
+pub mod db {
+    pub use crate::database_provider::*;
+    pub use crate::history::*;
+    pub use crate::hashing::*;
+    pub use crate::stats::*;
+}
+
+#[cfg(feature = "db-api")]
+pub use db::*;
