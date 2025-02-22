@@ -6,14 +6,11 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
-use alloy_rpc_types::{
-    engine::{BlobsBundleV1, PayloadAttributes},
-    Withdrawal,
-};
+use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
