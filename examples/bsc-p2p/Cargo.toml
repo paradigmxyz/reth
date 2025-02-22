@@ -55,3 +55,13 @@ serde = [
     "bytes/serde",
     "rand/serde",
 ]
+
+arbitrary = [
+    "dep:arbitrary",
+    "alloy-primitives/arbitrary",
+    "reth-chainspec/arbitrary",
+    "reth-eth-wire/arbitrary",
+    "reth-eth-wire-types/arbitrary",
+    "reth-ethereum-forks/arbitrary",
+    "reth-primitives/arbitrary",
+]
