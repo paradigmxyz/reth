@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use core::ops::{Range, RangeInclusive};
+use serde::{Deserialize, Serialize};
 
 use alloy_primitives::{Address, BlockNumber, StorageKey};
 use reth_primitives_traits::Account;
