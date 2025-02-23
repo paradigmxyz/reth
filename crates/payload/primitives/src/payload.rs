@@ -55,7 +55,8 @@ impl ExecutionPayload for ExecutionData {
     }
 }
 
-/// Either an [`ExecutionPayload`] or a type that implements the [`PayloadAttributes`] trait.
+/// Either a type that implements the [`ExecutionPayload`] or a type that implements the
+/// [`PayloadAttributes`] trait.
 ///
 /// This is a helper type to unify pre-validation of version specific fields of the engine API.
 #[derive(Debug)]
