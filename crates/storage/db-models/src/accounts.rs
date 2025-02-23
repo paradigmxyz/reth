@@ -1,6 +1,7 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use core::ops::{Range, RangeInclusive};
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, BlockNumber, StorageKey};
 use reth_primitives_traits::Account;
 
 /// Account as it is saved in the database.
@@ -49,3 +50,49 @@ impl reth_codecs::Compact for AccountBeforeTx {
         (Self { address, info }, buf)
     }
 }
+
+/// [`BlockNumber`] concatenated with [`Address`].
+///
+/// Since it's used as a key, it isn't compressed when encoding it.
+#[derive(
+    Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd, Hash,
+)]
+pub struct BlockNumberAddress(pub (BlockNumber, Address));
+
+impl BlockNumberAddress {
+    /// Create a new Range from `start` to `end`
+    ///
+    /// Note: End is inclusive
+    pub fn range(range: RangeInclusive<BlockNumber>) -> Range<Self> {
+        (*range.start(), Address::ZERO).into()..(*range.end() + 1, Address::ZERO).into()
+    }
+
+    /// Return the block number
+    pub const fn block_number(&self) -> BlockNumber {
+        self.0 .0
+    }
+
+    /// Return the address
+    pub const fn address(&self) -> Address {
+        self.0 .1
+    }
+
+    /// Consumes `Self` and returns [`BlockNumber`], [`Address`]
+    pub const fn take(self) -> (BlockNumber, Address) {
+        (self.0 .0, self.0 .1)
+    }
+}
+
+impl From<(BlockNumber, Address)> for BlockNumberAddress {
+    fn from(tpl: (u64, Address)) -> Self {
+        Self(tpl)
+    }
+}
+
+/// [`Address`] concatenated with [`StorageKey`]. Used by `reth_etl` and history stages.
+///
+/// Since it's used as a key, it isn't compressed when encoding it.
+#[derive(
+    Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Ord, PartialOrd, Hash,
+)]
+pub struct AddressStorageKey(pub (Address, StorageKey));
