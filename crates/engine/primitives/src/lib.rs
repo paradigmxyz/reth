@@ -90,7 +90,7 @@ pub trait EngineTypes:
     /// Execution data.
     type ExecutionData: ExecutionPayload;
 
-    /// Converts a [`BuiltPayload`] into an [`ExecutionData`].
+    /// Converts a [`BuiltPayload`] into an [`Self::ExecutionData`].
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
