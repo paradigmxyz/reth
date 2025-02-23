@@ -3,11 +3,12 @@ use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
-    models::{BlockNumberAddress, CompactU256},
+    models::CompactU256,
     table::Decompress,
     tables,
     transaction::{DbTx, DbTxMut},
 };
+use reth_db_models::BlockNumberAddress;
 use reth_etl::Collector;
 use reth_primitives::StorageEntry;
 use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};

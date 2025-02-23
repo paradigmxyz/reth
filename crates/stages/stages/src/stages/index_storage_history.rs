@@ -2,11 +2,9 @@ use super::{collect_history_indices, load_history_indices};
 use crate::{StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
-    table::Decode,
-    tables,
-    transaction::DbTxMut,
+    models::storage_sharded_key::StorageShardedKey, table::Decode, tables, transaction::DbTxMut,
 };
+use reth_db_models::{AddressStorageKey, BlockNumberAddress};
 use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
