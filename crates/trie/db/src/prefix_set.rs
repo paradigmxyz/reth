@@ -6,13 +6,8 @@ use core::{
     marker::PhantomData,
     ops::{Deref, RangeInclusive},
 };
-use reth_db_api::{
-    cursor::DbCursorRO,
-    models::{AccountBeforeTx, BlockNumberAddress},
-    tables,
-    transaction::DbTx,
-    DatabaseError,
-};
+use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx, DatabaseError};
+use reth_db_models::{AccountBeforeTx, BlockNumberAddress};
 use reth_primitives_traits::StorageEntry;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
