@@ -4,7 +4,7 @@ use alloc::{
 };
 use alloy_primitives::{Address, BlockNumber, B256};
 use core::ops::RangeInclusive;
-use reth_db_api::models::BlockNumberAddress;
+use reth_db_models::BlockNumberAddress;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 
