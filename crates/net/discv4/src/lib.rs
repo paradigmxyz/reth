@@ -3018,7 +3018,9 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let (_, mut bootnode_service) = create_discv4().await;
-        let (_discv4_instance, _discv4_service) = create_discv4_with_config(Discv4Config::builder().add_boot_node(bootnode_service.local_node_record).build()).await;
+        let (_discv4_instance, _discv4_service) = create_discv4_with_config(
+            Discv4Config::builder().add_boot_node(bootnode_service.local_node_record).build(),
+        ).await;
 
         let mut updates = bootnode_service.update_stream();
 
@@ -3030,7 +3032,9 @@ mod tests {
             Some(update) = updates.next() => Some(update),
             _ = &mut timeout => None,
         } {
-            if let DiscoveryUpdate::Added(_) = update { panic!("Bootnode should not emit DiscoveryUpdate::Added") }
+            if let DiscoveryUpdate::Added(_) = update {
+                panic!("Bootnode should not emit DiscoveryUpdate::Added")
+            }
         }
     }
 }
