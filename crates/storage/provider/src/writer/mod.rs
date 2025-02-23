@@ -230,10 +230,10 @@ mod tests {
     use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        models::{AccountBeforeTx, BlockNumberAddress},
         tables,
         transaction::{DbTx, DbTxMut},
     };
+    use reth_db_models::{AccountBeforeTx, BlockNumberAddress};
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{Account, Receipt, StorageEntry};
     use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider};
