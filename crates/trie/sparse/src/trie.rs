@@ -206,6 +206,78 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
     }
 }
 
+/// Turns a [`Nibbles`] into a [`String`] by concatenating each nibbles' hex character.
+fn encode_nibbles(nibbles: &Nibbles) -> String {
+    let encoded = hex::encode(nibbles.pack());
+    encoded[..nibbles.len()].to_string()
+}
+
+impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // This prints the trie in preorder traversal, using a stack
+        let mut stack = Vec::new();
+        let mut visited = HashSet::new();
+
+        // 4 spaces as indent per level
+        const INDENT: &str = "    ";
+
+        // Track both path and depth
+        stack.push((Nibbles::default(), self.nodes_ref().get(&Nibbles::default()).unwrap(), 0));
+
+        while let Some((path, node, depth)) = stack.pop() {
+            if !visited.insert(path.clone()) {
+                continue;
+            }
+
+            // Add indentation if alternate flag (#) is set
+            if f.alternate() {
+                write!(f, "{}", INDENT.repeat(depth))?;
+            }
+
+            let packed_path = if depth == 0 { String::from("Root") } else { encode_nibbles(&path) };
+
+            match node {
+                SparseNode::Empty | SparseNode::Hash(_) => {
+                    writeln!(f, "{packed_path} -> {node:?}")?;
+                }
+                SparseNode::Leaf { key, .. } => {
+                    // we want to append the key to the path
+                    let mut full_path = path.clone();
+                    full_path.extend_from_slice_unchecked(key);
+                    let packed_path = encode_nibbles(&full_path);
+
+                    writeln!(f, "{packed_path} -> {node:?}")?;
+                }
+                SparseNode::Extension { key, .. } => {
+                    writeln!(f, "{packed_path} -> {node:?}")?;
+
+                    // push the child node onto the stack with increased depth
+                    let mut child_path = path.clone();
+                    child_path.extend_from_slice_unchecked(key);
+                    if let Some(child_node) = self.nodes_ref().get(&child_path) {
+                        stack.push((child_path, child_node, depth + 1));
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    writeln!(f, "{packed_path} -> {node:?}")?;
+
+                    for i in CHILD_INDEX_RANGE.rev() {
+                        if state_mask.is_bit_set(i) {
+                            let mut child_path = path.clone();
+                            child_path.push_unchecked(i);
+                            if let Some(child_node) = self.nodes_ref().get(&child_path) {
+                                stack.push((child_path, child_node, depth + 1));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl Default for RevealedSparseTrie {
     fn default() -> Self {
         Self {
@@ -2773,5 +2845,76 @@ mod tests {
         sparse.wipe();
 
         assert_eq!(sparse.root(), EMPTY_ROOT_HASH);
+    }
+
+    #[test]
+    fn sparse_trie_display() {
+        let mut sparse = RevealedSparseTrie::default();
+
+        let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
+
+        // Extension (Key = 5) – Level 0
+        // └── Branch (Mask = 1011) – Level 1
+        //     ├── 0 -> Extension (Key = 23) – Level 2
+        //     │        └── Branch (Mask = 0101) – Level 3
+        //     │              ├── 1 -> Leaf (Key = 1, Path = 50231) – Level 4
+        //     │              └── 3 -> Leaf (Key = 3, Path = 50233) – Level 4
+        //     ├── 2 -> Leaf (Key = 013, Path = 52013) – Level 2
+        //     └── 3 -> Branch (Mask = 0101) – Level 2
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102) – Level 3
+        //                └── 3 -> Branch (Mask = 1010) – Level 3
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
+            .unwrap();
+        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
+
+        let normal_printed = format!("{sparse}");
+        let expected = "\
+Root -> Extension { key: Nibbles(0x05), hash: None, store_in_db_trie: None }
+5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None }
+50 -> Extension { key: Nibbles(0x0203), hash: None, store_in_db_trie: None }
+5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
+50231 -> Leaf { key: Nibbles(0x), hash: None }
+50233 -> Leaf { key: Nibbles(0x), hash: None }
+52013 -> Leaf { key: Nibbles(0x000103), hash: None }
+53 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
+53102 -> Leaf { key: Nibbles(0x0002), hash: None }
+533 -> Branch { state_mask: TrieMask(0000000000000101), hash: None, store_in_db_trie: None }
+53302 -> Leaf { key: Nibbles(0x02), hash: None }
+53320 -> Leaf { key: Nibbles(0x00), hash: None }
+";
+        assert_eq!(normal_printed, expected);
+
+        let alternate_printed = format!("{sparse:#}");
+        let expected = "\
+Root -> Extension { key: Nibbles(0x05), hash: None, store_in_db_trie: None }
+    5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None }
+        50 -> Extension { key: Nibbles(0x0203), hash: None, store_in_db_trie: None }
+            5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
+                50231 -> Leaf { key: Nibbles(0x), hash: None }
+                50233 -> Leaf { key: Nibbles(0x), hash: None }
+        52013 -> Leaf { key: Nibbles(0x000103), hash: None }
+        53 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
+            53102 -> Leaf { key: Nibbles(0x0002), hash: None }
+            533 -> Branch { state_mask: TrieMask(0000000000000101), hash: None, store_in_db_trie: None }
+                53302 -> Leaf { key: Nibbles(0x02), hash: None }
+                53320 -> Leaf { key: Nibbles(0x00), hash: None }
+";
+
+        assert_eq!(alternate_printed, expected);
     }
 }
