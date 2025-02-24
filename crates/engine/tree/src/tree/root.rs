@@ -926,9 +926,11 @@ where
     /// The lifecycle is the following:
     /// 1. Either [`StateRootMessage::PrefetchProofs`] or [`StateRootMessage::StateUpdate`] is
     ///    received from the engine.
+    ///    * For [`StateRootMessage::PrefetchProofs`], proof targets are chunked via
+    ///      [`ChunkedProofTargets`].
     ///    * For [`StateRootMessage::StateUpdate`], the state update is hashed with
-    ///      [`evm_state_to_hashed_post_state`], and then (proof targets)[`MultiProofTargets`] are
-    ///      extracted with [`get_proof_targets`].
+    ///      [`evm_state_to_hashed_post_state`], (proof targets)[`MultiProofTargets`] are extracted
+    ///      with [`hashed_post_state_to_targets`], and chunked via [`ChunkedProofTargets`].
     ///    * For both messages, proof targets are deduplicated according to `fetched_proof_targets`,
     ///      so that the proofs for accounts and storage slots that were already fetched are not
     ///      requested again.
