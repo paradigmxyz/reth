@@ -1,6 +1,6 @@
 //! Discovery v4 implementation: <https://github.com/ethereum/devp2p/blob/master/discv4.md>
 //!
-//! Discv4 employs a kademlia-like routing table to store and manage discovered peers and topics.
+//! Discv4 employs a Kademlia-like routing table to store and manage discovered peers and topics.
 //! The protocol allows for external IP discovery in NAT environments through regular PING/PONG's
 //! with discovered nodes. Nodes return the external IP address that they have received and a simple
 //! majority is chosen as our external IP address. If an external IP address is updated, this is
