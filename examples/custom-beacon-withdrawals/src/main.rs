@@ -28,9 +28,7 @@ use reth_evm::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{
-    Block, EthPrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, TransactionSigned,
-};
+use reth_primitives::{Block, EthPrimitives, Receipt, Recovered, SealedBlock, TransactionSigned};
 use std::fmt::Display;
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -117,9 +115,9 @@ impl BlockExecutionStrategyFactory for CustomEvmConfig {
     type Primitives = EthPrimitives;
 
     fn create_strategy<'a, DB>(
-        &'a mut self,
+        &'a self,
         db: &'a mut State<DB>,
-        block: &'a RecoveredBlock<Block>,
+        block: &'a SealedBlock<Block>,
     ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
     where
         DB: Database,
