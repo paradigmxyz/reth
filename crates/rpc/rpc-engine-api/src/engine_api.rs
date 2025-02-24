@@ -9,9 +9,10 @@ use alloy_eips::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload,
-    ExecutionPayloadBodiesV1, ExecutionPayloadBodyV1, ExecutionPayloadSidecar, ForkchoiceState,
-    ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields, TransitionConfiguration,
+    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
+    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    PraguePayloadFields, TransitionConfiguration,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -557,13 +558,14 @@ where
     /// Caution: This should not accept the `withdrawals` field
     pub async fn new_payload_v1(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() };
+        let payload =
+            ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() };
         let payload_or_attrs =
-            PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload,
-            );
+        PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
+            &payload,
+        );
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
@@ -579,11 +581,11 @@ where
     /// Metered version of `new_payload_v1`.
     async fn new_payload_v1_metered(
         &self,
-        execution_data: ExecutionData,
+        payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = execution_data.payload.as_v1().gas_used;
-        let res = Self::new_payload_v1(self, execution_data.payload).await;
+        let gas_used = payload.gas_used;
+        let res = Self::new_payload_v1(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v1.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -593,9 +595,12 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() };
+        let payload = ExecutionData {
+            payload: payload.into_payload(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
         let payload_or_attrs =
             PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload,
@@ -614,12 +619,11 @@ where
     /// Metered version of `new_payload_v2`.
     pub async fn new_payload_v2_metered(
         &self,
-        execution_data: ExecutionData,
+        payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
-        let payload = execution_data.payload.as_v2().ok_or(EngineApiError::UnknownPayload)?;
-        let gas_used = payload.payload_inner.gas_used;
-        let res = Self::new_payload_v2(self, execution_data.payload).await;
+        let gas_used = payload.execution_payload.gas_used;
+        let res = Self::new_payload_v2(self, payload).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v2.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -629,12 +633,12 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     pub async fn new_payload_v3(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionData {
-            payload,
+            payload: payload.into(),
             sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
                 versioned_hashes,
                 parent_beacon_block_root,
@@ -659,20 +663,14 @@ where
     // Metrics version of `new_payload_v3`
     async fn new_payload_v3_metered(
         &self,
-        execution_data: ExecutionData,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
-        let payload_v3 = execution_data.payload.as_v3().ok_or(EngineApiError::UnknownPayload)?;
-        let gas_used = payload_v3.payload_inner.payload_inner.gas_used;
-        let res = Self::new_payload_v3(
-            self,
-            execution_data.payload,
-            versioned_hashes,
-            parent_beacon_block_root,
-        )
-        .await;
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
+        let res =
+            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v3.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -682,13 +680,13 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
     pub async fn new_payload_v4(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> EngineApiResult<PayloadStatus> {
         let payload = ExecutionData {
-            payload,
+            payload: payload.into(),
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                 PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
@@ -717,17 +715,16 @@ where
     /// Metrics version of `new_payload_v4`
     async fn new_payload_v4_metered(
         &self,
-        execution_data: ExecutionData,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
-        let payload_v3 = execution_data.payload.as_v3().unwrap();
-        let gas_used = payload_v3.payload_inner.payload_inner.gas_used;
+        let gas_used = payload.payload_inner.payload_inner.gas_used;
         let res = Self::new_payload_v4(
             self,
-            execution_data.payload,
+            payload,
             versioned_hashes,
             parent_beacon_block_root,
             execution_requests,
@@ -773,49 +770,43 @@ where
     /// Handler for `engine_newPayloadV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
-    async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
-        let execution_data = ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() };
-        Ok(self.new_payload_v1_metered(execution_data).await?)
+        Ok(self.new_payload_v1_metered(payload).await?)
     }
 
     /// Handler for `engine_newPayloadV2`
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
-    async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
-        let execution_data = ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() };
-        Ok(self.new_payload_v2_metered(execution_data).await?)
+        Ok(self.new_payload_v2_metered(payload).await?)
     }
 
     /// Handler for `engine_newPayloadV3`
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
-        let execution_data = ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() };
-        Ok(self
-            .new_payload_v3_metered(execution_data, versioned_hashes, parent_beacon_block_root)
-            .await?)
+        Ok(self.new_payload_v3_metered(payload, versioned_hashes, parent_beacon_block_root).await?)
     }
 
     /// Handler for `engine_newPayloadV4`
     /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/prague.md#engine_newpayloadv4>
     async fn new_payload_v4(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
-        let execution_data = ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() };
         Ok(self
             .new_payload_v4_metered(
-                execution_data,
+                payload,
                 versioned_hashes,
                 parent_beacon_block_root,
                 execution_requests,
@@ -1086,9 +1077,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, EthereumHardfork, MAINNET};
     use reth_engine_primitives::BeaconEngineMessage;
-    use reth_ethereum_engine_primitives::{
-        EthEngineTypes, EthereumEngineValidator, ExecutionPayloadV1,
-    };
+    use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_ethereum_primitives::Block;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_provider::test_utils::MockEthProvider;
@@ -1158,11 +1147,9 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         tokio::spawn(async move {
-            api.new_payload_v1(ExecutionPayload::V1(ExecutionPayloadV1::from_block_slow(
-                &Block::default(),
-            )))
-            .await
-            .unwrap();
+            api.new_payload_v1(ExecutionPayloadV1::from_block_slow(&Block::default()))
+                .await
+                .unwrap();
         });
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }

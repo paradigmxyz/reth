@@ -3,8 +3,8 @@
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionData, ExecutionPayload, ExecutionPayloadBodiesV1, ForkchoiceState,
-    ForkchoiceUpdated, PayloadId, PayloadStatus,
+    ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
+    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
@@ -33,7 +33,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     ///
     /// No modifications needed for OP compatibility.
     #[method(name = "newPayloadV2")]
-    async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus>;
+    async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus>;
 
     /// Sends the given payload to the execution layer client, as specified for the Cancun fork.
     ///
@@ -48,7 +48,7 @@ pub trait OpEngineApi<Engine: EngineTypes> {
     #[method(name = "newPayloadV3")]
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;
@@ -211,13 +211,13 @@ where
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
-    async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus> {
+    async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         EngineApiServer::new_payload_v2(&self.inner, payload).await
     }
 
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayload,
+        payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
@@ -241,7 +241,7 @@ where
         let payload = payload.payload_inner;
         EngineApiServer::new_payload_v4(
             &self.inner,
-            payload.into(),
+            payload,
             versioned_hashes,
             parent_beacon_block_root,
             execution_requests,
