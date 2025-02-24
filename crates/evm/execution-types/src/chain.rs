@@ -8,8 +8,9 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives_traits::{
+    serde_bincode_compat::SerdeBincodeCompat,
     transaction::signed::SignedTransactionIntoRecoveredExt, Block, BlockBody, NodePrimitives,
-    RecoveredBlock, SealedHeader, SignedTransaction,serde_bincode_compat::SerdeBincodeCompat
+    RecoveredBlock, SealedHeader, SignedTransaction,
 };
 use reth_trie_common::updates::TrieUpdates;
 use revm_database::BundleState;
@@ -566,20 +567,20 @@ pub(super) mod serde_bincode_compat {
     //     trie_updates: Option<TrieUpdates<'a>>,
     // }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Chain<'a, N = EthPrimitives>
-where
-    N: NodePrimitives<
-        Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
-        Receipt: SerdeBincodeCompat,
-    >,
-    <N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>: Clone,
-{
-    blocks: RecoveredBlocks<'a, N::Block>,
-    execution_outcome: Cow<'a, ExecutionOutcome<<N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>>>,
-    trie_updates: Option<TrieUpdates<'a>>,
-}
-
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Chain<'a, N = EthPrimitives>
+    where
+        N: NodePrimitives<
+            Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+            Receipt: SerdeBincodeCompat,
+        >,
+        <N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>: Clone,
+    {
+        blocks: RecoveredBlocks<'a, N::Block>,
+        execution_outcome:
+            Cow<'a, ExecutionOutcome<<N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>>>,
+        trie_updates: Option<TrieUpdates<'a>>,
+    }
 
     #[derive(Debug)]
     struct RecoveredBlocks<
@@ -625,12 +626,34 @@ where
     where
         N: NodePrimitives<
             Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+            Receipt: SerdeBincodeCompat,
         >,
+        <N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>: Clone,
     {
         fn from(value: &'a super::Chain<N>) -> Self {
+            let converted_execution_outcome = {
+                let original = &value.execution_outcome;
+                let converted_receipts = original
+                    .receipts()
+                    .iter()
+                    .map(|vec| {
+                        vec.iter()
+                            .map(|receipt| <N::Receipt as SerdeBincodeCompat>::as_repr(receipt))
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+
+                ExecutionOutcome {
+                    bundle: original.bundle.clone(),
+                    receipts: converted_receipts,
+                    requests: original.requests.clone(),
+                    first_block: original.first_block,
+                }
+            };
+
             Self {
                 blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
-                execution_outcome: Cow::Borrowed(&value.execution_outcome),
+                execution_outcome: Cow::Owned(converted_execution_outcome),
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
         }
@@ -640,12 +663,36 @@ where
     where
         N: NodePrimitives<
             Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+            Receipt: SerdeBincodeCompat,
         >,
+        for<'b> <N::Receipt as SerdeBincodeCompat>::BincodeRepr<'b>: Clone,
     {
         fn from(value: Chain<'a, N>) -> Self {
+            let converted_execution_outcome = {
+                let original = value.execution_outcome.into_owned();
+                let converted_receipts = original
+                    .receipts()
+                    .iter()
+                    .map(|vec| {
+                        vec.iter()
+                            .map(|receipt| {
+                                <N::Receipt as SerdeBincodeCompat>::from_repr(receipt.clone())
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+
+                ExecutionOutcome {
+                    bundle: original.bundle,
+                    receipts: converted_receipts,
+                    requests: original.requests,
+                    first_block: original.first_block,
+                }
+            };
+
             Self {
                 blocks: value.blocks.0.into_owned(),
-                execution_outcome: value.execution_outcome.into_owned(),
+                execution_outcome: converted_execution_outcome,
                 trie_updates: value.trie_updates.map(Into::into),
             }
         }
@@ -655,7 +702,9 @@ where
     where
         N: NodePrimitives<
             Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+            Receipt: SerdeBincodeCompat,
         >,
+        for<'a> <N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>: Clone,
     {
         fn serialize_as<S>(source: &super::Chain<N>, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -669,7 +718,9 @@ where
     where
         N: NodePrimitives<
             Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+            Receipt: SerdeBincodeCompat,
         >,
+        for<'a> <N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>: Clone,
     {
         fn deserialize_as<D>(deserializer: D) -> Result<super::Chain<N>, D::Error>
         where
