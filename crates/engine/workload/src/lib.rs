@@ -37,26 +37,30 @@ use tokio::runtime::Runtime;
 /// An executor for mixed I/O and CPU workloads.
 #[derive(Debug, Clone)]
 pub struct WorkloadExecutor {
-    inner: Arc<WorkloadExecutorInner>,
+    inner: WorkloadExecutorInner,
 }
 
 impl WorkloadExecutor {
+
     pub fn new(cpu_threads: usize) -> Self {
         // Create runtime for I/O operations
-        let runtime = Runtime::new().unwrap();
+        let runtime = Arc::new(Runtime::new().unwrap());
 
         // Create Rayon thread pool for CPU work
-        let rayon_pool = rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap();
+        let rayon_pool = Arc::new(rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap());
 
-        WorkloadExecutor { inner: Arc::new(WorkloadExecutorInner { runtime, rayon_pool }) }
+        WorkloadExecutor { inner: WorkloadExecutorInner { runtime, rayon_pool } }
     }
 
-    // TODO helper functions for spawning, scoping
+    /// Returns access to the rayon pool
+   pub fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
+       &self.inner.rayon_pool
+   }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct WorkloadExecutorInner {
     // TODO: replace with main tokio handle instead or even task executor?
-    runtime: Runtime,
-    rayon_pool: RayonPool,
+    runtime: Arc<Runtime>,
+    rayon_pool: Arc<RayonPool>,
 }

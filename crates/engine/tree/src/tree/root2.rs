@@ -38,6 +38,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, error, trace, trace_span};
+use reth_workload_executor::WorkloadExecutor;
+use crate::tree::payload_processor::SparseTrieEvent;
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
@@ -349,7 +351,7 @@ struct MultiproofManager<Factory> {
     /// Queued calculations.
     pending: VecDeque<MultiproofInput<Factory>>,
     /// Thread pool to spawn multiproof calculations.
-    thread_pool: Arc<rayon::ThreadPool>,
+    thread_pool: WorkloadExecutor
 }
 
 impl<Factory> MultiproofManager<Factory>
@@ -358,7 +360,7 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
+    fn new(thread_pool: WorkloadExecutor,  thread_pool_size: usize) -> Self {
         // we keep 2 threads to be used internally by [`StateRootTask`]
         let max_concurrent = thread_pool_size.saturating_sub(2);
         debug_assert!(max_concurrent != 0);
@@ -416,56 +418,58 @@ where
             state_root_message_sender,
         }: MultiproofInput<Factory>,
     ) {
-        let thread_pool = self.thread_pool.clone();
 
-        self.thread_pool.spawn(move || {
-            let account_targets = proof_targets.len();
-            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum();
-
-            trace!(
-                target: "engine::root",
-                proof_sequence_number,
-                ?proof_targets,
-                account_targets,
-                storage_targets,
-                "Starting multiproof calculation",
-            );
-            let start = Instant::now();
-            let result = calculate_multiproof(thread_pool, config, proof_targets);
-            let elapsed = start.elapsed();
-            trace!(
-                target: "engine::root",
-                proof_sequence_number,
-                ?elapsed,
-                ?source,
-                account_targets,
-                storage_targets,
-                "Multiproof calculated",
-            );
-
-            match result {
-                Ok(proof) => {
-                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
-                        Box::new(ProofCalculated {
-                            sequence_number: proof_sequence_number,
-                            update: SparseTrieUpdate {
-                                state: hashed_state_update,
-                                multiproof: proof,
-                            },
-                            account_targets,
-                            storage_targets,
-                            elapsed,
-                        }),
-                    ));
-                }
-                Err(error) => {
-                    let _ = state_root_message_sender
-                        .send(StateRootMessage::ProofCalculationError(error));
-                }
-            }
-        });
-
-        self.inflight += 1;
+        todo!()
+        // let thread_pool = self.thread_pool.clone();
+        //
+        // self.thread_pool.spawn(move || {
+        //     let account_targets = proof_targets.len();
+        //     let storage_targets = proof_targets.values().map(|slots| slots.len()).sum();
+        //
+        //     trace!(
+        //         target: "engine::root",
+        //         proof_sequence_number,
+        //         ?proof_targets,
+        //         account_targets,
+        //         storage_targets,
+        //         "Starting multiproof calculation",
+        //     );
+        //     let start = Instant::now();
+        //     let result = calculate_multiproof(thread_pool, config, proof_targets);
+        //     let elapsed = start.elapsed();
+        //     trace!(
+        //         target: "engine::root",
+        //         proof_sequence_number,
+        //         ?elapsed,
+        //         ?source,
+        //         account_targets,
+        //         storage_targets,
+        //         "Multiproof calculated",
+        //     );
+        //
+        //     match result {
+        //         Ok(proof) => {
+        //             let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
+        //                 Box::new(ProofCalculated {
+        //                     sequence_number: proof_sequence_number,
+        //                     update: SparseTrieUpdate {
+        //                         state: hashed_state_update,
+        //                         multiproof: proof,
+        //                     },
+        //                     account_targets,
+        //                     storage_targets,
+        //                     elapsed,
+        //                 }),
+        //             ));
+        //         }
+        //         Err(error) => {
+        //             let _ = state_root_message_sender
+        //                 .send(StateRootMessage::ProofCalculationError(error));
+        //         }
+        //     }
+        // });
+        //
+        // self.inflight += 1;
     }
 }
 
@@ -502,7 +506,7 @@ pub(crate) struct StateRootTaskMetrics {
 /// Then it updates relevant leaves according to the result of the transaction.
 /// This feeds updates to the sparse trie task.
 
-// TODO(mattsse): rename
+// TODO(mattsse): rename to MultiProof
 #[derive(Debug)]
 pub struct StateRootTask2<Factory> {
     /// Task configuration.
@@ -511,12 +515,14 @@ pub struct StateRootTask2<Factory> {
     rx: Receiver<StateRootMessage>,
     /// Sender for state root related messages.
     tx: Sender<StateRootMessage>,
+    /// Sender for state updates emitted by this type.
+    to_sparse_trie: Sender<SparseTrieEvent>,
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
-    /// Reference to the shared thread pool for parallel proof generation.
-    thread_pool: Arc<rayon::ThreadPool>,
+    /// Reference to the executor used to spawn workloads.
+    executor: WorkloadExecutor,
     /// Manages calculation of multiproofs.
     multiproof_manager: MultiproofManager<Factory>,
     /// State root task metrics
@@ -529,16 +535,17 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new state root task with the unified message channel
-    pub fn new(config: StateRootConfig<Factory>, thread_pool: Arc<rayon::ThreadPool>) -> Self {
+    pub fn new(config: StateRootConfig<Factory>, executor: WorkloadExecutor, to_sparse_trie: Sender<SparseTrieEvent>) -> Self {
         let (tx, rx) = channel();
         Self {
             config,
             rx,
             tx,
+            to_sparse_trie,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
-            thread_pool: thread_pool.clone(),
-            multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
+            executor: executor.clone(),
+            multiproof_manager: MultiproofManager::new(executor, thread_pool_size()),
             metrics: StateRootTaskMetrics::default(),
         }
     }
@@ -592,25 +599,27 @@ where
 
     /// Spawn long running sparse trie task that forwards the final result upon completion.
     fn spawn_sparse_trie(
-        thread_pool: Arc<rayon::ThreadPool>,
+        thread_pool: WorkloadExecutor,
         config: StateRootConfig<Factory>,
         metrics: StateRootTaskMetrics,
         task_tx: Sender<StateRootMessage>,
     ) -> Sender<SparseTrieUpdate> {
-        let (tx, rx) = mpsc::channel();
-        thread_pool.spawn(move || {
-            debug!(target: "engine::tree", "Sparse trie task starting");
-            // We clone the task sender here so that it can be used in case the sparse trie task
-            // succeeds, without blocking due to any `Drop` implementation.
-            //
-            // It's more important to make sure we capture any errors, than to make sure we send an
-            // error result without blocking, which is why we wait for `run_sparse_trie` to return
-            // before sending errors.
-            if let Err(err) = run_sparse_trie(config, metrics, rx, task_tx.clone()) {
-                let _ = task_tx.send(StateRootMessage::RootCalculationError(err));
-            }
-        });
-        tx
+        // let (tx, rx) = mpsc::channel();
+        // thread_pool.spawn(move || {
+        //     debug!(target: "engine::tree", "Sparse trie task starting");
+        //     // We clone the task sender here so that it can be used in case the sparse trie task
+        //     // succeeds, without blocking due to any `Drop` implementation.
+        //     //
+        //     // It's more important to make sure we capture any errors, than to make sure we send an
+        //     // error result without blocking, which is why we wait for `run_sparse_trie` to return
+        //     // before sending errors.
+        //     if let Err(err) = run_sparse_trie(config, metrics, rx, task_tx.clone()) {
+        //         let _ = task_tx.send(StateRootMessage::RootCalculationError(err));
+        //     }
+        // });
+        // tx
+
+        todo!()
     }
 
     /// Handles request for proof prefetch.
@@ -1104,7 +1113,7 @@ fn get_proof_targets(
 /// Calculate multiproof for the targets.
 #[inline]
 fn calculate_multiproof<Factory>(
-    thread_pool: Arc<rayon::ThreadPool>,
+    executor: WorkloadExecutor,
     config: StateRootConfig<Factory>,
     proof_targets: MultiProofTargets,
 ) -> ProviderResult<MultiProof>
@@ -1117,7 +1126,7 @@ where
         config.nodes_sorted,
         config.state_sorted,
         config.prefix_sets,
-        thread_pool,
+        executor.rayon_pool().clone(),
     )
     .with_branch_node_masks(true)
     .multiproof(proof_targets)?)
@@ -1299,7 +1308,7 @@ mod tests {
             .build()
             .expect("Failed to create test proof worker thread pool");
 
-        let thread_pool = Arc::new(thread_pool);
+        let thread_pool = WorkloadExecutor::new(2);
         let config = create_state_root_config(factory, TrieInput::default());
 
         StateRootTask2::new(config, thread_pool)
@@ -1368,13 +1377,9 @@ mod tests {
 
         let num_threads = thread_pool_size();
 
-        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .thread_name(|i| format!("proof-worker-{}", i))
-            .build()
-            .expect("Failed to create proof worker thread pool");
+        let executor = WorkloadExecutor::new(2);
 
-        let task = StateRootTask2::new(config, Arc::new(state_root_task_pool));
+        let task = StateRootTask2::new(config, executor);
         let mut state_hook = task.state_hook();
         let handle = task.spawn();
 

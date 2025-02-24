@@ -1,17 +1,18 @@
 //! Entrypoint for payload processing.
 
+use crate::tree::root2::*;
 use crate::tree::{
     cached_state::{CachedStateMetrics, ProviderCaches},
-    root::{SparseTrieUpdate, StateRootConfig, StateRootTaskMetrics},
     StateProviderBuilder,
 };
 use alloy_consensus::transaction::Recovered;
 use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, RecoveredBlock};
+use reth_provider::providers::ConsistentDbView;
 use reth_provider::{
-    BlockReader, DatabaseProviderFactory, HashedPostStateProvider, StateCommitmentProvider,
-    StateProviderFactory, StateReader, StateRootProvider,
+    BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
+    StateProviderFactory, StateReader,
 };
-use reth_revm::cancelled::ManualCancel;
+use reth_trie::TrieInput;
 use reth_workload_executor::WorkloadExecutor;
 use std::{
     collections::VecDeque,
@@ -21,18 +22,26 @@ use std::{
     },
 };
 use std::sync::{Arc, RwLock};
-use reth_provider::providers::ConsistentDbView;
-use reth_trie_sparse::SparseStateTrie;
-use crate::tree::root2::StateRootResult;
+use std::sync::mpsc::channel;
+use alloy_consensus::BlockHeader;
+use alloy_primitives::B256;
+use reth_evm::ConfigureEvmEnvFor;
+use crate::tree::cached_state::SavedCache;
 
 /// Entrypoint for executing the payload.
-pub struct PayloadProcessor<N> {
+pub struct PayloadProcessor<N, Evm> {
     executor: WorkloadExecutor,
-    // TODO move all the caching stuff in here
+    /// The most recent cache used for execution.
+    most_recent_cache: ExecutionCache,
+    /// Metrics for prewarmed execution
+    metrics: CachedStateMetrics,
+    /// Determines how to configure the evm for execution.
+    evm_config: Evm
 }
 
-impl<N> PayloadProcessor<N>
-    where N: NodePrimitives
+impl<N, Evm> PayloadProcessor<N, Evm>
+        where N: NodePrimitives,
+        Evm: ConfigureEvmEnvFor<N>  + 'static
 {
     /// Executes the payload based on the configured settings.
     pub fn execute(&self) {
@@ -72,13 +81,55 @@ impl<N> PayloadProcessor<N>
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    fn spawn(&self, block: RecoveredBlock<N>) -> PayloadTaskHandle {
-        // TODO: spawn the main tasks and wire them up
+    pub fn spawn<P>(&self, block: RecoveredBlock<N>, consistent_view: ConsistentDbView<P>, trie_input: TrieInput,
+     provider_builder: StateProviderBuilder<N, P>,
+    ) -> PayloadTaskHandle
+    where
+        P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone,
+    {
+
+        let (to_sparse_trie, sparse_trie_rx) = channel();
+        // spawn multiproof task
+        let state_root_config =
+            StateRootConfig::new_from_input(consistent_view, trie_input);
+        let multi_proof_task =
+            StateRootTask2::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie);
+
+        let caches = self.cache_for(block.header().parent_hash());
+        // configure prewarming
+        let prewarm_ctx = PrewarmContext {
+            header: block.clone_header(),
+            evm_config: self.evm_config.clone(),
+            caches,
+            cache_metrics: Default::default(),
+            provider: provider_builder,
+        };
+        // wire the multiproof task to the prewarm task
+        let to_multi_proof = multi_proof_task.state_root_message_sender();
+        let prewarm_task = PrewarmTask::new(self.executor.clone(), prewarm_ctx, to_multi_proof);
+
+
+        let sparse_trie_task = SparseTrieTask {
+            executor: self.executor.clone(),
+            updates: sparse_trie_rx,
+            config: StateRootConfig {},
+            metrics: Default::default(),
+            max_concurrency: 0,
+        };
 
 
 
         todo!()
     }
+
+
+    /// Returns the cache for the given parent hash.
+    ///
+    /// If the given hash is different then what is recently cached, the cache will be invalidated.
+    fn cache_for(&self, parent_hash: B256) -> ProviderCaches {
+        todo!()
+    }
+
 }
 
 pub struct PayloadTaskHandle {
@@ -118,13 +169,13 @@ impl Drop for PayloadTaskHandle {
     }
 }
 
+
 /// A task responsible for populating the sparse trie.
 pub struct SparseTrieTask<F> {
     executor: WorkloadExecutor,
     /// Receives updates from the state root task
-    // TODO: change to option?
     updates: mpsc::Receiver<SparseTrieEvent>,
-    factory: F,
+    // TODO: ideally we need a way to create multiple readers on demand.
     config: StateRootConfig<F>,
     metrics: StateRootTaskMetrics,
     /// How many sparse trie jobs should be executed in parallel
@@ -171,7 +222,7 @@ where
     }
 }
 
-enum SparseTrieEvent {
+pub(crate) enum SparseTrieEvent {
     /// Updates received from the multiproof task
     Update(Option<SparseTrieUpdate>),
     /// Updates processed from the spawned trie updates jobs (update_sparse_trie)
@@ -190,7 +241,7 @@ pub struct PrewarmTask<N: NodePrimitives, P, C> {
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
     /// Sender to emit evm state outcome messages
-    to_multi_proof: mpsc::Sender<()>,
+    to_multi_proof: mpsc::Sender<StateRootMessage>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
     /// Sender the transactions use to send their result back
@@ -202,6 +253,22 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone,
 {
+
+    fn new(executor: WorkloadExecutor, ctx: PrewarmContext<N, P, C>, to_multi_proof: mpsc::Sender<StateRootMessage>) -> Self {
+        let (actions_tx, actions_rx) = mpsc::channel();
+        Self {
+            executor,
+            pending: Default::default(),
+            ctx,
+            in_progress: 0,
+            // TODO settings
+            max_concurrency: 4,
+            to_multi_proof,
+            actions_rx,
+            actions_tx,
+        }
+    }
+
     /// Spawns the next transactions
     fn spawn_next(&mut self) {
         while self.in_progress < self.max_concurrency {
@@ -260,4 +327,11 @@ enum PrewarmTaskEvent {
     Outcome {
         // Evmstate outcome
     },
+}
+
+/// Shared access to most recently used cache.
+#[derive(Clone)]
+struct ExecutionCache {
+    // TODO: simplify internals
+    inner: Arc<RwLock<Option<SavedCache>>>
 }
