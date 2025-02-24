@@ -115,8 +115,20 @@ where
         };
         // wire the multiproof task to the prewarm task
         let to_multi_proof = multi_proof_task.state_root_message_sender();
-        let prewarm_task = PrewarmTask::new(self.executor.clone(), prewarm_ctx, to_multi_proof);
+        let txs = block.transactions_recovered().map(Recovered::cloned).collect();
+        let prewarm_task =
+            PrewarmTask::new(self.executor.clone(), prewarm_ctx, to_multi_proof, txs);
         let to_prewarm_task = prewarm_task.actions_tx.clone();
+
+        // spawn pre-warm task
+        self.executor.spawn_blocking(move || {
+            prewarm_task.run();
+        });
+
+        // spawn multi-proof task
+        self.executor.spawn_blocking(move || {
+            multi_proof_task.run();
+        });
 
         let sparse_trie_task = SparseTrieTask {
             executor: self.executor.clone(),
@@ -135,9 +147,7 @@ where
             let _ = state_root_tx.send(res);
         });
 
-        PayloadTaskHandle { prewarm: Some(to_prewarm_task), state_root: Some(state_root_rx) };
-
-        todo!()
+        PayloadTaskHandle { prewarm: Some(to_prewarm_task), state_root: Some(state_root_rx) }
     }
 
     /// Returns the cache for the given parent hash.
@@ -178,7 +188,6 @@ impl PayloadTaskHandle {
 
 impl Drop for PayloadTaskHandle {
     fn drop(&mut self) {
-        // TODO: terminate all tasks
         self.terminate_prewarming();
     }
 }
@@ -187,7 +196,7 @@ impl Drop for PayloadTaskHandle {
 pub struct SparseTrieTask<F> {
     /// Executor used to spawn subtasks.
     executor: WorkloadExecutor,
-    /// Receives updates from the state root task
+    /// Receives updates from the state root task.
     updates: mpsc::Receiver<SparseTrieEvent>,
     // TODO: ideally we need a way to create multiple readers on demand.
     config: StateRootConfig<F>,
@@ -234,8 +243,12 @@ where
     }
 }
 
+/// The event type the sparse trie task operates on.
 pub(crate) enum SparseTrieEvent {
-    /// Updates received from the multiproof task
+    /// Updates received from the multiproof task.
+    ///
+    /// This represents a stream of [`SparseTrieUpdate`] where a `None` indicates that all updates
+    /// have been received.
     Update(Option<SparseTrieUpdate>),
     /// Updates processed from the spawned trie updates jobs (update_sparse_trie)
     Processed(),
@@ -243,8 +256,9 @@ pub(crate) enum SparseTrieEvent {
 
 /// A task that executes transactions individually in parallel.
 pub struct PrewarmTask<N: NodePrimitives, P, C> {
+    /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
-    /// Transactions pending execution
+    /// Transactions pending execution.
     pending: VecDeque<Recovered<N::SignedTx>>,
     /// Context provided to execution tasks
     ctx: PrewarmContext<N, P, C>,
@@ -269,6 +283,7 @@ where
         executor: WorkloadExecutor,
         ctx: PrewarmContext<N, P, C>,
         to_multi_proof: mpsc::Sender<StateRootMessage>,
+        transactions: VecDeque<N::SignedTx>,
     ) -> Self {
         let (actions_tx, actions_rx) = mpsc::channel();
         Self {

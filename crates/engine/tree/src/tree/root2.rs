@@ -773,204 +773,207 @@ where
     ///      back to this task via [`StateRootMessage::RootCalculated`] message.
     /// 6. On [`StateRootMessage::RootCalculated`] message, the loop exits and the the state root is
     ///    returned.
-    fn run(mut self, sparse_trie_tx: Sender<SparseTrieUpdate>) -> StateRootResult {
-        let mut sparse_trie_tx = Some(sparse_trie_tx);
+    pub(crate) fn run(mut self) {
+        todo!()
 
-        let mut prefetch_proofs_received = 0;
-        let mut updates_received = 0;
-        let mut proofs_processed = 0;
-
-        let mut updates_finished = false;
-
-        // Timestamp when the first state update was received
-        let mut first_update_time = None;
-        // Timestamp when the last state update was received
-        let mut last_update_time = None;
-
-        loop {
-            trace!(target: "engine::root", "entering main channel receiving loop");
-            match self.rx.recv() {
-                Ok(message) => match message {
-                    StateRootMessage::PrefetchProofs(targets) => {
-                        trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
-                        prefetch_proofs_received += 1;
-                        debug!(
-                            target: "engine::root",
-                            targets = targets.len(),
-                            storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>(),
-                            total_prefetches = prefetch_proofs_received,
-                            "Prefetching proofs"
-                        );
-                        self.on_prefetch_proof(targets);
-                    }
-                    StateRootMessage::StateUpdate(source, update) => {
-                        trace!(target: "engine::root", "processing StateRootMessage::StateUpdate");
-                        if updates_received == 0 {
-                            first_update_time = Some(Instant::now());
-                            debug!(target: "engine::root", "Started state root calculation");
-                        }
-                        last_update_time = Some(Instant::now());
-
-                        updates_received += 1;
-                        debug!(
-                            target: "engine::root",
-                            ?source,
-                            len = update.len(),
-                            total_updates = updates_received,
-                            "Received new state update"
-                        );
-                        let next_sequence = self.proof_sequencer.next_sequence();
-                        self.on_state_update(source, update, next_sequence);
-                    }
-                    StateRootMessage::FinishedStateUpdates => {
-                        trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
-                        updates_finished = true;
-
-                        if check_end_condition(CheckEndConditionParams {
-                            proofs_processed,
-                            updates_received,
-                            prefetch_proofs_received,
-                            updates_finished,
-                            proof_sequencer: &self.proof_sequencer,
-                        }) {
-                            sparse_trie_tx.take();
-                            debug!(
-                                target: "engine::root",
-                                "State updates finished and all proofs processed, ending calculation"
-                            );
-                        };
-                    }
-                    StateRootMessage::EmptyProof { sequence_number, state } => {
-                        trace!(target: "engine::root", "processing StateRootMessage::EmptyProof");
-
-                        proofs_processed += 1;
-
-                        if let Some(combined_update) = self.on_proof(
-                            sequence_number,
-                            SparseTrieUpdate { state, multiproof: MultiProof::default() },
-                        ) {
-                            let _ = sparse_trie_tx
-                                .as_ref()
-                                .expect("tx not dropped")
-                                .send(combined_update);
-                        }
-
-                        if check_end_condition(CheckEndConditionParams {
-                            proofs_processed,
-                            updates_received,
-                            prefetch_proofs_received,
-                            updates_finished,
-                            proof_sequencer: &self.proof_sequencer,
-                        }) {
-                            sparse_trie_tx.take();
-                            debug!(
-                                target: "engine::root",
-                                "State updates finished and all proofs processed, ending calculation"
-                            );
-                        };
-                    }
-                    StateRootMessage::ProofCalculated(proof_calculated) => {
-                        trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
-
-                        // we increment proofs_processed for both state updates and prefetches,
-                        // because both are used for the root termination condition.
-                        proofs_processed += 1;
-
-                        self.metrics
-                            .proof_calculation_duration_histogram
-                            .record(proof_calculated.elapsed);
-                        self.metrics
-                            .proof_calculation_account_targets_histogram
-                            .record(proof_calculated.account_targets as f64);
-                        self.metrics
-                            .proof_calculation_storage_targets_histogram
-                            .record(proof_calculated.storage_targets as f64);
-
-                        debug!(
-                            target: "engine::root",
-                            sequence = proof_calculated.sequence_number,
-                            total_proofs = proofs_processed,
-                            "Processing calculated proof"
-                        );
-
-                        self.multiproof_manager.on_calculation_complete();
-
-                        if let Some(combined_update) =
-                            self.on_proof(proof_calculated.sequence_number, proof_calculated.update)
-                        {
-                            let _ = sparse_trie_tx
-                                .as_ref()
-                                .expect("tx not dropped")
-                                .send(combined_update);
-                        }
-
-                        if check_end_condition(CheckEndConditionParams {
-                            proofs_processed,
-                            updates_received,
-                            prefetch_proofs_received,
-                            updates_finished,
-                            proof_sequencer: &self.proof_sequencer,
-                        }) {
-                            sparse_trie_tx.take();
-                            debug!(
-                                target: "engine::root",
-                                "State updates finished and all proofs processed, ending calculation"
-                            );
-                        };
-                    }
-                    StateRootMessage::RootCalculated { state_root, trie_updates, iterations } => {
-                        trace!(target: "engine::root", "processing StateRootMessage::RootCalculated");
-                        let total_time =
-                            first_update_time.expect("first update time should be set").elapsed();
-                        let time_from_last_update =
-                            last_update_time.expect("last update time should be set").elapsed();
-                        debug!(
-                            target: "engine::root",
-                            total_updates = updates_received,
-                            total_proofs = proofs_processed,
-                            roots_calculated = iterations,
-                            ?total_time,
-                            ?time_from_last_update,
-                            "All proofs processed, ending calculation"
-                        );
-
-                        self.metrics
-                            .state_updates_received_histogram
-                            .record(updates_received as f64);
-                        self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
-                        self.metrics.state_root_iterations_histogram.record(iterations as f64);
-
-                        return Ok(StateRootComputeOutcome {
-                            state_root: (state_root, trie_updates),
-                            total_time,
-                            time_from_last_update,
-                        });
-                    }
-
-                    StateRootMessage::ProofCalculationError(e) => {
-                        return Err(ParallelStateRootError::Other(format!(
-                            "could not calculate multiproof: {e:?}"
-                        )))
-                    }
-                    StateRootMessage::RootCalculationError(e) => {
-                        return Err(ParallelStateRootError::Other(format!(
-                            "could not calculate state root: {e:?}"
-                        )))
-                    }
-                },
-                Err(_) => {
-                    // this means our internal message channel is closed, which shouldn't happen
-                    // in normal operation since we hold both ends
-                    error!(
-                        target: "engine::root",
-                        "Internal message channel closed unexpectedly"
-                    );
-                    return Err(ParallelStateRootError::Other(
-                        "Internal message channel closed unexpectedly".into(),
-                    ));
-                }
-            }
-        }
+        // let mut prefetch_proofs_received = 0;
+        // let mut updates_received = 0;
+        // let mut proofs_processed = 0;
+        //
+        // let mut updates_finished = false;
+        //
+        // // Timestamp when the first state update was received
+        // let mut first_update_time = None;
+        // // Timestamp when the last state update was received
+        // let mut last_update_time = None;
+        //
+        // loop {
+        //     trace!(target: "engine::root", "entering main channel receiving loop");
+        //     match self.rx.recv() {
+        //         Ok(message) => match message {
+        //             StateRootMessage::PrefetchProofs(targets) => {
+        //                 trace!(target: "engine::root", "processing
+        // StateRootMessage::PrefetchProofs");                 prefetch_proofs_received +=
+        // 1;                 debug!(
+        //                     target: "engine::root",
+        //                     targets = targets.len(),
+        //                     storage_targets = targets.values().map(|slots|
+        // slots.len()).sum::<usize>(),                     total_prefetches =
+        // prefetch_proofs_received,                     "Prefetching proofs"
+        //                 );
+        //                 self.on_prefetch_proof(targets);
+        //             }
+        //             StateRootMessage::StateUpdate(source, update) => {
+        //                 trace!(target: "engine::root", "processing
+        // StateRootMessage::StateUpdate");                 if updates_received == 0 {
+        //                     first_update_time = Some(Instant::now());
+        //                     debug!(target: "engine::root", "Started state root calculation");
+        //                 }
+        //                 last_update_time = Some(Instant::now());
+        //
+        //                 updates_received += 1;
+        //                 debug!(
+        //                     target: "engine::root",
+        //                     ?source,
+        //                     len = update.len(),
+        //                     total_updates = updates_received,
+        //                     "Received new state update"
+        //                 );
+        //                 let next_sequence = self.proof_sequencer.next_sequence();
+        //                 self.on_state_update(source, update, next_sequence);
+        //             }
+        //             StateRootMessage::FinishedStateUpdates => {
+        //                 trace!(target: "engine::root", "processing
+        // StateRootMessage::FinishedStateUpdates");                 updates_finished =
+        // true;
+        //
+        //                 if check_end_condition(CheckEndConditionParams {
+        //                     proofs_processed,
+        //                     updates_received,
+        //                     prefetch_proofs_received,
+        //                     updates_finished,
+        //                     proof_sequencer: &self.proof_sequencer,
+        //                 }) {
+        //                     sparse_trie_tx.take();
+        //                     debug!(
+        //                         target: "engine::root",
+        //                         "State updates finished and all proofs processed, ending
+        // calculation"                     );
+        //                 };
+        //             }
+        //             StateRootMessage::EmptyProof { sequence_number, state } => {
+        //                 trace!(target: "engine::root", "processing
+        // StateRootMessage::EmptyProof");
+        //
+        //                 proofs_processed += 1;
+        //
+        //                 if let Some(combined_update) = self.on_proof(
+        //                     sequence_number,
+        //                     SparseTrieUpdate { state, multiproof: MultiProof::default() },
+        //                 ) {
+        //                     let _ = sparse_trie_tx
+        //                         .as_ref()
+        //                         .expect("tx not dropped")
+        //                         .send(combined_update);
+        //                 }
+        //
+        //                 if check_end_condition(CheckEndConditionParams {
+        //                     proofs_processed,
+        //                     updates_received,
+        //                     prefetch_proofs_received,
+        //                     updates_finished,
+        //                     proof_sequencer: &self.proof_sequencer,
+        //                 }) {
+        //                     sparse_trie_tx.take();
+        //                     debug!(
+        //                         target: "engine::root",
+        //                         "State updates finished and all proofs processed, ending
+        // calculation"                     );
+        //                 };
+        //             }
+        //             StateRootMessage::ProofCalculated(proof_calculated) => {
+        //                 trace!(target: "engine::root", "processing
+        // StateRootMessage::ProofCalculated");
+        //
+        //                 // we increment proofs_processed for both state updates and prefetches,
+        //                 // because both are used for the root termination condition.
+        //                 proofs_processed += 1;
+        //
+        //                 self.metrics
+        //                     .proof_calculation_duration_histogram
+        //                     .record(proof_calculated.elapsed);
+        //                 self.metrics
+        //                     .proof_calculation_account_targets_histogram
+        //                     .record(proof_calculated.account_targets as f64);
+        //                 self.metrics
+        //                     .proof_calculation_storage_targets_histogram
+        //                     .record(proof_calculated.storage_targets as f64);
+        //
+        //                 debug!(
+        //                     target: "engine::root",
+        //                     sequence = proof_calculated.sequence_number,
+        //                     total_proofs = proofs_processed,
+        //                     "Processing calculated proof"
+        //                 );
+        //
+        //                 self.multiproof_manager.on_calculation_complete();
+        //
+        //                 if let Some(combined_update) =
+        //                     self.on_proof(proof_calculated.sequence_number,
+        // proof_calculated.update)                 {
+        //                     let _ = sparse_trie_tx
+        //                         .as_ref()
+        //                         .expect("tx not dropped")
+        //                         .send(combined_update);
+        //                 }
+        //
+        //                 if check_end_condition(CheckEndConditionParams {
+        //                     proofs_processed,
+        //                     updates_received,
+        //                     prefetch_proofs_received,
+        //                     updates_finished,
+        //                     proof_sequencer: &self.proof_sequencer,
+        //                 }) {
+        //                     sparse_trie_tx.take();
+        //                     debug!(
+        //                         target: "engine::root",
+        //                         "State updates finished and all proofs processed, ending
+        // calculation"                     );
+        //                 };
+        //             }
+        //             StateRootMessage::RootCalculated { state_root, trie_updates, iterations } =>
+        // {                 trace!(target: "engine::root", "processing
+        // StateRootMessage::RootCalculated");                 let total_time =
+        //                     first_update_time.expect("first update time should be
+        // set").elapsed();                 let time_from_last_update =
+        //                     last_update_time.expect("last update time should be set").elapsed();
+        //                 debug!(
+        //                     target: "engine::root",
+        //                     total_updates = updates_received,
+        //                     total_proofs = proofs_processed,
+        //                     roots_calculated = iterations,
+        //                     ?total_time,
+        //                     ?time_from_last_update,
+        //                     "All proofs processed, ending calculation"
+        //                 );
+        //
+        //                 self.metrics
+        //                     .state_updates_received_histogram
+        //                     .record(updates_received as f64);
+        //                 self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
+        //                 self.metrics.state_root_iterations_histogram.record(iterations as f64);
+        //
+        //                 return Ok(StateRootComputeOutcome {
+        //                     state_root: (state_root, trie_updates),
+        //                     total_time,
+        //                     time_from_last_update,
+        //                 });
+        //             }
+        //
+        //             StateRootMessage::ProofCalculationError(e) => {
+        //                 return Err(ParallelStateRootError::Other(format!(
+        //                     "could not calculate multiproof: {e:?}"
+        //                 )))
+        //             }
+        //             StateRootMessage::RootCalculationError(e) => {
+        //                 return Err(ParallelStateRootError::Other(format!(
+        //                     "could not calculate state root: {e:?}"
+        //                 )))
+        //             }
+        //         },
+        //         Err(_) => {
+        //             // this means our internal message channel is closed, which shouldn't happen
+        //             // in normal operation since we hold both ends
+        //             error!(
+        //                 target: "engine::root",
+        //                 "Internal message channel closed unexpectedly"
+        //             );
+        //             return Err(ParallelStateRootError::Other(
+        //                 "Internal message channel closed unexpectedly".into(),
+        //             ));
+        //         }
+        //     }
+        // }
     }
 }
 
