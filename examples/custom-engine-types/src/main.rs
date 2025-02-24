@@ -38,7 +38,7 @@ use reth::{
     },
     network::NetworkHandle,
     payload::ExecutionPayloadValidator,
-    primitives::{Block, EthPrimitives, SealedBlock, TransactionSigned},
+    primitives::{Block, EthPrimitives, RecoveredBlock, SealedBlock, TransactionSigned},
     providers::{EthStorage, StateProviderFactory},
     rpc::{eth::EthApi, types::engine::ExecutionPayload},
     tasks::TaskManager,
@@ -205,8 +205,9 @@ impl PayloadValidator for CustomEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
-        Ok(self.inner.ensure_well_formed_payload(payload)?)
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 }
 
@@ -217,7 +218,7 @@ where
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, T::PayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, T::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
@@ -227,7 +228,13 @@ where
         version: EngineApiMessageVersion,
         attributes: &T::PayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(self.chain_spec(), version, attributes.into())?;
+        validate_version_specific_fields(
+            self.chain_spec(),
+            version,
+            PayloadOrAttributes::<Self::ExecutionData, T::PayloadAttributes>::PayloadAttributes(
+                attributes,
+            ),
+        )?;
 
         // custom validation logic - ensure that the custom field is not zero
         if attributes.custom == 0 {
