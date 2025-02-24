@@ -8,7 +8,7 @@ use crate::{
     Capability, EthMessageID, EthVersion,
 };
 use alloy_primitives::bytes::Bytes;
-use alloy_rlp:: {Encodable, Decodable, BufMut};
+use alloy_rlp::{BufMut, Decodable, Encodable};
 use derive_more::{Deref, DerefMut};
 use std::{
     borrow::Cow,
@@ -61,7 +61,7 @@ impl Decodable for RawCapabilityMessage {
         let payload = Bytes::copy_from_slice(buf);
         *buf = &buf[buf.len()..];
 
-        Ok(Self {id, payload})
+        Ok(Self { id, payload })
     }
 }
 
@@ -408,8 +408,8 @@ pub struct UnsupportedCapabilityError {
 mod tests {
     use super::*;
     use crate::{Capabilities, Capability};
-    use alloy_rlp::{Encodable, Decodable};
     use alloy_primitives::bytes::Bytes;
+    use alloy_rlp::{Decodable, Encodable};
 
     #[test]
     fn from_eth_68() {
@@ -572,10 +572,7 @@ mod tests {
 
     #[test]
     fn test_raw_capability_rlp() {
-        let msg = RawCapabilityMessage {
-            id: 1,
-            payload: Bytes::from(vec![0x01, 0x02, 0x03]),
-        };
+        let msg = RawCapabilityMessage { id: 1, payload: Bytes::from(vec![0x01, 0x02, 0x03]) };
 
         // Encode the message into bytes
         let mut encoded = Vec::new();
@@ -586,6 +583,5 @@ mod tests {
 
         // Verify that the decoded message matches the original
         assert_eq!(msg, decoded);
-
     }
 }
