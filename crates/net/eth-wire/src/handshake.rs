@@ -37,6 +37,16 @@ pub trait UnauthEth:
     + Send
 {
 }
+
+impl<T> UnauthEth for T where
+    T: Stream<Item = Result<BytesMut, P2PStreamError>>
+        + Sink<Bytes, Error = P2PStreamError>
+        + CanDisconnect<Bytes>
+        + Unpin
+        + Send
+{
+}
+
 /// The Ethereum P2P handshake.
 #[derive(Debug, Default, Clone)]
 pub struct EthHandshake;
@@ -57,7 +67,7 @@ impl EthRlpxHandshake for EthHandshake {
     }
 }
 
-/// A **shared helper function** that performs the common handshake logic.
+/// Performs the `eth` rlpx protocol handshake using the given input stream.
 pub async fn eth_handshake(
     unauth: &mut dyn UnauthEth,
     status: Status,

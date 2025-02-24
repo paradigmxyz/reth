@@ -2,7 +2,6 @@ use crate::{
     capability::SharedCapabilities,
     disconnect::CanDisconnect,
     errors::{P2PHandshakeError, P2PStreamError},
-    handshake::UnauthEth,
     pinger::{Pinger, PingerEvent},
     DisconnectReason, HelloMessage, HelloMessageWithProtocols,
 };
@@ -202,11 +201,6 @@ where
     ) -> Pin<Box<dyn Future<Output = Result<(), P2PStreamError>> + Send + '_>> {
         Box::pin(async move { self.disconnect(reason).await })
     }
-}
-
-impl<S> UnauthEth for P2PStream<S> where
-    S: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin + Send + Sync
-{
 }
 
 /// A P2PStream wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
