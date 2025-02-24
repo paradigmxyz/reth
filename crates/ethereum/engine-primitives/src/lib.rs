@@ -13,7 +13,7 @@ extern crate alloc;
 
 mod payload;
 use alloc::sync::Arc;
-use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, PayloadError};
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
@@ -23,10 +23,10 @@ use reth_chainspec::ChainSpec;
 use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
 use reth_payload_primitives::{
     validate_version_specific_fields, BuiltPayload, EngineApiMessageVersion,
-    EngineObjectValidationError, PayloadOrAttributes, PayloadTypes,
+    EngineObjectValidationError, NewPayloadError, PayloadOrAttributes, PayloadTypes,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, NodePrimitives, SealedBlock};
+use reth_primitives::{Block, NodePrimitives, RecoveredBlock, SealedBlock};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -104,8 +104,9 @@ impl PayloadValidator for EthereumEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload)
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 }
 
@@ -116,7 +117,7 @@ where
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, EthPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, EthPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
@@ -126,6 +127,12 @@ where
         version: EngineApiMessageVersion,
         attributes: &EthPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(self.chain_spec(), version, attributes.into())
+        validate_version_specific_fields(
+            self.chain_spec(),
+            version,
+            PayloadOrAttributes::<Self::ExecutionData, EthPayloadAttributes>::PayloadAttributes(
+                attributes,
+            ),
+        )
     }
 }

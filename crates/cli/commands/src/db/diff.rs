@@ -1,6 +1,8 @@
 use clap::Parser;
-use reth_db::{open_db_read_only, tables_to_generic, DatabaseEnv, Tables};
-use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
+use reth_db::{open_db_read_only, tables_to_generic, DatabaseEnv};
+use reth_db_api::{
+    cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx, Tables,
+};
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_core::{

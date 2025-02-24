@@ -11,6 +11,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_eips::BlockNumberOrTag;
+use alloy_evm::Evm;
 use alloy_primitives::Address;
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
 use clap::Parser;
@@ -20,17 +21,16 @@ use reth::{
     chainspec::EthereumChainSpecParser,
     cli::Cli,
     revm::{
-        inspector_handle_register,
-        interpreter::{Interpreter, OpCode},
-        primitives::{Env, EnvWithHandlerCfg},
-        Database, Evm, EvmContext, Inspector,
+        bytecode::opcode::OpCode,
+        context_interface::ContextTr,
+        inspector::Inspector,
+        interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
     },
     rpc::api::eth::helpers::Call,
     transaction_pool::TransactionPool,
 };
-use reth_evm::EvmEnv;
+use reth_evm::ConfigureEvm;
 use reth_node_ethereum::node::EthereumNode;
-use revm_primitives::HandlerCfg;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
@@ -60,31 +60,24 @@ fn main() {
                             let call_request =
                                 TransactionRequest::from_recovered_transaction(tx.to_consensus());
 
+                            let evm_config = node.evm_config.clone();
+
                             let result = eth_api
                                 .spawn_with_call_at(
                                     call_request,
                                     BlockNumberOrTag::Latest.into(),
                                     EvmOverrides::default(),
                                     move |db, evm_env, tx_env| {
-                                        let EvmEnv { cfg_env, block_env, spec } = evm_env;
-                                        let env = EnvWithHandlerCfg {
-                                            handler_cfg: HandlerCfg::new(spec),
-                                            env: Env::boxed(cfg_env, block_env, tx_env),
-                                        };
                                         let mut dummy_inspector = DummyInspector::default();
-                                        {
-                                            // configure the evm with the custom inspector
-                                            let mut evm = Evm::builder()
-                                                .with_db(db)
-                                                .with_external_context(&mut dummy_inspector)
-                                                .with_env_with_handler_cfg(env)
-                                                .append_handler_register(inspector_handle_register)
-                                                .build();
-                                            // execute the transaction on a blocking task and await
-                                            // the
-                                            // inspector result
-                                            let _ = evm.transact()?;
-                                        }
+                                        let mut evm = evm_config.evm_with_env_and_inspector(
+                                            db,
+                                            evm_env,
+                                            &mut dummy_inspector,
+                                        );
+                                        // execute the transaction on a blocking task and await
+                                        // the
+                                        // inspector result
+                                        let _ = evm.transact(tx_env)?;
                                         Ok(dummy_inspector)
                                     },
                                 )
@@ -130,16 +123,16 @@ struct DummyInspector {
     ret_val: Vec<String>,
 }
 
-impl<DB> Inspector<DB> for DummyInspector
+impl<CTX> Inspector<CTX, EthInterpreter> for DummyInspector
 where
-    DB: Database,
+    CTX: ContextTr,
 {
     /// This method is called at each step of the EVM execution.
     /// It checks if the current opcode is valid and if so, it stores the opcode and its
     /// corresponding program counter in the `ret_val` vector.
-    fn step(&mut self, interp: &mut Interpreter, _context: &mut EvmContext<DB>) {
-        if let Some(opcode) = OpCode::new(interp.current_opcode()) {
-            self.ret_val.push(format!("{}: {}", interp.program_counter(), opcode));
+    fn step(&mut self, interp: &mut Interpreter<EthInterpreter>, _context: &mut CTX) {
+        if let Some(opcode) = OpCode::new(interp.bytecode.opcode()) {
+            self.ret_val.push(format!("{}: {}", interp.bytecode.pc(), opcode));
         }
     }
 }

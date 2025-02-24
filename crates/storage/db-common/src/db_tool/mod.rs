@@ -2,13 +2,12 @@
 
 use boyer_moore_magiclen::BMByte;
 use eyre::Result;
-use reth_db::{RawTable, TableRawRow};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
     table::{Decode, Decompress, DupSort, Table, TableRow},
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
+    DatabaseError, RawTable, TableRawRow,
 };
 use reth_fs_util as fs;
 use reth_node_types::NodeTypesWithDB;

@@ -8,8 +8,10 @@ use proptest::{
     test_runner::{TestRng, TestRunner},
 };
 use proptest_arbitrary_interop::arb;
-use reth_db::tables;
-use reth_db_api::table::{DupSort, Table, TableRow};
+use reth_db_api::{
+    table::{DupSort, Table, TableRow},
+    tables,
+};
 use reth_fs_util as fs;
 use reth_primitives::TransactionSigned;
 use std::collections::HashSet;

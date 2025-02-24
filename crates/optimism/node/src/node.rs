@@ -53,7 +53,7 @@ use reth_transaction_pool::{
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-use revm::primitives::TxEnv;
+use revm::context::TxEnv;
 use std::sync::Arc;
 
 /// Storage implementation for Optimism.
@@ -261,7 +261,7 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
+        Evm: ConfigureEvmEnv<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
@@ -333,7 +333,7 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv>,
+        Evm: ConfigureEvm<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,

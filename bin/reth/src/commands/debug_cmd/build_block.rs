@@ -1,4 +1,5 @@
 //! Command for debugging block building.
+use crate::primitives::kzg::KzgSettings;
 use alloy_consensus::{BlockHeader, TxEip4844};
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -10,7 +11,7 @@ use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
@@ -23,19 +24,13 @@ use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
-use reth_primitives_traits::{
-    transaction::signed::SignedTransactionIntoRecoveredExt, Block as _, SealedBlock, SealedHeader,
-    SignedTransaction,
-};
+use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignedTransaction};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{
-    cached::CachedReads, cancelled::CancelOnDrop, database::StateProviderDatabase,
-    primitives::KzgSettings,
-};
+use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop, database::StateProviderDatabase};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -203,8 +198,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             prev_randao: self.prev_randao,
             timestamp: self.timestamp,
             suggested_fee_recipient: self.suggested_fee_recipient,
-            // TODO: add support for withdrawals
-            withdrawals: None,
+            // Set empty withdrawals vector if Shanghai is active, None otherwise
+            withdrawals: provider_factory
+                .chain_spec()
+                .is_shanghai_active_at_timestamp(self.timestamp)
+                .then(Vec::new),
         };
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
