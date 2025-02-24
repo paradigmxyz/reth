@@ -837,9 +837,15 @@ where
                     chunked_proof_targets.entry(address).or_default();
                 match storage {
                     Entry::Occupied(mut entry) => {
+                        let entry_mut = entry.get_mut();
+
+                        if entry_mut.wiped {
+                            chuncked_hashed_storage.wiped = true;
+                            entry_mut.wiped = false;
+                        }
+
                         for storage_slot in storage_slots {
-                            let value = entry
-                                .get_mut()
+                            let value = entry_mut
                                 .storage
                                 .remove(&storage_slot)
                                 .expect("storage slot should be present");
@@ -850,7 +856,7 @@ where
                             }
                         }
 
-                        if entry.get_mut().storage.is_empty() {
+                        if entry_mut.storage.is_empty() {
                             entry.remove();
                         }
                     }
