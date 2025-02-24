@@ -32,4 +32,4 @@ reqwest = { workspace = true, features = ["rustls-tls", "json"] }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["time"] }
 
-ringbuffer = "0.15.0"
+ringbuffer.workspace = true

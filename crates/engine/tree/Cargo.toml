@@ -90,7 +90,7 @@ revm-state.workspace = true
 
 assert_matches.workspace = true
 criterion.workspace = true
-crossbeam-channel = "0.5.13"
+crossbeam-channel.workspace = true
 proptest.workspace = true
 rand.workspace = true
 
