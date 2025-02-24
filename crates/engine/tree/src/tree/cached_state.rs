@@ -356,11 +356,12 @@ impl ProviderCaches {
         key: StorageKey,
         value: Option<StorageValue>,
     ) {
-        let account_cache = self.storage_cache.get(&address).unwrap_or_default();
-
+        let account_cache = self.storage_cache.get(&address).unwrap_or_else(|| {
+            let account_cache = AccountStorageCache::default();
+            self.storage_cache.insert(address, account_cache.clone());
+            account_cache
+        });
         account_cache.insert_storage(key, value);
-
-        self.storage_cache.insert(address, account_cache);
     }
 
     /// Invalidate storage for specific account

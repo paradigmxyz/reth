@@ -674,8 +674,10 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_db::transaction::DbTx;
-    use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_db_api::{
+        models::AccountBeforeTx,
+        transaction::{DbTx, DbTxMut},
+    };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_evm::execute::BasicBlockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutionStrategyFactory;

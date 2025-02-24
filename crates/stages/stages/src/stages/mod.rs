@@ -48,14 +48,13 @@ mod tests {
     use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, B256, U256};
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_db::{
-        mdbx::{cursor::Cursor, RW},
-        tables, AccountsHistory,
-    };
+    use reth_db::mdbx::{cursor::Cursor, RW};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW},
         table::Table,
+        tables,
         transaction::{DbTx, DbTxMut},
+        AccountsHistory,
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_evm_ethereum::execute::EthExecutorProvider;

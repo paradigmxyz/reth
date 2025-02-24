@@ -35,6 +35,8 @@ hardfork!(
         Holocene,
         /// Isthmus: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/isthmus/overview.md>
         Isthmus,
+        /// TODO: add interop hardfork overview when available
+        Interop,
     }
 );
 
@@ -162,6 +164,7 @@ impl OpHardfork {
                 Self::Granite => Some(1723478400),
                 Self::Holocene => Some(1732633200),
                 Self::Isthmus => todo!(),
+                Self::Interop => todo!(),
             },
         )
     }
@@ -198,6 +201,7 @@ impl OpHardfork {
                 Self::Granite => Some(1726070401),
                 Self::Holocene => Some(1736445601),
                 Self::Isthmus => todo!(),
+                Self::Interop => todo!(),
             },
         )
     }
@@ -378,8 +382,10 @@ mod tests {
 
     #[test]
     fn check_op_hardfork_from_str() {
-        let hardfork_str =
-            ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE", "isthMUS"];
+        let hardfork_str = [
+            "beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE", "isthMUS",
+            "inTerOP",
+        ];
         let expected_hardforks = [
             OpHardfork::Bedrock,
             OpHardfork::Regolith,
@@ -389,6 +395,7 @@ mod tests {
             OpHardfork::Granite,
             OpHardfork::Holocene,
             OpHardfork::Isthmus,
+            OpHardfork::Interop,
         ];
 
         let hardforks: Vec<OpHardfork> =

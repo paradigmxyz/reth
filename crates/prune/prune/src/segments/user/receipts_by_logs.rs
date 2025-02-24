@@ -4,7 +4,7 @@ use crate::{
     PrunerError,
 };
 use alloy_consensus::TxReceipt;
-use reth_db::{table::Value, tables, transaction::DbTxMut};
+use reth_db_api::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockReader, DBProvider, NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
@@ -230,8 +230,7 @@ mod tests {
     use crate::segments::{PruneInput, PruneLimiter, ReceiptsByLogs, Segment};
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
-    use reth_db::tables;
-    use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+    use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
     use reth_primitives_traits::InMemorySize;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader, TransactionsProvider};
     use reth_prune_types::{PruneMode, PruneSegment, ReceiptsLogPruneConfig};

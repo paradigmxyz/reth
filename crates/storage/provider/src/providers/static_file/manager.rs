@@ -22,11 +22,13 @@ use reth_db::{
         iter_static_files, BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask,
         ReceiptMask, StaticFileCursor, TDWithHashMask, TransactionMask,
     },
-    table::{Decompress, Value},
-    tables,
 };
 use reth_db_api::{
-    cursor::DbCursorRO, models::StoredBlockBodyIndices, table::Table, transaction::DbTx,
+    cursor::DbCursorRO,
+    models::StoredBlockBodyIndices,
+    table::{Decompress, Table, Value},
+    tables,
+    transaction::DbTx,
 };
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::{FullNodePrimitives, NodePrimitives};

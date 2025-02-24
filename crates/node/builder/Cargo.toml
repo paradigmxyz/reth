@@ -68,7 +68,7 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 tokio-stream.workspace = true
 
 ## crypto
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 
 ## misc
 aquamarine.workspace = true

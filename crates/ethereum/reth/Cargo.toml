@@ -49,6 +49,7 @@ std = [
     "reth-consensus-common?/std",
     "alloy-rpc-types-eth?/std",
     "reth-storage-api?/std",
+    "reth-evm?/std",
 ]
 arbitrary = [
     "std",

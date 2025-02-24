@@ -5,11 +5,11 @@ use alloc::sync::Arc;
 use alloy_chains::Chain;
 use alloy_consensus::constants::DEV_GENESIS_HASH;
 use alloy_primitives::U256;
-use reth_chainspec::{make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
+use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_optimism_forks::DEV_HARDFORKS;
 use reth_primitives_traits::SealedHeader;
 
-use crate::{LazyLock, OpChainSpec};
+use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
 
 /// OP dev testnet specification
 ///
@@ -23,7 +23,7 @@ pub static OP_DEV: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
         inner: ChainSpec {
             chain: Chain::dev(),
             genesis_header: SealedHeader::new(
-                make_genesis_header(&genesis, &hardforks),
+                make_op_genesis_header(&genesis, &hardforks),
                 DEV_GENESIS_HASH,
             ),
             genesis,

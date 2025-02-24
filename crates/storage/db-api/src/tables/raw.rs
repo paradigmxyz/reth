@@ -1,5 +1,7 @@
-use crate::DatabaseError;
-use reth_db_api::table::{Compress, Decode, Decompress, DupSort, Encode, Key, Table, Value};
+use crate::{
+    table::{Compress, Decode, Decompress, DupSort, Encode, Key, Table, Value},
+    DatabaseError,
+};
 use serde::{Deserialize, Serialize};
 
 /// Tuple with `RawKey<T::Key>` and `RawValue<T::Value>`.

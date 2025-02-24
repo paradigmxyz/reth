@@ -24,5 +24,4 @@ alloy-consensus.workspace = true
 eyre.workspace = true
 
 [features]
-optimism = ["revm/optimism"]
 scroll = ["revm/scroll"]

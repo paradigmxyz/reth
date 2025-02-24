@@ -363,7 +363,7 @@ reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
 reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }
-reth-evm = { path = "crates/evm" }
+reth-evm = { path = "crates/evm", default-features = false }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-optimism-evm = { path = "crates/optimism/evm", default-features = false }
 reth-execution-errors = { path = "crates/evm/execution-errors", default-features = false }
@@ -445,15 +445,25 @@ reth-trie-sparse = { path = "crates/trie/sparse" }
 reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
 
 # revm
-revm = { version = "19.5.0", default-features = false }
-revm-primitives = { version = "15.2.0", default-features = false }
-revm-interpreter = { version = "15.2.0", default-features = false }
-revm-inspectors = "0.15.0"
+revm = { version = "20.0.0-alpha.1", default-features = false }
+revm-bytecode = { version = "1.0.0-alpha.1", default-features = false }
+revm-database = { version = "1.0.0-alpha.1", default-features = false }
+revm-state = { version = "1.0.0-alpha.1", default-features = false }
+revm-primitives = { version = "16.0.0-alpha.1", default-features = false }
+revm-interpreter = { version = "16.0.0-alpha.1", default-features = false }
+revm-inspector = { version = "1.0.0-alpha.1", default-features = false }
+revm-context = { version = "1.0.0-alpha.1", default-features = false }
+revm-context-interface = { version = "1.0.0-alpha.1", default-features = false }
+revm-database-interface = { version = "1.0.0-alpha.1", default-features = false }
+revm-specification = { version = "1.0.0-alpha.1", default-features = false }
+revm-optimism = { version = "1.0.0-alpha.1", default-features = false }
+revm-inspectors = "0.15"
 
 # eth
 alloy-chains = { version = "0.1.32", default-features = false }
 alloy-dyn-abi = "0.8.20"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
+alloy-evm = { version = "0.1", default-features = false }
 alloy-primitives = { version = "0.8.20", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-types = "0.8.20"
@@ -509,12 +519,13 @@ reth-scroll-trie = { path = "crates/scroll/trie" }
 poseidon-bn254 = { git = "https://github.com/scroll-tech/poseidon-bn254", rev = "526a64a", features = ["bn254"] }
 
 # op
-op-alloy-rpc-types = { version = "0.10.3", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.10.3", default-features = false }
-op-alloy-network = { version = "0.10.3", default-features = false }
-op-alloy-consensus = { version = "0.10.3", default-features = false }
-op-alloy-flz = { version = "0.10.3", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.10.3", default-features = false }
+alloy-op-evm = { version = "0.1", default-features = false }
+op-alloy-rpc-types = { version = "0.10.5", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.10.5", default-features = false }
+op-alloy-network = { version = "0.10.5", default-features = false }
+op-alloy-consensus = { version = "0.10.5", default-features = false }
+op-alloy-flz = { version = "0.10.5", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.10.5", default-features = false }
 
 # misc
 aquamarine = "0.6"
@@ -528,7 +539,7 @@ bytes = { version = "1.5", default-features = false }
 cfg-if = "1.0"
 clap = "4"
 dashmap = "6.0"
-derive_more = { version = "1", default-features = false, features = ["full"] }
+derive_more = { version = "2", default-features = false, features = ["full"] }
 dirs-next = "2.0.0"
 dyn-clone = "1.0.17"
 eyre = "0.6"
@@ -536,10 +547,10 @@ fdlimit = "0.3.0"
 generic-array = "0.14"
 humantime = "2.1"
 humantime-serde = "1.1"
-itertools = { version = "0.13", default-features = false }
+itertools = { version = "0.14", default-features = false }
 linked_hash_set = "0.1"
 modular-bitfield = "0.11.2"
-notify = { version = "6.1.1", default-features = false, features = ["macos_fsevent"] }
+notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
 nybbles = { version = "0.3.0", default-features = false }
 once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
 parking_lot = "0.12"
@@ -554,7 +565,7 @@ serde_with = { version = "3", default-features = false, features = ["macros"] }
 sha2 = { version = "0.10", default-features = false }
 shellexpand = "3.0.0"
 smallvec = "1"
-strum = { version = "0.26", default-features = false }
+strum = { version = "0.27", default-features = false }
 syn = "2.0"
 thiserror = { version = "2.0.0", default-features = false }
 tracing = "0.1.0"
@@ -585,7 +596,7 @@ async-stream = "0.3"
 async-trait = "0.1.68"
 futures = "0.3"
 futures-core = "0.3"
-futures-util = "0.3"
+futures-util = { version = "0.3", default-features = false }
 hyper = "1.3"
 hyper-util = "0.1.5"
 pin-project = "1.0.12"
@@ -595,7 +606,7 @@ tower = "0.4"
 tower-http = "0.6"
 
 # p2p
-discv5 = "0.8.0"
+discv5 = "0.9"
 if-addrs = "0.13"
 
 # rpc
@@ -613,9 +624,9 @@ jsonwebtoken = "9"
 proptest-arbitrary-interop = "0.1.0"
 
 # crypto
-enr = { version = "0.12.1", default-features = false }
+enr = { version = "0.13", default-features = false }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
-secp256k1 = { version = "0.29", default-features = false, features = ["global-context", "recovery"] }
+secp256k1 = { version = "0.30", default-features = false, features = ["global-context", "recovery"] }
 
 # for eip-4844
 c-kzg = "1.0.0"
@@ -633,13 +644,13 @@ proptest-derive = "0.5"
 serial_test = { default-features = false, version = "3" }
 similar-asserts = { version = "1.5.0", features = ["serde"] }
 tempfile = "3.8"
-test-fuzz = "6"
-rstest = "0.23.0"
+test-fuzz = "7"
+rstest = "0.24.0"
 
 # allocators
 tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
-tracy-client = "0.17.3"
+tracy-client = "0.18.0"
 snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 
 # TODO: When we build for a windows target on an ubuntu runner, crunchy tries to
@@ -648,7 +659,28 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 # See: https://github.com/eira-fransham/crunchy/issues/13
 crunchy = "=0.2.2"
 
-# [patch.crates-io]
+[patch.crates-io]
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "beb6832" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "beb6832" }
+
+revm = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v56" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-primitives = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v56" }
+revm-interpreter = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v56" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-specification = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+revm-optimism = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
+
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "8900c2b" }
+
+ff = { git = "https://github.com/scroll-tech/ff", branch = "feat/sp1" }
+alloy-eip2930 = { git = "https://github.com/scroll-tech/alloy-eips", branch = "v0.3.2" }
+
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
@@ -684,12 +716,3 @@ crunchy = "=0.2.2"
 # op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 #
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
-
-[patch.crates-io]
-revm = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v56" }
-revm-primitives = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v56" }
-revm-interpreter = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v56" }
-
-ff = { git = "https://github.com/scroll-tech/ff", branch = "feat/sp1" }
-
-alloy-eip2930 = { git = "https://github.com/scroll-tech/alloy-eips", branch = "v0.3.2" }

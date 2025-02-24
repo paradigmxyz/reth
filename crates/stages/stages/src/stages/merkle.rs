@@ -1,7 +1,11 @@
 use alloy_consensus::BlockHeader;
 use reth_codecs::Compact;
-use reth_db::tables;
-use reth_db_api::transaction::{DbTx, DbTxMut};
+use reth_consensus::ConsensusError;
+use reth_db_api::{
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
+use reth_primitives::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
     StatsReader, TrieWriter,
