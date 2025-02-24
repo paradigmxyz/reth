@@ -41,21 +41,21 @@ pub struct WorkloadExecutor {
 }
 
 impl WorkloadExecutor {
-
     pub fn new(cpu_threads: usize) -> Self {
         // Create runtime for I/O operations
         let runtime = Arc::new(Runtime::new().unwrap());
 
         // Create Rayon thread pool for CPU work
-        let rayon_pool = Arc::new(rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap());
+        let rayon_pool =
+            Arc::new(rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap());
 
         WorkloadExecutor { inner: WorkloadExecutorInner { runtime, rayon_pool } }
     }
 
     /// Returns access to the rayon pool
-   pub fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
-       &self.inner.rayon_pool
-   }
+    pub fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
+        &self.inner.rayon_pool
+    }
 }
 
 #[derive(Debug, Clone)]

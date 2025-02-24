@@ -1,15 +1,16 @@
 //! Entrypoint for payload processing.
 
-use crate::tree::root2::*;
 use crate::tree::{
-    cached_state::{CachedStateMetrics, ProviderCaches},
+    cached_state::{CachedStateMetrics, ProviderCaches, SavedCache},
+    root2::*,
     StateProviderBuilder,
 };
-use alloy_consensus::transaction::Recovered;
+use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_primitives::B256;
+use reth_evm::ConfigureEvmEnvFor;
 use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, RecoveredBlock};
-use reth_provider::providers::ConsistentDbView;
 use reth_provider::{
-    BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
     StateProviderFactory, StateReader,
 };
 use reth_trie::TrieInput;
@@ -18,15 +19,10 @@ use std::{
     collections::VecDeque,
     sync::{
         mpsc,
-        mpsc::{Receiver, Sender},
+        mpsc::{channel, Receiver, Sender},
+        Arc, RwLock,
     },
 };
-use std::sync::{Arc, RwLock};
-use std::sync::mpsc::channel;
-use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
-use reth_evm::ConfigureEvmEnvFor;
-use crate::tree::cached_state::SavedCache;
 
 /// Entrypoint for executing the payload.
 pub struct PayloadProcessor<N, Evm> {
@@ -34,14 +30,19 @@ pub struct PayloadProcessor<N, Evm> {
     /// The most recent cache used for execution.
     most_recent_cache: ExecutionCache,
     /// Metrics for prewarmed execution
-    metrics: CachedStateMetrics,
+    cache_metrics: CachedStateMetrics,
+    /// Metrics for trie operations
+    trie_metrics: StateRootTaskMetrics,
     /// Determines how to configure the evm for execution.
-    evm_config: Evm
+    evm_config: Evm,
+
+    _m: std::marker::PhantomData<N>,
 }
 
 impl<N, Evm> PayloadProcessor<N, Evm>
-        where N: NodePrimitives,
-        Evm: ConfigureEvmEnvFor<N>  + 'static
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvmEnvFor<N> + 'static,
 {
     /// Executes the payload based on the configured settings.
     pub fn execute(&self) {
@@ -81,24 +82,32 @@ impl<N, Evm> PayloadProcessor<N, Evm>
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    pub fn spawn<P>(&self, block: RecoveredBlock<N>, consistent_view: ConsistentDbView<P>, trie_input: TrieInput,
-     provider_builder: StateProviderBuilder<N, P>,
+    pub fn spawn<P>(
+        &self,
+        block: RecoveredBlock<N::Block>,
+        consistent_view: ConsistentDbView<P>,
+        trie_input: TrieInput,
+        provider_builder: StateProviderBuilder<N, P>,
     ) -> PayloadTaskHandle
     where
-        P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone,
+        P: DatabaseProviderFactory<Provider: BlockReader>
+            + BlockReader
+            + StateProviderFactory
+            + StateReader
+            + StateCommitmentProvider
+            + Clone
+            + 'static,
     {
-
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task
-        let state_root_config =
-            StateRootConfig::new_from_input(consistent_view, trie_input);
+        let state_root_config = StateRootConfig::new_from_input(consistent_view, trie_input);
         let multi_proof_task =
             StateRootTask2::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie);
 
         let caches = self.cache_for(block.header().parent_hash());
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
-            header: block.clone_header(),
+            header: block.clone_sealed_header(),
             evm_config: self.evm_config.clone(),
             caches,
             cache_metrics: Default::default(),
@@ -107,21 +116,26 @@ impl<N, Evm> PayloadProcessor<N, Evm>
         // wire the multiproof task to the prewarm task
         let to_multi_proof = multi_proof_task.state_root_message_sender();
         let prewarm_task = PrewarmTask::new(self.executor.clone(), prewarm_ctx, to_multi_proof);
-
+        let to_prewarm_task = prewarm_task.actions_tx.clone();
 
         let sparse_trie_task = SparseTrieTask {
             executor: self.executor.clone(),
             updates: sparse_trie_rx,
-            config: StateRootConfig {},
-            metrics: Default::default(),
-            max_concurrency: 0,
+            config: state_root_config,
+            metrics: self.trie_metrics.clone(),
+
+            // TODO settings
+            max_concurrency: 4,
         };
 
+        // wire the sparse trie to the state root response receiver
+        let (state_root_tx, state_root_rx) = channel();
+        sparse_trie_task.spawn(state_root_tx);
 
+        PayloadTaskHandle { prewarm: Some(to_prewarm_task), state_root: Some(state_root_rx) };
 
         todo!()
     }
-
 
     /// Returns the cache for the given parent hash.
     ///
@@ -129,7 +143,6 @@ impl<N, Evm> PayloadProcessor<N, Evm>
     fn cache_for(&self, parent_hash: B256) -> ProviderCaches {
         todo!()
     }
-
 }
 
 pub struct PayloadTaskHandle {
@@ -145,33 +158,31 @@ pub struct PayloadTaskHandle {
     prewarm: Option<Sender<PrewarmTaskEvent>>,
 
     /// Receiver for the state root
-    state_root: Option<mpsc::Receiver<StateRootResult>>
+    state_root: Option<mpsc::Receiver<StateRootResult>>,
 }
 
 impl PayloadTaskHandle {
-
     /// Awaits the state root
     pub fn state_root(&self) -> StateRootResult {
         todo!()
     }
 
-
     /// Terminates the pre-warming processing
     pub fn terminate_prewarming(&mut self) {
-       self.prewarm.take().map(|tx|tx.send(PrewarmTaskEvent::Terminate).ok());
+        self.prewarm.take().map(|tx| tx.send(PrewarmTaskEvent::Terminate).ok());
     }
 }
 
 impl Drop for PayloadTaskHandle {
     fn drop(&mut self) {
-       // TODO: terminate all tasks
-       self.terminate_prewarming();
+        // TODO: terminate all tasks
+        self.terminate_prewarming();
     }
 }
 
-
 /// A task responsible for populating the sparse trie.
 pub struct SparseTrieTask<F> {
+    /// Executor used to spawn subtasks.
     executor: WorkloadExecutor,
     /// Receives updates from the state root task
     updates: mpsc::Receiver<SparseTrieEvent>,
@@ -186,6 +197,8 @@ impl<F> SparseTrieTask<F>
 where
     F: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
 {
+    fn spawn(self, state_root: Sender<StateRootResult>) {}
+
     /// Runs the sparse trie task to completion.
     ///
     /// This waits for new incoming [`SparseTrieUpdate`].
@@ -198,10 +211,8 @@ where
 
         // TODO setup
 
-
         // run
         while let Ok(mut update) = self.updates.recv() {
-
             match update {
                 SparseTrieEvent::Update(_) => {}
                 SparseTrieEvent::Processed() => {
@@ -253,8 +264,11 @@ where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone,
 {
-
-    fn new(executor: WorkloadExecutor, ctx: PrewarmContext<N, P, C>, to_multi_proof: mpsc::Sender<StateRootMessage>) -> Self {
+    fn new(
+        executor: WorkloadExecutor,
+        ctx: PrewarmContext<N, P, C>,
+        to_multi_proof: mpsc::Sender<StateRootMessage>,
+    ) -> Self {
         let (actions_tx, actions_rx) = mpsc::channel();
         Self {
             executor,
@@ -319,8 +333,7 @@ struct PrewarmContext<N: NodePrimitives, P, C> {
     provider: StateProviderBuilder<N, P>,
 }
 
-impl<N: NodePrimitives, P, C> PrewarmContext<N, P, C> {
-}
+impl<N: NodePrimitives, P, C> PrewarmContext<N, P, C> {}
 
 enum PrewarmTaskEvent {
     Terminate,
@@ -333,5 +346,5 @@ enum PrewarmTaskEvent {
 #[derive(Clone)]
 struct ExecutionCache {
     // TODO: simplify internals
-    inner: Arc<RwLock<Option<SavedCache>>>
+    inner: Arc<RwLock<Option<SavedCache>>>,
 }

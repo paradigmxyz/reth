@@ -1,5 +1,6 @@
 //! State root task related functionality.
 
+use crate::tree::payload_processor::SparseTrieEvent;
 use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use metrics::Histogram;
@@ -28,6 +29,7 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
+use reth_workload_executor::WorkloadExecutor;
 use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -38,8 +40,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, error, trace, trace_span};
-use reth_workload_executor::WorkloadExecutor;
-use crate::tree::payload_processor::SparseTrieEvent;
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
@@ -351,7 +351,7 @@ struct MultiproofManager<Factory> {
     /// Queued calculations.
     pending: VecDeque<MultiproofInput<Factory>>,
     /// Thread pool to spawn multiproof calculations.
-    thread_pool: WorkloadExecutor
+    thread_pool: WorkloadExecutor,
 }
 
 impl<Factory> MultiproofManager<Factory>
@@ -360,7 +360,7 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(thread_pool: WorkloadExecutor,  thread_pool_size: usize) -> Self {
+    fn new(thread_pool: WorkloadExecutor, thread_pool_size: usize) -> Self {
         // we keep 2 threads to be used internally by [`StateRootTask`]
         let max_concurrent = thread_pool_size.saturating_sub(2);
         debug_assert!(max_concurrent != 0);
@@ -418,7 +418,6 @@ where
             state_root_message_sender,
         }: MultiproofInput<Factory>,
     ) {
-
         todo!()
         // let thread_pool = self.thread_pool.clone();
         //
@@ -535,7 +534,11 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new state root task with the unified message channel
-    pub fn new(config: StateRootConfig<Factory>, executor: WorkloadExecutor, to_sparse_trie: Sender<SparseTrieEvent>) -> Self {
+    pub fn new(
+        config: StateRootConfig<Factory>,
+        executor: WorkloadExecutor,
+        to_sparse_trie: Sender<SparseTrieEvent>,
+    ) -> Self {
         let (tx, rx) = channel();
         Self {
             config,
@@ -610,9 +613,9 @@ where
         //     // We clone the task sender here so that it can be used in case the sparse trie task
         //     // succeeds, without blocking due to any `Drop` implementation.
         //     //
-        //     // It's more important to make sure we capture any errors, than to make sure we send an
-        //     // error result without blocking, which is why we wait for `run_sparse_trie` to return
-        //     // before sending errors.
+        //     // It's more important to make sure we capture any errors, than to make sure we send
+        // an     // error result without blocking, which is why we wait for
+        // `run_sparse_trie` to return     // before sending errors.
         //     if let Err(err) = run_sparse_trie(config, metrics, rx, task_tx.clone()) {
         //         let _ = task_tx.send(StateRootMessage::RootCalculationError(err));
         //     }
