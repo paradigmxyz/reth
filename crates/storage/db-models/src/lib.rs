@@ -13,7 +13,7 @@ extern crate alloc;
 
 /// Accounts
 pub mod accounts;
-pub use accounts::AccountBeforeTx;
+pub use accounts::{AccountBeforeTx, AddressStorageKey, BlockNumberAddress};
 
 /// Blocks
 pub mod blocks;
