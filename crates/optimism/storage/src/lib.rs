@@ -8,6 +8,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+mod chain;
+pub use chain::OptStorage;
+
 pub mod predeploys;
 pub use predeploys::withdrawals_root;
 
