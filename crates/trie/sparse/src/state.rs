@@ -23,9 +23,9 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Blinded node provider factory.
     provider_factory: F,
     /// Sparse account trie.
-    state: SparseTrie<F::AccountNodeProvider>,
+    state: SparseTrie,
     /// Sparse storage tries.
-    storages: B256Map<SparseTrie<F::StorageNodeProvider>>,
+    storages: B256Map<SparseTrie>,
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// Collection of revealed storage trie paths, per account.
@@ -113,40 +113,27 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Returns reference to state trie if it was revealed.
-    pub const fn state_trie_ref(&self) -> Option<&RevealedSparseTrie<F::AccountNodeProvider>> {
+    pub const fn state_trie_ref(&self) -> Option<&RevealedSparseTrie> {
         self.state.as_revealed_ref()
     }
 
     /// Returns reference to storage trie if it was revealed.
-    pub fn storage_trie_ref(
-        &self,
-        address: &B256,
-    ) -> Option<&RevealedSparseTrie<F::StorageNodeProvider>> {
+    pub fn storage_trie_ref(&self, address: &B256) -> Option<&RevealedSparseTrie> {
         self.storages.get(address).and_then(|e| e.as_revealed_ref())
     }
 
     /// Returns mutable reference to storage sparse trie if it was revealed.
-    pub fn storage_trie_mut(
-        &mut self,
-        address: &B256,
-    ) -> Option<&mut RevealedSparseTrie<F::StorageNodeProvider>> {
+    pub fn storage_trie_mut(&mut self, address: &B256) -> Option<&mut RevealedSparseTrie> {
         self.storages.get_mut(address).and_then(|e| e.as_revealed_mut())
     }
 
     /// Takes the storage trie for the provided address.
-    pub fn take_storage_trie(
-        &mut self,
-        address: &B256,
-    ) -> Option<SparseTrie<F::StorageNodeProvider>> {
+    pub fn take_storage_trie(&mut self, address: &B256) -> Option<SparseTrie> {
         self.storages.remove(address)
     }
 
     /// Inserts storage trie for the provided address.
-    pub fn insert_storage_trie(
-        &mut self,
-        address: B256,
-        storage_trie: SparseTrie<F::StorageNodeProvider>,
-    ) {
+    pub fn insert_storage_trie(&mut self, address: B256, storage_trie: SparseTrie) {
         self.storages.insert(address, storage_trie);
     }
 
@@ -489,9 +476,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns mutable reference to the revealed sparse trie.
     ///
     /// If the trie is not revealed yet, its root will be revealed using the blinded node provider.
-    fn revealed_trie_mut(
-        &mut self,
-    ) -> SparseStateTrieResult<&mut RevealedSparseTrie<F::AccountNodeProvider>> {
+    fn revealed_trie_mut(&mut self) -> SparseStateTrieResult<&mut RevealedSparseTrie> {
         match self.state {
             SparseTrie::Blind => {
                 let (root_node, hash_mask, tree_mask) = self
@@ -580,7 +565,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         path: Nibbles,
         value: Vec<u8>,
     ) -> SparseStateTrieResult<()> {
-        self.state.update_leaf(path, value)?;
+        self.state.update_leaf(path, value, &mut self.provider_factory.account_node_provider())?;
         Ok(())
     }
 
@@ -592,7 +577,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         value: Vec<u8>,
     ) -> SparseStateTrieResult<()> {
         let storage_trie = self.storages.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
-        storage_trie.update_leaf(slot, value)?;
+        storage_trie.update_leaf(
+            slot,
+            value,
+            &mut self.provider_factory.storage_node_provider(address),
+        )?;
         Ok(())
     }
 
@@ -633,7 +622,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
     /// Remove the account leaf node.
     pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
-        self.state.remove_leaf(path)?;
+        self.state.remove_leaf(path, &mut self.provider_factory.account_node_provider())?;
         Ok(())
     }
 
@@ -644,7 +633,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         slot: &Nibbles,
     ) -> SparseStateTrieResult<()> {
         let storage_trie = self.storages.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
-        storage_trie.remove_leaf(slot)?;
+        storage_trie
+            .remove_leaf(slot, &mut self.provider_factory.storage_node_provider(address))?;
         Ok(())
     }
 }
