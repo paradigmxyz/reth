@@ -9,12 +9,14 @@ use reth_ethereum_forks::{EthereumHardfork, Hardfork};
 use reth_optimism_forks::OpHardfork;
 use reth_primitives_traits::SealedHeader;
 
-use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
+use crate::{
+    make_op_genesis_header, superchain_registry::read_superchain_genesis, LazyLock, OpChainSpec,
+};
 
 /// The Base mainnet spec
 pub static BASE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
-    let genesis = serde_json::from_str(include_str!("../res/genesis/base.json"))
-        .expect("Can't deserialize Base genesis json");
+    let genesis = read_superchain_genesis("base", "mainnet").expect("Can't read Base genesis");
+
     let hardforks = OpHardfork::base_mainnet();
     OpChainSpec {
         inner: ChainSpec {
