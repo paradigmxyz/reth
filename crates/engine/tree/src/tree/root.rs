@@ -815,8 +815,8 @@ where
             let mut chunked_proof_targets = MultiProofTargets::default();
 
             for (address, storage_slots) in chunk {
-                if let Some(account) = state_update.accounts.remove(&address) {
-                    chunked_state_update.accounts.insert(address, account);
+                if let Some(account) = state_update.accounts.get(&address) {
+                    chunked_state_update.accounts.insert(address, *account);
                 }
                 let fetched_storage_proof_targets_entry = self.fetched_proof_targets.entry(address);
                 let fetched_storage_proof_targets = match fetched_storage_proof_targets_entry {
@@ -885,7 +885,6 @@ where
         }
 
         debug!(target: "engine::tree", ?state_update, "State update after");
-        debug_assert!(state_update.is_empty());
 
         total_updates as u64
     }
