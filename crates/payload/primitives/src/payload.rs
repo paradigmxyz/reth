@@ -42,12 +42,12 @@ impl ExecutionPayload for ExecutionData {
         self.payload.block_number()
     }
 
-    fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.sidecar.parent_beacon_block_root()
-    }
-
     fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
         self.payload.withdrawals()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.sidecar.parent_beacon_block_root()
     }
 
     fn timestamp(&self) -> u64 {
@@ -60,18 +60,15 @@ impl ExecutionPayload for ExecutionData {
 ///
 /// This is a helper type to unify pre-validation of version specific fields of the engine API.
 #[derive(Debug)]
-pub enum PayloadOrAttributes<'a, Payload: ExecutionPayload, Attributes> {
+pub enum PayloadOrAttributes<'a, Payload, Attributes> {
     /// An [`ExecutionPayload`]
     ExecutionPayload(&'a Payload),
     /// A payload attributes type.
     PayloadAttributes(&'a Attributes),
 }
 
-impl<'a, Payload, Attributes> PayloadOrAttributes<'a, Payload, Attributes>
-where
-    Payload: ExecutionPayload,
-{
-    /// Construct a [`PayloadOrAttributes`] variant
+impl<'a, Payload, Attributes> PayloadOrAttributes<'a, Payload, Attributes> {
+    /// Construct a [`PayloadOrAttributes::ExecutionPayload`] variant
     pub const fn from_execution_payload(payload: &'a Payload) -> Self {
         Self::ExecutionPayload(payload)
     }
@@ -123,7 +120,6 @@ where
 impl<'a, Payload, AttributesType> From<&'a AttributesType>
     for PayloadOrAttributes<'a, Payload, AttributesType>
 where
-    Payload: ExecutionPayload,
     AttributesType: PayloadAttributes,
 {
     fn from(attributes: &'a AttributesType) -> Self {

@@ -302,12 +302,13 @@ impl MessageValidationKind {
 /// either an execution payload, or payload attributes.
 ///
 /// The version is provided by the [`EngineApiMessageVersion`] argument.
-pub fn validate_version_specific_fields<Payload: ExecutionPayload, Type, T>(
+pub fn validate_version_specific_fields<Payload, Type, T>(
     chain_spec: &T,
     version: EngineApiMessageVersion,
     payload_or_attrs: PayloadOrAttributes<'_, Payload, Type>,
 ) -> Result<(), EngineObjectValidationError>
 where
+    Payload: ExecutionPayload,
     Type: PayloadAttributes,
     T: EthereumHardforks,
 {
