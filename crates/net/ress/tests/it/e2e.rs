@@ -17,7 +17,7 @@ use tokio::sync::{mpsc, oneshot};
 async fn disconnect_on_stateful_pair() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
-    let protocol_provider = NoopRessProtocolProvider::default();
+    let protocol_provider = NoopRessProtocolProvider;
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
@@ -77,7 +77,7 @@ async fn disconnect_on_stateful_pair() {
 async fn message_exchange() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
-    let protocol_provider = NoopRessProtocolProvider::default();
+    let protocol_provider = NoopRessProtocolProvider;
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];

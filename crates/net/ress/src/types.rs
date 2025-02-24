@@ -78,8 +78,6 @@ pub struct StateWitnessNet(
 
 impl FromIterator<(B256, Bytes)> for StateWitnessNet {
     fn from_iter<T: IntoIterator<Item = (B256, Bytes)>>(iter: T) -> Self {
-        Self(Vec::from_iter(
-            iter.into_iter().map(|(hash, bytes)| StateWitnessEntry { hash, bytes }),
-        ))
+        Self(iter.into_iter().map(|(hash, bytes)| StateWitnessEntry { hash, bytes }).collect())
     }
 }

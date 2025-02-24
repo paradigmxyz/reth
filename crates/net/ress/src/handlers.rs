@@ -109,7 +109,7 @@ where
         RessProtocolConnection::new(
             self.provider.clone(),
             self.node_type,
-            self.peers_handle.clone(),
+            self.peers_handle,
             peer_id,
             conn,
             UnboundedReceiverStream::from(rx),

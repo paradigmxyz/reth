@@ -1,4 +1,4 @@
-//! `ress` protocol is an RLPx subprotocol for stateless nodes.
+//! `ress` protocol is an `RLPx` subprotocol for stateless nodes.
 //! following [RLPx specs](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
 
 #![doc(

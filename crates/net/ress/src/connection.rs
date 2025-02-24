@@ -56,7 +56,7 @@ type WitnessFut = Pin<
     >,
 >;
 
-/// The connection handler for the custom RLPx protocol.
+/// The connection handler for the custom `RLPx` protocol.
 #[derive(Debug)]
 pub struct RessProtocolConnection<P> {
     /// Provider.
