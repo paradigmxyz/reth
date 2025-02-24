@@ -55,11 +55,9 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
     /// `max(minTransactionSize, intercept + fastlzCoef*fastlzSize)`
     /// Uses cached EIP-2718 encoded bytes to avoid recomputing the encoding for each estimation.
     pub fn estimated_compressed_size(&self) -> u64 {
-        *self.estimated_tx_compressed_size.get_or_init(|| {
-            let encoded_2718 =
-                self.encoded_2718.get_or_init(|| self.inner.transaction().encoded_2718().into());
-            op_alloy_flz::tx_estimated_size_fjord(encoded_2718)
-        })
+        *self
+            .estimated_tx_compressed_size
+            .get_or_init(|| op_alloy_flz::tx_estimated_size_fjord(self.encoded_2718()))
     }
 
     /// Returns lazily computed EIP-2718 encoded bytes of the transaction.
