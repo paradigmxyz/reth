@@ -1270,14 +1270,11 @@ where
     Ok(())
 }
 
-/// Iterator over proof targets chunks.
+/// Iterator that chunks proof targets.
 ///
-/// Each chunk will have at most [`MULTIPROOF_ACCOUNTS_CHUNK_SIZE`] accounts and
-/// [`MULTIPROOF_STORAGES_CHUNK_SIZE`] storage slots per account.
-///
-/// This iterator will yield items of type [`Vec<B256Map<B256Set>>`], with each mapping having a
-/// maximum length of [`MULTIPROOF_ACCOUNTS_CHUNK_SIZE`], and each mapping value having a maximum
-/// length of [`MULTIPROOF_STORAGES_CHUNK_SIZE`].
+/// This iterator will yield items of type [`Vec<MultiProofTargets>`], with each
+/// [`MultiProofTargets`] mapping having a maximum length of `accounts_chunk_size`, and each mapping
+/// value [`B256Set`] having a maximum length of `storages_chunk_size`.
 struct ChunkedProofTargets {
     proof_targets: MultiProofTargets,
     accounts_chunk_size: usize,
@@ -1799,6 +1796,8 @@ mod tests {
         ]);
         let chunks = ChunkedProofTargets::new(targets.clone(), 1, 2);
 
+        // We're doing this manual assertions and not just using `assert_eq!` because we can't
+        // guarantee the order.
         for chunk in chunks.flatten() {
             // Every chunk should have at most one address
             assert_eq!(chunk.len(), 1);
