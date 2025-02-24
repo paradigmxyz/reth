@@ -93,9 +93,9 @@ impl PruneInput {
                 let last_tx = body.last_tx_num();
                 if last_tx + body.tx_count() == 0 {
                     // Prevents a scenario where the pruner correctly starts at a finalized block,
-                    // but the first transaction (tx_num = 0) only appears on an non-finalized one.
+                    // but the first transaction (tx_num = 0) only appears on a non-finalized one.
                     // Should only happen on a test/hive scenario.
-                    return Ok(None)
+                    return Ok(None);
                 }
                 last_tx
             }
@@ -104,7 +104,7 @@ impl PruneInput {
 
         let range = from_tx_number..=to_tx_number;
         if range.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         Ok(Some(range))
