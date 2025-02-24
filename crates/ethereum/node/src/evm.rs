@@ -3,6 +3,6 @@
 #[doc(inline)]
 pub use reth_evm::execute::BasicBlockExecutorProvider;
 #[doc(inline)]
-pub use reth_evm_ethereum::execute::{EthExecutionStrategyFactory, EthExecutorProvider};
+pub use reth_evm_ethereum::execute::EthExecutorProvider;
 #[doc(inline)]
 pub use reth_evm_ethereum::{EthEvm, EthEvmConfig};

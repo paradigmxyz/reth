@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 // Re-export execution types
-use crate::{system_calls::OnStateHook, Database};
+use crate::{system_calls::OnStateHook, ConfigureEvmFor, Database};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
@@ -191,7 +191,7 @@ pub trait BlockExecutionStrategy {
 }
 
 /// A strategy factory that can create block execution strategies.
-pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
+pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> {
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
 
@@ -229,7 +229,7 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
-    F: BlockExecutionStrategyFactory,
+    F: BlockExecutionStrategyFactory + 'static,
 {
     type Primitives = F::Primitives;
 
@@ -359,10 +359,8 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{address, bytes, U256};
+    use alloy_primitives::{address, U256};
     use core::marker::PhantomData;
-    use reth_ethereum_primitives::TransactionSigned;
     use reth_primitives::EthPrimitives;
     use revm::state::AccountInfo;
     use revm_database::{CacheDB, EmptyDBTyped};
@@ -416,80 +414,12 @@ mod tests {
         }
     }
 
-    struct TestExecutorStrategy {
-        result: BlockExecutionResult<Receipt>,
-    }
-
-    #[derive(Clone)]
-    struct TestExecutorStrategyFactory {
-        result: BlockExecutionResult<Receipt>,
-    }
-
-    impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
-        type Primitives = EthPrimitives;
-
-        fn create_strategy<'a, DB>(
-            &'a mut self,
-            _db: &'a mut State<DB>,
-            _block: &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
-        where
-            DB: Database,
-        {
-            TestExecutorStrategy { result: self.result.clone() }
-        }
-    }
-
-    impl BlockExecutionStrategy for TestExecutorStrategy {
-        type Primitives = EthPrimitives;
-        type Error = BlockExecutionError;
-
-        fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn execute_transaction(
-            &mut self,
-            _tx: Recovered<&TransactionSigned>,
-        ) -> Result<u64, Self::Error> {
-            Ok(0)
-        }
-
-        fn apply_post_execution_changes(
-            self,
-        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
-        {
-            Ok(self.result)
-        }
-
-        fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
-    }
-
     #[test]
     fn test_provider() {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
         let _ = executor.execute(&Default::default());
-    }
-
-    #[test]
-    fn test_strategy() {
-        let expected_result = BlockExecutionResult {
-            receipts: vec![Receipt::default()],
-            gas_used: 10,
-            requests: Requests::new(vec![bytes!("deadbeef")]),
-        };
-
-        let strategy_factory = TestExecutorStrategyFactory { result: expected_result.clone() };
-        let provider = BasicBlockExecutorProvider::new(strategy_factory);
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-        let executor = provider.executor(db);
-        let result = executor.execute(&Default::default());
-
-        assert!(result.is_ok());
-        let block_execution_output = result.unwrap();
-        assert_eq!(block_execution_output.result, expected_result);
     }
 
     fn setup_state_with_account(
