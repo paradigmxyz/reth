@@ -9,10 +9,10 @@ use alloy_eips::{
 };
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayload,
-    ExecutionPayloadBodiesV1, ExecutionPayloadBodyV1, ExecutionPayloadInputV2,
-    ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
-    ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields, TransitionConfiguration,
+    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
+    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    PraguePayloadFields, TransitionConfiguration,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -560,10 +560,11 @@ where
         &self,
         payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionPayload::from(payload);
+        let payload =
+            ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() };
         let payload_or_attrs =
-            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload, None,
+            PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
+                &payload,
             );
         self.inner
             .validator
@@ -572,7 +573,7 @@ where
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() })
+            .new_payload(payload)
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
@@ -596,10 +597,13 @@ where
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = payload.into_payload();
+        let payload = ExecutionData {
+            payload: payload.into_payload(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
         let payload_or_attrs =
-            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload, None,
+            PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
+                &payload,
             );
         self.inner
             .validator
@@ -607,7 +611,7 @@ where
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() })
+            .new_payload(payload)
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
@@ -633,11 +637,16 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionPayload::from(payload);
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                versioned_hashes,
+                parent_beacon_block_root,
+            }),
+        };
         let payload_or_attrs =
-            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
+            PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload,
-                Some(parent_beacon_block_root),
             );
         self.inner
             .validator
@@ -646,13 +655,7 @@ where
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(ExecutionData {
-                payload,
-                sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                    versioned_hashes,
-                    parent_beacon_block_root,
-                }),
-            })
+            .new_payload(payload)
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
@@ -682,27 +685,29 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionPayload::from(payload);
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
+            ),
+        };
         let payload_or_attrs =
-            PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
+            PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload,
-                Some(parent_beacon_block_root),
             );
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        self.inner.validator.validate_execution_requests(&execution_requests)?;
+        if let Some(requests) = payload.sidecar.requests() {
+            self.inner.validator.validate_execution_requests(requests)?;
+        }
+
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(ExecutionData {
-                payload,
-                sidecar: ExecutionPayloadSidecar::v4(
-                    CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
-                    PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
-                ),
-            })
+            .new_payload(payload)
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
