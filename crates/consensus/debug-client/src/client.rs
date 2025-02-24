@@ -96,7 +96,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
             // Send new events to execution client
             let _ = reth_rpc_api::EngineApiClient::<T>::new_payload_v3(
                 &execution_client,
-                payload.execution_payload_v3,
+                payload.execution_payload_v3.into(),
                 payload.versioned_hashes,
                 payload.parent_beacon_block_root,
             )

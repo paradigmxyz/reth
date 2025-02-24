@@ -7,9 +7,8 @@ use alloy_eips::{eip4844::BlobAndProofV1, eip7685::Requests, BlockId, BlockNumbe
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B256, U256, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration,
+    ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1, ForkchoiceState,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
 };
 use alloy_rpc_types_eth::{
     state::StateOverride, transaction::TransactionRequest, BlockOverrides,
@@ -42,11 +41,11 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     #[method(name = "newPayloadV1")]
-    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus>;
+    async fn new_payload_v1(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     #[method(name = "newPayloadV2")]
-    async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus>;
+    async fn new_payload_v2(&self, payload: ExecutionPayload) -> RpcResult<PayloadStatus>;
 
     /// Post Cancun payload handler
     ///
@@ -54,7 +53,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "newPayloadV3")]
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ExecutionPayload,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;
@@ -65,7 +64,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "newPayloadV4")]
     async fn new_payload_v4(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ExecutionPayload,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,

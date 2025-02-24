@@ -65,7 +65,7 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks, N: NodePrimitives>
             let envelope: <E as EngineTypes>::ExecutionPayloadEnvelopeV4 = payload.into();
             EngineApiClient::<E>::new_payload_v4(
                 &self.engine_api_client,
-                envelope.execution_payload(),
+                envelope.execution_payload().into(),
                 versioned_hashes,
                 payload_builder_attributes.parent_beacon_block_root().unwrap(),
                 requests,
@@ -75,7 +75,7 @@ impl<E: EngineTypes, ChainSpec: EthereumHardforks, N: NodePrimitives>
             let envelope: <E as EngineTypes>::ExecutionPayloadEnvelopeV3 = payload.into();
             EngineApiClient::<E>::new_payload_v3(
                 &self.engine_api_client,
-                envelope.execution_payload(),
+                envelope.execution_payload().into(),
                 versioned_hashes,
                 payload_builder_attributes.parent_beacon_block_root().unwrap(),
             )
