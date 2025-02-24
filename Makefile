@@ -391,7 +391,8 @@ ensure-codespell:
 # Dependencies:
 #   - ensure-dprint: Ensures that dprint is installed and available in the system.
 lint-toml: ensure-dprint
-	dprint fmt
+	cargo metadata --format-version=1 --no-deps | jq '.packages.[].manifest_path' | \
+	xargs dprint fmt --config dprint.json
 
 ensure-dprint:
 	@if ! command -v dprint &> /dev/null; then \
