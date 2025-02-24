@@ -261,7 +261,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=beb6832#beb68324d7e05ae2eafad9f726a94cb0b63d15a5"
+source = "git+https://github.com/alloy-rs/evm?rev=04fa394#04fa3947c5694c2d15956bb18a31834b95e0e975"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
@@ -369,7 +369,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=beb6832#beb68324d7e05ae2eafad9f726a94cb0b63d15a5"
+source = "git+https://github.com/alloy-rs/evm?rev=04fa394#04fa3947c5694c2d15956bb18a31834b95e0e975"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -3146,7 +3146,6 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
- "alloy-consensus",
  "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
@@ -3345,7 +3344,6 @@ dependencies = [
 name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
- "alloy-consensus",
  "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",

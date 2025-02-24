@@ -11,7 +11,6 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
-use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
@@ -241,16 +240,14 @@ where
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory>;
+    type Executor = BasicBlockExecutorProvider<EthEvmConfig>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let chain_spec = ctx.chain_spec();
         let evm_config = EthEvmConfig::new(ctx.chain_spec());
-        let strategy_factory = EthExecutionStrategyFactory::new(chain_spec, evm_config.clone());
-        let executor = BasicBlockExecutorProvider::new(strategy_factory);
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
     }
