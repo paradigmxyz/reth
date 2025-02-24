@@ -147,11 +147,11 @@ impl RlpxSubProtocols {
 
 /// A set of additional RLPx-based sub-protocol connection handlers.
 #[derive(Default)]
-pub(crate) struct RlpxSubProtocolHandlers(Vec<Box<dyn DynConnectionHandler>>);
+pub struct RlpxSubProtocolHandlers(Vec<Box<dyn DynConnectionHandler>>);
 
 impl RlpxSubProtocolHandlers {
     /// Returns all handlers.
-    pub(crate) fn into_iter(self) -> impl Iterator<Item = Box<dyn DynConnectionHandler>> {
+    pub fn into_iter(self) -> impl Iterator<Item = Box<dyn DynConnectionHandler>> {
         self.0.into_iter()
     }
 }
@@ -197,7 +197,7 @@ impl<T: ProtocolHandler> DynProtocolHandler for T {
 }
 
 /// Wrapper trait for internal ease of use.
-pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
+pub trait DynConnectionHandler: Send + Sync + 'static {
     fn protocol(&self) -> Protocol;
 
     fn into_connection(
