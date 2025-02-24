@@ -20,9 +20,7 @@ use reth_evm::{
     ConfigureEvm, Database, Evm, EvmEnv, EvmFactory, TransactionEnv,
 };
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{
-    EthPrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, TransactionSigned,
-};
+use reth_primitives::{EthPrimitives, Receipt, Recovered, SealedBlock, TransactionSigned};
 use reth_primitives_traits::NodePrimitives;
 use reth_revm::{
     context_interface::result::ResultAndState, db::State, specification::hardfork::SpecId,
@@ -40,15 +38,15 @@ where
     type Primitives = EthPrimitives;
 
     fn create_strategy<'a, DB>(
-        &'a mut self,
+        &'a self,
         db: &'a mut State<DB>,
-        block: &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
     where
         DB: Database,
     {
         let evm = self.evm_for_block(db, block.header());
-        EthExecutionStrategy::new(evm, block.sealed_block(), &self.chain_spec)
+        EthExecutionStrategy::new(evm, block, &self.chain_spec)
     }
 }
 
@@ -283,7 +281,7 @@ mod tests {
     use reth_chainspec::{ChainSpecBuilder, ForkCondition, MAINNET};
     use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
     use reth_execution_types::BlockExecutionResult;
-    use reth_primitives::{Account, Block, BlockBody, Transaction};
+    use reth_primitives::{Account, Block, BlockBody, RecoveredBlock, Transaction};
     use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Block as _};
     use reth_revm::{
         database::StateProviderDatabase,
