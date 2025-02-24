@@ -217,7 +217,7 @@ where
             leaves_added = stats.leaves_added(),
             missed_leaves = stats.missed_leaves(),
             precomputed_storage_roots = stats.precomputed_storage_roots(),
-            "calculated state root"
+            "Calculated state root"
         );
 
         Ok((root, trie_updates))

@@ -1,7 +1,7 @@
 //! Commonly used code snippets
 
 use super::{EthApiError, EthResult};
-use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, Recovered};
+use reth_primitives::Recovered;
 use reth_primitives_traits::SignedTransaction;
 use std::future::Future;
 
