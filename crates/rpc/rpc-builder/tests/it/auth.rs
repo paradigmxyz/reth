@@ -21,7 +21,7 @@ where
     let block = Block::<_>::default().seal_slow();
     EngineApiClient::new_payload_v1(
         client,
-        ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.clone().into_block()),
+        ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.clone().into_block()).into(),
     )
     .await;
     EngineApiClient::new_payload_v2(
@@ -31,7 +31,8 @@ where
                 &block.into_block(),
             ),
             withdrawals: None,
-        },
+        }
+        .into(),
     )
     .await;
     EngineApiClient::fork_choice_updated_v1(client, ForkchoiceState::default(), None).await;
