@@ -20,6 +20,7 @@ reth-primitives-traits.workspace = true
 reth-chain-state.workspace = true
 reth-trie.workspace = true
 reth-errors.workspace = true
+reth-trie-common.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -42,6 +43,7 @@ std = [
     "reth-execution-types/std",
     "reth-primitives/std",
     "reth-primitives-traits/std",
+    "reth-trie-common/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-rpc-types-engine/std",
