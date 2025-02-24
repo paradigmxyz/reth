@@ -1,7 +1,7 @@
 use super::txpool::PendingFees;
 use crate::{
-    identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
-    PoolTransaction, SubPoolLimit, ValidPoolTransaction,
+    identifier::TransactionId, metrics::BlobEvictionMetrics, pool::size::SizeTracker,
+    traits::BestTransactionsAttributes, PoolTransaction, SubPoolLimit, ValidPoolTransaction,
 };
 use std::{
     cmp::Ordering,
@@ -31,6 +31,8 @@ pub(crate) struct BlobTransactions<T: PoolTransaction> {
     ///
     /// See also [`reth_primitives_traits::InMemorySize::size`].
     size_of: SizeTracker,
+    /// Metrics for evictions
+    eviction_metrics: BlobEvictionMetrics,
 }
 
 // === impl BlobTransactions ===
@@ -221,6 +223,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
+        let start = std::time::Instant::now();
         let mut removed = Vec::new();
 
         while self.exceeds(&limit) {
@@ -228,6 +231,9 @@ impl<T: PoolTransaction> BlobTransactions<T> {
             let id = *tx.transaction.id();
             removed.push(self.remove_transaction(&id).expect("transaction exists"));
         }
+
+        self.eviction_metrics.blob_eviction_duration_seconds.record(start.elapsed());
+        self.eviction_metrics.blob_transactions_evicted.increment(removed.len() as u64);
 
         removed
     }
@@ -257,6 +263,7 @@ impl<T: PoolTransaction> Default for BlobTransactions<T> {
             all: Default::default(),
             size_of: Default::default(),
             pending_fees: Default::default(),
+            eviction_metrics: Default::default(),
         }
     }
 }
