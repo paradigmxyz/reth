@@ -836,28 +836,36 @@ where
                 let chunked_storage_proof_targets =
                     chunked_proof_targets.entry(address).or_default();
                 match storage {
-                    Entry::Occupied(mut entry) => {
-                        let entry_mut = entry.get_mut();
+                    Entry::Occupied(mut storage) => {
+                        let storage_mut = storage.get_mut();
 
-                        if entry_mut.wiped {
+                        // If the storage was wiped, set the wiped flag on the first chunk and reset
+                        // it on the original storage entry to prevent sending more chunks with
+                        // wiped storage.
+                        if storage_mut.wiped {
                             chuncked_hashed_storage.wiped = true;
-                            entry_mut.wiped = false;
+                            storage_mut.wiped = false;
                         }
 
+                        // Iterate over the storage slots
                         for storage_slot in storage_slots {
-                            let value = entry_mut
+                            let value = storage_mut
                                 .storage
                                 .remove(&storage_slot)
                                 .expect("storage slot should be present");
+                            // Always insert the storage slot in the chunked hashed storage
                             chuncked_hashed_storage.storage.insert(storage_slot, value);
 
+                            // Check if the storage slot was already fetched, and if not, add it to
+                            // the chunked storage proof targets
                             if fetched_storage_proof_targets.insert(storage_slot) {
                                 chunked_storage_proof_targets.insert(storage_slot);
                             }
                         }
 
-                        if entry_mut.storage.is_empty() {
-                            entry.remove();
+                        // If we processed all storage slots from the state update, delete the entry
+                        if storage_mut.storage.is_empty() {
+                            storage.remove();
                         }
                     }
                     Entry::Vacant(_) => unreachable!(),
@@ -877,6 +885,7 @@ where
         }
 
         debug!(target: "engine::tree", ?state_update, "State update after");
+        debug_assert!(state_update.is_empty());
 
         total_updates as u64
     }
