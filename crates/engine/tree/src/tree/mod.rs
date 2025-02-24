@@ -2673,12 +2673,27 @@ where
 
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
             debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
+
+            // Check if historical block is latest persisted block
+            let historical_block = match self.provider.block_number(historical)? {
+                Some(_) => self.persistence_state.last_persisted_block.hash,
+                None => historical,
+            };
+
             // Retrieve revert state for historical block.
-            let revert_state = consistent_view.revert_state(historical)?;
+            let revert_state = consistent_view.revert_state(historical_block)?;
             input.append(revert_state);
 
-            // Extend with contents of parent in-memory blocks.
-            for block in blocks.iter().rev() {
+            // Filter out blocks that are already persisted
+            let in_memory_blocks = blocks
+                .iter()
+                .filter(|b| {
+                    b.recovered_block().number() >
+                        self.persistence_state.last_persisted_block.number
+                })
+                .rev();
+
+            for block in in_memory_blocks {
                 input.append_cached_ref(block.trie_updates(), block.hashed_state())
             }
         } else {
