@@ -118,35 +118,35 @@ jobs:
 
           # consume-engine
           - sim: ethereum/eest/consume-engine
-            limit: tests/prague
+            limit: .*tests/prague
           - sim: ethereum/eest/consume-engine
-            limit: tests/cancun
+            limit: .*tests/cancun
           - sim: ethereum/eest/consume-engine
-            limit: tests/shanghai
+            limit: .*tests/shanghai
           - sim: ethereum/eest/consume-engine
-            limit: tests/berlin
+            limit: .*tests/berlin
           - sim: ethereum/eest/consume-engine
-            limit: tests/istanbul
+            limit: .*tests/istanbul
           - sim: ethereum/eest/consume-engine
-            limit: tests/homestead
+            limit: .*tests/homestead
           - sim: ethereum/eest/consume-engine
-            limit: tests/frontier
+            limit: .*tests/frontier
 
           # consume-rlp
           - sim: ethereum/eest/consume-rlp
-            limit: tests/prague
+            limit: .*tests/prague
           - sim: ethereum/eest/consume-rlp
-            limit: tests/cancun
+            limit: .*tests/cancun
           - sim: ethereum/eest/consume-rlp
-            limit: tests/shanghai
+            limit: .*tests/shanghai
           - sim: ethereum/eest/consume-rlp
-            limit: tests/berlin
+            limit: .*tests/berlin
           - sim: ethereum/eest/consume-rlp
-            limit: tests/istanbul
+            limit: .*tests/istanbul
           - sim: ethereum/eest/consume-rlp
-            limit: tests/homestead
+            limit: .*tests/homestead
           - sim: ethereum/eest/consume-rlp
-            limit: tests/frontier
+            limit: .*tests/frontier
     needs:
       - prepare-reth
       - prepare-hive

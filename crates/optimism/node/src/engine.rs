@@ -167,7 +167,7 @@ where
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, OpPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, OpPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_withdrawals_presence(
             self.chain_spec(),
@@ -190,7 +190,13 @@ where
         version: EngineApiMessageVersion,
         attributes: &OpPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(self.chain_spec(), version, attributes.into())?;
+        validate_version_specific_fields(
+            self.chain_spec(),
+            version,
+            PayloadOrAttributes::<Self::ExecutionData, OpPayloadAttributes>::PayloadAttributes(
+                attributes,
+            ),
+        )?;
 
         if attributes.gas_limit.is_none() {
             return Err(EngineObjectValidationError::InvalidParams(
