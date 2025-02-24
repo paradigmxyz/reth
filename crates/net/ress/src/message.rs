@@ -25,7 +25,7 @@ pub struct RessProtocolMessage {
 impl<'a> arbitrary::Arbitrary<'a> for RessProtocolMessage {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let message: RessMessage = u.arbitrary()?;
-        Ok(RessProtocolMessage { message_type: message.message_id(), message })
+        Ok(Self { message_type: message.message_id(), message })
     }
 }
 
@@ -250,9 +250,8 @@ impl Encodable for RessMessage {
             Self::Headers(header) => header.encode(out),
             Self::GetBlockBodies(request) => request.encode(out),
             Self::BlockBodies(body) => body.encode(out),
-            Self::GetBytecode(request) => request.encode(out),
+            Self::GetBytecode(request) | Self::GetWitness(request) => request.encode(out),
             Self::Bytecode(bytecode) => bytecode.encode(out),
-            Self::GetWitness(request) => request.encode(out),
             Self::Witness(witness) => witness.encode(out),
         }
     }
@@ -264,9 +263,8 @@ impl Encodable for RessMessage {
             Self::Headers(header) => header.length(),
             Self::GetBlockBodies(request) => request.length(),
             Self::BlockBodies(body) => body.length(),
-            Self::GetBytecode(request) => request.length(),
+            Self::GetBytecode(request) | Self::GetWitness(request) => request.length(),
             Self::Bytecode(bytecode) => bytecode.length(),
-            Self::GetWitness(request) => request.length(),
             Self::Witness(witness) => witness.length(),
         }
     }
