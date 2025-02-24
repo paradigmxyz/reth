@@ -8,6 +8,7 @@ use crate::{
     Capability, EthMessageID, EthVersion,
 };
 use alloy_primitives::bytes::Bytes;
+use alloy_rlp::{BufMut, Decodable, Encodable};
 use derive_more::{Deref, DerefMut};
 use std::{
     borrow::Cow,
@@ -37,6 +38,30 @@ impl RawCapabilityMessage {
     /// See also  [`EthMessage`](crate::EthMessage)
     pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
         Self::new(id as usize, payload)
+    }
+}
+
+impl Encodable for RawCapabilityMessage {
+    /// Encodes the `RawCapabilityMessage` into an RLP byte stream.
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.id.encode(out);
+        out.put_slice(&self.payload);
+    }
+
+    /// Returns the total length of the encoded message.
+    fn length(&self) -> usize {
+        self.id.length() + self.payload.len()
+    }
+}
+
+impl Decodable for RawCapabilityMessage {
+    /// Decodes a `RawCapabilityMessage` from an RLP byte stream.
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let id = usize::decode(buf)?;
+        let payload = Bytes::copy_from_slice(buf);
+        *buf = &buf[buf.len()..];
+
+        Ok(Self { id, payload })
     }
 }
 
@@ -383,6 +408,8 @@ pub struct UnsupportedCapabilityError {
 mod tests {
     use super::*;
     use crate::{Capabilities, Capability};
+    use alloy_primitives::bytes::Bytes;
+    use alloy_rlp::{Decodable, Encodable};
 
     #[test]
     fn from_eth_68() {
@@ -541,5 +568,20 @@ mod tests {
         // the 6th shared message is the first message of the eth capability
         let shared_eth = shared.find_by_relative_offset(1 + proto.messages()).unwrap();
         assert_eq!(shared_eth.name(), "eth");
+    }
+
+    #[test]
+    fn test_raw_capability_rlp() {
+        let msg = RawCapabilityMessage { id: 1, payload: Bytes::from(vec![0x01, 0x02, 0x03]) };
+
+        // Encode the message into bytes
+        let mut encoded = Vec::new();
+        msg.encode(&mut encoded);
+
+        // Decode the bytes back into RawCapbailitMessage
+        let decoded = RawCapabilityMessage::decode(&mut &encoded[..]).unwrap();
+
+        // Verify that the decoded message matches the original
+        assert_eq!(msg, decoded);
     }
 }
