@@ -10,7 +10,7 @@ use reth_storage_api::{errors::ProviderResult, DBProvider, StorageLocation};
 
 /// Trait that implements how block bodies are written to the storage.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockBodyWriter<Provider, Body: BlockBody> {
+pub(crate) trait BlockBodyWriter<Provider, Body: BlockBody> {
     /// Writes a set of block bodies to the storage.
     fn write_block_bodies(
         &self,
@@ -30,7 +30,7 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
 
 /// Input for reading a block body. Contains a header of block being read and a list of pre-fetched
 /// transactions.
-pub type ReadBodyInput<'a, B> =
+pub(crate) type ReadBodyInput<'a, B> =
     (&'a <B as Block>::Header, Vec<<<B as Block>::Body as BlockBody>::Transaction>);
 
 /// Trait that implements how block bodies are read from the storage.
@@ -39,7 +39,7 @@ pub type ReadBodyInput<'a, B> =
 /// trait is provided with transactions read beforehand and is expected to construct the block body
 /// from those transactions and additional data read from elsewhere.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockBodyReader<Provider> {
+pub(crate) trait BlockBodyReader<Provider> {
     /// The block type.
     type Block: Block;
 
@@ -93,7 +93,6 @@ where
         provider: &Provider,
         inputs: Vec<ReadBodyInput<'_, Self::Block>>,
     ) -> ProviderResult<Vec<<Self::Block as Block>::Body>> {
-        // TODO: Ideally storage should hold its own copy of chain spec
         let chain_spec = provider.chain_spec();
 
         let mut withdrawals_cursor = provider.tx_ref().cursor_read::<tables::BlockWithdrawals>()?;
