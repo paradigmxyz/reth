@@ -2,10 +2,13 @@ use crate::{BlockExecutionOutput, BlockExecutionResult};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
-use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
+use reth_primitives_traits::{
+    serde_bincode_compat::SerdeBincodeCompat, Account, Bytecode, Receipt, StorageEntry,
+};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::state::AccountInfo;
 use revm_database::{states::BundleState, BundleAccount};
+use std::borrow::Cow;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +50,48 @@ pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
     pub requests: Vec<Requests>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ExecutionOutcomeBincode<'a, T: SerdeBincodeCompat + std::fmt::Debug> {
+    pub bundle: Cow<'a, BundleState>,
+    pub receipts: Vec<Vec<T::BincodeRepr<'a>>>,
+    pub first_block: BlockNumber,
+    pub requests: Cow<'a, Vec<Requests>>,
+}
+
+impl<T: SerdeBincodeCompat + std::fmt::Debug> SerdeBincodeCompat for ExecutionOutcome<T> {
+    type BincodeRepr<'a>
+        = ExecutionOutcomeBincode<'a, T>
+    where
+        Self: 'a;
+
+    fn as_repr(&self) -> Self::BincodeRepr<'_> {
+        ExecutionOutcomeBincode {
+            bundle: Cow::Borrowed(&self.bundle),
+            receipts: self
+                .receipts
+                .iter()
+                .map(|vec| vec.iter().map(|receipt| T::as_repr(receipt)).collect())
+                .collect(),
+            first_block: self.first_block,
+            requests: Cow::Borrowed(&self.requests),
+        }
+    }
+
+    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+        ExecutionOutcome {
+            bundle: repr.bundle.into_owned(),
+            receipts: repr
+                .receipts
+                .into_iter()
+                .map(|vec| vec.into_iter().map(|receipt| T::from_repr(receipt)).collect())
+                .collect(),
+            first_block: repr.first_block,
+            requests: repr.requests.into_owned(),
+        }
+    }
 }
 
 impl<T> Default for ExecutionOutcome<T> {

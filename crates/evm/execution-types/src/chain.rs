@@ -527,7 +527,7 @@ pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives>
 /// Bincode-compatible [`Chain`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use crate::ExecutionOutcome;
+    use crate::{ExecutionOutcome, ExecutionOutcomeBincode};
     use alloc::borrow::Cow;
     use alloy_primitives::BlockNumber;
     use reth_ethereum_primitives::EthPrimitives;
@@ -577,8 +577,7 @@ pub(super) mod serde_bincode_compat {
         <N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>: Clone,
     {
         blocks: RecoveredBlocks<'a, N::Block>,
-        execution_outcome:
-            Cow<'a, ExecutionOutcome<<N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>>>,
+        execution_outcome: Cow<'a, ExecutionOutcomeBincode<'a, N::Receipt>>, // Use the new type
         trie_updates: Option<TrieUpdates<'a>>,
     }
 
@@ -631,29 +630,9 @@ pub(super) mod serde_bincode_compat {
         <N::Receipt as SerdeBincodeCompat>::BincodeRepr<'a>: Clone,
     {
         fn from(value: &'a super::Chain<N>) -> Self {
-            let converted_execution_outcome = {
-                let original = &value.execution_outcome;
-                let converted_receipts = original
-                    .receipts()
-                    .iter()
-                    .map(|vec| {
-                        vec.iter()
-                            .map(|receipt| <N::Receipt as SerdeBincodeCompat>::as_repr(receipt))
-                            .collect::<Vec<_>>()
-                    })
-                    .collect::<Vec<_>>();
-
-                ExecutionOutcome {
-                    bundle: original.bundle.clone(),
-                    receipts: converted_receipts,
-                    requests: original.requests.clone(),
-                    first_block: original.first_block,
-                }
-            };
-
             Self {
                 blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
-                execution_outcome: Cow::Owned(converted_execution_outcome),
+                execution_outcome: Cow::Owned(value.execution_outcome.as_repr()), 
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
         }
@@ -671,21 +650,15 @@ pub(super) mod serde_bincode_compat {
             let converted_execution_outcome = {
                 let original = value.execution_outcome.into_owned();
                 let converted_receipts = original
-                    .receipts()
-                    .iter()
-                    .map(|vec| {
-                        vec.iter()
-                            .map(|receipt| {
-                                <N::Receipt as SerdeBincodeCompat>::from_repr(receipt.clone())
-                            })
-                            .collect::<Vec<_>>()
-                    })
+                    .receipts
+                    .into_iter()
+                    .map(|vec| vec.into_iter().map(N::Receipt::from_repr).collect::<Vec<_>>())
                     .collect::<Vec<_>>();
 
                 ExecutionOutcome {
-                    bundle: original.bundle,
+                    bundle: original.bundle.into_owned(),
                     receipts: converted_receipts,
-                    requests: original.requests,
+                    requests: original.requests.into_owned(),
                     first_block: original.first_block,
                 }
             };
