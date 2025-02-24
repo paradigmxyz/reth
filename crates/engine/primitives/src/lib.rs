@@ -13,9 +13,7 @@ extern crate alloc;
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::B256;
-use alloy_rpc_types_engine::ExecutionData;
-use core::fmt::{self, Debug};
+use core::fmt;
 use reth_payload_primitives::{
     validate_execution_requests, BuiltPayload, EngineApiMessageVersion,
     EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes,
@@ -24,6 +22,9 @@ use reth_payload_primitives::{
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock};
 use reth_primitives_traits::Block;
 use serde::{de::DeserializeOwned, Serialize};
+
+// Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
+pub use reth_payload_primitives::ExecutionPayload;
 
 mod error;
 pub use error::*;
@@ -39,34 +40,6 @@ pub use event::*;
 
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
-
-/// An execution payload.
-pub trait ExecutionPayload:
-    Serialize + DeserializeOwned + Debug + Clone + Send + Sync + 'static
-{
-    /// Returns the parent hash of the block.
-    fn parent_hash(&self) -> B256;
-
-    /// Returns the hash of the block.
-    fn block_hash(&self) -> B256;
-
-    /// Returns the number of the block.
-    fn block_number(&self) -> u64;
-}
-
-impl ExecutionPayload for ExecutionData {
-    fn parent_hash(&self) -> B256 {
-        self.payload.parent_hash()
-    }
-
-    fn block_hash(&self) -> B256 {
-        self.payload.block_hash()
-    }
-
-    fn block_number(&self) -> u64 {
-        self.payload.block_number()
-    }
-}
 
 /// This type defines the versioned types of the engine API.
 ///
@@ -117,7 +90,7 @@ pub trait EngineTypes:
     /// Execution data.
     type ExecutionData: ExecutionPayload;
 
-    /// Converts a [`BuiltPayload`] into an [`ExecutionData`].
+    /// Converts a [`BuiltPayload`] into an [`Self::ExecutionData`].
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
@@ -165,7 +138,11 @@ pub trait EngineValidator<Types: EngineTypes>:
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, <Types as PayloadTypes>::PayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<
+            '_,
+            Types::ExecutionData,
+            <Types as PayloadTypes>::PayloadAttributes,
+        >,
     ) -> Result<(), EngineObjectValidationError>;
 
     /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
