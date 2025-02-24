@@ -13,7 +13,7 @@ pub use reth_execution_errors::{
 };
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{NodePrimitives, Receipt, Recovered, RecoveredBlock};
+use reth_primitives::{NodePrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock};
 pub use reth_storage_errors::provider::ProviderError;
 use revm::state::{Account, AccountStatus, EvmState};
 use revm_database::{states::bundle_state::BundleRetention, State};
@@ -197,9 +197,9 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> {
 
     /// Creates a strategy using the given database.
     fn create_strategy<'a, DB>(
-        &'a mut self,
+        &'a self,
         db: &'a mut State<DB>,
-        block: &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
     where
         DB: Database;

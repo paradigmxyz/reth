@@ -7491,6 +7491,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-forks",
+ "reth-ethereum-primitives",
  "reth-evm",
  "reth-fs-util",
  "reth-payload-primitives",

@@ -2,7 +2,6 @@
 
 use futures::Stream;
 use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
-use reth_payload_validator::ExecutionPayloadValidator;
 use std::path::PathBuf;
 use tokio_util::either::Either;
 
@@ -94,14 +93,14 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     }
 
     /// Creates reorgs with specified frequency.
-    fn reorg<Provider, Evm, Spec>(
+    fn reorg<Provider, Evm, Validator>(
         self,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator<Spec>,
+        payload_validator: Validator,
         frequency: usize,
         depth: Option<usize>,
-    ) -> EngineReorg<Self, Engine, Provider, Evm, Spec>
+    ) -> EngineReorg<Self, Engine, Provider, Evm, Validator>
     where
         Self: Sized,
     {
@@ -117,14 +116,14 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
 
     /// If frequency is [Some], returns the stream that creates reorgs with
     /// specified frequency. Otherwise, returns `Self`.
-    fn maybe_reorg<Provider, Evm, Spec>(
+    fn maybe_reorg<Provider, Evm, Validator>(
         self,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator<Spec>,
+        payload_validator: Validator,
         frequency: Option<usize>,
         depth: Option<usize>,
-    ) -> Either<EngineReorg<Self, Engine, Provider, Evm, Spec>, Self>
+    ) -> Either<EngineReorg<Self, Engine, Provider, Evm, Validator>, Self>
     where
         Self: Sized,
     {
