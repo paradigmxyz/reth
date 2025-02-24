@@ -815,9 +815,17 @@ where
             let mut chunked_proof_targets = MultiProofTargets::default();
 
             for (address, storage_slots) in chunk {
-                if let Some(account) = state_update.accounts.get(&address) {
-                    chunked_state_update.accounts.insert(address, *account);
-                }
+                // Do not remove the account from the state update, because if there's multiple
+                // storage slots chunks for the same address, we need to have an account update in
+                // each of them.
+                chunked_state_update.accounts.insert(
+                    address,
+                    *state_update
+                        .accounts
+                        .get(&address)
+                        .expect("proof target chunks are calculated from the state update, so account is present"),
+                );
+
                 let fetched_storage_proof_targets_entry = self.fetched_proof_targets.entry(address);
                 let fetched_storage_proof_targets = match fetched_storage_proof_targets_entry {
                     Entry::Occupied(entry) => entry.into_mut(),
@@ -827,6 +835,8 @@ where
                     }
                 };
 
+                // We updated chunked state update, chunked proof targets, and fetched proof
+                // targets, so we can skip processing storage slots if there's none in the chunk.
                 if storage_slots.is_empty() {
                     continue
                 }
@@ -852,7 +862,7 @@ where
                             let value = storage_mut
                                 .storage
                                 .remove(&storage_slot)
-                                .expect("storage slot should be present");
+                                .expect("proof target chunks are calculated from the state update, so storage slot is present");
                             // Always insert the storage slot in the chunked hashed storage
                             chuncked_hashed_storage.storage.insert(storage_slot, value);
 
@@ -868,7 +878,9 @@ where
                             storage.remove();
                         }
                     }
-                    Entry::Vacant(_) => unreachable!(),
+                    Entry::Vacant(_) => {
+                        unreachable!("proof target chunks are calculated from the state update, so storage is present")
+                    }
                 }
                 chunked_state_update.storages.insert(address, chuncked_hashed_storage);
             }
