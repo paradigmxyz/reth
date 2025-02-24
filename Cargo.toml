@@ -27,6 +27,7 @@ members = [
     "crates/engine/primitives/",
     "crates/engine/service",
     "crates/engine/tree/",
+    "crates/engine/workload/",
     "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
@@ -331,6 +332,7 @@ reth-downloaders = { path = "crates/net/downloaders" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-engine-local = { path = "crates/engine/local" }
+reth-workload-executor = { path = "crates/engine/workload" }
 reth-engine-primitives = { path = "crates/engine/primitives", default-features = false }
 reth-engine-tree = { path = "crates/engine/tree" }
 reth-engine-service = { path = "crates/engine/service" }
