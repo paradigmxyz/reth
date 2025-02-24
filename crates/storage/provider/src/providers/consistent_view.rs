@@ -62,17 +62,20 @@ where
             debug!(target: "providers::consistent_view", ?block_hash, block_number, "Returning empty revert state");
             Ok(HashedPostState::default())
         } else {
+            let revert_state = HashedPostState::from_reverts::<
+                <Factory::StateCommitment as StateCommitment>::KeyHasher,
+            >(provider.tx_ref(), block_number + 1)?;
             debug!(
                 target: "providers::consistent_view",
                 ?block_hash,
                 block_number,
                 best_block_number,
                 last_block_number,
+                accounts = revert_state.accounts.len(),
+                storages = revert_state.storages.len(),
                 "Returning non-empty revert state"
             );
-            Ok(HashedPostState::from_reverts::<
-                <Factory::StateCommitment as StateCommitment>::KeyHasher,
-            >(provider.tx_ref(), block_number + 1)?)
+            Ok(revert_state)
         }
     }
 
