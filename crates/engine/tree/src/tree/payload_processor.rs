@@ -130,7 +130,10 @@ where
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
-        sparse_trie_task.spawn(state_root_tx);
+        self.executor.spawn_blocking(move || {
+            let res = sparse_trie_task.run();
+            let _ = state_root_tx.send(res);
+        });
 
         PayloadTaskHandle { prewarm: Some(to_prewarm_task), state_root: Some(state_root_rx) };
 
@@ -197,8 +200,6 @@ impl<F> SparseTrieTask<F>
 where
     F: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
 {
-    fn spawn(self, state_root: Sender<StateRootResult>) {}
-
     /// Runs the sparse trie task to completion.
     ///
     /// This waits for new incoming [`SparseTrieUpdate`].

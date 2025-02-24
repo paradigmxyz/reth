@@ -32,7 +32,7 @@
 
 use rayon::ThreadPool as RayonPool;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
+use tokio::{runtime::Runtime, task::JoinHandle};
 
 /// An executor for mixed I/O and CPU workloads.
 #[derive(Debug, Clone)]
@@ -50,6 +50,21 @@ impl WorkloadExecutor {
             Arc::new(rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap());
 
         WorkloadExecutor { inner: WorkloadExecutorInner { runtime, rayon_pool } }
+    }
+
+    /// Returns access to the tokio runtime
+    pub fn runtime(&self) -> &Arc<Runtime> {
+        &self.inner.runtime
+    }
+
+    /// Shorthand for [Runtime::spawn_blocking]
+    #[track_caller]
+    pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.runtime().spawn_blocking(func)
     }
 
     /// Returns access to the rayon pool
