@@ -936,8 +936,6 @@ struct CheckEndConditionParams<'a> {
     proof_sequencer: &'a ProofSequencer,
 }
 
-
-
 // Returns true if all state updates finished and all profs processed.
 fn check_end_condition(
     CheckEndConditionParams {
@@ -1185,8 +1183,6 @@ mod tests {
             + Clone
             + 'static,
     {
-
-
         let executor = WorkloadExecutor::new(2);
         let config = create_state_root_config(factory, TrieInput::default());
 
@@ -1253,7 +1249,6 @@ mod tests {
             state_sorted,
             prefix_sets: Arc::new(input.prefix_sets),
         };
-
 
         let executor = WorkloadExecutor::new(2);
 
