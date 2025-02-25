@@ -16,11 +16,17 @@ use reth_primitives_traits::{
     header::SealedHeaderFor, NodePrimitives, RecoveredBlock, SignedTransaction,
 };
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
-    StateProviderFactory, StateReader,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    StateCommitmentProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
-use reth_trie::{MultiProofTargets, TrieInput};
+use reth_trie::{
+    hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
+    trie_cursor::InMemoryTrieCursorFactory, MultiProofTargets, TrieInput,
+};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_sparse::SparseStateTrie;
 use reth_workload_executor::WorkloadExecutor;
 use std::{
     collections::VecDeque,
@@ -31,7 +37,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Entrypoint for executing the payload.
 pub struct PayloadProcessor<N, Evm> {
@@ -94,6 +100,7 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
+    // TODO: needs config to determine how to run this (prewarim optional e.g.)
     pub fn spawn<P>(
         &self,
         block: RecoveredBlock<N::Block>,
@@ -224,43 +231,77 @@ where
     /// This concludes once the last trie update has been received.
     // TODO this should probably return the stateroot as response so we can wire a oneshot channel
     fn run(mut self) -> StateRootResult {
+        let now = Instant::now();
+        let provider_ro = self.config.consistent_view.provider_ro()?;
+        let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
+            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+            &self.config.nodes_sorted,
+        );
+        let blinded_provider_factory = ProofBlindedProviderFactory::new(
+            in_memory_trie_cursor.clone(),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                &self.config.state_sorted,
+            ),
+            self.config.prefix_sets.clone(),
+        );
+
         let mut num_iterations = 0;
-        // let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
+        let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
 
-        // TODO setup
-
-        // run
         while let Ok(mut update) = self.updates.recv() {
-            match update {
-                SparseTrieEvent::Update(_) => {}
-                SparseTrieEvent::Processed() => {
-                    // TODO apply update to trie, needs shared access?
-                }
+            num_iterations += 1;
+            let mut num_updates = 1;
+            while let Ok(next) = self.updates.try_recv() {
+                update.extend(next);
+                num_updates += 1;
             }
 
-            // num_iterations += 1;
-            // let mut num_updates = 1;
-            //
-            // while let Ok(next) = self.updates.try_recv() {
-            //     // update.extend(next);
-            //     // num_updates += 1;
-            // }
+            debug!(
+                target: "engine::root",
+                num_updates,
+                account_proofs = update.multiproof.account_subtree.len(),
+                storage_proofs = update.multiproof.storages.len(),
+                "Updating sparse trie"
+            );
+
+            let elapsed =
+                crate::tree::root2::update_sparse_trie(&mut trie, update).map_err(|e| {
+                    ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+                })?;
+            self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
+            trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
 
-        todo!()
+        debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
+
+        let start = Instant::now();
+        let (state_root, trie_updates) = trie.root_with_updates().map_err(|e| {
+            ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+        })?;
+        let elapsed = start.elapsed();
+
+        self.metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
+
+        Ok(StateRootComputeOutcome {
+            state_root: (state_root, trie_updates),
+            total_time: now.elapsed(),
+            time_from_last_update: elapsed,
+        })
     }
 }
 
-/// The event type the sparse trie task operates on.
-pub(crate) enum SparseTrieEvent {
-    /// Updates received from the multiproof task.
-    ///
-    /// This represents a stream of [`SparseTrieUpdate`] where a `None` indicates that all updates
-    /// have been received.
-    Update(Option<SparseTrieUpdate>),
-    /// Updates processed from the spawned trie updates jobs (update_sparse_trie)
-    Processed(),
-}
+/// Aliased for now to not introduce too many changes at once.
+pub type SparseTrieEvent = SparseTrieUpdate;
+
+// /// The event type the sparse trie task operates on.
+// pub(crate) enum SparseTrieEvent {
+//     /// Updates received from the multiproof task.
+//     ///
+//     /// This represents a stream of [`SparseTrieUpdate`] where a `None` indicates that all
+// updates     /// have been received.
+//     Update(Option<SparseTrieUpdate>),
+// }
 
 /// A task that executes transactions individually in parallel.
 pub struct PrewarmTask<N: NodePrimitives, P, Evm> {
@@ -370,6 +411,7 @@ where
 
             if self.is_done() {
                 /// we're done and terminate this task
+                // TODO should we wait for terminate signale and flush the cache here?
                 break
             }
         }
@@ -465,6 +507,8 @@ where
 
         let mut evm_env = evm_config.evm_env(&header);
 
+        // we must disable the nonce check so that we can execute the transaction even if the nonce
+        // doesn't match what's on chain.
         evm_env.cfg_env.disable_nonce_check = true;
 
         // create a new executor and disable nonce checks in the env

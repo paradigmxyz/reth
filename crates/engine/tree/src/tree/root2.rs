@@ -83,9 +83,9 @@ pub struct StateRootComputeOutcome {
 #[derive(Default, Debug)]
 pub struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
-    state: HashedPostState,
+    pub(crate) state: HashedPostState,
     /// The calculated multiproof
-    multiproof: MultiProof,
+    pub(crate) multiproof: MultiProof,
 }
 
 impl SparseTrieUpdate {
@@ -504,8 +504,7 @@ pub(crate) struct StateRootTaskMetrics {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 /// This feeds updates to the sparse trie task.
-
-// TODO(mattsse): rename to MultiProof
+// TODO(mattsse): rename to MultiProofTask
 #[derive(Debug)]
 pub struct StateRootTask2<Factory> {
     /// Task configuration.
@@ -1139,7 +1138,7 @@ where
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
-fn update_sparse_trie<BPF>(
+pub(crate) fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
     SparseTrieUpdate { state, multiproof }: SparseTrieUpdate,
 ) -> SparseStateTrieResult<Duration>
