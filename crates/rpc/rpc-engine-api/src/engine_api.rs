@@ -584,15 +584,13 @@ where
         payload: ExecutionPayloadV1,
     ) -> EngineApiResult<PayloadStatus>
     where
-        EngineT::ExecutionData: TryFrom<ExecutionPayloadV1>,
-        <EngineT::ExecutionData as TryFrom<ExecutionPayloadV1>>::Error:
-            std::error::Error + Send + Sync + 'static,
+        EngineT: EngineTypes<ExecutionData = ExecutionData>,
     {
         let start = Instant::now();
         let gas_used = payload.gas_used;
 
-        let execution_data = EngineT::ExecutionData::try_from(payload)
-            .map_err(|_| EngineApiError::UnknownPayload)?;
+        let execution_data =
+            ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() };
 
         let res = Self::new_payload_v1(self, execution_data).await;
         let elapsed = start.elapsed();
@@ -628,9 +626,7 @@ where
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus>
     where
-        EngineT::ExecutionData: TryFrom<ExecutionData>,
-        <EngineT::ExecutionData as TryFrom<ExecutionData>>::Error:
-            std::error::Error + Send + Sync + 'static,
+        EngineT: EngineTypes<ExecutionData = ExecutionData>,
     {
         let start = Instant::now();
         let gas_used = payload.execution_payload.gas_used;
@@ -639,10 +635,7 @@ where
             payload: payload.into_payload(),
             sidecar: ExecutionPayloadSidecar::none(),
         };
-
-        let engine_execution_data = EngineT::ExecutionData::try_from(execution_data)
-            .map_err(|_| EngineApiError::UnknownPayload)?;
-        let res = Self::new_payload_v2(self, engine_execution_data).await;
+        let res = Self::new_payload_v2(self, execution_data).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v2.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -679,9 +672,7 @@ where
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>
     where
-        EngineT::ExecutionData: TryFrom<ExecutionData>,
-        <EngineT::ExecutionData as TryFrom<ExecutionData>>::Error:
-            std::error::Error + Send + Sync + 'static,
+        EngineT: EngineTypes<ExecutionData = ExecutionData>,
     {
         let start = Instant::now();
         let gas_used = payload.payload_inner.payload_inner.gas_used;
@@ -693,10 +684,8 @@ where
                 parent_beacon_block_root,
             }),
         };
-        let engine_execution_data = EngineT::ExecutionData::try_from(execution_data)
-            .map_err(|_| EngineApiError::UnknownPayload)?;
 
-        let res = Self::new_payload_v3(self, engine_execution_data).await;
+        let res = Self::new_payload_v3(self, execution_data).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v3.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -734,9 +723,7 @@ where
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus>
     where
-        EngineT::ExecutionData: TryFrom<ExecutionData>,
-        <EngineT::ExecutionData as TryFrom<ExecutionData>>::Error:
-            std::error::Error + Send + Sync + 'static,
+        EngineT: EngineTypes<ExecutionData = ExecutionData>,
     {
         let start = Instant::now();
         let gas_used = payload.payload_inner.payload_inner.gas_used;
@@ -755,10 +742,7 @@ where
             }
         }
 
-        let engine_execution_data = EngineT::ExecutionData::try_from(execution_data)
-            .map_err(|_| EngineApiError::UnknownPayload)?;
-
-        let res = Self::new_payload_v4(self, engine_execution_data).await;
+        let res = Self::new_payload_v4(self, execution_data).await;
 
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
