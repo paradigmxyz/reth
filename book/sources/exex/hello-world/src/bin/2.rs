@@ -11,7 +11,7 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("my-exex", |ctx| async move { Ok(my_exex(ctx)) })
+            .install_exex("my-exex", |ctx| my_exex(ctx))
             .launch()
             .await?;
 
