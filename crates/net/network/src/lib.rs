@@ -124,10 +124,13 @@ pub mod test_utils;
 pub mod cache;
 pub mod config;
 pub mod error;
+/// Eth network protocol implementation.
+pub mod eth_protocol;
 pub mod eth_requests;
 pub mod import;
 pub mod message;
 pub mod peers;
+/// Trait helper that helps abstract the p2p protocol handling.
 pub mod protocol;
 pub mod transactions;
 
@@ -144,6 +147,8 @@ mod session;
 mod state;
 mod swarm;
 
+pub use eth_protocol::eth::EthNetworkProtocol;
+
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
 pub use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 pub use reth_network_api::{
@@ -153,9 +158,10 @@ pub use reth_network_api::{
 pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 pub use reth_network_types::{PeersConfig, SessionsConfig};
 pub use session::{
-    ActiveSessionHandle, ActiveSessionMessage, Direction, EthRlpxConnection, PeerInfo,
-    PendingSessionEvent, PendingSessionHandle, PendingSessionHandshakeError, SessionCommand,
-    SessionEvent, SessionId, SessionManager,
+    get_ecies_stream, ActiveSessionHandle, ActiveSessionMessage, Direction, EthRlpxConnection,
+    HandshakeInfo, PeerInfo, PendingSessionEvent, PendingSessionHandle,
+    PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId, SessionInfo,
+    SessionManager, TryFromPeerMessage,
 };
 
 pub use builder::NetworkBuilder;

@@ -1909,7 +1909,10 @@ struct TxManagerPollDurations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
+    use crate::{
+        eth_protocol::eth::EthNetworkProtocol, test_utils::Testnet, NetworkConfigBuilder,
+        NetworkManager,
+    };
     use alloy_primitives::hex;
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
@@ -2066,10 +2069,11 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
-            .disable_discovery()
-            .listener_port(0)
-            .build(client);
+        let config =
+            NetworkConfigBuilder::<EthNetworkPrimitives, EthNetworkProtocol>::new(secret_key)
+                .disable_discovery()
+                .listener_port(0)
+                .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
@@ -2140,10 +2144,11 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
-            .disable_discovery()
-            .listener_port(0)
-            .build(client);
+        let config =
+            NetworkConfigBuilder::<EthNetworkPrimitives, EthNetworkProtocol>::new(secret_key)
+                .disable_discovery()
+                .listener_port(0)
+                .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await
@@ -2216,10 +2221,11 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::new(secret_key)
-            .disable_discovery()
-            .listener_port(0)
-            .build(client);
+        let config =
+            NetworkConfigBuilder::<EthNetworkPrimitives, EthNetworkProtocol>::new(secret_key)
+                .disable_discovery()
+                .listener_port(0)
+                .build(client);
         let transactions_manager_config = config.transactions_manager_config.clone();
         let (network_handle, network, mut transactions, _) = NetworkManager::new(config)
             .await

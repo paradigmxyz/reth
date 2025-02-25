@@ -2,6 +2,7 @@
 
 use crate::{
     error::NetworkError,
+    eth_protocol::{eth::EthNetworkProtocol, NetworkProtocolHandler},
     import::{BlockImport, ProofOfStakeBlockImport},
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
@@ -32,7 +33,13 @@ pub fn rng_secret_key() -> SecretKey {
 
 /// All network related initialization settings.
 #[derive(Debug)]
-pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct NetworkConfig<
+    C,
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    P: NetworkProtocolHandler<N> = EthNetworkProtocol,
+> {
+    /// The Ethereum protocol handler
+    pub eth_protocol_handler: Arc<P>,
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
@@ -87,19 +94,19 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
 
 // === impl NetworkConfig ===
 
-impl<N: NetworkPrimitives> NetworkConfig<(), N> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkConfig<(), N, P> {
     /// Convenience method for creating the corresponding builder type
-    pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder<N> {
+    pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder<N, P> {
         NetworkConfigBuilder::new(secret_key)
     }
 
     /// Convenience method for creating the corresponding builder type with a random secret key.
-    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder<N> {
+    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder<N, P> {
         NetworkConfigBuilder::with_rng_secret_key()
     }
 }
 
-impl<C, N: NetworkPrimitives> NetworkConfig<C, N> {
+impl<C, N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkConfig<C, N, P> {
     /// Create a new instance with all mandatory fields set, rest is field with defaults.
     pub fn new(client: C, secret_key: SecretKey) -> Self
     where
@@ -134,18 +141,18 @@ impl<C, N: NetworkPrimitives> NetworkConfig<C, N> {
     }
 }
 
-impl<C, N> NetworkConfig<C, N>
+impl<C, N, P: NetworkProtocolHandler<N>> NetworkConfig<C, N, P>
 where
     C: BlockNumReader + 'static,
     N: NetworkPrimitives,
 {
     /// Convenience method for calling [`NetworkManager::new`].
-    pub async fn manager(self) -> Result<NetworkManager<N>, NetworkError> {
+    pub async fn manager(self) -> Result<NetworkManager<N, P>, NetworkError> {
         NetworkManager::new(self).await
     }
 }
 
-impl<C, N> NetworkConfig<C, N>
+impl<C, N, P: NetworkProtocolHandler<N>> NetworkConfig<C, N, P>
 where
     N: NetworkPrimitives,
     C: BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
@@ -157,10 +164,8 @@ where
     /// Starts the networking stack given a [`NetworkConfig`] and returns a handle to the network.
     pub async fn start_network(self) -> Result<NetworkHandle<N>, NetworkError> {
         let client = self.client.clone();
-        let (handle, network, _txpool, eth) = NetworkManager::builder::<C>(self)
-            .await?
-            .request_handler::<C>(client)
-            .split_with_handle();
+        let handler = NetworkManager::builder::<C>(self).await?;
+        let (handle, network, _txpool, eth) = handler.request_handler(client).split_with_handle();
 
         tokio::task::spawn(network);
         tokio::task::spawn(eth);
@@ -170,7 +175,12 @@ where
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
 #[derive(Debug)]
-pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct NetworkConfigBuilder<
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    P: NetworkProtocolHandler<N> = EthNetworkProtocol,
+> {
+    /// The Ethereum protocol handler
+    eth_protocol_handler: Arc<P>,
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
     /// How to configure discovery over DNS.
@@ -197,6 +207,7 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
     extra_protocols: RlpxSubProtocols,
+
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
     /// Whether tx gossip is disabled
@@ -219,7 +230,7 @@ impl NetworkConfigBuilder<EthNetworkPrimitives> {
 // === impl NetworkConfigBuilder ===
 
 #[allow(missing_docs)]
-impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> NetworkConfigBuilder<N, P> {
     /// Create a new builder instance with a random secret key.
     pub fn with_rng_secret_key() -> Self {
         Self::new(rng_secret_key())
@@ -241,6 +252,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor: None,
             hello_message: None,
             extra_protocols: Default::default(),
+            eth_protocol_handler: Arc::new(P::default()),
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
@@ -503,6 +515,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Overrides the eth protocol used by the network to handle outgoing and incoming connections.
+    pub fn eth_protocol(mut self, protocol: P) -> Self {
+        self.eth_protocol_handler = Arc::new(protocol);
+        self
+    }
+
     /// Sets whether tx gossip is disabled.
     pub const fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
         self.tx_gossip_disabled = disable_tx_gossip;
@@ -520,7 +538,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     pub fn build_with_noop_provider<ChainSpec>(
         self,
         chain_spec: Arc<ChainSpec>,
-    ) -> NetworkConfig<NoopProvider<ChainSpec>, N>
+    ) -> NetworkConfig<NoopProvider<ChainSpec>, N, P>
     where
         ChainSpec: EthChainSpec + Hardforks + 'static,
     {
@@ -539,7 +557,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// The given client is to be used for interacting with the chain, for example fetching the
     /// corresponding block for a given block hash we receive from a peer in the status message when
     /// establishing a connection.
-    pub fn build<C>(self, client: C) -> NetworkConfig<C, N>
+    pub fn build<C>(self, client: C) -> NetworkConfig<C, N, P>
     where
         C: ChainSpecProvider<ChainSpec: Hardforks>,
     {
@@ -559,6 +577,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor,
             hello_message,
             extra_protocols,
+            eth_protocol_handler,
             head,
             tx_gossip_disabled,
             block_import,
@@ -627,6 +646,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             status,
             hello_message,
             extra_protocols,
+            eth_protocol_handler,
             fork_filter,
             tx_gossip_disabled,
             transactions_manager_config,

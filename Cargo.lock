@@ -8085,6 +8085,7 @@ dependencies = [
  "schnellru",
  "secp256k1 0.30.0",
  "serde",
+ "serde_json",
  "serial_test",
  "smallvec",
  "tempfile",
@@ -8101,6 +8102,7 @@ name = "reth-network-api"
 version = "1.2.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-admin",
  "auto_impl",
  "derive_more 2.0.1",

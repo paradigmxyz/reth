@@ -1,7 +1,9 @@
 //! API related to listening for network events.
 
+use crate::message::NetworkMessage;
+use derive_more::Debug;
 use reth_eth_wire_types::{
-    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
+    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason,
     EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
     GetPooledTransactions, GetReceipts, NetworkPrimitives, NodeData, PooledTransactions, Receipts,
     Status,
@@ -249,25 +251,22 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
     }
 
     /// Returns the [`EthMessage`] for this type
-    pub fn create_request_message(&self, request_id: u64) -> EthMessage<N> {
+    pub fn create_request_message<M: NetworkMessage<N>>(&self, request_id: u64) -> M {
         match self {
             Self::GetBlockHeaders { request, .. } => {
-                EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request })
+                M::get_block_headers(RequestPair { request_id, message: *request })
             }
             Self::GetBlockBodies { request, .. } => {
-                EthMessage::GetBlockBodies(RequestPair { request_id, message: request.clone() })
+                M::get_block_bodies(RequestPair { request_id, message: request.clone() })
             }
             Self::GetPooledTransactions { request, .. } => {
-                EthMessage::GetPooledTransactions(RequestPair {
-                    request_id,
-                    message: request.clone(),
-                })
+                M::get_pooled_transactions(RequestPair { request_id, message: request.clone() })
             }
             Self::GetNodeData { request, .. } => {
-                EthMessage::GetNodeData(RequestPair { request_id, message: request.clone() })
+                M::get_node_data(RequestPair { request_id, message: request.clone() })
             }
             Self::GetReceipts { request, .. } => {
-                EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
+                M::get_receipts(RequestPair { request_id, message: request.clone() })
             }
         }
     }

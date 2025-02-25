@@ -6,21 +6,23 @@ use crate::{
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
     Status,
 };
+use alloy_chains::{ChainKind, NamedChain};
 use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
 use futures::{ready, Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
-use reth_eth_wire_types::NetworkPrimitives;
+use reth_eth_wire_types::{message::StatusUpgrade, NetworkPrimitives};
 use reth_ethereum_forks::ForkFilter;
 use reth_primitives_traits::GotExpected;
 use std::{
+    fmt::Debug,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
 use tokio::time::timeout;
 use tokio_stream::Stream;
-use tracing::{debug, trace};
+use tracing::{debug, info, trace};
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
 // https://github.com/ethereum/go-ethereum/blob/30602163d5d8321fbc68afdcbbaf2362b2641bde/eth/protocols/eth/protocol.go#L50
@@ -54,6 +56,7 @@ impl<S, E> UnauthedEthStream<S>
 where
     S: Stream<Item = Result<BytesMut, E>> + CanDisconnect<Bytes> + Unpin,
     EthStreamError: From<E> + From<<S as Sink<Bytes>>::Error>,
+    E: Debug,
 {
     /// Consumes the [`UnauthedEthStream`] and returns an [`EthStream`] after the `Status`
     /// handshake is completed successfully. This also returns the `Status` message sent by the
@@ -117,9 +120,10 @@ where
         let msg = match ProtocolMessage::<N>::decode_message(version, &mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
+                let err = EthStreamError::InvalidMessage(err);
                 debug!("decode error in eth handshake: msg={their_msg:x}");
                 self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
-                return Err(EthStreamError::InvalidMessage(err))
+                return Err(err)
             }
         };
 
@@ -175,6 +179,12 @@ where
                     return Err(err.into())
                 }
 
+                let bsc =
+                    matches!(status.chain.kind(), ChainKind::Named(NamedChain::BinanceSmartChain));
+                if bsc && status.version >= EthVersion::Eth67 {
+                    self.negotiate_status_upgrades::<N>(version).await?;
+                }
+
                 // now we can create the `EthStream` because the peer has successfully completed
                 // the handshake
                 let stream = EthStream::new(version, self.inner);
@@ -186,6 +196,49 @@ where
                 Err(EthStreamError::EthHandshakeError(
                     EthHandshakeError::NonStatusMessageInHandshake,
                 ))
+            }
+        }
+    }
+
+    async fn negotiate_status_upgrades<N: NetworkPrimitives>(
+        &mut self,
+        version: EthVersion,
+    ) -> Result<(), EthStreamError> {
+        info!("negotiating status upgrades");
+        let their_upgrade_msg_res = self.inner.next().await;
+
+        let their_upgrade_msg = match their_upgrade_msg_res {
+            Some(msg) => msg,
+            None => {
+                self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
+                return Err(EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse))
+            }
+        }?;
+
+        let msg =
+            match ProtocolMessage::<N>::decode_message(version, &mut their_upgrade_msg.as_ref()) {
+                Ok(m) => m,
+                Err(err) => {
+                    self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
+                    return Err(err.into())
+                }
+            };
+
+        match msg.message {
+            EthMessage::StatusUpgrade(upgrade) if upgrade.is_tx_propagation_allowed() => {
+                // If peer allows transaction propagation we advertise we also allow (we allow
+                // always).
+                let msg = StatusUpgrade::with_allowed_txns();
+                let bytes = msg.into_msg_bytes::<N>();
+                self.inner.send(bytes).await?;
+                Ok(())
+            }
+            _ => {
+                // In any other case we disconnect from this peer
+                self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
+                Err(EthStreamError::EthHandshakeError(
+                    EthHandshakeError::NonStatusMessageInHandshake,
+                ))?
             }
         }
     }

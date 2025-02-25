@@ -6,16 +6,17 @@ mod counter;
 mod handle;
 
 use active::QueuedOutgoingMessages;
+pub use active::TryFromPeerMessage;
 pub use conn::EthRlpxConnection;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
 };
-
 pub use reth_network_api::{Direction, PeerInfo};
 
 use std::{
     collections::HashMap,
+    fmt,
     future::Future,
     net::SocketAddr,
     sync::{atomic::AtomicU64, Arc},
@@ -24,6 +25,7 @@ use std::{
 };
 
 use crate::{
+    eth_protocol::{ConnectionHandler, NetworkProtocolHandler, NetworkStream},
     message::PeerMessage,
     metrics::SessionManagerMetrics,
     protocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols},
@@ -33,9 +35,8 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    errors::EthStreamError, multiplex::RlpxProtocolMultiplexer, Capabilities, DisconnectReason,
-    EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status, UnauthedEthStream,
-    UnauthedP2PStream,
+    errors::EthStreamError, Capabilities, DisconnectReason, EthVersion, HelloMessageWithProtocols,
+    NetworkPrimitives, Status, UnauthedP2PStream,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -52,16 +53,24 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, trace};
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);
 
+/// Type alias for the connection type of a protocol handler
+type ProtocolHandlerConnection<N, P> =
+    <<P as NetworkProtocolHandler<N>>::ConnectionHandler as ConnectionHandler<N>>::Connection;
+
+/// Type alias for the pending session event sender
+type PendingSessionEventSender<N, P> =
+    mpsc::Sender<PendingSessionEvent<N, ProtocolHandlerConnection<N, P>>>;
+
 /// Manages a set of sessions.
 #[must_use = "Session Manager must be polled to process session events."]
 #[derive(Debug)]
-pub struct SessionManager<N: NetworkPrimitives> {
+pub struct SessionManager<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> {
     /// Tracks the identifier for the next session.
     next_id: usize,
     /// Keeps track of all sessions
@@ -97,11 +106,9 @@ pub struct SessionManager<N: NetworkPrimitives> {
     ///
     /// When a new (pending) session is created, the corresponding [`PendingSessionHandle`] will
     /// get a clone of this sender half.
-    pending_sessions_tx: mpsc::Sender<PendingSessionEvent<N>>,
+    pending_sessions_tx: PendingSessionEventSender<N, P>,
     /// Receiver half that listens for [`PendingSessionEvent`] produced by pending sessions.
-    pending_session_rx: ReceiverStream<PendingSessionEvent<N>>,
-    /// The original Sender half of the [`ActiveSessionMessage`] channel.
-    ///
+    pending_session_rx: ReceiverStream<PendingSessionEvent<N, ProtocolHandlerConnection<N, P>>>,
     /// When active session state is reached, the corresponding [`ActiveSessionHandle`] will get a
     /// clone of this sender half.
     active_session_tx: MeteredPollSender<ActiveSessionMessage<N>>,
@@ -113,11 +120,13 @@ pub struct SessionManager<N: NetworkPrimitives> {
     disconnections_counter: DisconnectionsCounter,
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
+    /// The eth protocol handler
+    eth_protocol_handler: Arc<P>,
 }
 
 // === impl SessionManager ===
 
-impl<N: NetworkPrimitives> SessionManager<N> {
+impl<N: NetworkPrimitives, P: NetworkProtocolHandler<N>> SessionManager<N, P> {
     /// Creates a new empty [`SessionManager`].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -128,12 +137,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
+        eth_protocol_handler: Arc<P>,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
         let active_session_tx = PollSender::new(active_session_tx);
 
         Self {
+            eth_protocol_handler,
             next_id: 0,
             counter: SessionCounter::new(config.limits),
             initial_internal_request_timeout: config.initial_internal_request_timeout,
@@ -222,6 +233,96 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         transition
     }
 
+    pub(crate) async fn handle_incoming_session(
+        eth_protocol_handler: Arc<P>,
+        disconnect_rx: oneshot::Receiver<()>,
+        events: PendingSessionEventSender<N, P>,
+        stream: TcpStream,
+        session_info: SessionInfo,
+        handshake_info: HandshakeInfo,
+    ) {
+        let connection =
+            eth_protocol_handler.on_incoming(stream, session_info.clone(), handshake_info);
+
+        match futures::future::select(disconnect_rx, connection).await {
+            Either::Left((_, _)) => {
+                let _ = events
+                    .send(PendingSessionEvent::Disconnected {
+                        remote_addr: session_info.remote_addr,
+                        session_id: session_info.session_id,
+                        direction: Direction::Incoming,
+                        error: None,
+                    })
+                    .await;
+            }
+            Either::Right((res, _)) => {
+                let _ = events.send(res).await;
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn handle_outgoing_session(
+        eth_protocol_handler: Arc<P>,
+        disconnect_rx: oneshot::Receiver<()>,
+        events: PendingSessionEventSender<N, P>,
+        handshake_info: HandshakeInfo,
+        session_id: SessionId,
+        remote_addr: SocketAddr,
+        secret_key: SecretKey,
+        remote_peer_id: PeerId,
+    ) {
+        let stream = match TcpStream::connect(remote_addr).await {
+            Ok(stream) => {
+                if let Err(err) = stream.set_nodelay(true) {
+                    tracing::warn!(target: "net::session", "set nodelay failed: {:?}", err);
+                }
+                stream
+            }
+            Err(error) => {
+                let _ = events
+                    .send(PendingSessionEvent::OutgoingConnectionError {
+                        remote_addr,
+                        session_id,
+                        peer_id: remote_peer_id,
+                        error,
+                    })
+                    .await;
+                return
+            }
+        };
+
+        let session_info = SessionInfo {
+            session_id,
+            remote_addr,
+            secret_key,
+            local_addr: stream.local_addr().ok(),
+        };
+
+        let connection = eth_protocol_handler.on_outgoing(
+            stream,
+            session_info.clone(),
+            handshake_info,
+            remote_peer_id,
+        );
+
+        match futures::future::select(disconnect_rx, connection).await {
+            Either::Left((_, _)) => {
+                let _ = events
+                    .send(PendingSessionEvent::Disconnected {
+                        remote_addr: session_info.remote_addr,
+                        session_id: session_info.session_id,
+                        direction: Direction::Outgoing(remote_peer_id),
+                        error: None,
+                    })
+                    .await;
+            }
+            Either::Right((res, _)) => {
+                let _ = events.send(res).await;
+            }
+        }
+    }
+
     /// An incoming TCP connection was received. This starts the authentication process to turn this
     /// stream into an active peer session.
     ///
@@ -245,27 +346,34 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         let secret_key = self.secret_key;
+
         let hello_message = self.hello_message.clone();
         let status = self.status;
         let fork_filter = self.fork_filter.clone();
+
         let extra_handlers = self.extra_protocols.on_incoming(remote_addr);
+        let local_addr = stream.local_addr().ok();
+
+        let protocol_handler = self.eth_protocol_handler.clone();
+
         self.spawn(pending_session_with_timeout(
             self.pending_session_timeout,
             session_id,
             remote_addr,
             Direction::Incoming,
             pending_events.clone(),
-            start_pending_incoming_session(
+            Self::handle_incoming_session(
+                protocol_handler,
                 disconnect_rx,
-                session_id,
-                stream,
                 pending_events,
-                remote_addr,
-                secret_key,
-                hello_message,
-                status,
-                fork_filter,
-                extra_handlers,
+                stream,
+                SessionInfo { session_id, remote_addr, secret_key, local_addr },
+                HandshakeInfo {
+                    hello_msg: hello_message,
+                    status_msg: status,
+                    fork_filter,
+                    extra_handlers,
+                },
             ),
         ));
 
@@ -286,27 +394,26 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             let (disconnect_tx, disconnect_rx) = oneshot::channel();
             let pending_events = self.pending_sessions_tx.clone();
             let secret_key = self.secret_key;
-            let hello_message = self.hello_message.clone();
+            let hello_msg = self.hello_message.clone();
             let fork_filter = self.fork_filter.clone();
-            let status = self.status;
+            let status_msg = self.status;
             let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
+
             self.spawn(pending_session_with_timeout(
                 self.pending_session_timeout,
                 session_id,
                 remote_addr,
                 Direction::Outgoing(remote_peer_id),
                 pending_events.clone(),
-                start_pending_outbound_session(
+                Self::handle_outgoing_session(
+                    self.eth_protocol_handler.clone(),
                     disconnect_rx,
                     pending_events,
+                    HandshakeInfo { hello_msg, status_msg, fork_filter, extra_handlers },
                     session_id,
                     remote_addr,
-                    remote_peer_id,
                     secret_key,
-                    hello_message,
-                    status,
-                    fork_filter,
-                    extra_handlers,
+                    remote_peer_id,
                 ),
             ));
 
@@ -471,6 +578,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 status,
                 direction,
                 client_id,
+                ..
             } => {
                 // move from pending to established.
                 self.remove_pending_session(&session_id);
@@ -784,12 +892,12 @@ impl PendingSessionHandshakeError {
 pub struct ExceedsSessionLimit(pub(crate) u32);
 
 /// Starts a pending session authentication with a timeout.
-pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
+pub(crate) async fn pending_session_with_timeout<N: NetworkPrimitives, F, C: NetworkStream<N>>(
     timeout: Duration,
     session_id: SessionId,
     remote_addr: SocketAddr,
     direction: Direction,
-    events: mpsc::Sender<PendingSessionEvent<N>>,
+    events: mpsc::Sender<PendingSessionEvent<N, C>>,
     f: F,
 ) where
     F: Future<Output = ()>,
@@ -806,154 +914,9 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
     }
 }
 
-/// Starts the authentication process for a connection initiated by a remote peer.
-///
-/// This will wait for the _incoming_ handshake request and answer it.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
-    disconnect_rx: oneshot::Receiver<()>,
-    session_id: SessionId,
-    stream: TcpStream,
-    events: mpsc::Sender<PendingSessionEvent<N>>,
-    remote_addr: SocketAddr,
-    secret_key: SecretKey,
-    hello: HelloMessageWithProtocols,
-    status: Status,
-    fork_filter: ForkFilter,
-    extra_handlers: RlpxSubProtocolHandlers,
-) {
-    authenticate(
-        disconnect_rx,
-        events,
-        stream,
-        session_id,
-        remote_addr,
-        secret_key,
-        Direction::Incoming,
-        hello,
-        status,
-        fork_filter,
-        extra_handlers,
-    )
-    .await
-}
-
-/// Starts the authentication process for a connection initiated by a remote peer.
-#[instrument(skip_all, fields(%remote_addr, peer_id), target = "net")]
-#[allow(clippy::too_many_arguments)]
-async fn start_pending_outbound_session<N: NetworkPrimitives>(
-    disconnect_rx: oneshot::Receiver<()>,
-    events: mpsc::Sender<PendingSessionEvent<N>>,
-    session_id: SessionId,
-    remote_addr: SocketAddr,
-    remote_peer_id: PeerId,
-    secret_key: SecretKey,
-    hello: HelloMessageWithProtocols,
-    status: Status,
-    fork_filter: ForkFilter,
-    extra_handlers: RlpxSubProtocolHandlers,
-) {
-    let stream = match TcpStream::connect(remote_addr).await {
-        Ok(stream) => {
-            if let Err(err) = stream.set_nodelay(true) {
-                tracing::warn!(target: "net::session", "set nodelay failed: {:?}", err);
-            }
-            stream
-        }
-        Err(error) => {
-            let _ = events
-                .send(PendingSessionEvent::OutgoingConnectionError {
-                    remote_addr,
-                    session_id,
-                    peer_id: remote_peer_id,
-                    error,
-                })
-                .await;
-            return
-        }
-    };
-    authenticate(
-        disconnect_rx,
-        events,
-        stream,
-        session_id,
-        remote_addr,
-        secret_key,
-        Direction::Outgoing(remote_peer_id),
-        hello,
-        status,
-        fork_filter,
-        extra_handlers,
-    )
-    .await
-}
-
-/// Authenticates a session
-#[allow(clippy::too_many_arguments)]
-async fn authenticate<N: NetworkPrimitives>(
-    disconnect_rx: oneshot::Receiver<()>,
-    events: mpsc::Sender<PendingSessionEvent<N>>,
-    stream: TcpStream,
-    session_id: SessionId,
-    remote_addr: SocketAddr,
-    secret_key: SecretKey,
-    direction: Direction,
-    hello: HelloMessageWithProtocols,
-    status: Status,
-    fork_filter: ForkFilter,
-    extra_handlers: RlpxSubProtocolHandlers,
-) {
-    let local_addr = stream.local_addr().ok();
-    let stream = match get_ecies_stream(stream, secret_key, direction).await {
-        Ok(stream) => stream,
-        Err(error) => {
-            let _ = events
-                .send(PendingSessionEvent::EciesAuthError {
-                    remote_addr,
-                    session_id,
-                    error,
-                    direction,
-                })
-                .await;
-            return
-        }
-    };
-
-    let unauthed = UnauthedP2PStream::new(stream);
-
-    let auth = authenticate_stream(
-        unauthed,
-        session_id,
-        remote_addr,
-        local_addr,
-        direction,
-        hello,
-        status,
-        fork_filter,
-        extra_handlers,
-    )
-    .boxed();
-
-    match futures::future::select(disconnect_rx, auth).await {
-        Either::Left((_, _)) => {
-            let _ = events
-                .send(PendingSessionEvent::Disconnected {
-                    remote_addr,
-                    session_id,
-                    direction,
-                    error: None,
-                })
-                .await;
-        }
-        Either::Right((res, _)) => {
-            let _ = events.send(res).await;
-        }
-    }
-}
-
 /// Returns an [`ECIESStream`] if it can be built. If not, send a
 /// [`PendingSessionEvent::EciesAuthError`] and returns `None`
-async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
+pub async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
     stream: Io,
     secret_key: SecretKey,
     direction: Direction,
@@ -966,111 +929,29 @@ async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
     }
 }
 
-/// Authenticate the stream via handshake
-///
-/// On Success return the authenticated stream as [`PendingSessionEvent`].
-///
-/// If additional [`RlpxSubProtocolHandlers`] are provided, the hello message will be updated to
-/// also negotiate the additional protocols.
-#[allow(clippy::too_many_arguments)]
-async fn authenticate_stream<N: NetworkPrimitives>(
-    stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
-    session_id: SessionId,
-    remote_addr: SocketAddr,
-    local_addr: Option<SocketAddr>,
-    direction: Direction,
-    mut hello: HelloMessageWithProtocols,
-    mut status: Status,
-    fork_filter: ForkFilter,
-    mut extra_handlers: RlpxSubProtocolHandlers,
-) -> PendingSessionEvent<N> {
-    // Add extra protocols to the hello message
-    extra_handlers.retain(|handler| hello.try_add_protocol(handler.protocol()).is_ok());
+#[derive(Clone, Debug)]
+#[allow(missing_docs)]
+pub struct SessionInfo {
+    pub session_id: SessionId,
+    pub remote_addr: SocketAddr,
+    pub secret_key: SecretKey,
+    pub local_addr: Option<SocketAddr>,
+}
 
-    // conduct the p2p handshake and return the authenticated stream
-    let (p2p_stream, their_hello) = match stream.handshake(hello).await {
-        Ok(stream_res) => stream_res,
-        Err(err) => {
-            return PendingSessionEvent::Disconnected {
-                remote_addr,
-                session_id,
-                direction,
-                error: Some(PendingSessionHandshakeError::Eth(err.into())),
-            }
-        }
-    };
+#[allow(missing_docs)]
+pub struct HandshakeInfo {
+    pub hello_msg: HelloMessageWithProtocols,
+    pub status_msg: Status,
+    pub fork_filter: ForkFilter,
+    pub extra_handlers: RlpxSubProtocolHandlers,
+}
 
-    // Ensure we negotiated mandatory eth protocol
-    let eth_version = match p2p_stream.shared_capabilities().eth_version() {
-        Ok(version) => version,
-        Err(err) => {
-            return PendingSessionEvent::Disconnected {
-                remote_addr,
-                session_id,
-                direction,
-                error: Some(PendingSessionHandshakeError::Eth(err.into())),
-            }
-        }
-    };
-
-    let (conn, their_status) = if p2p_stream.shared_capabilities().len() == 1 {
-        // if the hello handshake was successful we can try status handshake
-        //
-        // Before trying status handshake, set up the version to negotiated shared version
-        status.set_eth_version(eth_version);
-        let eth_unauthed = UnauthedEthStream::new(p2p_stream);
-        let (eth_stream, their_status) = match eth_unauthed.handshake(status, fork_filter).await {
-            Ok(stream_res) => stream_res,
-            Err(err) => {
-                return PendingSessionEvent::Disconnected {
-                    remote_addr,
-                    session_id,
-                    direction,
-                    error: Some(PendingSessionHandshakeError::Eth(err)),
-                }
-            }
-        };
-        (eth_stream.into(), their_status)
-    } else {
-        // Multiplex the stream with the extra protocols
-        let mut multiplex_stream = RlpxProtocolMultiplexer::new(p2p_stream);
-
-        // install additional handlers
-        for handler in extra_handlers.into_iter() {
-            let cap = handler.protocol().cap;
-            let remote_peer_id = their_hello.id;
-            multiplex_stream
-                .install_protocol(&cap, move |conn| {
-                    handler.into_connection(direction, remote_peer_id, conn)
-                })
-                .ok();
-        }
-
-        let (multiplex_stream, their_status) =
-            match multiplex_stream.into_eth_satellite_stream(status, fork_filter).await {
-                Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
-                Err(err) => {
-                    return PendingSessionEvent::Disconnected {
-                        remote_addr,
-                        session_id,
-                        direction,
-                        error: Some(PendingSessionHandshakeError::Eth(err)),
-                    }
-                }
-            };
-
-        (multiplex_stream.into(), their_status)
-    };
-
-    PendingSessionEvent::Established {
-        session_id,
-        remote_addr,
-        local_addr,
-        peer_id: their_hello.id,
-        capabilities: Arc::new(Capabilities::from(their_hello.capabilities)),
-        status: Arc::new(their_status),
-        conn,
-        direction,
-        client_id: their_hello.client_version,
+impl fmt::Debug for HandshakeInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HandshakeInfo")
+            .field("hello_msg", &self.hello_msg)
+            .field("status_msg", &self.status_msg)
+            .field("fork_filter", &self.fork_filter)
+            .finish()
     }
 }
