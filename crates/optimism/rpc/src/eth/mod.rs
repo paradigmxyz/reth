@@ -324,7 +324,7 @@ where
 {
     type EthApi = OpEthApi<N>;
 
-    fn build(
+    fn build_eth_api(
         self,
         core_components: &N,
         config: EthConfig,

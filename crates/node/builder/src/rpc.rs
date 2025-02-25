@@ -469,7 +469,7 @@ where
             }),
         );
 
-        let eth_api = eth_api_builder.build(&node, config.rpc.eth_config(), cache);
+        let eth_api = eth_api_builder.build_eth_api(&node, config.rpc.eth_config(), cache);
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
@@ -602,7 +602,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
         + 'static;
 
     /// Builds the `EthApi` from the given context.
-    fn build(
+    fn build_eth_api(
         self,
         core_components: &N,
         config: EthConfig,
