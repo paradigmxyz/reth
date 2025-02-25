@@ -30,7 +30,6 @@ use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiS
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError, EthConfig, EthStateCache};
 use reth_rpc_server_types::RethRpcModule;
-use reth_tasks::TaskSpawner;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,

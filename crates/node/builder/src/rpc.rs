@@ -601,7 +601,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
         + Unpin
         + 'static;
 
-    /// Builds the `EthApi` from the given context.
+    /// Builds the [`EthApiServer`](reth_rpc_api::eth::EthApiServer) from the given context.
     fn build_eth_api(
         self,
         core_components: &N,
