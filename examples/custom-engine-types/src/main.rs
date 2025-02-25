@@ -39,7 +39,7 @@ use reth::{
     payload::ExecutionPayloadValidator,
     primitives::{Block, EthPrimitives, RecoveredBlock, SealedBlock, TransactionSigned},
     providers::{EthStorage, StateProviderFactory},
-    rpc::{eth::EthApi, types::engine::ExecutionPayload},
+    rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
     version::default_extra_data_bytes,
