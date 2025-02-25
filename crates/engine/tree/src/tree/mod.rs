@@ -1891,8 +1891,11 @@ where
         false
     }
 
-    /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
-    /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
+    /// Checks whether the given `check` hash points to an invalid header, inserting the given
+    /// `head` block into the invalid header cache if the `check` hash has a known invalid
+    /// ancestor.
+    ///
+    /// This also checks whether the head block has been marked as invalid previously.
     ///
     /// Returns a payload status response according to the engine API spec if the block is known to
     /// be invalid.
@@ -1902,7 +1905,15 @@ where
         head: &SealedBlock<N::Block>,
     ) -> ProviderResult<Option<PayloadStatus>> {
         // check if the check hash was previously marked as invalid
-        let Some(header) = self.state.invalid_headers.get(&check) else { return Ok(None) };
+        let Some(header) = self.state.invalid_headers.get(&check) else {
+            if self.state.invalid_headers.get(head.hash_ref()).is_some() {
+                // the head hash has already been marked as invalid previously
+                let status = self.prepare_invalid_response(head.parent_hash())?;
+                self.emit_event(BeaconConsensusEngineEvent::InvalidBlock(Box::new(head.clone())));
+                return Ok(Some(status))
+            }
+            return Ok(None)
+        };
 
         // populate the latest valid hash field
         let status = self.prepare_invalid_response(header.parent)?;
