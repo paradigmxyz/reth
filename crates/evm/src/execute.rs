@@ -196,6 +196,8 @@ pub trait BlockExecutionStrategy {
         self.execute_transaction_with_result_closure(tx, |_| ())
     }
 
+    /// Executes a single transaction and applies execution result to internal state. Invokes the
+    /// given closure with an internal [`ExecutionResult`] produced by the EVM.
     fn execute_transaction_with_result_closure(
         &mut self,
         tx: Recovered<&<Self::Primitives as NodePrimitives>::SignedTx>,
@@ -246,7 +248,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         attributes: NextBlockEnvAttributes<'a>,
     ) -> Self::ExecutionCtx<'a>;
 
-    /// Creates a strategy using the given database.
+    /// Creates a strategy with given EVM and execution context.
     fn create_strategy<'a, DB, I>(
         &'a self,
         evm: EvmFor<Self, &'a mut State<DB>, I>,
@@ -257,35 +259,23 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         I: InspectorFor<&'a mut State<DB>, Self> + 'a;
 
     /// Creates a strategy for execution of a given block.
-    ///
-    /// Helper to invoke [`BlockExecutionStrategyFactory::input_for_block`] and
-    /// [`BlockExecutionStrategyFactory::create_strategy`].
-    fn strategy_for_block<'a, DB>(
+    fn strategy_for_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Self::Strategy<'a, DB, NoOpInspector>
-    where
-        DB: Database,
-    {
+    ) -> Self::Strategy<'a, DB, NoOpInspector> {
         let evm = self.evm_for_block(db, block.header());
         let ctx = self.context_for_block(block);
         self.create_strategy(evm, ctx)
     }
 
-    /// Creates a strategy for execution of a pending block.
-    ///
-    /// Helper to invoke [`BlockExecutionStrategyFactory::input_for_pending_block`] and
-    /// [`BlockExecutionStrategyFactory::create_strategy`].
-    fn strategy_for_next_block<'a, DB>(
+    /// Creates a strategy for execution of a next block.
+    fn strategy_for_next_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
         attributes: NextBlockEnvAttributes<'a>,
-    ) -> Result<Self::Strategy<'a, DB, NoOpInspector>, Self::Error>
-    where
-        DB: Database,
-    {
+    ) -> Result<Self::Strategy<'a, DB, NoOpInspector>, Self::Error> {
         let evm_env = self.next_evm_env(parent, attributes)?;
         let evm = self.evm_with_env(db, evm_env);
         let ctx = self.context_for_next_block(parent, attributes);

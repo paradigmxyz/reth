@@ -1,8 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
-use std::borrow::BorrowMut;
-
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
@@ -167,8 +165,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
                         let inspector = TransferInspector::new(false).with_logs(true);
-                        let evm =
-                            this.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+                        let evm = this
+                            .evm_config()
+                            .evm_with_env_and_inspector(&mut db, evm_env, inspector);
                         let strategy = this.evm_config().create_strategy(evm, ctx);
                         simulate::execute_transactions(
                             strategy,
