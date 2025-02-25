@@ -2167,7 +2167,7 @@ where
             self.update_reorg_metrics(old.len());
             self.reinsert_reorged_blocks(new.clone());
             // Try reinserting the reorged canonical chain. This is only possible if we have
-            // `persisted_trie_updatess` for those blocks.
+            // `persisted_trie_updates` for those blocks.
             let old = old
                 .iter()
                 .filter_map(|block| {
