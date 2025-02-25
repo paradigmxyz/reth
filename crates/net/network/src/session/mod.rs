@@ -521,7 +521,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     commands_rx: ReceiverStream::new(commands_rx),
                     to_session_manager: self.active_session_tx.clone(),
                     pending_message_to_session: None,
-                    internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
+                    internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                     inflight_requests: Default::default(),
                     conn,
                     queued_outgoing: QueuedOutgoingMessages::new(
