@@ -34,7 +34,7 @@ use reth_trie_sparse::{
     SparseStateTrie,
 };
 use std::{
-    collections::{hash_map::Entry, BTreeMap, BTreeSet, VecDeque},
+    collections::{hash_map::Entry, BTreeMap, VecDeque},
     sync::{
         mpsc::{self, channel, Receiver, Sender},
         Arc,
@@ -1301,11 +1301,11 @@ where
 /// [`MultiProofTargets`] mapping having a maximum length of `accounts_chunk_size`, and each mapping
 /// value [`B256Set`] having a maximum length of `storages_chunk_size`.
 struct ChunkedProofTargets {
-    /// Proof targets sorted by hashed address, and their associated sorted storage slots.
+    /// Sorted proof targets.
     ///
-    /// We keep them sorted, because multiproofs are more efficient when proof targets are located
+    /// We keep this sorted, because multiproofs are more efficient when proof targets are located
     /// close to each other.
-    proof_targets: BTreeMap<B256, BTreeSet<B256>>,
+    proof_targets: VecDeque<(B256, B256Set)>,
     /// Number of accounts per chunk.
     accounts_chunk_size: usize,
     /// Number of storage slots per account per chunk.
@@ -1321,7 +1321,7 @@ impl ChunkedProofTargets {
         Self {
             proof_targets: proof_targets
                 .into_iter()
-                .map(|(address, storages)| (address, storages.into_iter().collect()))
+                .sorted_by_key(|(address, _)| *address)
                 .collect(),
             accounts_chunk_size,
             storages_chunk_size,
@@ -1340,11 +1340,11 @@ impl Iterator for ChunkedProofTargets {
         // Every address will be added to at least first chunk
         let mut chunks = vec![MultiProofTargets::default(); 1];
 
-        let keys: Vec<B256> =
-            self.proof_targets.keys().take(self.accounts_chunk_size).copied().collect();
-        for address in keys {
-            let storage_slots = self.proof_targets.remove(&address).expect("address not found");
-            let storage_chunks = storage_slots.into_iter().chunks(self.storages_chunk_size);
+        let accounts_chunk =
+            self.proof_targets.drain(..self.accounts_chunk_size.min(self.proof_targets.len()));
+        for (address, storage_slots) in accounts_chunk {
+            let storage_chunks =
+                storage_slots.into_iter().sorted().chunks(self.storages_chunk_size);
 
             // Initialize the chunk with an address with no storage slots. We need to do this,
             // because the account may have no storage slots in the targets, but we still need to
