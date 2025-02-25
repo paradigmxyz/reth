@@ -31,7 +31,7 @@ use alloy_rpc_types::{
 use reth::{
     api::{InvalidPayloadAttributesError, PayloadTypes},
     builder::{
-        components::{ComponentsBuilder, PayloadServiceBuilder},
+        components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
         node::{NodeTypes, NodeTypesWithEngine},
         rpc::{EngineValidatorBuilder, RpcAddOns},
         BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
@@ -324,7 +324,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         EthereumPoolBuilder,
-        CustomPayloadServiceBuilder,
+        BasicPayloadServiceBuilder<CustomPayloadBuilderBuilder>,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
@@ -337,7 +337,7 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
-            .payload(CustomPayloadServiceBuilder::default())
+            .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
@@ -351,9 +351,9 @@ where
 /// A custom payload service builder that supports the custom engine types
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct CustomPayloadServiceBuilder;
+pub struct CustomPayloadBuilderBuilder;
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
+impl<Node, Pool> PayloadBuilderBuilder<Node, Pool> for CustomPayloadBuilderBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<
@@ -369,7 +369,7 @@ where
     type PayloadBuilder = CustomPayloadBuilder<Pool, Node::Provider>;
 
     async fn build_payload_builder(
-        &self,
+        self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {
