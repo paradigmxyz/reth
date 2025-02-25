@@ -77,7 +77,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    /// Fetches the best block block from the database.
+    /// Fetches the best block from the database.
     ///
     /// If the database is empty, returns the genesis block.
     fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
