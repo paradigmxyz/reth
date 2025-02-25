@@ -6,15 +6,21 @@ use crate::tree::{
     StateProviderBuilder,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
-use alloy_primitives::B256;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnvFor};
-use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, RecoveredBlock};
+use alloy_primitives::{keccak256, map::B256Set, B256};
+use reth_evm::{
+    execute::BlockExecutorProvider,
+    system_calls::{NoopHook, OnStateHook},
+    ConfigureEvm, ConfigureEvmEnvFor, Evm,
+};
+use reth_primitives_traits::{
+    header::SealedHeaderFor, NodePrimitives, RecoveredBlock, SignedTransaction,
+};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
     StateProviderFactory, StateReader,
 };
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
-use reth_trie::TrieInput;
+use reth_trie::{MultiProofTargets, TrieInput};
 use reth_workload_executor::WorkloadExecutor;
 use std::{
     collections::VecDeque,
@@ -23,6 +29,7 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc, RwLock,
     },
+    time::Instant,
 };
 use tracing::trace;
 
@@ -284,16 +291,17 @@ where
         + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
         + 'static,
 {
+    /// Intializes the task with the given transactions pending execution
     fn new(
         executor: WorkloadExecutor,
         ctx: PrewarmContext<N, P, Evm>,
-        to_multi_proof: mpsc::Sender<StateRootMessage>,
-        transactions: VecDeque<Recovered<N::SignedTx>>,
+        to_multi_proof: Sender<StateRootMessage>,
+        pending: VecDeque<Recovered<N::SignedTx>>,
     ) -> Self {
-        let (actions_tx, actions_rx) = mpsc::channel();
+        let (actions_tx, actions_rx) = channel();
         Self {
             executor,
-            pending: Default::default(),
+            pending,
             ctx,
             in_progress: 0,
             // TODO settings
@@ -320,7 +328,8 @@ where
         let ctx = self.ctx.clone();
         let actions_tx = self.actions_tx.clone();
         self.executor.spawn_blocking(move || {
-            ctx.transact(tx);
+            let proof_targets = ctx.prepare_multiproof_targets(tx);
+            let _ = actions_tx.send(PrewarmTaskEvent::Outcome { proof_targets });
         });
     }
 
@@ -333,6 +342,7 @@ where
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
     fn run(mut self) {
+        // spawn execution tasks.
         self.spawn_next();
 
         while let Ok(event) = self.actions_rx.recv() {
@@ -341,11 +351,25 @@ where
                     // received terminate signal
                     break
                 }
-                PrewarmTaskEvent::Outcome { .. } => {}
+                PrewarmTaskEvent::Outcome { proof_targets } => {
+                    // completed a transaction, frees up one slot
+                    self.in_progress -= 1;
+
+                    if let Some(proof_targets) = proof_targets {
+                        // the task successfully executed the transaction and prepared the proof
+                        // targets for the multiproof task.
+                        let _ = self
+                            .to_multi_proof
+                            .send(StateRootMessage::PrefetchProofs(proof_targets));
+                    }
+                }
             }
 
+            // schedule followup transactions
             self.spawn_next();
+
             if self.is_done() {
+                /// we're done and terminate this task
                 break
             }
         }
@@ -372,8 +396,52 @@ where
         + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
         + 'static,
 {
+    /// Transacts the the transactions and transform the state into [`MultiProofTargets`].
+    fn prepare_multiproof_targets(
+        mut self,
+        tx: Recovered<N::SignedTx>,
+    ) -> Option<MultiProofTargets> {
+        let state = self.transact(tx)?;
+
+        let mut targets =
+            MultiProofTargets::with_capacity_and_hasher(state.len(), Default::default());
+
+        for (addr, account) in state {
+            // if the account was not touched, or if the account was selfdestructed, do not
+            // fetch proofs for it
+            //
+            // Since selfdestruct can only happen in the same transaction, we can skip
+            // prefetching proofs for selfdestructed accounts
+            //
+            // See: https://eips.ethereum.org/EIPS/eip-6780
+            if !account.is_touched() || account.is_selfdestructed() {
+                continue
+            }
+
+            let mut storage_set =
+                B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
+            for (key, slot) in account.storage {
+                // do nothing if unchanged
+                if !slot.is_changed() {
+                    continue
+                }
+
+                storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
+            }
+
+            targets.insert(keccak256(addr), storage_set);
+        }
+
+        Some(targets)
+    }
+
     /// Transacts the transaction and returns the state outcome.
-    // TODO: proper error handling
+    ///
+    /// Returns `None` if executing the transaction failed to a non Revert error.
+    /// Returns the touched+modified state of the transaction.
+    ///
+    /// Note: Since here are no ordering guarantees this won't the state the tx produces when
+    /// executed sequentially.
     fn transact(mut self, tx: Recovered<N::SignedTx>) -> Option<EvmState> {
         let Self { header, evm_config, caches, cache_metrics, provider } = self;
         // Create the state provider inside the thread
@@ -404,16 +472,32 @@ where
 
         // create the tx env and reset nonce
         let tx_env = evm_config.tx_env(&tx);
+        let res = match evm.transact(tx_env) {
+            Ok(res) => res,
+            Err(err) => {
+                trace!(
+                    target: "engine::tree",
+                    %err,
+                    tx_hash=%tx.tx_hash(),
+                    sender=%tx.signer(),
+                    "Error when executing prewarm transaction",
+                );
+                return None
+            }
+        };
 
-        todo!()
+        Some(res.state)
     }
 }
 
+/// The events the pre-warm task can handle.
 enum PrewarmTaskEvent {
+    /// Forcefully terminate the task on demand, e.g. when no longer required.
     Terminate,
+    /// The outcome of a pre-warm task
     Outcome {
-        /// Returns the state if the transaction
-        state: Option<EvmState>,
+        /// The prepared proof targets based on the evm state outcome
+        proof_targets: Option<MultiProofTargets>,
     },
 }
 
