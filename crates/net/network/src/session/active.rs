@@ -920,7 +920,7 @@ mod tests {
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
 
             tokio::task::spawn(start_pending_incoming_session(
-                Arc::new(EthHandshake),
+                Arc::new(EthHandshake::default()),
                 disconnect_rx,
                 session_id,
                 stream,

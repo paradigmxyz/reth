@@ -16,6 +16,7 @@ use crate::upgrade_status::{UpgradeStatus, UpgradeStatusExtension};
 
 #[derive(Debug, Default)]
 /// The Binance Smart Chain (BSC) P2P handshake.
+#[non_exhaustive]
 pub struct BscHandshake;
 
 impl BscHandshake {

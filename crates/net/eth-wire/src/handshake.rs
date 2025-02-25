@@ -49,6 +49,7 @@ impl<T> UnauthEth for T where
 
 /// The Ethereum P2P handshake.
 #[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct EthHandshake;
 
 impl EthRlpxHandshake for EthHandshake {

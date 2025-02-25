@@ -255,7 +255,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             block_import: None,
             transactions_manager_config: Default::default(),
             nat: None,
-            handshake: Arc::new(EthHandshake),
+            handshake: Arc::new(EthHandshake::default()),
         }
     }
 
