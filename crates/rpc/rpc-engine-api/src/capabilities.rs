@@ -33,7 +33,6 @@ pub const OPSTACK_CAPABILITIES:&[&str]=&[
     "engine_newPayloadV4",
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByRangeV1",
-   
 ];
 
 // The list of all supported Engine capabilities available over the engine endpoint.
