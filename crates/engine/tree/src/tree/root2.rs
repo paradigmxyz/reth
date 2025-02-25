@@ -44,28 +44,6 @@ use tracing::{debug, error, trace, trace_span};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
-/// Determines the size of the thread pool to be used in [`StateRootTask2`].
-/// It should be at least three, one for multiproof calculations  plus two to be
-/// used internally in [`StateRootTask2`].
-///
-/// NOTE: this value can be greater than the available cores in the host, it
-/// represents the maximum number of threads that can be handled by the pool.
-pub(crate) fn thread_pool_size() -> usize {
-    std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
-}
-
-/// Determines if the host has enough parallelism to run the state root task.
-///
-/// It requires at least 5 parallel threads:
-/// - Engine in main thread that spawns the state root task.
-/// - State Root Task spawned in [`StateRootTask2::spawn`]
-/// - Sparse Trie spawned in [`run_sparse_trie`]
-/// - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
-/// - Storage root computation spawned in [`ParallelProof::multiproof`]
-pub(crate) fn has_enough_parallelism() -> bool {
-    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
-}
-
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
 #[derive(Debug)]
@@ -360,9 +338,7 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(thread_pool: WorkloadExecutor, thread_pool_size: usize) -> Self {
-        // we keep 2 threads to be used internally by [`StateRootTask`]
-        let max_concurrent = thread_pool_size.saturating_sub(2);
+    fn new(thread_pool: WorkloadExecutor, max_concurrent: usize) -> Self {
         debug_assert!(max_concurrent != 0);
         Self {
             thread_pool,
@@ -418,57 +394,56 @@ where
             state_root_message_sender,
         }: MultiproofInput<Factory>,
     ) {
-        todo!()
-        // let thread_pool = self.thread_pool.clone();
-        //
-        // self.thread_pool.spawn(move || {
-        //     let account_targets = proof_targets.len();
-        //     let storage_targets = proof_targets.values().map(|slots| slots.len()).sum();
-        //
-        //     trace!(
-        //         target: "engine::root",
-        //         proof_sequence_number,
-        //         ?proof_targets,
-        //         account_targets,
-        //         storage_targets,
-        //         "Starting multiproof calculation",
-        //     );
-        //     let start = Instant::now();
-        //     let result = calculate_multiproof(thread_pool, config, proof_targets);
-        //     let elapsed = start.elapsed();
-        //     trace!(
-        //         target: "engine::root",
-        //         proof_sequence_number,
-        //         ?elapsed,
-        //         ?source,
-        //         account_targets,
-        //         storage_targets,
-        //         "Multiproof calculated",
-        //     );
-        //
-        //     match result {
-        //         Ok(proof) => {
-        //             let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
-        //                 Box::new(ProofCalculated {
-        //                     sequence_number: proof_sequence_number,
-        //                     update: SparseTrieUpdate {
-        //                         state: hashed_state_update,
-        //                         multiproof: proof,
-        //                     },
-        //                     account_targets,
-        //                     storage_targets,
-        //                     elapsed,
-        //                 }),
-        //             ));
-        //         }
-        //         Err(error) => {
-        //             let _ = state_root_message_sender
-        //                 .send(StateRootMessage::ProofCalculationError(error));
-        //         }
-        //     }
-        // });
-        //
-        // self.inflight += 1;
+        let thread_pool = self.thread_pool.clone();
+
+        self.thread_pool.rayon_pool().spawn(move || {
+            let account_targets = proof_targets.len();
+            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum();
+
+            trace!(
+                target: "engine::root",
+                proof_sequence_number,
+                ?proof_targets,
+                account_targets,
+                storage_targets,
+                "Starting multiproof calculation",
+            );
+            let start = Instant::now();
+            let result = calculate_multiproof(thread_pool, config, proof_targets);
+            let elapsed = start.elapsed();
+            trace!(
+                target: "engine::root",
+                proof_sequence_number,
+                ?elapsed,
+                ?source,
+                account_targets,
+                storage_targets,
+                "Multiproof calculated",
+            );
+
+            match result {
+                Ok(proof) => {
+                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
+                        Box::new(ProofCalculated {
+                            sequence_number: proof_sequence_number,
+                            update: SparseTrieUpdate {
+                                state: hashed_state_update,
+                                multiproof: proof,
+                            },
+                            account_targets,
+                            storage_targets,
+                            elapsed,
+                        }),
+                    ));
+                }
+                Err(error) => {
+                    let _ = state_root_message_sender
+                        .send(StateRootMessage::ProofCalculationError(error));
+                }
+            }
+        });
+
+        self.inflight += 1;
     }
 }
 
@@ -547,7 +522,8 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             executor: executor.clone(),
-            multiproof_manager: MultiproofManager::new(executor, thread_pool_size()),
+            // TODO settings
+            multiproof_manager: MultiproofManager::new(executor, 4),
             metrics: StateRootTaskMetrics::default(),
         }
     }
@@ -597,31 +573,6 @@ where
         //     .expect("failed to spawn state root thread");
         //
         // StateRootHandle::new(rx)
-    }
-
-    /// Spawn long running sparse trie task that forwards the final result upon completion.
-    fn spawn_sparse_trie(
-        thread_pool: WorkloadExecutor,
-        config: StateRootConfig<Factory>,
-        metrics: StateRootTaskMetrics,
-        task_tx: Sender<StateRootMessage>,
-    ) -> Sender<SparseTrieUpdate> {
-        // let (tx, rx) = mpsc::channel();
-        // thread_pool.spawn(move || {
-        //     debug!(target: "engine::tree", "Sparse trie task starting");
-        //     // We clone the task sender here so that it can be used in case the sparse trie task
-        //     // succeeds, without blocking due to any `Drop` implementation.
-        //     //
-        //     // It's more important to make sure we capture any errors, than to make sure we send
-        // an     // error result without blocking, which is why we wait for
-        // `run_sparse_trie` to return     // before sending errors.
-        //     if let Err(err) = run_sparse_trie(config, metrics, rx, task_tx.clone()) {
-        //         let _ = task_tx.send(StateRootMessage::RootCalculationError(err));
-        //     }
-        // });
-        // tx
-
-        todo!()
     }
 
     /// Handles request for proof prefetch.
@@ -985,6 +936,8 @@ struct CheckEndConditionParams<'a> {
     proof_sequencer: &'a ProofSequencer,
 }
 
+
+
 // Returns true if all state updates finished and all profs processed.
 fn check_end_condition(
     CheckEndConditionParams {
@@ -1007,79 +960,6 @@ fn check_end_condition(
         "Checking end condition"
     );
     all_proofs_received && no_pending && updates_finished
-}
-
-/// Listen to incoming sparse trie updates and update the sparse trie.
-///
-/// Once the updates receiver channel is dropped, this sends the final state root, trie updates and
-/// the number of update iterations to the `task_tx`.
-///
-/// This takes `task_tx` as an argument so that the state root result can be sent without blocking
-/// on any of the `Drop` implementations run at the end of this method.
-fn run_sparse_trie<Factory>(
-    config: StateRootConfig<Factory>,
-    metrics: StateRootTaskMetrics,
-    update_rx: mpsc::Receiver<SparseTrieUpdate>,
-    task_tx: Sender<StateRootMessage>,
-) -> Result<(), ParallelStateRootError>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
-{
-    let provider_ro = config.consistent_view.provider_ro()?;
-    let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
-        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-        &config.nodes_sorted,
-    );
-    let blinded_provider_factory = ProofBlindedProviderFactory::new(
-        in_memory_trie_cursor.clone(),
-        HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-            &config.state_sorted,
-        ),
-        config.prefix_sets.clone(),
-    );
-
-    let mut num_iterations = 0;
-    let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
-
-    while let Ok(mut update) = update_rx.recv() {
-        num_iterations += 1;
-        let mut num_updates = 1;
-        while let Ok(next) = update_rx.try_recv() {
-            update.extend(next);
-            num_updates += 1;
-        }
-
-        debug!(
-            target: "engine::root",
-            num_updates,
-            account_proofs = update.multiproof.account_subtree.len(),
-            storage_proofs = update.multiproof.storages.len(),
-            "Updating sparse trie"
-        );
-
-        let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
-            ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-        })?;
-        metrics.sparse_trie_update_duration_histogram.record(elapsed);
-        trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
-    }
-
-    debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
-
-    let start = Instant::now();
-    let (state_root, trie_updates) = trie.root_with_updates().map_err(|e| {
-        ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-    })?;
-    let elapsed = start.elapsed();
-    metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
-
-    let _ = task_tx.send(StateRootMessage::RootCalculated {
-        state_root,
-        trie_updates,
-        iterations: num_iterations,
-    });
-    Ok(())
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
@@ -1305,18 +1185,12 @@ mod tests {
             + Clone
             + 'static,
     {
-        let num_threads = thread_pool_size();
 
-        let thread_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .thread_name(|i| format!("test-worker-{}", i))
-            .build()
-            .expect("Failed to create test proof worker thread pool");
 
-        let thread_pool = WorkloadExecutor::new(2);
+        let executor = WorkloadExecutor::new(2);
         let config = create_state_root_config(factory, TrieInput::default());
 
-        StateRootTask2::new(config, thread_pool)
+        StateRootTask2::new(config, executor)
     }
 
     #[test]
@@ -1380,7 +1254,6 @@ mod tests {
             prefix_sets: Arc::new(input.prefix_sets),
         };
 
-        let num_threads = thread_pool_size();
 
         let executor = WorkloadExecutor::new(2);
 

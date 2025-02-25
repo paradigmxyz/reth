@@ -229,7 +229,6 @@ where
     /// This waits for new incoming [`SparseTrieUpdate`].
     ///
     /// This concludes once the last trie update has been received.
-    // TODO this should probably return the stateroot as response so we can wire a oneshot channel
     fn run(mut self) -> StateRootResult {
         let now = Instant::now();
         let provider_ro = self.config.consistent_view.provider_ro()?;
