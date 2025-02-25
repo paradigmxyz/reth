@@ -132,23 +132,24 @@ where
 
     fn build(
         self,
-        provider: N::Provider,
-        pool: N::Pool,
-        network: N::Network,
-        evm: N::Evm,
+        core_components: &N,
         config: EthConfig,
-        executor: impl TaskSpawner + 'static,
         cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
     ) -> Self::EthApi {
-        reth_rpc::EthApiBuilder::new(provider, pool, network, evm)
-            .eth_cache(cache)
-            .task_spawner(executor)
-            .gas_cap(config.rpc_gas_cap.into())
-            .max_simulate_blocks(config.rpc_max_simulate_blocks)
-            .eth_proof_window(config.eth_proof_window)
-            .fee_history_cache_config(config.fee_history_cache)
-            .proof_permits(config.proof_permits)
-            .build()
+        reth_rpc::EthApiBuilder::new(
+            core_components.provider().clone(),
+            core_components.pool().clone(),
+            core_components.network().clone(),
+            core_components.evm_config().clone(),
+        )
+        .eth_cache(cache)
+        .task_spawner(core_components.task_executor().clone())
+        .gas_cap(config.rpc_gas_cap.into())
+        .max_simulate_blocks(config.rpc_max_simulate_blocks)
+        .eth_proof_window(config.eth_proof_window)
+        .fee_history_cache_config(config.fee_history_cache)
+        .proof_permits(config.proof_permits)
+        .build()
     }
 }
 

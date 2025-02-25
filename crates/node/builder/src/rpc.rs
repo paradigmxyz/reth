@@ -23,7 +23,7 @@ use reth_rpc_builder::{
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
-use reth_tasks::{TaskExecutor, TaskSpawner};
+use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
 use std::{
@@ -469,15 +469,7 @@ where
             }),
         );
 
-        let eth_api = eth_api_builder.build(
-            node.provider().clone(),
-            node.pool().clone(),
-            node.network().clone(),
-            node.evm_config().clone(),
-            config.rpc.eth_config(),
-            node.task_executor().clone(),
-            cache,
-        );
+        let eth_api = eth_api_builder.build(&node, config.rpc.eth_config(), cache);
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
@@ -610,15 +602,10 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
         + 'static;
 
     /// Builds the `EthApi` from the given context.
-    #[allow(clippy::too_many_arguments)]
     fn build(
         self,
-        provider: N::Provider,
-        pool: N::Pool,
-        network: N::Network,
-        evm: N::Evm,
+        core_components: &N,
         config: EthConfig,
-        executor: impl TaskSpawner + 'static,
         cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
     ) -> Self::EthApi;
 }
