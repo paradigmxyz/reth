@@ -32,7 +32,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-trie-db.workspace = true
-reth-ethereum-payload-builder.workspace = true
 
 ## alloy
 alloy-eips.workspace = true

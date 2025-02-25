@@ -15,7 +15,8 @@ use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PoolBuilder,
+        BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
+        NetworkBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
@@ -46,7 +47,7 @@ impl EthereumNode {
     pub fn components<Node>() -> ComponentsBuilder<
         Node,
         EthereumPoolBuilder,
-        EthereumPayloadBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
@@ -62,7 +63,7 @@ impl EthereumNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(EthereumPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
+            .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
@@ -210,7 +211,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         EthereumPoolBuilder,
-        EthereumPayloadBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
