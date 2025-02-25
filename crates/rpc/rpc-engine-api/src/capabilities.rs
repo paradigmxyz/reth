@@ -19,6 +19,22 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getPayloadBodiesByRangeV1",
     "engine_getBlobsV1",
 ];
+/// The list of all supported Engine capabilities available over the engine endpoint.
+pub const OPSTACK_CAPABILITIES:&[&str]=&[
+    "engine_forkchoiceUpdatedV2",
+    "engine_forkchoiceUpdatedV3",
+    "engine_exchangeTransitionConfigurationV1",
+    "engine_getClientVersionV1",
+    "engine_getPayloadV2",
+    "engine_getPayloadV3",
+    "engine_getPayloadV4",
+    "engine_newPayloadV2",
+    "engine_newPayloadV3",
+    "engine_newPayloadV4",
+    "engine_getPayloadBodiesByHashV1",
+    "engine_getPayloadBodiesByRangeV1",
+   
+];
 
 // The list of all supported Engine capabilities available over the engine endpoint.
 ///
@@ -29,7 +45,7 @@ pub struct EngineCapabilities {
 }
 
 impl EngineCapabilities {
-    /// Creates a new `EngineCapabilities` instance with the given capabilities.
+    /// Creates a new EngineCapabilities instance with the given capabilities.
     pub fn new(capabilities: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self { inner: capabilities.into_iter().map(Into::into).collect() }
     }
@@ -37,6 +53,12 @@ impl EngineCapabilities {
     /// Returns the list of all supported Engine capabilities for Prague spec.
     fn prague() -> Self {
         Self { inner: CAPABILITIES.iter().copied().map(str::to_owned).collect() }
+    }
+    /// Returns the list of all supported Engine capabilities for Prague spec.
+    fn opstack() -> Self {
+        Self {
+            inner: OPSTACK_CAPABILITIES.iter().copied().map(str::to_owned).collect(),
+        }
     }
 
     /// Returns the list of all supported Engine capabilities.
