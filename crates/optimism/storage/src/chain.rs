@@ -59,11 +59,9 @@ where
         for (header, _) in inputs {
             // If we are past shanghai, then all blocks should have a withdrawal list,
             // even if empty
-            if chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
-                continue;
-            } else {
+            if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
                 return Err(ProviderError::InvalidStorageOutput);
-            };
+            }
         }
 
         Ok(vec![])
