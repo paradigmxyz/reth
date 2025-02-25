@@ -23,7 +23,7 @@ tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 pin-project.workspace = true
 
-tracing.workspace = true
+tracing = { workspace = true, features = ["attributes"] }
 
 # HeaderBytes
 generic-array.workspace = true

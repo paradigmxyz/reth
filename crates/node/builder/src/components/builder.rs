@@ -8,7 +8,7 @@ use crate::{
     BuilderContext, FullNodeTypes,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
+use reth_evm::execute::{BlockExecutionStrategyFactory, BlockExecutorProvider};
 use reth_network::NetworkPrimitives;
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -409,7 +409,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: ConfigureEvmFor<PrimitivesTy<Node::Types>> + 'static,
+    EVM: BlockExecutionStrategyFactory<Primitives = PrimitivesTy<Node::Types>> + 'static,
     Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
     Cons:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,

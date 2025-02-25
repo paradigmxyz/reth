@@ -97,7 +97,7 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// A message that needs to be delivered to the session manager
     pub(crate) pending_message_to_session: Option<ActiveSessionMessage<N>>,
     /// Incoming internal requests which are delegated to the remote peer.
-    pub(crate) internal_request_tx: Fuse<ReceiverStream<PeerRequest<N>>>,
+    pub(crate) internal_request_rx: Fuse<ReceiverStream<PeerRequest<N>>>,
     /// All requests sent to the remote peer we're waiting on a response
     pub(crate) inflight_requests: FxHashMap<u64, InflightRequest<PeerRequest<N>>>,
     /// All requests that were sent by the remote peer and we're waiting on an internal response
@@ -547,7 +547,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
 
             let deadline = this.request_deadline();
 
-            while let Poll::Ready(Some(req)) = this.internal_request_tx.poll_next_unpin(cx) {
+            while let Poll::Ready(Some(req)) = this.internal_request_rx.poll_next_unpin(cx) {
                 progress = true;
                 this.on_internal_peer_request(req, deadline);
             }
@@ -960,7 +960,7 @@ mod tests {
                             "network_active_session",
                         ),
                         pending_message_to_session: None,
-                        internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
+                        internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
                         queued_outgoing: QueuedOutgoingMessages::new(Gauge::noop()),

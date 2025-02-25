@@ -12,7 +12,7 @@ mod chain;
 pub use chain::OptStorage;
 
 pub mod predeploys;
-pub use predeploys::withdrawals_root;
+pub use predeploys::{withdrawals_root, withdrawals_root_prehashed};
 
 #[cfg(test)]
 mod tests {

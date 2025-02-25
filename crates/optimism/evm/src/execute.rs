@@ -10,6 +10,7 @@ use alloy_consensus::{
 };
 use alloy_evm::FromRecoveredTx;
 use op_alloy_consensus::OpDepositReceipt;
+use reth_chainspec::EthChainSpec;
 use reth_evm::{
     execute::{
         balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
@@ -17,88 +18,36 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvm, ConfigureEvmFor, Database, Evm, HaltReasonFor,
+    ConfigureEvm, Database, Evm,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt, OpPrimitives};
-use reth_primitives_traits::{
-    Block, NodePrimitives, RecoveredBlock, SealedBlock, SignedTransaction,
-};
-use revm::{context_interface::result::ResultAndState, DatabaseCommit};
+use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt};
+use reth_primitives_traits::{Block, NodePrimitives, SealedBlock, SignedTransaction};
+use revm::{context::TxEnv, context_interface::result::ResultAndState, DatabaseCommit};
 use revm_database::State;
 use revm_primitives::{Address, B256};
 use tracing::trace;
 
-/// Factory for [`OpExecutionStrategy`].
-#[derive(Debug, Clone)]
-pub struct OpExecutionStrategyFactory<
-    N: NodePrimitives = OpPrimitives,
-    ChainSpec = OpChainSpec,
-    EvmConfig: ConfigureEvm = OpEvmConfig<ChainSpec>,
-> {
-    /// The chainspec
-    chain_spec: Arc<ChainSpec>,
-    /// How to create an EVM.
-    evm_config: EvmConfig,
-    /// Receipt builder.
-    receipt_builder:
-        Arc<dyn OpReceiptBuilder<N::SignedTx, HaltReasonFor<EvmConfig>, Receipt = N::Receipt>>,
-}
-
-impl OpExecutionStrategyFactory<OpPrimitives> {
-    /// Creates a new default optimism executor strategy factory.
-    pub fn optimism(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self::new(
-            chain_spec.clone(),
-            OpEvmConfig::new(chain_spec),
-            BasicOpReceiptBuilder::default(),
-        )
-    }
-}
-
-impl<N: NodePrimitives, ChainSpec, EvmConfig: ConfigureEvm>
-    OpExecutionStrategyFactory<N, ChainSpec, EvmConfig>
-{
-    /// Creates a new executor strategy factory.
-    pub fn new(
-        chain_spec: Arc<ChainSpec>,
-        evm_config: EvmConfig,
-        receipt_builder: impl OpReceiptBuilder<
-            N::SignedTx,
-            HaltReasonFor<EvmConfig>,
-            Receipt = N::Receipt,
-        >,
-    ) -> Self {
-        Self { chain_spec, evm_config, receipt_builder: Arc::new(receipt_builder) }
-    }
-}
-
-impl<N, ChainSpec, EvmConfig> BlockExecutionStrategyFactory
-    for OpExecutionStrategyFactory<N, ChainSpec, EvmConfig>
+impl<ChainSpec, N> BlockExecutionStrategyFactory for OpEvmConfig<ChainSpec, N>
 where
+    ChainSpec: EthChainSpec + OpHardforks,
     N: NodePrimitives<SignedTx: OpTransaction, Receipt: DepositReceipt>,
-    ChainSpec: OpHardforks + Clone + Unpin + Sync + Send + 'static,
-    EvmConfig: ConfigureEvmFor<N> + Clone + Unpin + Sync + Send + 'static,
+    revm_optimism::OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx>,
 {
     type Primitives = N;
 
     fn create_strategy<'a, DB>(
-        &'a mut self,
+        &'a self,
         db: &'a mut State<DB>,
-        block: &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
     where
         DB: Database,
     {
-        let evm = self.evm_config.evm_for_block(db, block.header());
-        OpExecutionStrategy::new(
-            evm,
-            block.sealed_block(),
-            &self.chain_spec,
-            self.receipt_builder.as_ref(),
-        )
+        let evm = self.evm_for_block(db, block.header());
+        OpExecutionStrategy::new(evm, block, &self.chain_spec, self.receipt_builder.as_ref())
     }
 }
 
@@ -329,10 +278,11 @@ pub struct OpExecutorProvider;
 
 impl OpExecutorProvider {
     /// Creates a new default optimism executor strategy factory.
-    pub fn optimism(
-        chain_spec: Arc<OpChainSpec>,
-    ) -> BasicBlockExecutorProvider<OpExecutionStrategyFactory<OpPrimitives>> {
-        BasicBlockExecutorProvider::new(OpExecutionStrategyFactory::optimism(chain_spec))
+    pub fn optimism(chain_spec: Arc<OpChainSpec>) -> BasicBlockExecutorProvider<OpEvmConfig> {
+        BasicBlockExecutorProvider::new(OpEvmConfig::new(
+            chain_spec,
+            BasicOpReceiptBuilder::default(),
+        ))
     }
 }
 
@@ -349,7 +299,7 @@ mod tests {
     use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-    use reth_primitives_traits::Account;
+    use reth_primitives_traits::{Account, RecoveredBlock};
     use reth_revm::{database::StateProviderDatabase, test_utils::StateProviderTest};
     use revm_optimism::constants::L1_BLOCK_CONTRACT;
     use std::{collections::HashMap, str::FromStr};
@@ -381,12 +331,11 @@ mod tests {
         db
     }
 
-    fn executor_provider(
-        chain_spec: Arc<OpChainSpec>,
-    ) -> BasicBlockExecutorProvider<OpExecutionStrategyFactory> {
-        let strategy_factory = OpExecutionStrategyFactory::optimism(chain_spec);
-
-        BasicBlockExecutorProvider::new(strategy_factory)
+    fn executor_provider(chain_spec: Arc<OpChainSpec>) -> BasicBlockExecutorProvider<OpEvmConfig> {
+        BasicBlockExecutorProvider::new(OpEvmConfig::new(
+            chain_spec,
+            BasicOpReceiptBuilder::default(),
+        ))
     }
 
     #[test]
