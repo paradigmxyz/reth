@@ -7,7 +7,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{address, Address, Bytes};
 use reth::{
     builder::{
-        components::{ExecutorBuilder, PayloadServiceBuilder},
+        components::{BasicPayloadServiceBuilder, ExecutorBuilder, PayloadBuilderBuilder},
         BuilderContext, NodeBuilder,
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
@@ -104,7 +104,7 @@ pub struct MyPayloadBuilder {
     inner: EthereumPayloadBuilder,
 }
 
-impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for MyPayloadBuilder
+impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for MyPayloadBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
@@ -124,7 +124,7 @@ where
     >;
 
     async fn build_payload_builder(
-        &self,
+        self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {
@@ -224,7 +224,7 @@ async fn main() -> eyre::Result<()> {
         .with_components(
             EthereumNode::components()
                 .executor(MyExecutorBuilder::default())
-                .payload(MyPayloadBuilder::default()),
+                .payload(BasicPayloadServiceBuilder::new(MyPayloadBuilder::default())),
         )
         .with_add_ons(EthereumAddOns::default())
         .launch()
