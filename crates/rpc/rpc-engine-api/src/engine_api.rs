@@ -549,7 +549,7 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes<ExecutionData = ExecutionData>,
+    EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -558,14 +558,14 @@ where
     /// Caution: This should not accept the `withdrawals` field
     pub async fn new_payload_v1(
         &self,
-        payload: ExecutionPayloadV1,
+        payload: EngineT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload =
-            ExecutionData { payload: payload.into(), sidecar: ExecutionPayloadSidecar::none() };
-        let payload_or_attrs =
-        PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
-            &payload,
-        );
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            EngineT::ExecutionData,
+            EngineT::PayloadAttributes,
+        >::from_execution_payload(&payload);
+
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V1, payload_or_attrs)?;
@@ -582,10 +582,19 @@ where
     async fn new_payload_v1_metered(
         &self,
         payload: ExecutionPayloadV1,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<PayloadStatus>
+    where
+        EngineT::ExecutionData: TryFrom<ExecutionPayloadV1>,
+        <EngineT::ExecutionData as TryFrom<ExecutionPayloadV1>>::Error:
+            std::error::Error + Send + Sync + 'static,
+    {
         let start = Instant::now();
         let gas_used = payload.gas_used;
-        let res = Self::new_payload_v1(self, payload).await;
+
+        let execution_data = EngineT::ExecutionData::try_from(payload)
+            .map_err(|_| EngineApiError::UnknownPayload)?;
+
+        let res = Self::new_payload_v1(self, execution_data).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v1.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -595,16 +604,13 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
-        payload: ExecutionPayloadInputV2,
+        payload: EngineT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionData {
-            payload: payload.into_payload(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
-        let payload_or_attrs =
-            PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload,
-            );
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            EngineT::ExecutionData,
+            EngineT::PayloadAttributes,
+        >::from_execution_payload(&payload);
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V2, payload_or_attrs)?;
@@ -620,10 +626,23 @@ where
     pub async fn new_payload_v2_metered(
         &self,
         payload: ExecutionPayloadInputV2,
-    ) -> EngineApiResult<PayloadStatus> {
+    ) -> EngineApiResult<PayloadStatus>
+    where
+        EngineT::ExecutionData: TryFrom<ExecutionData>,
+        <EngineT::ExecutionData as TryFrom<ExecutionData>>::Error:
+            std::error::Error + Send + Sync + 'static,
+    {
         let start = Instant::now();
         let gas_used = payload.execution_payload.gas_used;
-        let res = Self::new_payload_v2(self, payload).await;
+
+        let execution_data = ExecutionData {
+            payload: payload.into_payload(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+
+        let engine_execution_data = EngineT::ExecutionData::try_from(execution_data)
+            .map_err(|_| EngineApiError::UnknownPayload)?;
+        let res = Self::new_payload_v2(self, engine_execution_data).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v2.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -633,21 +652,13 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     pub async fn new_payload_v3(
         &self,
-        payload: ExecutionPayloadV3,
-        versioned_hashes: Vec<B256>,
-        parent_beacon_block_root: B256,
+        payload: EngineT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                versioned_hashes,
-                parent_beacon_block_root,
-            }),
-        };
-        let payload_or_attrs =
-            PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload,
-            );
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            EngineT::ExecutionData,
+            EngineT::PayloadAttributes,
+        >::from_execution_payload(&payload);
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V3, payload_or_attrs)?;
@@ -666,11 +677,26 @@ where
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<PayloadStatus>
+    where
+        EngineT::ExecutionData: TryFrom<ExecutionData>,
+        <EngineT::ExecutionData as TryFrom<ExecutionData>>::Error:
+            std::error::Error + Send + Sync + 'static,
+    {
         let start = Instant::now();
         let gas_used = payload.payload_inner.payload_inner.gas_used;
-        let res =
-            Self::new_payload_v3(self, payload, versioned_hashes, parent_beacon_block_root).await;
+
+        let execution_data = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                versioned_hashes,
+                parent_beacon_block_root,
+            }),
+        };
+        let engine_execution_data = EngineT::ExecutionData::try_from(execution_data)
+            .map_err(|_| EngineApiError::UnknownPayload)?;
+
+        let res = Self::new_payload_v3(self, engine_execution_data).await;
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v3.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -680,29 +706,16 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
     pub async fn new_payload_v4(
         &self,
-        payload: ExecutionPayloadV3,
-        versioned_hashes: Vec<B256>,
-        parent_beacon_block_root: B256,
-        execution_requests: Requests,
+        payload: EngineT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = ExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v4(
-                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
-                PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
-            ),
-        };
-        let payload_or_attrs =
-            PayloadOrAttributes::<'_, ExecutionData, EngineT::PayloadAttributes>::from_execution_payload(
-                &payload,
-            );
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            EngineT::ExecutionData,
+            EngineT::PayloadAttributes,
+        >::from_execution_payload(&payload);
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
-
-        if let Some(requests) = payload.sidecar.requests() {
-            self.inner.validator.validate_execution_requests(requests)?;
-        }
 
         Ok(self
             .inner
@@ -719,17 +732,34 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,
-    ) -> RpcResult<PayloadStatus> {
+    ) -> RpcResult<PayloadStatus>
+    where
+        EngineT::ExecutionData: TryFrom<ExecutionData>,
+        <EngineT::ExecutionData as TryFrom<ExecutionData>>::Error:
+            std::error::Error + Send + Sync + 'static,
+    {
         let start = Instant::now();
         let gas_used = payload.payload_inner.payload_inner.gas_used;
-        let res = Self::new_payload_v4(
-            self,
-            payload,
-            versioned_hashes,
-            parent_beacon_block_root,
-            execution_requests,
-        )
-        .await;
+
+        let execution_data = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
+            ),
+        };
+
+        if let Some(requests) = execution_data.sidecar.requests() {
+            if let Err(err) = self.inner.validator.validate_execution_requests(requests) {
+                return Err(EngineApiError::Internal(Box::new(err)).into());
+            }
+        }
+
+        let engine_execution_data = EngineT::ExecutionData::try_from(execution_data)
+            .map_err(|_| EngineApiError::UnknownPayload)?;
+
+        let res = Self::new_payload_v4(self, engine_execution_data).await;
+
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
@@ -1147,9 +1177,13 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         tokio::spawn(async move {
-            api.new_payload_v1(ExecutionPayloadV1::from_block_slow(&Block::default()))
-                .await
-                .unwrap();
+            let payload_v1 = ExecutionPayloadV1::from_block_slow(&Block::default());
+            let execution_data = ExecutionData {
+                payload: payload_v1.into(),
+                sidecar: ExecutionPayloadSidecar::none(),
+            };
+
+            api.new_payload_v1(execution_data).await.unwrap();
         });
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }
