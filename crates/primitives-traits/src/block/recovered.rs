@@ -291,6 +291,15 @@ impl<B: Block> RecoveredBlock<B> {
         self.senders.iter().zip(self.block.body().transactions())
     }
 
+    /// Returns an iterator over cloned `Recovered<Transaction>`
+    #[inline]
+    pub fn clone_transactions_recovered(
+        &self,
+    ) -> impl Iterator<Item = Recovered<<B::Body as BlockBody>::Transaction>> + '_ {
+        self.transactions_with_sender()
+            .map(|(sender, tx)| Recovered::new_unchecked(tx.clone(), *sender))
+    }
+
     /// Returns an iterator over `Recovered<&Transaction>`
     #[inline]
     pub fn transactions_recovered(
