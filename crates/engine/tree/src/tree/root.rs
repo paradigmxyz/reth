@@ -34,7 +34,7 @@ use reth_trie_sparse::{
     SparseStateTrie,
 };
 use std::{
-    collections::{hash_map::Entry, BTreeMap, VecDeque},
+    collections::{hash_map::Entry, BTreeMap, BTreeSet, VecDeque},
     sync::{
         mpsc::{self, channel, Receiver, Sender},
         Arc,
@@ -1301,8 +1301,14 @@ where
 /// [`MultiProofTargets`] mapping having a maximum length of `accounts_chunk_size`, and each mapping
 /// value [`B256Set`] having a maximum length of `storages_chunk_size`.
 struct ChunkedProofTargets {
-    proof_targets: MultiProofTargets,
+    /// Proof targets sorted by hashed address, and their associated sorted storage slots.
+    ///
+    /// We keep them sorted, because multiproofs are more efficient when proof targets are located
+    /// close to each other.
+    proof_targets: BTreeMap<B256, BTreeSet<B256>>,
+    /// Number of accounts per chunk.
     accounts_chunk_size: usize,
+    /// Number of storage slots per account per chunk.
     storages_chunk_size: usize,
 }
 
@@ -1312,7 +1318,14 @@ impl ChunkedProofTargets {
         accounts_chunk_size: usize,
         storages_chunk_size: usize,
     ) -> Self {
-        Self { proof_targets, accounts_chunk_size, storages_chunk_size }
+        Self {
+            proof_targets: proof_targets
+                .into_iter()
+                .map(|(address, storages)| (address, storages.into_iter().collect()))
+                .collect(),
+            accounts_chunk_size,
+            storages_chunk_size,
+        }
     }
 }
 
