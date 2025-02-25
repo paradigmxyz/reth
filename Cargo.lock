@@ -261,7 +261,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=beb6832#beb68324d7e05ae2eafad9f726a94cb0b63d15a5"
+source = "git+https://github.com/alloy-rs/evm?rev=04fa394#04fa3947c5694c2d15956bb18a31834b95e0e975"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
@@ -369,7 +369,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=beb6832#beb68324d7e05ae2eafad9f726a94cb0b63d15a5"
+source = "git+https://github.com/alloy-rs/evm?rev=04fa394#04fa3947c5694c2d15956bb18a31834b95e0e975"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -3146,7 +3146,6 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
- "alloy-consensus",
  "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
@@ -3345,7 +3344,6 @@ dependencies = [
 name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
- "alloy-consensus",
  "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
@@ -6022,9 +6020,9 @@ dependencies = [
 
 [[package]]
 name = "portable-atomic"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "280dc24453071f1b63954171985a0b0d30058d287960968b9b2aca264c8d4ee6"
+checksum = "350e9b48cbc6b0e028b0473b114454c6316e57336ee184ceab6e53f72c178b3e"
 
 [[package]]
 name = "powerfmt"
@@ -7385,6 +7383,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-trie",
+ "reth-trie-common",
  "serde",
  "thiserror 2.0.11",
  "tokio",
@@ -7494,6 +7493,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-forks",
+ "reth-ethereum-primitives",
  "reth-evm",
  "reth-fs-util",
  "reth-payload-primitives",
@@ -8667,6 +8667,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
+ "reth-trie-common",
  "reth-trie-db",
  "revm",
  "revm-optimism",

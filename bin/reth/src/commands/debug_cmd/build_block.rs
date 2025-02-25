@@ -24,10 +24,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
-use reth_primitives_traits::{
-    transaction::signed::SignedTransactionIntoRecoveredExt, Block as _, SealedBlock, SealedHeader,
-    SignedTransaction,
-};
+use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignedTransaction};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
@@ -80,7 +77,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    /// Fetches the best block block from the database.
+    /// Fetches the best block from the database.
     ///
     /// If the database is empty, returns the genesis block.
     fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
