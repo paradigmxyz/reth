@@ -1,20 +1,32 @@
 //! Contains the implementation of the sparse trie logic responsible for creating the
 
-use crate::tree::root2::{
+use crate::tree::payload_processor::multiproof::{
     SparseTrieUpdate, StateRootComputeOutcome, StateRootConfig, StateRootResult,
     StateRootTaskMetrics,
 };
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_provider::{BlockReader, DBProvider, DatabaseProviderFactory, StateCommitmentProvider};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::InMemoryTrieCursorFactory, MultiProofTargets, Nibbles,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
-use reth_trie_sparse::SparseStateTrie;
+use reth_trie_sparse::{
+    blinded::{BlindedProvider, BlindedProviderFactory},
+    errors::{SparseStateTrieResult, SparseTrieErrorKind},
+    SparseStateTrie,
+};
 use reth_workload_executor::WorkloadExecutor;
-use std::{sync::mpsc, time::Instant};
-use tracing::{debug, trace};
+use std::{
+    sync::mpsc,
+    time::{Duration, Instant},
+};
+use tracing::{debug, trace, trace_span};
+
+/// The level below which the sparse trie hashes are calculated in
+/// [`crate::tree::payload_processor::multiproof::update_sparse_trie`].
+const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// A task responsible for populating the sparse trie.
 pub struct SparseTrieTask<F> {
@@ -73,10 +85,9 @@ where
                 "Updating sparse trie"
             );
 
-            let elapsed =
-                crate::tree::root2::update_sparse_trie(&mut trie, update).map_err(|e| {
-                    ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-                })?;
+            let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
+                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+            })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
@@ -110,3 +121,77 @@ pub type SparseTrieEvent = SparseTrieUpdate;
 // updates     /// have been received.
 //     Update(Option<SparseTrieUpdate>),
 // }
+
+/// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
+pub(crate) fn update_sparse_trie<BPF>(
+    trie: &mut SparseStateTrie<BPF>,
+    SparseTrieUpdate { state, multiproof }: SparseTrieUpdate,
+) -> SparseStateTrieResult<Duration>
+where
+    BPF: BlindedProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
+    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+{
+    trace!(target: "engine::root::sparse", "Updating sparse trie");
+    let started_at = Instant::now();
+
+    // Reveal new accounts and storage slots.
+    trie.reveal_multiproof(multiproof)?;
+
+    // Update storage slots with new values and calculate storage roots.
+    let (tx, rx) = mpsc::channel();
+    state
+        .storages
+        .into_iter()
+        .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
+        .par_bridge()
+        .map(|(address, storage, storage_trie)| {
+            let span = trace_span!(target: "engine::root::sparse", "Storage trie", ?address);
+            let _enter = span.enter();
+            trace!(target: "engine::root::sparse", "Updating storage");
+            let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
+
+            if storage.wiped {
+                trace!(target: "engine::root::sparse", "Wiping storage");
+                storage_trie.wipe()?;
+            }
+            for (slot, value) in storage.storage {
+                let slot_nibbles = Nibbles::unpack(slot);
+                if value.is_zero() {
+                    trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
+                    storage_trie.remove_leaf(&slot_nibbles)?;
+                } else {
+                    trace!(target: "engine::root::sparse", ?slot, "Updating storage slot");
+                    storage_trie
+                        .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                }
+            }
+
+            storage_trie.root();
+
+            SparseStateTrieResult::Ok((address, storage_trie))
+        })
+        .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
+    drop(tx);
+    for result in rx {
+        let (address, storage_trie) = result?;
+        trie.insert_storage_trie(address, storage_trie);
+    }
+
+    // Update accounts with new values
+    for (address, account) in state.accounts {
+        trace!(target: "engine::root::sparse", ?address, "Updating account");
+        trie.update_account(address, account.unwrap_or_default())?;
+    }
+
+    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+    let elapsed = started_at.elapsed();
+
+    Ok(elapsed)
+}
+
+fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
+    for (address, slots) in other {
+        targets.entry(*address).or_default().extend(slots);
+    }
+}

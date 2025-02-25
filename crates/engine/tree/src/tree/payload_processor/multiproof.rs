@@ -1,6 +1,6 @@
 //! State root task related functionality.
 
-use crate::tree::payload_processor::SparseTrieEvent;
+use crate::tree::payload_processor::sparse_trie::SparseTrieEvent;
 use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use metrics::Histogram;
@@ -40,9 +40,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, error, trace, trace_span};
-
-/// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
-const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
@@ -1013,74 +1010,6 @@ where
     )
     .with_branch_node_masks(true)
     .multiproof(proof_targets)?)
-}
-
-/// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
-pub(crate) fn update_sparse_trie<BPF>(
-    trie: &mut SparseStateTrie<BPF>,
-    SparseTrieUpdate { state, multiproof }: SparseTrieUpdate,
-) -> SparseStateTrieResult<Duration>
-where
-    BPF: BlindedProviderFactory + Send + Sync,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
-{
-    trace!(target: "engine::root::sparse", "Updating sparse trie");
-    let started_at = Instant::now();
-
-    // Reveal new accounts and storage slots.
-    trie.reveal_multiproof(multiproof)?;
-
-    // Update storage slots with new values and calculate storage roots.
-    let (tx, rx) = mpsc::channel();
-    state
-        .storages
-        .into_iter()
-        .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
-        .par_bridge()
-        .map(|(address, storage, storage_trie)| {
-            let span = trace_span!(target: "engine::root::sparse", "Storage trie", ?address);
-            let _enter = span.enter();
-            trace!(target: "engine::root::sparse", "Updating storage");
-            let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
-
-            if storage.wiped {
-                trace!(target: "engine::root::sparse", "Wiping storage");
-                storage_trie.wipe()?;
-            }
-            for (slot, value) in storage.storage {
-                let slot_nibbles = Nibbles::unpack(slot);
-                if value.is_zero() {
-                    trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
-                    storage_trie.remove_leaf(&slot_nibbles)?;
-                } else {
-                    trace!(target: "engine::root::sparse", ?slot, "Updating storage slot");
-                    storage_trie
-                        .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
-                }
-            }
-
-            storage_trie.root();
-
-            SparseStateTrieResult::Ok((address, storage_trie))
-        })
-        .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
-    drop(tx);
-    for result in rx {
-        let (address, storage_trie) = result?;
-        trie.insert_storage_trie(address, storage_trie);
-    }
-
-    // Update accounts with new values
-    for (address, account) in state.accounts {
-        trace!(target: "engine::root::sparse", ?address, "Updating account");
-        trie.update_account(address, account.unwrap_or_default())?;
-    }
-
-    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
-    let elapsed = started_at.elapsed();
-
-    Ok(elapsed)
 }
 
 fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {

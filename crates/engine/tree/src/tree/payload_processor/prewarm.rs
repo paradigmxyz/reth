@@ -1,6 +1,6 @@
 use crate::tree::{
     cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
-    root2::*,
+    payload_processor::multiproof::StateRootMessage,
     StateProviderBuilder,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};

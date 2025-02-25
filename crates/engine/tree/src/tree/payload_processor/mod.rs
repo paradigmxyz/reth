@@ -6,11 +6,11 @@ use crate::tree::{
         prewarm::{PrewarmContext, PrewarmTask, PrewarmTaskEvent},
         sparse_trie::SparseTrieTask,
     },
-    root2::*,
     StateProviderBuilder,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_primitives::B256;
+use multiproof::*;
 use reth_evm::{
     execute::BlockExecutorProvider, system_calls::OnStateHook, ConfigureEvm, ConfigureEvmEnvFor,
     Evm,
@@ -28,11 +28,13 @@ use std::sync::{
     Arc, RwLock,
 };
 
+mod multiproof;
 mod prewarm;
 mod sparse_trie;
 
 /// Entrypoint for executing the payload.
 pub struct PayloadProcessor<N, Evm> {
+    /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
     most_recent_cache: ExecutionCache,

@@ -88,7 +88,6 @@ mod metrics;
 mod payload_processor;
 mod persistence_state;
 pub mod root;
-pub mod root2;
 mod trie_updates;
 
 use crate::tree::{config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError};
