@@ -728,7 +728,7 @@ where
         let proof_targets = self.get_prefetch_proof_targets(targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
-        let mut total_proofs = 0;
+        let mut total_proofs: u64 = 0;
         for chunk in ChunkedProofTargets::new(
             proof_targets,
             MULTIPROOF_ACCOUNTS_CHUNK_SIZE,
@@ -750,7 +750,7 @@ where
         }
 
         self.metrics.prefetch_chunks_histogram.record(total_proofs as f64);
-        total_proofs as u64
+        total_proofs
     }
 
     /// Calls `get_proof_targets` with existing proof targets for prefetching.
@@ -816,7 +816,7 @@ where
         let mut state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = hashed_post_state_to_proof_targets(&state_update);
 
-        let mut total_proofs = 0;
+        let mut total_proofs: u64 = 0;
 
         for chunk in ChunkedProofTargets::new(
             proof_targets,
@@ -917,7 +917,7 @@ where
         }
 
         self.metrics.state_update_chunks_histogram.record(total_proofs as f64);
-        total_proofs as u64
+        total_proofs
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -1353,7 +1353,7 @@ impl Iterator for ChunkedProofTargets {
 
             for (i, chunk) in storage_chunks.into_iter().enumerate() {
                 if i >= chunks.len() {
-                    chunks.push(B256Map::default());
+                    chunks.push(MultiProofTargets::default());
                 }
                 chunks[i].entry(address).or_default().extend(chunk);
             }
