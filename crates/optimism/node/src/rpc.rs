@@ -1,13 +1,12 @@
 //! RPC component builder
 
-pub use reth_optimism_rpc::OpEngineApi;
-
-use alloy_rpc_types_engine::ExecutionData;
+use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
     AddOnsContext, EngineTypes, FullNodeComponents, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_builder::rpc::{BasicEngineApiBuilder, EngineApiBuilder, EngineValidatorBuilder};
+pub use reth_optimism_rpc::OpEngineApi;
 
 /// Builder for basic [`OpEngineApi`] implementation.
 #[derive(Debug, Default)]
@@ -20,7 +19,7 @@ where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec: EthereumHardforks,
-            Engine: EngineTypes<ExecutionData = ExecutionData>,
+            Engine: EngineTypes<ExecutionData = OpExecutionData>,
         >,
     >,
     EV: EngineValidatorBuilder<N>,

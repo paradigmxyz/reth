@@ -1,8 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{
-    ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1,
-};
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayload, OpExecutionPayloadEnvelopeV3,
     OpExecutionPayloadEnvelopeV4, OpPayloadAttributes,
@@ -22,11 +20,9 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{
-    OpExecutionPayloadValidator,
+    OpBuiltPayload, OpExecutionPayloadValidator, OpPayloadBuilderAttributes,
 };
-use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::{OpBlock, OpPrimitives, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
-use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{RecoveredBlock, SealedBlock};
 use reth_provider::StateProviderFactory;
 use reth_trie_common::{HashedPostState, KeyHasher};
@@ -152,7 +148,7 @@ where
 
 impl<Types, P> EngineValidator<Types> for OpEngineValidator<P>
 where
-    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = ExecutionData>,
+    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = OpExecutionData>,
     P: StateProviderFactory + Unpin + 'static,
 {
     fn validate_execution_requests(
