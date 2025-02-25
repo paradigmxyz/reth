@@ -16,13 +16,13 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
+    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodePrimitives,
+    NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    primitives::Head,
+    primitives::{Head, SignedTransaction},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::EthereumHardforks;
@@ -65,9 +65,18 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<Types, DB, T, CB, AO, Tx> LaunchNode<NodeBuilderWithComponents<T, CB, AO>>
+    for EngineNodeLauncher
 where
-    Types: NodeTypesForProvider + NodeTypesWithEngine,
+    Tx: SignedTransaction,
+    Types: NodeTypesForProvider
+        + NodeTypesWithEngine<
+            Primitives: NodePrimitives<
+                SignedTx = Tx,
+                BlockHeader = alloy_consensus::Header,
+                BlockBody = alloy_consensus::BlockBody<Tx>,
+            >,
+        >,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     T: FullNodeTypes<
         Types = Types,
@@ -143,20 +152,6 @@ where
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         let node_config = ctx.node_config();
-        let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
-            .maybe_skip_fcu(node_config.debug.skip_fcu)
-            .maybe_skip_new_payload(node_config.debug.skip_new_payload)
-            // .maybe_reorg(
-            //     ctx.blockchain_db().clone(),
-            //     ctx.components().evm_config().clone(),
-            //     reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
-            //     node_config.debug.reorg_frequency,
-            //     node_config.debug.reorg_depth,
-            // )
-            // Store messages _after_ skipping so that `replay-engine` command
-            // would replay only the messages that were observed by the engine
-            // during this run.
-            .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
         let max_block = ctx.max_block(network_client.clone()).await?;
 
@@ -212,6 +207,21 @@ where
             engine_events: event_sender.clone(),
         };
         let engine_payload_validator = add_ons.engine_validator(&add_ons_ctx).await?;
+
+        let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
+            .maybe_skip_fcu(node_config.debug.skip_fcu)
+            .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            .maybe_reorg(
+                ctx.blockchain_db().clone(),
+                ctx.components().evm_config().clone(),
+                engine_payload_validator.clone(),
+                node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
+            )
+            // Store messages _after_ skipping so that `replay-engine` command
+            // would replay only the messages that were observed by the engine
+            // during this run.
+            .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
         let mut engine_service = if ctx.is_dev() {
             let eth_service = LocalEngineService::new(

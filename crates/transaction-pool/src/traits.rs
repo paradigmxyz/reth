@@ -17,9 +17,8 @@ use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
-    kzg::KzgSettings,
-    transaction::{SignedTransactionIntoRecoveredExt, TransactionConversionError},
-    PooledTransaction, Recovered, SealedBlock, TransactionSigned,
+    kzg::KzgSettings, transaction::TransactionConversionError, PooledTransaction, Recovered,
+    SealedBlock, TransactionSigned,
 };
 use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
 #[cfg(feature = "serde")]
