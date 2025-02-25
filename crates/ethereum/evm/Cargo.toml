@@ -29,6 +29,8 @@ alloy-evm.workspace = true
 alloy-sol-types.workspace = true
 alloy-consensus.workspace = true
 
+derive_more.workspace = true
+
 [dev-dependencies]
 reth-testing-utils.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }

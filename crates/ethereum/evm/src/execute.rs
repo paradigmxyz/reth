@@ -1,5 +1,7 @@
 //! Ethereum block execution strategy.
 
+use core::ops::Deref;
+
 use crate::{
     dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
     EthEvmConfig,
@@ -8,7 +10,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip4895::Withdrawals, eip6110, eip7685::Requests};
 use alloy_evm::FromRecoveredTx;
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_evm::{
     execute::{
@@ -17,13 +19,19 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvm, Database, Evm, EvmEnv, EvmFactory, TransactionEnv,
+    ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv, EvmFactory, EvmFor, InspectorFor,
+    NextBlockEnvAttributes, TransactionEnv,
 };
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{EthPrimitives, Receipt, Recovered, SealedBlock, TransactionSigned};
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives::{
+    EthPrimitives, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
+};
 use reth_revm::{
-    context_interface::result::ResultAndState, db::State, specification::hardfork::SpecId,
+    context::{result::ExecutionResult, BlockEnv},
+    context_interface::result::ResultAndState,
+    db::State,
+    inspector::NoOpInspector,
+    specification::hardfork::SpecId,
     DatabaseCommit,
 };
 
@@ -33,56 +41,86 @@ where
         + Send
         + Sync
         + Unpin
-        + Clone,
+        + Clone
+        + 'static,
 {
     type Primitives = EthPrimitives;
+    type Input<'a> = EthBlockExecutionInput<'a>;
+    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self>> =
+        EthExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
+
+    fn input_for_block<'a>(&self, block: &'a SealedBlock) -> Self::Input<'a> {
+        EthBlockExecutionInput {
+            evm_env: self.evm_env(block.header()),
+            parent_hash: block.header().parent_hash,
+            parent_beacon_block_root: block.header().parent_beacon_block_root,
+            ommers: &block.body().ommers,
+            withdrawals: block.body().withdrawals.as_ref(),
+        }
+    }
+
+    fn input_for_next_block<'a>(
+        &self,
+        parent: &SealedHeader,
+        attributes: NextBlockEnvAttributes<'a>,
+    ) -> Result<Self::Input<'a>, Self::Error> {
+        Ok(EthBlockExecutionInput {
+            evm_env: self.next_evm_env(parent, attributes)?,
+            parent_hash: parent.hash(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            ommers: &[],
+            withdrawals: attributes.withdrawals,
+        })
+    }
 
     fn create_strategy<'a, DB>(
         &'a self,
         db: &'a mut State<DB>,
-        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
+        input: Self::Input<'a>,
+    ) -> Self::Strategy<'a, DB, NoOpInspector>
     where
         DB: Database,
     {
-        let evm = self.evm_for_block(db, block.header());
-        EthExecutionStrategy::new(evm, block, &self.chain_spec)
+        let evm = self.evm_with_env(db, input.evm_env.clone());
+        EthExecutionStrategy::new(evm, input, &self.chain_spec)
+    }
+
+    fn create_strategy_with_inspector<'a, DB, I>(
+        &'a self,
+        db: &'a mut State<DB>,
+        inspector: I,
+        input: Self::Input<'a>,
+    ) -> Self::Strategy<'a, DB, I>
+    where
+        DB: Database,
+        I: InspectorFor<&'a mut State<DB>, Self>,
+    {
+        let evm = self.evm_with_env_and_inspector(db, input.evm_env.clone(), inspector);
+        EthExecutionStrategy::new(evm, input, &self.chain_spec)
     }
 }
 
 /// Input for block execution.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, derive_more::AsMut)]
 pub struct EthBlockExecutionInput<'a> {
-    /// Block number.
-    pub number: u64,
-    /// Block timestamp.
-    pub timestamp: u64,
+    /// The EVM configuration.
+    #[as_mut]
+    pub evm_env: EvmEnv<SpecId>,
     /// Parent block hash.
     pub parent_hash: B256,
-    /// Block gas limit.
-    pub gas_limit: u64,
     /// Parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
-    /// Block beneficiary.
-    pub beneficiary: Address,
     /// Block ommers
     pub ommers: &'a [Header],
     /// Block withdrawals.
     pub withdrawals: Option<&'a Withdrawals>,
 }
 
-impl<'a> From<&'a SealedBlock> for EthBlockExecutionInput<'a> {
-    fn from(block: &'a SealedBlock) -> Self {
-        Self {
-            number: block.header().number,
-            timestamp: block.header().timestamp,
-            parent_hash: block.header().parent_hash,
-            gas_limit: block.header().gas_limit,
-            parent_beacon_block_root: block.header().parent_beacon_block_root,
-            beneficiary: block.header().beneficiary,
-            ommers: &block.body().ommers,
-            withdrawals: block.body().withdrawals.as_ref(),
-        }
+impl<'a> Deref for EthBlockExecutionInput<'a> {
+    type Target = BlockEnv;
+
+    fn deref(&self) -> &Self::Target {
+        self.evm_env.block_env()
     }
 }
 
@@ -130,6 +168,7 @@ where
 {
     type Error = BlockExecutionError;
     type Primitives = EthPrimitives;
+    type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
@@ -144,9 +183,10 @@ where
         Ok(())
     }
 
-    fn execute_transaction(
+    fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<&TransactionSigned>,
+        tx: Recovered<&<Self::Primitives as reth_primitives::NodePrimitives>::SignedTx>,
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, Self::Error> {
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block's gasLimit.
@@ -168,6 +208,8 @@ where
             .on_state(StateChangeSource::Transaction(self.receipts.len()), &result_and_state.state);
         let ResultAndState { result, state } = result_and_state;
         self.evm.db_mut().commit(state);
+
+        f(&result);
 
         let gas_used = result.gas_used();
 
@@ -246,6 +288,10 @@ where
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
+    }
+
+    fn evm_mut(&mut self) -> &mut Self::Evm {
+        &mut self.evm
     }
 }
 

@@ -1,8 +1,12 @@
 //! Traits for execution.
 
 use alloy_consensus::BlockHeader;
+use alloy_evm::Evm;
 // Re-export execution types
-use crate::{system_calls::OnStateHook, ConfigureEvmFor, Database};
+use crate::{
+    system_calls::OnStateHook, ConfigureEvmFor, Database, EvmEnvFor, EvmFor, InspectorFor,
+    NextBlockEnvAttributes,
+};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
@@ -13,9 +17,15 @@ pub use reth_execution_errors::{
 };
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{NodePrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock};
+use reth_primitives::{
+    NodePrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
+};
 pub use reth_storage_errors::provider::ProviderError;
-use revm::state::{Account, AccountStatus, EvmState};
+use revm::{
+    context::result::ExecutionResult,
+    inspector::NoOpInspector,
+    state::{Account, AccountStatus, EvmState},
+};
 use revm_database::{states::bundle_state::BundleRetention, State};
 
 /// A type that knows how to execute a block. It is assumed to operate on a
@@ -167,6 +177,9 @@ pub trait BlockExecutionStrategy {
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
 
+    /// EVM used by the strategy.
+    type Evm: Evm;
+
     /// The error type returned by this strategy's methods.
     type Error: core::error::Error;
 
@@ -179,6 +192,14 @@ pub trait BlockExecutionStrategy {
     fn execute_transaction(
         &mut self,
         tx: Recovered<&<Self::Primitives as NodePrimitives>::SignedTx>,
+    ) -> Result<u64, Self::Error> {
+        self.execute_transaction_with_result_closure(tx, |_| ())
+    }
+
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: Recovered<&<Self::Primitives as NodePrimitives>::SignedTx>,
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
@@ -188,21 +209,84 @@ pub trait BlockExecutionStrategy {
 
     /// Sets a hook to be called after each state change during execution.
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>);
+
+    /// Exposes mutable reference to EVM.
+    fn evm_mut(&mut self) -> &mut Self::Evm;
 }
 
 /// A strategy factory that can create block execution strategies.
-pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> {
+pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'static {
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
 
+    /// Strategy this factory produces.
+    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self>>: BlockExecutionStrategy<
+        Primitives = Self::Primitives,
+        Error = BlockExecutionError,
+        Evm = EvmFor<Self, &'a mut State<DB>, I>,
+    >;
+
+    /// Context required for execution a block.
+    ///
+    /// This is similar to [`alloy_evm::EvmEnv`], but only contains context unrelated to EVM and
+    /// required for execution of an entire block.
+    type ExecutionCtx<'a>;
+
+    /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for block execution.
+    fn context_for_block<'a>(
+        &self,
+        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Self::Input<'a>;
+
+    /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for `parent + 1`
+    /// block.
+    fn context_for_next_block<'a>(
+        &self,
+        parent: &SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
+        attributes: NextBlockEnvAttributes<'a>,
+    ) -> Result<Self::Input<'a>, Self::Error>;
+
     /// Creates a strategy using the given database.
-    fn create_strategy<'a, DB>(
+    fn create_strategy<'a, DB, I>(
+        &'a self,
+        evm: EvmFor<Self, &'a mut State<DB>, I>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Strategy<'a, DB, NoOpInspector>
+    where
+        DB: Database;
+
+    /// Creates a strategy for execution of a given block.
+    ///
+    /// Helper to invoke [`BlockExecutionStrategyFactory::input_for_block`] and
+    /// [`BlockExecutionStrategyFactory::create_strategy`].
+    fn strategy_for_block<'a, DB>(
         &'a self,
         db: &'a mut State<DB>,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
+    ) -> Self::Strategy<'a, DB, NoOpInspector>
     where
-        DB: Database;
+        DB: Database,
+    {
+        let input = self.input_for_block(block);
+        self.create_strategy(db, input)
+    }
+
+    /// Creates a strategy for execution of a pending block.
+    ///
+    /// Helper to invoke [`BlockExecutionStrategyFactory::input_for_pending_block`] and
+    /// [`BlockExecutionStrategyFactory::create_strategy`].
+    fn strategy_for_pending_block<'a, DB>(
+        &'a self,
+        db: &'a mut State<DB>,
+        parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
+        attributes: NextBlockEnvAttributes<'a>,
+    ) -> Result<Self::Strategy<'a, DB, NoOpInspector>, Self::Error>
+    where
+        DB: Database,
+    {
+        let input = self.input_for_next_block(parent, attributes)?;
+        Ok(self.create_strategy(db, input))
+    }
 }
 
 impl<F> Clone for BasicBlockExecutorProvider<F>
@@ -275,7 +359,7 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let mut strategy = self.strategy_factory.create_strategy(&mut self.db, block);
+        let mut strategy = self.strategy_factory.strategy_for_block(&mut self.db, block);
 
         strategy.apply_pre_execution_changes()?;
         for tx in block.transactions_recovered() {
@@ -296,7 +380,7 @@ where
     where
         H: OnStateHook + 'static,
     {
-        let mut strategy = self.strategy_factory.create_strategy(&mut self.db, block);
+        let mut strategy = self.strategy_factory.strategy_for_block(&mut self.db, block);
         strategy.with_state_hook(Some(Box::new(state_hook)));
 
         strategy.apply_pre_execution_changes()?;

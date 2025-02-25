@@ -7,12 +7,13 @@ use alloy_consensus::{
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::{ConfigureEvm, HaltReasonFor};
-use reth_primitives::{logs_bloom, BlockBody, Receipt};
+use reth_evm::execute::BlockExecutionStrategyFactory;
+use reth_node_api::NodePrimitives;
+use reth_primitives::{logs_bloom, BlockBody, Receipt, SealedHeader};
 use reth_primitives_traits::proofs::calculate_transaction_root;
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderReceipt, ProviderTx,
-    StateProviderFactory,
+    BlockExecutionResult, BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock,
+    ProviderHeader, ProviderReceipt, ProviderTx, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
@@ -21,10 +22,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm::{
-    context::BlockEnv,
-    context_interface::{result::ExecutionResult, Block},
-};
+use revm::{context::BlockEnv, context_interface::Block};
 use revm_primitives::B256;
 
 use crate::EthApi;
@@ -46,7 +44,13 @@ where
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
-            Evm: ConfigureEvm<Header = Header, Transaction = ProviderTx<Self::Provider>>,
+            Evm: BlockExecutionStrategyFactory<
+                Primitives: NodePrimitives<
+                    BlockHeader = Header,
+                    SignedTx = ProviderTx<Self::Provider>,
+                    Receipt = ProviderReceipt<Self::Provider>,
+                >,
+            >,
         >,
     Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
 {
@@ -62,17 +66,17 @@ where
     fn assemble_block(
         &self,
         block_env: &BlockEnv,
-        parent_hash: revm_primitives::B256,
+        result: &BlockExecutionResult<ProviderReceipt<Self::Provider>>,
+        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
         state_root: revm_primitives::B256,
         transactions: Vec<Recovered<ProviderTx<Self::Provider>>>,
-        receipts: &[ProviderReceipt<Self::Provider>],
     ) -> reth_provider::ProviderBlock<Self::Provider> {
         let chain_spec = self.provider().chain_spec();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root = Receipt::calculate_receipt_root_no_memo(receipts);
+        let receipts_root = Receipt::calculate_receipt_root_no_memo(&result.receipts);
 
-        let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
+        let logs_bloom = logs_bloom(result.receipts.iter().flat_map(|r| &r.logs));
 
         let timestamp = block_env.timestamp;
         let is_shanghai = chain_spec.is_shanghai_active_at_timestamp(timestamp);
@@ -80,7 +84,7 @@ where
         let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
 
         let header = Header {
-            parent_hash,
+            parent_hash: parent.hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
             beneficiary: block_env.beneficiary,
             state_root,
@@ -95,7 +99,7 @@ where
             number: block_env.number,
             gas_limit: block_env.gas_limit,
             difficulty: U256::ZERO,
-            gas_used: receipts.last().map(|r| r.cumulative_gas_used).unwrap_or_default(),
+            gas_used: result.gas_used,
             blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
@@ -113,20 +117,6 @@ where
                 ommers: vec![],
                 withdrawals: None,
             },
-        }
-    }
-
-    fn assemble_receipt(
-        &self,
-        tx: &ProviderTx<Self::Provider>,
-        result: ExecutionResult<HaltReasonFor<Self::Evm>>,
-        cumulative_gas_used: u64,
-    ) -> reth_provider::ProviderReceipt<Self::Provider> {
-        Receipt {
-            tx_type: tx.tx_type(),
-            success: result.is_success(),
-            cumulative_gas_used,
-            logs: result.into_logs().into_iter().collect(),
         }
     }
 }
