@@ -1,6 +1,8 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
+use std::borrow::BorrowMut;
+
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
     helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
@@ -106,37 +108,33 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     Vec::with_capacity(block_state_calls.len());
                 let mut block_state_calls = block_state_calls.into_iter().peekable();
                 while let Some(block) = block_state_calls.next() {
-                    let mut input = this
+                    let mut evm_env = this
                         .evm_config()
-                        .input_for_next_block(&parent, this.pending_next_env_attributes(&parent)?)
+                        .next_evm_env(&parent, this.next_env_attributes(&parent)?)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
 
                     // Always disable EIP-3607
-                    input.as_mut().cfg_env.disable_eip3607 = true;
+                    evm_env.cfg_env.disable_eip3607 = true;
 
                     if !validation {
-                        input.as_mut().cfg_env.disable_base_fee = !validation;
-                        input.as_mut().block_env.basefee = 0;
+                        evm_env.cfg_env.disable_base_fee = !validation;
+                        evm_env.block_env.basefee = 0;
                     }
 
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 
                     if let Some(block_overrides) = block_overrides {
-                        apply_block_overrides(
-                            block_overrides,
-                            &mut db,
-                            &mut input.as_mut().block_env,
-                        );
+                        apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
                     }
                     if let Some(state_overrides) = state_overrides {
                         apply_state_overrides(state_overrides, &mut db)?;
                     }
 
-                    let block_env = input.as_mut().block_env.clone();
-                    let chain_id = input.as_mut().cfg_env.chain_id;
+                    let block_env = evm_env.block_env.clone();
+                    let chain_id = evm_env.cfg_env.chain_id;
 
-                    if (total_gas_limit - gas_used) < block_env.gas_limit {
+                    if (total_gas_limit - gas_used) < evm_env.block_env.gas_limit {
                         return Err(
                             EthApiError::Other(Box::new(EthSimulateError::GasLimitReached)).into()
                         )
@@ -162,13 +160,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
                     };
 
+                    let ctx = this
+                        .evm_config()
+                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?);
                     let (transactions, result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
                         let inspector = TransferInspector::new(false).with_logs(true);
-                        let strategy = this
-                            .evm_config()
-                            .create_strategy_with_inspector(&mut db, inspector, input);
+                        let evm =
+                            this.evm_config().evm_with_env_and_inspector(&mut db, evm_env, inspector);
+                        let strategy = this.evm_config().create_strategy(evm, ctx);
                         simulate::execute_transactions(
                             strategy,
                             calls,
@@ -178,7 +179,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             this.tx_resp_builder(),
                         )?
                     } else {
-                        let strategy = this.evm_config().create_strategy(&mut db, input);
+                        let evm = this.evm_config().evm_with_env(&mut db, evm_env);
+                        let strategy = this.evm_config().create_strategy(evm, ctx);
                         simulate::execute_transactions(
                             strategy,
                             calls,

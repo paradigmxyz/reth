@@ -159,7 +159,7 @@ where
     };
 
     let mut strategy = evm_config
-        .strategy_for_pending_block(&mut db, &parent_header, next_attributes)
+        .strategy_for_next_block(&mut db, &parent_header, next_attributes)
         .map_err(PayloadBuilderError::other)?;
 
     let chain_spec = client.chain_spec();

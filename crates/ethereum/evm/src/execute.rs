@@ -45,13 +45,12 @@ where
         + 'static,
 {
     type Primitives = EthPrimitives;
-    type Input<'a> = EthBlockExecutionInput<'a>;
-    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self>> =
+    type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
+    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
         EthExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
 
-    fn input_for_block<'a>(&self, block: &'a SealedBlock) -> Self::Input<'a> {
-        EthBlockExecutionInput {
-            evm_env: self.evm_env(block.header()),
+    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> Self::ExecutionCtx<'a> {
+        EthBlockExecutionCtx {
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             ommers: &block.body().ommers,
@@ -59,53 +58,35 @@ where
         }
     }
 
-    fn input_for_next_block<'a>(
+    fn context_for_next_block<'a>(
         &self,
         parent: &SealedHeader,
         attributes: NextBlockEnvAttributes<'a>,
-    ) -> Result<Self::Input<'a>, Self::Error> {
-        Ok(EthBlockExecutionInput {
-            evm_env: self.next_evm_env(parent, attributes)?,
+    ) -> Self::ExecutionCtx<'a> {
+        EthBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             ommers: &[],
             withdrawals: attributes.withdrawals,
-        })
+        }
     }
 
-    fn create_strategy<'a, DB>(
+    fn create_strategy<'a, DB, I>(
         &'a self,
-        db: &'a mut State<DB>,
-        input: Self::Input<'a>,
-    ) -> Self::Strategy<'a, DB, NoOpInspector>
-    where
-        DB: Database,
-    {
-        let evm = self.evm_with_env(db, input.evm_env.clone());
-        EthExecutionStrategy::new(evm, input, &self.chain_spec)
-    }
-
-    fn create_strategy_with_inspector<'a, DB, I>(
-        &'a self,
-        db: &'a mut State<DB>,
-        inspector: I,
-        input: Self::Input<'a>,
+        evm: EvmFor<Self, &'a mut State<DB>, I>,
+        ctx: Self::ExecutionCtx<'a>,
     ) -> Self::Strategy<'a, DB, I>
     where
         DB: Database,
-        I: InspectorFor<&'a mut State<DB>, Self>,
+        I: InspectorFor<&'a mut State<DB>, Self> + 'a,
     {
-        let evm = self.evm_with_env_and_inspector(db, input.evm_env.clone(), inspector);
-        EthExecutionStrategy::new(evm, input, &self.chain_spec)
+        EthExecutionStrategy::new(evm, ctx, &self.chain_spec)
     }
 }
 
 /// Input for block execution.
-#[derive(Debug, Clone, derive_more::AsMut)]
-pub struct EthBlockExecutionInput<'a> {
-    /// The EVM configuration.
-    #[as_mut]
-    pub evm_env: EvmEnv<SpecId>,
+#[derive(Debug, Clone, Copy)]
+pub struct EthBlockExecutionCtx<'a> {
     /// Parent block hash.
     pub parent_hash: B256,
     /// Parent beacon block root.
@@ -116,14 +97,6 @@ pub struct EthBlockExecutionInput<'a> {
     pub withdrawals: Option<&'a Withdrawals>,
 }
 
-impl<'a> Deref for EthBlockExecutionInput<'a> {
-    type Target = BlockEnv;
-
-    fn deref(&self) -> &Self::Target {
-        self.evm_env.block_env()
-    }
-}
-
 /// Block execution strategy for Ethereum.
 #[derive(Debug)]
 pub struct EthExecutionStrategy<'a, Evm> {
@@ -131,7 +104,7 @@ pub struct EthExecutionStrategy<'a, Evm> {
     chain_spec: &'a ChainSpec,
 
     /// Input for block execution.
-    input: EthBlockExecutionInput<'a>,
+    ctx: EthBlockExecutionCtx<'a>,
     /// The EVM used by strategy.
     evm: Evm,
     /// Utility to call system smart contracts.
@@ -145,15 +118,11 @@ pub struct EthExecutionStrategy<'a, Evm> {
 
 impl<'a, Evm> EthExecutionStrategy<'a, Evm> {
     /// Creates a new [`EthExecutionStrategy`]
-    pub fn new(
-        evm: Evm,
-        input: impl Into<EthBlockExecutionInput<'a>>,
-        chain_spec: &'a ChainSpec,
-    ) -> Self {
+    pub fn new(evm: Evm, ctx: EthBlockExecutionCtx<'a>, chain_spec: &'a ChainSpec) -> Self {
         Self {
             evm,
             chain_spec,
-            input: input.into(),
+            ctx,
             receipts: Vec::new(),
             gas_used: 0,
             system_caller: SystemCaller::new(chain_spec),
@@ -173,12 +142,11 @@ where
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            self.chain_spec.is_spurious_dragon_active_at_block(self.input.number);
+            self.chain_spec.is_spurious_dragon_active_at_block(self.evm.block().number);
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
+        self.system_caller.apply_blockhashes_contract_call(self.ctx.parent_hash, &mut self.evm)?;
         self.system_caller
-            .apply_blockhashes_contract_call(self.input.parent_hash, &mut self.evm)?;
-        self.system_caller
-            .apply_beacon_root_contract_call(self.input.parent_beacon_block_root, &mut self.evm)?;
+            .apply_beacon_root_contract_call(self.ctx.parent_beacon_block_root, &mut self.evm)?;
 
         Ok(())
     }
@@ -190,7 +158,7 @@ where
     ) -> Result<u64, Self::Error> {
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block's gasLimit.
-        let block_available_gas = self.input.gas_limit - self.gas_used;
+        let block_available_gas = self.evm.block().gas_limit - self.gas_used;
         if tx.gas_limit() > block_available_gas {
             return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                 transaction_gas_limit: tx.gas_limit(),
@@ -232,7 +200,8 @@ where
     fn apply_post_execution_changes(
         mut self,
     ) -> Result<BlockExecutionResult<Receipt>, Self::Error> {
-        let requests = if self.chain_spec.is_prague_active_at_timestamp(self.input.timestamp) {
+        let requests = if self.chain_spec.is_prague_active_at_timestamp(self.evm.block().timestamp)
+        {
             // Collect all EIP-6110 deposits
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(self.chain_spec, &self.receipts)?;
@@ -252,12 +221,13 @@ where
         let mut balance_increments = post_block_balance_increments(
             self.chain_spec,
             self.evm.block(),
-            self.input.ommers,
-            self.input.withdrawals,
+            self.ctx.ommers,
+            self.ctx.withdrawals,
         );
 
         // Irregular state change at Ethereum DAO hardfork
-        if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(self.input.number) {
+        if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(self.evm.block().number)
+        {
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
                 .evm

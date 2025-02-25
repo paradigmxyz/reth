@@ -220,7 +220,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     type Primitives: NodePrimitives;
 
     /// Strategy this factory produces.
-    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self>>: BlockExecutionStrategy<
+    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a>: BlockExecutionStrategy<
         Primitives = Self::Primitives,
         Error = BlockExecutionError,
         Evm = EvmFor<Self, &'a mut State<DB>, I>,
@@ -236,7 +236,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Self::Input<'a>;
+    ) -> Self::ExecutionCtx<'a>;
 
     /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for `parent + 1`
     /// block.
@@ -244,16 +244,17 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         &self,
         parent: &SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
         attributes: NextBlockEnvAttributes<'a>,
-    ) -> Result<Self::Input<'a>, Self::Error>;
+    ) -> Self::ExecutionCtx<'a>;
 
     /// Creates a strategy using the given database.
     fn create_strategy<'a, DB, I>(
         &'a self,
         evm: EvmFor<Self, &'a mut State<DB>, I>,
         ctx: Self::ExecutionCtx<'a>,
-    ) -> Self::Strategy<'a, DB, NoOpInspector>
+    ) -> Self::Strategy<'a, DB, I>
     where
-        DB: Database;
+        DB: Database,
+        I: InspectorFor<&'a mut State<DB>, Self> + 'a;
 
     /// Creates a strategy for execution of a given block.
     ///
@@ -267,15 +268,16 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     where
         DB: Database,
     {
-        let input = self.input_for_block(block);
-        self.create_strategy(db, input)
+        let evm = self.evm_for_block(db, block.header());
+        let ctx = self.context_for_block(block);
+        self.create_strategy(evm, ctx)
     }
 
     /// Creates a strategy for execution of a pending block.
     ///
     /// Helper to invoke [`BlockExecutionStrategyFactory::input_for_pending_block`] and
     /// [`BlockExecutionStrategyFactory::create_strategy`].
-    fn strategy_for_pending_block<'a, DB>(
+    fn strategy_for_next_block<'a, DB>(
         &'a self,
         db: &'a mut State<DB>,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
@@ -284,8 +286,10 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     where
         DB: Database,
     {
-        let input = self.input_for_next_block(parent, attributes)?;
-        Ok(self.create_strategy(db, input))
+        let evm_env = self.next_evm_env(parent, attributes)?;
+        let evm = self.evm_with_env(db, evm_env);
+        let ctx = self.context_for_next_block(parent, attributes);
+        Ok(self.create_strategy(evm, ctx))
     }
 }
 

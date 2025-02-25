@@ -111,7 +111,7 @@ pub trait LoadPendingBlock:
 
         let evm_env = self
             .evm_config()
-            .next_evm_env(&latest, self.pending_next_env_attributes(&latest)?)
+            .next_evm_env(&latest, self.next_env_attributes(&latest)?)
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
@@ -119,7 +119,7 @@ pub trait LoadPendingBlock:
     }
 
     /// Returns [`NextBlockEnvAttributes`] for building a local pending block.
-    fn pending_next_env_attributes(
+    fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
     ) -> Result<NextBlockEnvAttributes<'_>, Self::Error> {
@@ -236,7 +236,7 @@ pub trait LoadPendingBlock:
 
         let mut strategy = self
             .evm_config()
-            .strategy_for_pending_block(&mut db, parent, self.pending_next_env_attributes(parent)?)
+            .strategy_for_next_block(&mut db, parent, self.next_env_attributes(parent)?)
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
