@@ -65,41 +65,7 @@ impl<S> CachedStateProvider<S> {
         let Self { caches, metrics, state_provider: _ } = self;
         let start = Instant::now();
 
-        for (addr, account) in &state_updates.state {
-            // If the account was not modified, as in not changed and not destroyed, then we have
-            // nothing to do w.r.t. this particular account and can move on
-            if account.status.is_not_modified() {
-                continue
-            }
-
-            // if the account was destroyed, invalidate from the account / storage caches
-            if account.was_destroyed() {
-                // invalidate the account cache entry if destroyed
-                caches.account_cache.invalidate(addr);
-
-                caches.invalidate_account_storage(addr);
-                continue
-            }
-
-            // if we have an account that was modified, but it has a `None` account info, some wild
-            // error has occurred because this state should be unrepresentable. An account with
-            // `None` current info, should be destroyed.
-            let Some(ref account_info) = account.info else {
-                trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
-                return Err(())
-            };
-
-            // insert will update if present, so we just use the new account info as the new value
-            // for the account cache
-            caches.account_cache.insert(*addr, Some(Account::from(account_info)));
-
-            // now we iterate over all storage and make updates to the cached storage values
-            for (storage_key, slot) in &account.storage {
-                // we convert the storage key from U256 to B256 because that is how it's represented
-                // in the cache
-                caches.insert_storage(*addr, (*storage_key).into(), Some(slot.present_value));
-            }
-        }
+        caches.insert_state(state_updates)?;
 
         // set metrics
         metrics.storage_cache_size.set(caches.total_storage_slots() as f64);
@@ -236,18 +202,18 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
         self.state_provider.state_root_from_nodes(input)
     }
 
-    fn state_root_from_nodes_with_updates(
-        &self,
-        input: TrieInput,
-    ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.state_provider.state_root_from_nodes_with_updates(input)
-    }
-
     fn state_root_with_updates(
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_with_updates(hashed_state)
+    }
+
+    fn state_root_from_nodes_with_updates(
+        &self,
+        input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.state_provider.state_root_from_nodes_with_updates(input)
     }
 }
 
@@ -372,6 +338,49 @@ impl ProviderCaches {
     /// Returns the total number of storage slots cached across all accounts
     pub(crate) fn total_storage_slots(&self) -> usize {
         self.storage_cache.iter().map(|addr| addr.len()).sum()
+    }
+
+    /// Inserts the [`BundleState`] entries into the cache.
+    ///
+    /// Returns an error if state can't be cached and the should be discarded.
+    pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
+        for (addr, account) in &state_updates.state {
+            // If the account was not modified, as in not changed and not destroyed, then we have
+            // nothing to do w.r.t. this particular account and can move on
+            if account.status.is_not_modified() {
+                continue
+            }
+
+            // if the account was destroyed, invalidate from the account / storage caches
+            if account.was_destroyed() {
+                // invalidate the account cache entry if destroyed
+                self.account_cache.invalidate(addr);
+
+                self.invalidate_account_storage(addr);
+                continue
+            }
+
+            // if we have an account that was modified, but it has a `None` account info, some wild
+            // error has occurred because this state should be unrepresentable. An account with
+            // `None` current info, should be destroyed.
+            let Some(ref account_info) = account.info else {
+                trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
+                return Err(())
+            };
+
+            // insert will update if present, so we just use the new account info as the new value
+            // for the account cache
+            self.account_cache.insert(*addr, Some(Account::from(account_info)));
+
+            // now we iterate over all storage and make updates to the cached storage values
+            for (storage_key, slot) in &account.storage {
+                // we convert the storage key from U256 to B256 because that is how it's represented
+                // in the cache
+                self.insert_storage(*addr, (*storage_key).into(), Some(slot.present_value));
+            }
+        }
+
+        Ok(())
     }
 }
 
