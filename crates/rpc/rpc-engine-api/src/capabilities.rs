@@ -55,7 +55,8 @@ impl EngineCapabilities {
     fn prague() -> Self {
         Self { inner: CAPABILITIES.iter().copied().map(str::to_owned).collect() }
     }
-    /// Returns the list of all supported Engine capabilities for Isthmus spec.
+
+/// Returns the list of all supported Engine capabilities for Isthmus spec.
     fn opstack() -> Self {
         Self {
             inner: OPSTACK_CAPABILITIES.iter().copied().map(str::to_owned).collect(),
