@@ -7,6 +7,7 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
+use alloy_rlp::{BufMut, Decodable, Encodable, Error, Header};
 
 /// Message IDs for the snap sync protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +45,61 @@ pub struct GetAccountRangeMessage {
     pub limit_hash: B256,
     /// Soft limit at which to stop returning data
     pub response_bytes: u64,
+}
+
+impl Encodable for GetAccountRangeMessage {
+    fn encode(&self, out: &mut dyn BufMut) {
+        alloy_rlp::encode_list::<_, &dyn Encodable>(
+            &[
+                &self.request_id as &dyn Encodable,
+                &self.root_hash as &dyn Encodable,
+                &self.starting_hash as &dyn Encodable,
+                &self.limit_hash as &dyn Encodable,
+                &self.response_bytes as &dyn Encodable,
+            ],
+            out,
+        );
+    }
+
+    fn length(&self) -> usize {
+        let payload_len = self.request_id.length() +
+            self.root_hash.length() +
+            self.starting_hash.length() +
+            self.limit_hash.length() +
+            self.response_bytes.length();
+
+        // Total RLP length = prefix length + payload length
+        alloy_rlp::length_of_length(payload_len) + payload_len
+    }
+}
+
+impl Decodable for GetAccountRangeMessage {
+    fn decode(buf: &mut &[u8]) -> Result<Self, Error> {
+        let list_header = Header::decode(buf)?;
+
+        if !list_header.list {
+            return Err(Error::UnexpectedString);
+        }
+
+        // Track bytes consumed
+        let original_len = buf.len();
+
+        let request_id = u64::decode(buf)?;
+        let root_hash = B256::decode(buf)?;
+        let starting_hash = B256::decode(buf)?;
+        let limit_hash = B256::decode(buf)?;
+        let response_bytes = u64::decode(buf)?;
+
+        // Ensure we consumed exactly the number of bytes specified in the header
+        if original_len - buf.len() != list_header.payload_length {
+            return Err(Error::ListLengthMismatch {
+                expected: list_header.payload_length,
+                got: original_len - buf.len(),
+            });
+        }
+
+        Ok(Self { request_id, root_hash, starting_hash, limit_hash, response_bytes })
+    }
 }
 
 /// Account data in the response.
@@ -199,5 +255,46 @@ impl SnapProtocolMessage {
             Self::GetTrieNodes(_) => SnapMessageId::GetTrieNodes,
             Self::TrieNodes(_) => SnapMessageId::TrieNodes,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{hex, B256};
+    use alloy_rlp::Decodable;
+
+    #[test]
+    fn test_get_account_range_roundtrip() {
+        let original_msg = GetAccountRangeMessage {
+            request_id: 12345,
+            root_hash: B256::from_slice(&hex!(
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+            )),
+            starting_hash: B256::from_slice(&hex!(
+                "abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678"
+            )),
+            limit_hash: B256::from_slice(&hex!(
+                "9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedc"
+            )),
+            response_bytes: 1024,
+        };
+
+        let mut encoded = Vec::new();
+        original_msg.encode(&mut encoded);
+        let decoded = GetAccountRangeMessage::decode(&mut &encoded[..]).expect("Failed to decode");
+
+        assert_eq!(original_msg, decoded);
+    }
+
+    #[test]
+    fn test_get_account_range_invalid_format() {
+        // non-list RLP encoding
+        let invalid_rlp = [0x80];
+
+        // Attempt decode it as a GetAccountRangeMessage
+        let result = GetAccountRangeMessage::decode(&mut &invalid_rlp[..]);
+
+        assert!(result.is_err());
     }
 }
