@@ -228,13 +228,13 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         Evm = EvmFor<Self, &'a mut State<DB>, I>,
     >;
 
-    /// Context required for execution a block.
+    /// Context required for block execution.
     ///
     /// This is similar to [`alloy_evm::EvmEnv`], but only contains context unrelated to EVM and
     /// required for execution of an entire block.
     type ExecutionCtx<'a>;
 
-    /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for block execution.
+    /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for a given block.
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
