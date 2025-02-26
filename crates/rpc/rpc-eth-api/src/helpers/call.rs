@@ -104,8 +104,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut gas_used = 0;
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
-                let mut block_state_calls = block_state_calls.into_iter().peekable();
-                while let Some(block) = block_state_calls.next() {
+                for block in block_state_calls {
                     let mut evm_env = this
                         .evm_config()
                         .next_evm_env(&parent, this.next_env_attributes(&parent)?)

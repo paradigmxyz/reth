@@ -1,7 +1,5 @@
 //! Ethereum block execution strategy.
 
-use core::ops::Deref;
-
 use crate::{
     dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
     EthEvmConfig,
@@ -19,20 +17,16 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv, EvmFactory, EvmFor, InspectorFor,
-    NextBlockEnvAttributes, TransactionEnv,
+    Database, Evm, EvmEnv, EvmFactory, EvmFor, InspectorFor, NextBlockEnvAttributes,
+    TransactionEnv,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{
     EthPrimitives, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
 };
 use reth_revm::{
-    context::{result::ExecutionResult, BlockEnv},
-    context_interface::result::ResultAndState,
-    db::State,
-    inspector::NoOpInspector,
-    specification::hardfork::SpecId,
-    DatabaseCommit,
+    context::result::ExecutionResult, context_interface::result::ResultAndState, db::State,
+    specification::hardfork::SpecId, DatabaseCommit,
 };
 
 impl<EvmF> BlockExecutionStrategyFactory for EthEvmConfig<EvmF>

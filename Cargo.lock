@@ -7776,7 +7776,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-sol-types",
- "derive_more 2.0.1",
  "reth-chainspec",
  "reth-ethereum-forks",
  "reth-evm",

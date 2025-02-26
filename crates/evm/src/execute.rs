@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_evm::Evm;
 // Re-export execution types
 use crate::{
-    system_calls::OnStateHook, ConfigureEvmFor, Database, EvmEnvFor, EvmFor, InspectorFor,
+    system_calls::OnStateHook, ConfigureEvmFor, Database, EvmFor, InspectorFor,
     NextBlockEnvAttributes,
 };
 use alloc::{boxed::Box, vec::Vec};

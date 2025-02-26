@@ -54,6 +54,7 @@ impl ToRpcError for EthSimulateError {
 /// given [`BlockExecutionStrategy`].
 ///
 /// Returns all executed transactions and the result of the execution.
+#[expect(clippy::type_complexity)]
 pub fn execute_transactions<N, S, T>(
     mut strategy: S,
     calls: Vec<TransactionRequest>,
