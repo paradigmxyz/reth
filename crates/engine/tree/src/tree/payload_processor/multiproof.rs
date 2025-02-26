@@ -1,6 +1,6 @@
 //! State root task related functionality.
 
-use crate::tree::payload_processor::sparse_trie::SparseTrieEvent;
+use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::SparseTrieEvent};
 use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use metrics::Histogram;
@@ -29,7 +29,6 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
-use reth_workload_executor::WorkloadExecutor;
 use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},

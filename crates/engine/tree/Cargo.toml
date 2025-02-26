@@ -33,7 +33,6 @@ reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
-reth-workload-executor.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
@@ -47,7 +46,7 @@ revm-primitives.workspace = true
 # common
 futures.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "sync"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 mini-moka = { workspace = true, features = ["sync"] }
 
 # metrics

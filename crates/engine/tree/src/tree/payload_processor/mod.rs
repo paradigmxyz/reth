@@ -4,6 +4,7 @@
 use crate::tree::{
     cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
     payload_processor::{
+        executor::WorkloadExecutor,
         prewarm::{PrewarmContext, PrewarmTask, PrewarmTaskEvent},
         sparse_trie::SparseTrieTask,
     },
@@ -24,12 +25,13 @@ use reth_provider::{
 };
 use reth_revm::db::BundleState;
 use reth_trie::TrieInput;
-use reth_workload_executor::WorkloadExecutor;
 use std::sync::{
     mpsc,
     mpsc::{channel, Sender},
     Arc,
 };
+
+mod executor;
 
 mod multiproof;
 mod prewarm;

@@ -7469,7 +7469,6 @@ dependencies = [
  "reth-trie-db",
  "reth-trie-parallel",
  "reth-trie-sparse",
- "reth-workload-executor",
  "revm-primitives",
  "revm-state",
  "schnellru",
@@ -9854,17 +9853,6 @@ dependencies = [
  "reth-trie-db",
  "smallvec",
  "thiserror 2.0.11",
-]
-
-[[package]]
-name = "reth-workload-executor"
-version = "1.2.0"
-dependencies = [
- "crossbeam-channel",
- "parking_lot",
- "rayon",
- "thiserror 2.0.11",
- "tokio",
 ]
 
 [[package]]

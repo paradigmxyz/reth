@@ -1,6 +1,6 @@
 use crate::tree::{
     cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
-    payload_processor::{multiproof::StateRootMessage, ExecutionCache},
+    payload_processor::{executor::WorkloadExecutor, multiproof::StateRootMessage, ExecutionCache},
     StateProviderBuilder,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
@@ -26,7 +26,6 @@ use reth_trie::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::SparseStateTrie;
-use reth_workload_executor::WorkloadExecutor;
 use std::{
     collections::VecDeque,
     sync::{

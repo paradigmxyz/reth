@@ -1,8 +1,11 @@
 //! Contains the implementation of the sparse trie logic responsible for creating the
 
-use crate::tree::payload_processor::multiproof::{
-    SparseTrieUpdate, StateRootComputeOutcome, StateRootConfig, StateRootResult,
-    StateRootTaskMetrics,
+use crate::tree::payload_processor::{
+    executor::WorkloadExecutor,
+    multiproof::{
+        SparseTrieUpdate, StateRootComputeOutcome, StateRootConfig, StateRootResult,
+        StateRootTaskMetrics,
+    },
 };
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_provider::{BlockReader, DBProvider, DatabaseProviderFactory, StateCommitmentProvider};
@@ -17,7 +20,6 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
-use reth_workload_executor::WorkloadExecutor;
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
