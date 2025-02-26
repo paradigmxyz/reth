@@ -543,6 +543,7 @@ impl ECIES {
         self.encrypt_message(unencrypted.as_ref(), &mut encrypted);
         let len_bytes = u16::try_from(encrypted.len()).unwrap().to_be_bytes();
         buf.unsplit(encrypted);
+        drop(unencrypted);
 
         // write length
         buf[..len_bytes.len()].copy_from_slice(&len_bytes[..]);
