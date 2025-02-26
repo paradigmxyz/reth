@@ -1,4 +1,5 @@
 //! Entrypoint for payload processing.
+#![allow(dead_code)] // TODO remove
 
 use crate::tree::{
     cached_state::{CachedStateMetrics, ProviderCaches, SavedCache},
@@ -127,7 +128,7 @@ where
             provider: provider_builder,
         };
         // wire the multiproof task to the prewarm task
-        let to_multi_proof = multi_proof_task.state_root_message_sender();
+        let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
         let txs = block.transactions_recovered().map(Recovered::cloned).collect();
         let prewarm_task =
             PrewarmTask::new(self.executor.clone(), prewarm_ctx, to_multi_proof, txs);
@@ -162,6 +163,9 @@ where
 
         PayloadTaskHandle { prewarm: Some(to_prewarm_task), state_root: Some(state_root_rx) }
     }
+
+    /// Spawn prewarming exclusively
+    pub fn spawn_prewarming(&self) {}
 
     /// Returns the cache for the given parent hash.
     ///
@@ -199,6 +203,12 @@ impl Drop for PayloadTaskHandle {
         // Ensure we drop clean up
         self.terminate_prewarming();
     }
+}
+
+/// Access to the spawned [`PrewarmTask`].
+pub(crate) struct PrewarmHandle {
+    // must include the receiver of the state root wired to the sparse trie
+    prewarm: Option<Sender<PrewarmTaskEvent>>,
 }
 
 /// Shared access to most recently used cache.

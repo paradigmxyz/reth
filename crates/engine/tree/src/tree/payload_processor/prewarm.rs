@@ -5,6 +5,7 @@ use crate::tree::{
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_primitives::{keccak256, map::B256Set, B256};
+use futures::SinkExt;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
@@ -49,8 +50,8 @@ pub struct PrewarmTask<N: NodePrimitives, P, Evm> {
     in_progress: usize,
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
-    /// Sender to emit evm state outcome messages
-    to_multi_proof: mpsc::Sender<StateRootMessage>,
+    /// Sender to emit evm state outcome messages, if any.
+    to_multi_proof: Option<mpsc::Sender<StateRootMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
     /// Sender the transactions use to send their result back
@@ -70,7 +71,7 @@ where
     pub(super) fn new(
         executor: WorkloadExecutor,
         ctx: PrewarmContext<N, P, Evm>,
-        to_multi_proof: Sender<StateRootMessage>,
+        to_multi_proof: Option<Sender<StateRootMessage>>,
         pending: VecDeque<Recovered<N::SignedTx>>,
     ) -> Self {
         let (actions_tx, actions_rx) = channel();
@@ -106,14 +107,34 @@ where
     fn spawn_transaction(&mut self, tx: Recovered<N::SignedTx>) {
         let ctx = self.ctx.clone();
         let actions_tx = self.actions_tx.clone();
+        let prepare_proof_targets = self.should_prepare_multi_proof_targets();
         self.executor.spawn_blocking(move || {
-            let proof_targets = ctx.prepare_multiproof_targets(tx);
+            // depending on whether this task needs he proof targets we either just transact or
+            // transact and prepare the targets
+            let proof_targets = if prepare_proof_targets {
+                ctx.prepare_multiproof_targets(tx)
+            } else {
+                ctx.transact(tx);
+                None
+            };
             let _ = actions_tx.send(PrewarmTaskEvent::Outcome { proof_targets });
         });
     }
 
     fn is_done(&self) -> bool {
         self.in_progress == 0 && self.pending.is_empty()
+    }
+
+    /// Returns true if the tx prewarming tasks should prepare multiproof targets.
+    fn should_prepare_multi_proof_targets(&self) -> bool {
+        self.to_multi_proof.is_some()
+    }
+
+    /// If configured and the tx returned proof targets, emit the targets the transaction produced
+    fn send_multi_proof_targets(&self, targets: Option<MultiProofTargets>) {
+        if let Some((proof_targets, to_multi_proof)) = targets.zip(self.to_multi_proof.as_ref()) {
+            let _ = to_multi_proof.send(StateRootMessage::PrefetchProofs(proof_targets));
+        }
     }
 
     /// Executes the task.
@@ -133,14 +154,7 @@ where
                 PrewarmTaskEvent::Outcome { proof_targets } => {
                     // completed a transaction, frees up one slot
                     self.in_progress -= 1;
-
-                    if let Some(proof_targets) = proof_targets {
-                        // the task successfully executed the transaction and prepared the proof
-                        // targets for the multiproof task.
-                        let _ = self
-                            .to_multi_proof
-                            .send(StateRootMessage::PrefetchProofs(proof_targets));
-                    }
+                    self.send_multi_proof_targets(proof_targets);
                 }
             }
 
