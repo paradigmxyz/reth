@@ -418,7 +418,7 @@ where
                     let inner = OtsReceipt {
                         status: receipt.status(),
                         cumulative_gas_used: receipt.cumulative_gas_used(),
-                        logs: None,
+                        logs: Some(vec![]),
                         logs_bloom: None,
                         r#type: tx.ty(),
                     };
@@ -613,7 +613,7 @@ where
                     let inner = OtsReceipt {
                         status: receipt.status(),
                         cumulative_gas_used: receipt.cumulative_gas_used(),
-                        logs: None,
+                        logs: Some(vec![]),
                         logs_bloom: None,
                         r#type: tx.ty(),
                     };
