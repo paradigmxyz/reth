@@ -57,7 +57,7 @@ impl EngineCapabilities {
     }
 
 /// Returns the list of all supported Engine capabilities for Isthmus spec.
-    fn opstack() -> Self {
+    pub fn opstack() -> Self {
         Self {
             inner: OPSTACK_CAPABILITIES.iter().copied().map(str::to_owned).collect(),
         }
