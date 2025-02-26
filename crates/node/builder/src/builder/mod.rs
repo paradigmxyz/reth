@@ -330,6 +330,7 @@ where
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
+        N::ComponentsBuilder: Clone,
     {
         self.with_types().with_components(node.components_builder()).with_add_ons(node.add_ons())
     }
@@ -359,6 +360,7 @@ where
         EngineNodeLauncher: LaunchNode<
             NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
         >,
+        N::ComponentsBuilder: Clone,
     {
         self.node(node).launch().await
     }
@@ -404,11 +406,11 @@ where
 impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
     T: FullNodeTypes<Types = T> + NodeTypes,
-    CB: NodeComponentsBuilder<T>,
+    CB: NodeComponentsBuilder<T> + Clone,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     /// Returns a reference to the node builder's config.
-    pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
+    pub fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
         &self.builder.adapter.config()
     }
 
@@ -547,7 +549,7 @@ impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<
 where
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     T: NodeTypesWithEngine + NodeTypesForProvider,
-    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>> + Clone,
     AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
     EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
 {
