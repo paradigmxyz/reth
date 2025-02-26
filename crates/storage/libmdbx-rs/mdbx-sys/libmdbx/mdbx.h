@@ -631,7 +631,7 @@ typedef mode_t mdbx_mode_t;
  * @{ */
 
 #ifdef __cplusplus
-extern "C" {
+unsafe extern "C" {
 #endif
 
 /* MDBX version 0.12.x */
