@@ -18,7 +18,7 @@ fn main() {
         unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     }
 
-    if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(|builder, _| async move {
+    if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
         info!(target: "reth::cli", "Launching node");
         let handle = builder.launch_node(EthereumNode::default()).await?;
         handle.node_exit_future.await

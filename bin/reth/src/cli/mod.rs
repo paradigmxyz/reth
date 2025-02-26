@@ -106,7 +106,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// use reth_node_ethereum::EthereumNode;
     ///
     /// Cli::parse_args()
-    ///     .run(|builder, _| async move {
+    ///     .run(async move |builder, _| {
     ///         let handle = builder.launch_node(EthereumNode::default()).await?;
     ///
     ///         handle.wait_for_node_exit().await
@@ -129,7 +129,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// }
     ///
     /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
-    ///     .run(|builder, my_args: MyArgs| async move {
+    ///     .run(async move |builder, my_args: MyArgs|
     ///         // launch the node
     ///
     ///         Ok(())
@@ -315,6 +315,6 @@ mod tests {
             "debug,net=trace",
         ])
         .unwrap();
-        assert!(reth.run(|_, _| async move { Ok(()) }).is_ok());
+        assert!(reth.run(async move |_, _| { Ok(()) }).is_ok());
     }
 }
