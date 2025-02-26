@@ -80,7 +80,7 @@ pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
 mod tests {
     use super::*;
     use alloy_consensus::{Receipt, ReceiptWithBloom};
-    use alloy_primitives::{Address, Bloom, Bytes, Log, LogData, b256, bloom, hex};
+    use alloy_primitives::{b256, bloom, hex, Address, Bloom, Bytes, Log, LogData};
     use op_alloy_consensus::OpDepositReceipt;
     use reth_optimism_chainspec::BASE_SEPOLIA;
     use reth_optimism_primitives::OpReceipt;

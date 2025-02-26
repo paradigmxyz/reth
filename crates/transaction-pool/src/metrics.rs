@@ -1,8 +1,8 @@
 //! Transaction pool metrics.
 
 use reth_metrics::{
-    Metrics,
     metrics::{Counter, Gauge},
+    Metrics,
 };
 
 /// Transaction pool metrics

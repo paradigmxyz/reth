@@ -1,4 +1,4 @@
-use crate::{HashedPostState, prefix_set::TriePrefixSetsMut, updates::TrieUpdates};
+use crate::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
 
 /// Inputs for trie-related computations.
 #[derive(Default, Debug, Clone)]

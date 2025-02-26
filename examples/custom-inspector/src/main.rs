@@ -13,7 +13,7 @@
 use alloy_eips::BlockNumberOrTag;
 use alloy_evm::Evm;
 use alloy_primitives::Address;
-use alloy_rpc_types_eth::{TransactionRequest, state::EvmOverrides};
+use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
@@ -24,7 +24,7 @@ use reth::{
         bytecode::opcode::OpCode,
         context_interface::ContextTr,
         inspector::Inspector,
-        interpreter::{Interpreter, interpreter::EthInterpreter, interpreter_types::Jumps},
+        interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
     },
     rpc::api::eth::helpers::Call,
     transaction_pool::TransactionPool,

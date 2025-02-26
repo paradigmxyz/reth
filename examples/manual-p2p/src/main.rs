@@ -11,15 +11,15 @@ use std::time::Duration;
 use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 use futures::StreamExt;
 use reth_chainspec::{Chain, MAINNET};
-use reth_discv4::{DEFAULT_DISCOVERY_ADDRESS, DiscoveryUpdate, Discv4, Discv4ConfigBuilder};
+use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     EthMessage, EthStream, HelloMessage, P2PStream, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_network::{EthNetworkPrimitives, config::rng_secret_key};
-use reth_network_peers::{NodeRecord, mainnet_nodes, pk2id};
+use reth_network::{config::rng_secret_key, EthNetworkPrimitives};
+use reth_network_peers::{mainnet_nodes, pk2id, NodeRecord};
 use reth_primitives::{EthereumHardfork, Head};
-use secp256k1::{SECP256K1, SecretKey};
+use secp256k1::{SecretKey, SECP256K1};
 use std::sync::LazyLock;
 use tokio::net::TcpStream;
 

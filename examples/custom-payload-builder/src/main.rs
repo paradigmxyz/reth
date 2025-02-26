@@ -13,8 +13,8 @@
 
 use crate::generator::EmptyBlockPayloadJobGenerator;
 use reth::{
-    builder::{BuilderContext, components::PayloadServiceBuilder, node::FullNodeTypes},
-    cli::{Cli, config::PayloadBuilderConfig},
+    builder::{components::PayloadServiceBuilder, node::FullNodeTypes, BuilderContext},
+    cli::{config::PayloadBuilderConfig, Cli},
     providers::CanonStateSubscriptions,
     transaction_pool::{PoolTransaction, TransactionPool},
 };
@@ -22,7 +22,7 @@ use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_node_api::NodeTypesWithEngine;
-use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthereumNode, node::EthereumAddOns};
+use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{EthPrimitives, TransactionSigned};
 

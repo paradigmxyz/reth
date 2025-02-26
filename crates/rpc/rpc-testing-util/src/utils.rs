@@ -5,5 +5,9 @@
 /// If the value has no http(s) scheme, it will be appended: `http://{var}`.
 pub fn parse_env_url(var: &str) -> Result<String, std::env::VarError> {
     let var = std::env::var(var)?;
-    if var.starts_with("http") { Ok(var) } else { Ok(format!("http://{var}")) }
+    if var.starts_with("http") {
+        Ok(var)
+    } else {
+        Ok(format!("http://{var}"))
+    }
 }

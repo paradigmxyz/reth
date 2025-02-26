@@ -1,9 +1,10 @@
 //! API related to listening for network events.
 
 use reth_eth_wire_types::{
-    BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage, EthNetworkPrimitives,
-    EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
-    NetworkPrimitives, NodeData, PooledTransactions, Receipts, Status, message::RequestPair,
+    message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
+    EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
+    GetPooledTransactions, GetReceipts, NetworkPrimitives, NodeData, PooledTransactions, Receipts,
+    Status,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -18,7 +19,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot};
-use tokio_stream::{Stream, StreamExt, wrappers::UnboundedReceiverStream};
+use tokio_stream::{wrappers::UnboundedReceiverStream, Stream, StreamExt};
 
 /// A boxed stream of network peer events that provides a type-erased interface.
 pub struct PeerEventStream(Pin<Box<dyn Stream<Item = PeerEvent> + Send + Sync>>);

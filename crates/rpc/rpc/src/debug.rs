@@ -1,24 +1,24 @@
 use alloy_consensus::BlockHeader;
-use alloy_eips::{BlockId, BlockNumberOrTag, eip2718::Encodable2718};
+use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{Address, B256, Bytes};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
-    Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo, state::EvmOverrides,
-    transaction::TransactionRequest,
+    state::EvmOverrides, transaction::TransactionRequest, Block as RpcBlock, BlockError, Bundle,
+    StateContext, TransactionInfo,
 };
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
-    GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
-    call::FlatCallFrame,
+    call::FlatCallFrame, BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType,
+    GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
+    NoopFrame, TraceResult,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
-    ConfigureEvmEnv, EvmEnv,
     execute::{BlockExecutorProvider, Executor},
+    ConfigureEvmEnv, EvmEnv,
 };
 use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
@@ -34,13 +34,13 @@ use reth_revm::{
 };
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    EthApiTypes, FromEthApiError, RpcNodeCore,
     helpers::{EthTransactions, TraceExt},
+    EthApiTypes, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
-use reth_rpc_server_types::{ToRpcResult, result::internal_rpc_err};
+use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::pool::BlockingTaskGuard;
-use revm::{DatabaseCommit, context_interface::Transaction, state::EvmState};
+use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };

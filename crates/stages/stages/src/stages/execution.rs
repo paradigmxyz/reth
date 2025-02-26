@@ -1,6 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use alloy_consensus::{BlockHeader, Header, Sealable};
-use alloy_eips::{NumHash, eip1898::BlockWithParent};
+use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
@@ -13,12 +13,12 @@ use reth_evm::{
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives::StaticFileSegment;
-use reth_primitives_traits::{Block, BlockBody, NodePrimitives, format_gas_throughput};
+use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
+    providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateCommitmentProvider,
     StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
-    providers::{StaticFileProvider, StaticFileWriter},
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -30,7 +30,7 @@ use std::{
     cmp::Ordering,
     ops::RangeInclusive,
     sync::Arc,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
 use tracing::*;
@@ -670,7 +670,7 @@ fn calculate_gas_used_from_headers<N: NodePrimitives>(
 mod tests {
     use super::*;
     use crate::test_utils::TestStageDB;
-    use alloy_primitives::{Address, B256, U256, address, hex_literal::hex, keccak256};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -683,8 +683,8 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
-        AccountReader, DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory,
-        test_utils::create_test_provider_factory,
+        test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
+        ReceiptProvider, StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};

@@ -12,7 +12,7 @@ use crate::{
 };
 use alloy_consensus::Header;
 use futures::{Future, FutureExt, Stream, StreamExt};
-use reth_consensus::{HeaderValidator, test_utils::TestConsensus};
+use reth_consensus::{test_utils::TestConsensus, HeaderValidator};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::SealedHeader;
@@ -20,10 +20,10 @@ use std::{
     fmt,
     pin::Pin,
     sync::{
-        Arc,
         atomic::{AtomicU64, Ordering},
+        Arc,
     },
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::Mutex;
 

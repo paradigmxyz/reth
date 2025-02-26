@@ -1,7 +1,7 @@
 //! reth's static file database table import and access
 
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap},
     path::Path,
 };
 
@@ -12,8 +12,8 @@ mod mask;
 pub use mask::*;
 use reth_nippy_jar::{NippyJar, NippyJarError};
 use reth_primitives::{
-    StaticFileSegment,
     static_file::{SegmentHeader, SegmentRangeInclusive},
+    StaticFileSegment,
 };
 
 mod masks;

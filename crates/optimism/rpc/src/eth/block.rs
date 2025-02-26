@@ -1,6 +1,6 @@
 //! Loads and formats OP block RPC response.
 
-use alloy_consensus::{BlockHeader, transaction::TransactionMeta};
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::BlockId;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
@@ -10,20 +10,20 @@ use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{
-    RpcReceipt,
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
+    RpcReceipt,
 };
 
-use crate::{OpEthApi, OpEthApiError, OpReceiptBuilder, eth::OpNodeCore};
+use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, OpReceiptBuilder};
 
 impl<N> EthBlocks for OpEthApi<N>
 where
     Self: LoadBlock<
-            Error = OpEthApiError,
-            NetworkTypes: RpcTypes<Receipt = OpTransactionReceipt>,
-            Provider: BlockReader<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
-        >,
+        Error = OpEthApiError,
+        NetworkTypes: RpcTypes<Receipt = OpTransactionReceipt>,
+        Provider: BlockReader<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
+    >,
     N: OpNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec> + HeaderProvider>,
 {
     async fn block_receipts(

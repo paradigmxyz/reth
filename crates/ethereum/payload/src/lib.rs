@@ -9,36 +9,36 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-use alloy_consensus::{BlockHeader, EMPTY_OMMER_ROOT_HASH, Header, Transaction, Typed2718};
+use alloy_consensus::{BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
-    BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig, is_better_payload,
+    is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig,
 };
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
-use reth_evm::{ConfigureEvm, NextBlockEnvAttributes, execute::BlockExecutionStrategy};
+use reth_evm::{execute::BlockExecutionStrategy, ConfigureEvm, NextBlockEnvAttributes};
 use reth_evm_ethereum::{
-    EthEvmConfig,
     execute::{EthBlockExecutionInput, EthExecutionStrategy},
+    EthEvmConfig,
 };
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives_traits::{
-    Block as _, SignedTransaction,
     proofs::{self},
+    Block as _, SignedTransaction,
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    db::{State, states::bundle_state::BundleRetention},
+    db::{states::bundle_state::BundleRetention, State},
 };
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
-    BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
-    ValidPoolTransaction, error::InvalidPoolTransactionError,
+    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
+    PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
 use revm::context_interface::Block as _;
 use std::sync::Arc;

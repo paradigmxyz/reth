@@ -1,7 +1,7 @@
 use reth_evm::metrics::ExecutorMetrics;
 use reth_metrics::{
-    Metrics,
     metrics::{Counter, Gauge, Histogram},
+    Metrics,
 };
 use reth_trie::updates::TrieUpdates;
 

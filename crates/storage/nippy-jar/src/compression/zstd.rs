@@ -1,4 +1,4 @@
-use crate::{NippyJarError, compression::Compression};
+use crate::{compression::Compression, NippyJarError};
 use derive_more::Deref;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{

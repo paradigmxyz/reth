@@ -4,8 +4,8 @@ use std::io;
 
 use reth_rpc::EthApi;
 use reth_rpc_builder::{
-    RpcServerConfig, TransportRpcModuleConfig,
     error::{RpcError, ServerKind, WsHttpSamePortError},
+    RpcServerConfig, TransportRpcModuleConfig,
 };
 use reth_rpc_server_types::RethRpcModule;
 

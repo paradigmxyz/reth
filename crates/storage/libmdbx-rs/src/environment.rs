@@ -1,10 +1,10 @@
 use crate::{
-    Mode, SyncMode, Transaction, TransactionKind,
     database::Database,
-    error::{Error, Result, mdbx_result},
+    error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
     transaction::{RO, RW},
     txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
+    Mode, SyncMode, Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
 use mem::size_of;
@@ -15,7 +15,7 @@ use std::{
     ops::{Bound, RangeBounds},
     path::Path,
     ptr,
-    sync::{Arc, mpsc::sync_channel},
+    sync::{mpsc::sync_channel, Arc},
     thread::sleep,
     time::Duration,
 };

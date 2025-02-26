@@ -103,10 +103,10 @@ impl<Node, Pool, EVM, Executor, Cons, N> NodeComponents<Node>
 where
     Node: FullNodeTypes,
     N: NetworkPrimitives<
-            BlockHeader = HeaderTy<Node::Types>,
-            BlockBody = BodyTy<Node::Types>,
-            Block = BlockTy<Node::Types>,
-        >,
+        BlockHeader = HeaderTy<Node::Types>,
+        BlockBody = BodyTy<Node::Types>,
+        Block = BlockTy<Node::Types>,
+    >,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,

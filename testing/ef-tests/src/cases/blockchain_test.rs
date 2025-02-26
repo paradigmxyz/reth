@@ -1,8 +1,8 @@
 //! Test runners for `BlockchainTests` in <https://github.com/ethereum/tests>
 
 use crate::{
-    Case, Error, Suite,
     models::{BlockchainTest, ForkSpec},
+    Case, Error, Suite,
 };
 use alloy_rlp::Decodable;
 use rayon::iter::{ParallelBridge, ParallelIterator};
@@ -10,10 +10,10 @@ use reth_chainspec::ChainSpec;
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{
-    DatabaseProviderFactory, HashingWriter, StaticFileProviderFactory, providers::StaticFileWriter,
-    test_utils::create_test_provider_factory_with_chain_spec,
+    providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
+    DatabaseProviderFactory, HashingWriter, StaticFileProviderFactory,
 };
-use reth_stages::{ExecInput, Stage, stages::ExecutionStage};
+use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.

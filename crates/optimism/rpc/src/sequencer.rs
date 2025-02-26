@@ -1,14 +1,14 @@
 //! Helpers for optimism specific RPC implementations.
 
 use std::sync::{
-    Arc,
     atomic::{self, AtomicUsize},
+    Arc,
 };
 
 use alloy_primitives::hex;
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use reqwest::Client;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tracing::warn;
 
 use crate::SequencerClientError;

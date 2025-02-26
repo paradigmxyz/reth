@@ -1,4 +1,4 @@
-use crate::{ForkCondition, hardforks::Hardforks};
+use crate::{hardforks::Hardforks, ForkCondition};
 use alloc::{
     format,
     string::{String, ToString},

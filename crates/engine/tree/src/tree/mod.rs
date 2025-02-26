@@ -8,11 +8,12 @@ use crate::{
         metrics::EngineApiMetrics,
     },
 };
-use alloy_consensus::{BlockHeader, transaction::Recovered};
+use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
-    B256, BlockNumber, U256, keccak256,
+    keccak256,
     map::{B256Set, HashMap, HashSet},
+    BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -34,9 +35,9 @@ use reth_engine_primitives::{
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
-    ConfigureEvm, Evm,
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
+    ConfigureEvm, Evm,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
@@ -45,15 +46,15 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_provider::{
-    BlockReader, DBProvider, DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider,
-    ProviderError, StateCommitmentProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, TransactionVariant, providers::ConsistentDbView,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
 use reth_revm::{cancelled::ManualCancel, database::StateProviderDatabase};
 use reth_stages_api::ControlFlow;
 use reth_trie::{
-    HashedPostState, MultiProofTargets, TrieInput, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates,
+    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState,
+    MultiProofTargets, TrieInput,
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -62,17 +63,17 @@ use root::{
 };
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, VecDeque, btree_map, hash_map},
+    collections::{btree_map, hash_map, BTreeMap, VecDeque},
     fmt::Debug,
     ops::Bound,
     sync::{
-        Arc, RwLock,
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
+        Arc, RwLock,
     },
     time::{Duration, Instant},
 };
 use tokio::sync::{
-    mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot::{self, error::TryRecvError},
 };
 use tracing::*;
@@ -1756,7 +1757,11 @@ where
             .block_by_hash(hash)
             .map(|block| block.as_ref().clone_sealed_header());
 
-        if block.is_some() { Ok(block) } else { self.provider.sealed_header_by_hash(hash) }
+        if block.is_some() {
+            Ok(block)
+        } else {
+            self.provider.sealed_header_by_hash(hash)
+        }
     }
 
     /// Return block from database or in-memory state by hash.
@@ -2011,7 +2016,11 @@ where
     /// height or its block number is greater than the given block, this returns None.
     #[inline]
     const fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
-        if block > local_tip { Some(block - local_tip) } else { None }
+        if block > local_tip {
+            Some(block - local_tip)
+        } else {
+            None
+        }
     }
 
     /// Returns the target hash to sync to if the distance from the local tip to the block is
@@ -3219,7 +3228,7 @@ mod tests {
         ExecutionPayloadV3,
     };
     use assert_matches::assert_matches;
-    use reth_chain_state::{BlockState, test_utils::TestBlockBuilder};
+    use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_consensus::EthBeaconConsensus;
@@ -3229,10 +3238,10 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_trie::{HashedPostState, updates::TrieUpdates};
+    use reth_trie::{updates::TrieUpdates, HashedPostState};
     use std::{
         str::FromStr,
-        sync::mpsc::{Sender, channel},
+        sync::mpsc::{channel, Sender},
     };
 
     /// This is a test channel that allows you to `release` any value that is in the channel.
@@ -3934,14 +3943,10 @@ mod tests {
         tree_state.insert_executed(fork_block_4.clone());
         assert_eq!(tree_state.blocks_by_hash.len(), 8);
 
-        assert!(
-            tree_state.parent_to_child[&fork_block_3.recovered_block().hash()]
-                .contains(&fork_block_4.recovered_block().hash())
-        );
-        assert!(
-            tree_state.parent_to_child[&fork_block_4.recovered_block().hash()]
-                .contains(&fork_block_5.recovered_block().hash())
-        );
+        assert!(tree_state.parent_to_child[&fork_block_3.recovered_block().hash()]
+            .contains(&fork_block_4.recovered_block().hash()));
+        assert!(tree_state.parent_to_child[&fork_block_4.recovered_block().hash()]
+            .contains(&fork_block_5.recovered_block().hash()));
 
         assert_eq!(tree_state.blocks_by_number[&4].len(), 2);
         assert_eq!(tree_state.blocks_by_number[&5].len(), 2);
@@ -4475,9 +4480,10 @@ mod tests {
 
         test_harness
             .tree
-            .on_engine_message(FromEngine::DownloadedBlocks(vec![
-                main_chain.last().unwrap().clone(),
-            ]))
+            .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+                .last()
+                .unwrap()
+                .clone()]))
             .unwrap();
 
         let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -4539,7 +4545,7 @@ mod tests {
         test_harness
             .tree
             .on_engine_message(FromEngine::DownloadedBlocks(vec![
-                main_chain_backfill_target.clone(),
+                main_chain_backfill_target.clone()
             ]))
             .unwrap();
 

@@ -1,5 +1,5 @@
 use super::setup;
-use reth_consensus::{ConsensusError, FullConsensus, noop::NoopConsensus};
+use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_db::DatabaseEnv;
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
@@ -9,10 +9,10 @@ use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
-    DatabaseProviderFactory, ProviderFactory,
     providers::{ProviderNodeTypes, StaticFileProvider},
+    DatabaseProviderFactory, ProviderFactory,
 };
-use reth_stages::{Stage, StageCheckpoint, UnwindInput, stages::ExecutionStage};
+use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use std::sync::Arc;
 use tracing::info;
 

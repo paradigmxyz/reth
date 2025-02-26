@@ -3,7 +3,7 @@
 //! before sending additional calls.
 
 use alloy_primitives::B256;
-use alloy_provider::{Network, ext::EngineApi};
+use alloy_provider::{ext::EngineApi, Network};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,

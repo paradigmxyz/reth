@@ -1,14 +1,14 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use alloy_consensus::{BlockHeader, transaction::TransactionMeta};
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::EthChainSpec;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ChainSpecProvider};
 use reth_rpc_eth_api::{
-    RpcNodeCoreExt, RpcReceipt,
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
+    RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 
@@ -17,13 +17,13 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadBlock<
-            Error = EthApiError,
-            NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
-            Provider: BlockReader<
-                Transaction = reth_primitives::TransactionSigned,
-                Receipt = reth_primitives::Receipt,
-            >,
+        Error = EthApiError,
+        NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
+        Provider: BlockReader<
+            Transaction = reth_primitives::TransactionSigned,
+            Receipt = reth_primitives::Receipt,
         >,
+    >,
     Provider: BlockReader + ChainSpecProvider,
 {
     async fn block_receipts(

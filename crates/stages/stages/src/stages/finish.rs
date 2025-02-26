@@ -36,8 +36,8 @@ impl<Provider> Stage<Provider> for FinishStage {
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
-        UnwindStageTestRunner, stage_test_suite_ext,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestStageDB, UnwindStageTestRunner,
     };
     use reth_primitives::SealedHeader;
     use reth_provider::providers::StaticFileWriter;

@@ -12,7 +12,7 @@ use std::{
     fmt::Debug,
     future::Future,
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};

@@ -1,11 +1,11 @@
 use crate::{BlockExecutionOutput, BlockExecutionResult};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{Address, B256, BlockNumber, Bloom, Log, U256, logs_bloom, map::HashMap};
+use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::state::AccountInfo;
-use revm_database::{BundleAccount, states::BundleState};
+use revm_database::{states::BundleState, BundleAccount};
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -403,7 +403,7 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 mod tests {
     use super::*;
     use alloy_consensus::TxType;
-    use alloy_primitives::{Address, B256, LogData, bytes};
+    use alloy_primitives::{bytes, Address, LogData, B256};
 
     #[test]
     fn test_initialisation() {

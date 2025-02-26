@@ -1,4 +1,4 @@
-use crate::{DatabaseError, table::*};
+use crate::{table::*, DatabaseError};
 
 /// A key-value pair for table `T`.
 pub type KeyValue<T> = (<T as Table>::Key, <T as Table>::Value);

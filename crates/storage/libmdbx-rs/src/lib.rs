@@ -20,7 +20,7 @@ pub use crate::{
     },
     error::{Error, Result},
     flags::*,
-    transaction::{CommitLatency, RO, RW, Transaction, TransactionKind},
+    transaction::{CommitLatency, Transaction, TransactionKind, RO, RW},
 };
 
 #[cfg(feature = "read-tx-timeouts")]

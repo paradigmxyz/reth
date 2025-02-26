@@ -1,7 +1,7 @@
 //! Sharded key
 use crate::{
-    DatabaseError,
     table::{Decode, Encode},
+    DatabaseError,
 };
 use alloy_primitives::BlockNumber;
 use serde::{Deserialize, Serialize};

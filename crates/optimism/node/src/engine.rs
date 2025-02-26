@@ -9,19 +9,19 @@ use op_alloy_rpc_types_engine::{
 use reth_chainspec::ChainSpec;
 use reth_consensus::ConsensusError;
 use reth_node_api::{
-    BuiltPayload, EngineTypes, EngineValidator, NodePrimitives, PayloadValidator,
     payload::{
-        EngineApiMessageVersion, EngineObjectValidationError, MessageValidationKind,
-        NewPayloadError, PayloadOrAttributes, PayloadTypes, VersionSpecificValidationError,
-        validate_parent_beacon_block_root_presence,
+        validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
+        EngineObjectValidationError, MessageValidationKind, NewPayloadError, PayloadOrAttributes,
+        PayloadTypes, VersionSpecificValidationError,
     },
-    validate_version_specific_fields,
+    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
+    PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::{ADDRESS_L2_TO_L1_MESSAGE_PASSER, OpBlock, OpPrimitives};
+use reth_optimism_primitives::{OpBlock, OpPrimitives, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{RecoveredBlock, SealedBlock};
 use reth_provider::StateProviderFactory;
@@ -272,7 +272,7 @@ mod test {
     use super::*;
 
     use crate::engine;
-    use alloy_primitives::{Address, B64, B256, b64};
+    use alloy_primitives::{b64, Address, B256, B64};
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_node_builder::EngineValidator;
     use reth_optimism_chainspec::BASE_SEPOLIA;

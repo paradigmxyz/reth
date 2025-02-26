@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::{B256, U256};
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use prop::strategy::ValueTree;
 use proptest::{prelude::*, test_runner::TestRunner};
 use rand::seq::IteratorRandom;

@@ -2,10 +2,10 @@
 
 use crate::OpEthApi;
 use alloy_consensus::{
-    EMPTY_OMMER_ROOT_HASH, Eip658Value, Header, Transaction as _, TxReceipt,
     constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, transaction::Recovered,
+    Eip658Value, Header, Transaction as _, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::{BlockNumberOrTag, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
+use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE, BlockNumberOrTag};
 use alloy_primitives::{B256, U256};
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -13,21 +13,21 @@ use reth_evm::{ConfigureEvm, HaltReasonFor};
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
-use reth_primitives::{BlockBody, RecoveredBlock, logs_bloom};
+use reth_primitives::{logs_bloom, BlockBody, RecoveredBlock};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
-    EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore,
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
+    EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::{
     context::BlockEnv,
-    context_interface::{Block, result::ExecutionResult},
+    context_interface::{result::ExecutionResult, Block},
 };
 
 impl<N> LoadPendingBlock for OpEthApi<N>
@@ -40,21 +40,19 @@ where
             Error: FromEvmError<Self::Evm>,
         >,
     N: RpcNodeCore<
-            Provider: BlockReaderIdExt<
-                Transaction = OpTransactionSigned,
-                Block = OpBlock,
-                Receipt = OpReceipt,
-                Header = reth_primitives::Header,
-            > + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
-                          + StateProviderFactory,
-            Pool: TransactionPool<
-                Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>,
-            >,
-            Evm: ConfigureEvm<
-                Header = ProviderHeader<Self::Provider>,
-                Transaction = ProviderTx<Self::Provider>,
-            >,
+        Provider: BlockReaderIdExt<
+            Transaction = OpTransactionSigned,
+            Block = OpBlock,
+            Receipt = OpReceipt,
+            Header = reth_primitives::Header,
+        > + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
+                      + StateProviderFactory,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
+        Evm: ConfigureEvm<
+            Header = ProviderHeader<Self::Provider>,
+            Transaction = ProviderTx<Self::Provider>,
         >,
+    >,
 {
     #[inline]
     fn pending_block(

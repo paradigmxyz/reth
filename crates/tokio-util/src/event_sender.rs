@@ -52,7 +52,7 @@ mod tests {
     use super::*;
     use tokio::{
         task,
-        time::{Duration, timeout},
+        time::{timeout, Duration},
     };
     use tokio_stream::StreamExt;
 

@@ -3,8 +3,8 @@
 use crate::{EthMessage, EthVersion, NetworkPrimitives};
 use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::{
-    B256, Bytes, TxHash, U128,
     map::{HashMap, HashSet},
+    Bytes, TxHash, B256, U128,
 };
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
@@ -770,7 +770,7 @@ mod tests {
     use super::*;
     use alloy_consensus::Typed2718;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{PrimitiveSignature as Signature, U256, b256, hex};
+    use alloy_primitives::{b256, hex, PrimitiveSignature as Signature, U256};
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use std::str::FromStr;
 

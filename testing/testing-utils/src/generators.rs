@@ -2,21 +2,21 @@
 
 use alloy_consensus::{Block, Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
-    NumHash,
     eip1898::BlockWithParent,
     eip4895::{Withdrawal, Withdrawals},
+    NumHash,
 };
-use alloy_primitives::{Address, B256, BlockNumber, Bytes, TxKind, U256};
+use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
-    SeedableRng, distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng,
+    distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
     Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
     TransactionSigned,
 };
 
-use reth_primitives_traits::{Block as _, crypto::secp256k1::sign_message, proofs};
+use reth_primitives_traits::{crypto::secp256k1::sign_message, proofs, Block as _};
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
@@ -471,10 +471,10 @@ mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{PrimitiveSignature as Signature, hex};
+    use alloy_primitives::{hex, PrimitiveSignature as Signature};
     use reth_primitives_traits::{
-        SignedTransaction,
         crypto::secp256k1::{public_key_to_address, sign_message},
+        SignedTransaction,
     };
     use std::str::FromStr;
 

@@ -28,24 +28,25 @@ use crate::{
     error::{DecodePacketError, Discv4Error},
     proto::{FindNode, Message, Neighbours, Packet, Ping, Pong},
 };
-use alloy_primitives::{B256, bytes::Bytes, hex};
+use alloy_primitives::{bytes::Bytes, hex, B256};
 use discv5::{
-    ConnectionDirection, ConnectionState, kbucket,
+    kbucket,
     kbucket::{
         BucketInsertResult, Distance, Entry as BucketEntry, InsertResult, KBucketsTable,
-        MAX_NODES_PER_BUCKET, NodeStatus,
+        NodeStatus, MAX_NODES_PER_BUCKET,
     },
+    ConnectionDirection, ConnectionState,
 };
 use enr::Enr;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use proto::{EnrRequest, EnrResponse};
 use reth_ethereum_forks::ForkId;
-use reth_network_peers::{PeerId, pk2id};
+use reth_network_peers::{pk2id, PeerId};
 use secp256k1::SecretKey;
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap, VecDeque, btree_map, hash_map::Entry},
+    collections::{btree_map, hash_map::Entry, BTreeMap, HashMap, VecDeque},
     fmt,
     future::poll_fn,
     io,
@@ -53,7 +54,7 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::Arc,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -62,7 +63,7 @@ use tokio::{
     task::{JoinHandle, JoinSet},
     time::Interval,
 };
-use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
+use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::{debug, trace};
 
 pub mod error;
@@ -72,7 +73,7 @@ mod config;
 pub use config::{Discv4Config, Discv4ConfigBuilder};
 
 mod node;
-use node::{NodeKey, kad_key};
+use node::{kad_key, NodeKey};
 
 mod table;
 
@@ -85,7 +86,7 @@ pub mod test_utils;
 use crate::table::PongTable;
 use reth_net_nat::ResolveNatInterval;
 /// reexport to get public ip.
-pub use reth_net_nat::{NatResolver, external_ip};
+pub use reth_net_nat::{external_ip, NatResolver};
 
 /// The default address for discv4 via UDP
 ///
@@ -215,7 +216,7 @@ impl Discv4 {
     /// # use std::io;
     /// use rand::thread_rng;
     /// use reth_discv4::{Discv4, Discv4Config};
-    /// use reth_network_peers::{NodeRecord, PeerId, pk2id};
+    /// use reth_network_peers::{pk2id, NodeRecord, PeerId};
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {
@@ -2398,7 +2399,7 @@ mod tests {
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable};
-    use rand::{Rng, thread_rng};
+    use rand::{thread_rng, Rng};
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
     use std::future::poll_fn;

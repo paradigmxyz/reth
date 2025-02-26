@@ -1,6 +1,6 @@
 //! Internal helpers for testing.
 
-use crate::{Pool, PoolConfig, blobstore::InMemoryBlobStore, noop::MockTransactionValidator};
+use crate::{blobstore::InMemoryBlobStore, noop::MockTransactionValidator, Pool, PoolConfig};
 use std::ops::Deref;
 
 mod tx_gen;

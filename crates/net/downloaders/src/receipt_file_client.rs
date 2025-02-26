@@ -215,9 +215,8 @@ pub struct ReceiptWithBlockNumber<R = Receipt> {
 #[cfg(test)]
 mod test {
     use alloy_primitives::{
-        Address, B256, Bytes, Log, LogData,
         bytes::{Buf, BytesMut},
-        hex,
+        hex, Address, Bytes, Log, LogData, B256,
     };
     use alloy_rlp::{Decodable, RlpDecodable};
     use reth_primitives::{Receipt, TxType};

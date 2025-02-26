@@ -10,7 +10,7 @@ use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{tables, transaction::DbTx};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
-    file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE, FileClient},
+    file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_evm::execute::BlockExecutorProvider;
@@ -22,11 +22,11 @@ use reth_node_api::BlockTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_provider::{
-    BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError, ProviderFactory,
-    StageCheckpointReader, providers::ProviderNodeTypes,
+    providers::ProviderNodeTypes, BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError,
+    ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::PruneModes;
-use reth_stages::{Pipeline, StageId, StageSet, prelude::*};
+use reth_stages::{prelude::*, Pipeline, StageId, StageSet};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;

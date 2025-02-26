@@ -38,11 +38,11 @@ pub trait NetworkPrimitives:
 /// types must be the same as the [`NodePrimitives`] associated types.
 pub trait NetPrimitivesFor<N: NodePrimitives>:
     NetworkPrimitives<
-        BlockHeader = N::BlockHeader,
-        BlockBody = N::BlockBody,
-        Block = N::Block,
-        Receipt = N::Receipt,
-    >
+    BlockHeader = N::BlockHeader,
+    BlockBody = N::BlockBody,
+    Block = N::Block,
+    Receipt = N::Receipt,
+>
 {
 }
 
@@ -50,11 +50,11 @@ impl<N, T> NetPrimitivesFor<N> for T
 where
     N: NodePrimitives,
     T: NetworkPrimitives<
-            BlockHeader = N::BlockHeader,
-            BlockBody = N::BlockBody,
-            Block = N::Block,
-            Receipt = N::Receipt,
-        >,
+        BlockHeader = N::BlockHeader,
+        BlockBody = N::BlockBody,
+        Block = N::Block,
+        Receipt = N::Receipt,
+    >,
 {
 }
 

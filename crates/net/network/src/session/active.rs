@@ -6,27 +6,27 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    sync::{Arc, atomic::AtomicU64},
-    task::{Context, Poll, ready},
+    sync::{atomic::AtomicU64, Arc},
+    task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
 
 use crate::{
     message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
     session::{
-        SessionId,
         conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
+        SessionId,
     },
 };
 use alloy_primitives::Sealable;
-use futures::{SinkExt, StreamExt, stream::Fuse};
+use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
     capability::RawCapabilityMessage,
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
@@ -851,7 +851,7 @@ mod tests {
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
     use reth_primitives::{EthereumHardfork, ForkFilter};
-    use secp256k1::{SECP256K1, SecretKey};
+    use secp256k1::{SecretKey, SECP256K1};
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,

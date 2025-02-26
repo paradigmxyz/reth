@@ -37,12 +37,12 @@
 //! # }
 //! ```
 use crate::{
-    StageSet, StageSetBuilder,
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
         IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
         PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },
+    StageSet, StageSetBuilder,
 };
 use alloy_primitives::B256;
 use reth_config::config::StageConfig;

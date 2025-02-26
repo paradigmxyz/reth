@@ -1,16 +1,16 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{
-    BenchmarkGroup, Criterion, criterion_group, criterion_main, measurement::WallTime,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use prop::test_runner::TestRng;
 use proptest::{
     prelude::*,
     strategy::ValueTree,
-    test_runner::{TestRunner, basic_result_cache},
+    test_runner::{basic_result_cache, TestRunner},
 };
 use reth_trie_common::{
-    Nibbles,
     prefix_set::{PrefixSet, PrefixSetMut},
+    Nibbles,
 };
 use std::{collections::BTreeSet, hint::black_box};
 

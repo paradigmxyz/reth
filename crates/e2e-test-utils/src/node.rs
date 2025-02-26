@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_primitives::{B256, BlockHash, BlockNumber, Bytes, Sealable};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
@@ -12,7 +12,7 @@ use futures_util::Future;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{Block, BlockBody, BlockTy, EngineTypes, FullNodeComponents, PrimitivesTy};
-use reth_node_builder::{FullNode, NodeTypes, NodeTypesWithEngine, rpc::RethRpcAddOns};
+use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes, NodeTypesWithEngine};
 use reth_node_core::primitives::SignedTransaction;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_provider::{

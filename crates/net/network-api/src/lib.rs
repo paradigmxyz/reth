@@ -22,8 +22,8 @@ pub mod noop;
 pub mod test_utils;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
-pub use reth_network_p2p::BlockClient;
 use reth_network_p2p::sync::NetworkSyncUpdater;
+pub use reth_network_p2p::BlockClient;
 pub use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 
 pub use downloaders::BlockDownloaderProvider;
@@ -35,7 +35,7 @@ pub use events::{
 
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
-use reth_eth_wire_types::{DisconnectReason, EthVersion, Status, capability::Capabilities};
+use reth_eth_wire_types::{capability::Capabilities, DisconnectReason, EthVersion, Status};
 use reth_network_peers::NodeRecord;
 
 /// The `PeerId` type.

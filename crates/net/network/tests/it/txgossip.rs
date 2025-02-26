@@ -6,12 +6,12 @@ use alloy_consensus::TxLegacy;
 use alloy_primitives::{PrimitiveSignature as Signature, U256};
 use futures::StreamExt;
 use rand::thread_rng;
-use reth_network::{NetworkEvent, NetworkEventListenerProvider, test_utils::Testnet};
-use reth_network_api::{PeersInfo, events::PeerEvent};
+use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEventListenerProvider};
+use reth_network_api::{events::PeerEvent, PeersInfo};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_transaction_pool::{PoolTransaction, TransactionPool, test_utils::TransactionGenerator};
+use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {
@@ -73,7 +73,7 @@ async fn test_4844_tx_gossip_penalization() {
     let mut tx_gen = TransactionGenerator::new(thread_rng());
 
     // peer 0 will be penalized for sending txs[0] over gossip
-    let txs = vec![gen.gen_eip4844_pooled(), tx_gen.gen_eip1559_pooled()];
+    let txs = vec![tx_gen.gen_eip4844_pooled(), tx_gen.gen_eip1559_pooled()];
 
     for tx in &txs {
         let sender = tx.sender();

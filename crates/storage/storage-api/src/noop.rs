@@ -10,10 +10,10 @@ use crate::{
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag, eip4895::Withdrawals};
+use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    Address, B256, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, U256,
     map::{B256Map, HashMap},
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use core::{
     marker::PhantomData,
@@ -29,8 +29,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
-    updates::TrieUpdates,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.

@@ -44,7 +44,11 @@ impl HeadersDirection {
     /// [`HeadersDirection::Rising`] block numbers for `reverse == 0 == false`
     /// [`HeadersDirection::Falling`] block numbers for `reverse == 1 == true`
     pub const fn new(reverse: bool) -> Self {
-        if reverse { Self::Falling } else { Self::Rising }
+        if reverse {
+            Self::Falling
+        } else {
+            Self::Rising
+        }
     }
 }
 
@@ -83,8 +87,8 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH, Header};
-    use alloy_primitives::{Address, B256, Bytes, U256, address, b256, bloom, bytes, hex};
+    use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
+    use alloy_primitives::{address, b256, bloom, bytes, hex, Address, Bytes, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 

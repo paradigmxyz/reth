@@ -1,11 +1,11 @@
 //! Contains RPC handler implementations specific to transactions
 
 use crate::EthApi;
-use alloy_primitives::{B256, Bytes};
+use alloy_primitives::{Bytes, B256};
 use reth_provider::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
 use reth_rpc_eth_api::{
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
@@ -57,7 +57,7 @@ where
 mod tests {
     use super::*;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
-    use alloy_primitives::{Bytes, hex_literal::hex};
+    use alloy_primitives::{hex_literal::hex, Bytes};
     use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
@@ -70,7 +70,7 @@ mod tests {
         DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
     };
     use reth_tasks::pool::BlockingTaskPool;
-    use reth_transaction_pool::{TransactionPool, test_utils::testing_pool};
+    use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
     #[tokio::test]
     async fn send_raw_transaction() {

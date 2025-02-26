@@ -1,7 +1,7 @@
 //! A IPC connection.
 
 use crate::stream_codec::StreamCodec;
-use futures::{FutureExt, Sink, Stream, stream::FuturesUnordered};
+use futures::{stream::FuturesUnordered, FutureExt, Sink, Stream};
 use std::{
     collections::VecDeque,
     future::Future,

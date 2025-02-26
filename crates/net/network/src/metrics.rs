@@ -1,8 +1,8 @@
 use metrics::Histogram;
 use reth_eth_wire::DisconnectReason;
 use reth_metrics::{
-    Metrics,
     metrics::{Counter, Gauge},
+    Metrics,
 };
 use reth_primitives::TxType;
 

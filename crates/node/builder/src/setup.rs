@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::BlockTy;
-use alloy_primitives::{B256, BlockNumber};
-use reth_config::{PruneConfig, config::StageConfig};
+use alloy_primitives::{BlockNumber, B256};
+use reth_config::{config::StageConfig, PruneConfig};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -13,11 +13,11 @@ use reth_downloaders::{
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
-    BlockClient, bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader,
+    bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::HeaderTy;
-use reth_provider::{ProviderFactory, providers::ProviderNodeTypes};
-use reth_stages::{Pipeline, StageSet, prelude::DefaultStages, stages::ExecutionStage};
+use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
+use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::debug;

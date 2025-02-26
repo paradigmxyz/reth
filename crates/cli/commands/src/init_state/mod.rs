@@ -70,9 +70,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
     pub async fn execute<N>(self) -> eyre::Result<()>
     where
         N: CliNodeTypes<
-                ChainSpec = C::ChainSpec,
-                Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
-            >,
+            ChainSpec = C::ChainSpec,
+            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
+        >,
     {
         info!(target: "reth::cli", "Reth init-state starting");
 

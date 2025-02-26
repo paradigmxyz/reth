@@ -1,5 +1,5 @@
 use crate::{AuthValidator, JwtError, JwtSecret};
-use http::{HeaderMap, Response, StatusCode, header};
+use http::{header, HeaderMap, Response, StatusCode};
 use jsonrpsee_http_client::{HttpBody, HttpResponse};
 use tracing::error;
 
@@ -65,7 +65,7 @@ fn err_response(err: JwtError) -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use crate::jwt_validator::get_bearer;
-    use http::{HeaderMap, header};
+    use http::{header, HeaderMap};
 
     #[test]
     fn auth_header_available() {

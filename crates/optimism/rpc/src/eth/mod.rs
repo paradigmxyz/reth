@@ -23,18 +23,18 @@ use reth_provider::{
     NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_rpc::eth::{DevSigner, core::EthApiInner};
+use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
-    EthApiTypes, FromEvmError, RpcNodeCore, RpcNodeCoreExt,
     helpers::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
+    EthApiTypes, FromEvmError, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
-    TaskSpawner,
     pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
 use std::{fmt, sync::Arc};
@@ -158,11 +158,11 @@ where
 impl<N> EthApiSpec for OpEthApi<N>
 where
     N: OpNodeCore<
-            Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
-                          + BlockNumReader
-                          + StageCheckpointReader,
-            Network: NetworkInfo,
-        >,
+        Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
+                      + BlockNumReader
+                      + StageCheckpointReader,
+        Network: NetworkInfo,
+    >,
 {
     type Transaction = ProviderTx<Self::Provider>;
 
@@ -220,9 +220,9 @@ where
 
 impl<N> LoadState for OpEthApi<N> where
     N: OpNodeCore<
-            Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-            Pool: TransactionPool,
-        >
+        Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Pool: TransactionPool,
+    >
 {
 }
 

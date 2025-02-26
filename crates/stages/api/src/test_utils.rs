@@ -4,8 +4,8 @@ use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, Unwi
 use std::{
     collections::VecDeque,
     sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     },
 };
 

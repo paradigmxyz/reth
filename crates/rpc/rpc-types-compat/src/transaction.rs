@@ -3,7 +3,7 @@
 use core::error;
 use std::fmt;
 
-use alloy_rpc_types_eth::{TransactionInfo, request::TransactionRequest};
+use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInfo};
 use reth_primitives::{Recovered, TransactionSigned};
 use serde::{Deserialize, Serialize};
 

@@ -9,14 +9,14 @@ use std::{
 use alloy_primitives::Bytes;
 use derive_more::Display;
 use discv5::{
-    ListenConfig,
     multiaddr::{Multiaddr, Protocol},
+    ListenConfig,
 };
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::NodeRecord;
 use tracing::warn;
 
-use crate::{NetworkStackId, enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys};
+use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
 
 /// The default address for discv5 via UDP is IPv4.
 ///

@@ -32,7 +32,7 @@ pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
 pub use utils::is_database_empty;
 
 #[cfg(feature = "mdbx")]
-pub use mdbx::{DatabaseEnv, DatabaseEnvKind, create_db, init_db, open_db, open_db_read_only};
+pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, DatabaseEnvKind};
 
 pub use models::ClientVersion;
 pub use reth_db_api::*;
@@ -215,7 +215,7 @@ mod tests {
         init_db,
         mdbx::DatabaseArguments,
         open_db, tables,
-        version::{DatabaseVersionError, db_version_file_path},
+        version::{db_version_file_path, DatabaseVersionError},
     };
     use assert_matches::assert_matches;
     use reth_db_api::{

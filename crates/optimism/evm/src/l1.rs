@@ -1,12 +1,12 @@
 //! Optimism-specific implementation and utilities for the executor
 
-use crate::{OpBlockExecutionError, error::L1BlockInfoError};
+use crate::{error::L1BlockInfoError, OpBlockExecutionError};
 use alloy_consensus::Transaction;
-use alloy_primitives::{Address, B256, Bytes, U256, address, b256, hex};
+use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
 use reth_execution_errors::BlockExecutionError;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::BlockBody;
-use revm::{DatabaseCommit, primitives::HashMap, state::Bytecode};
+use revm::{primitives::HashMap, state::Bytecode, DatabaseCommit};
 use revm_optimism::{L1BlockInfo, OpSpecId};
 use tracing::trace;
 
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn sanity_l1_block() {
         use alloy_consensus::Header;
-        use alloy_primitives::{Bytes, hex_literal::hex};
+        use alloy_primitives::{hex_literal::hex, Bytes};
 
         let bytes = Bytes::from_static(&hex!(
             "7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"

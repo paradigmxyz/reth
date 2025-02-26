@@ -1,12 +1,12 @@
 use crate::BeaconSidecarConfig;
 use alloy_consensus::{
-    BlockHeader, Signed, Transaction as _, TxEip4844WithSidecar, Typed2718,
-    transaction::PooledTransaction,
+    transaction::PooledTransaction, BlockHeader, Signed, Transaction as _, TxEip4844WithSidecar,
+    Typed2718,
 };
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
-use futures_util::{Future, Stream, StreamExt, stream::FuturesUnordered};
+use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
     core::primitives::SignedTransaction,

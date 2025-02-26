@@ -3,9 +3,9 @@
 #![allow(dead_code)]
 
 use crate::{
-    TransactionOrdering,
-    pool::{AddedTransaction, txpool::TxPool},
+    pool::{txpool::TxPool, AddedTransaction},
     test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
+    TransactionOrdering,
 };
 use alloy_primitives::{Address, U256};
 use rand::Rng;

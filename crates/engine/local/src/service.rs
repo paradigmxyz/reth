@@ -29,13 +29,13 @@ use reth_engine_tree::{
     persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
-use reth_evm::{ConfigureEvm, execute::BlockExecutorProvider};
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_node_types::{BlockTy, HeaderTy, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
 use reth_provider::{
-    ChainSpecProvider, ProviderFactory,
     providers::{BlockchainProvider, EngineNodeTypes},
+    ChainSpecProvider, ProviderFactory,
 };
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::MetricEventsSender;

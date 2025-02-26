@@ -4,7 +4,7 @@ use reth_provider::{BlockReader, CanonStateSubscriptions, StateProviderFactory};
 use reth_rpc::{EthFilter, EthPubSub};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::{
-    EthApiBuilderCtx, EthConfig, EthStateCache, cache::cache_new_blocks_task,
+    cache::cache_new_blocks_task, EthApiBuilderCtx, EthConfig, EthStateCache,
 };
 use reth_tasks::TaskSpawner;
 

@@ -1,4 +1,4 @@
-use alloy_primitives::{B256, Bytes, keccak256, map::B256Map};
+use alloy_primitives::{keccak256, map::B256Map, Bytes, B256};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm_database::State;
 

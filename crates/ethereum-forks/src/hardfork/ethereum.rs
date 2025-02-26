@@ -1,7 +1,7 @@
-use crate::{ChainHardforks, ForkCondition, Hardfork, hardfork};
+use crate::{hardfork, ChainHardforks, ForkCondition, Hardfork};
 use alloc::{boxed::Box, format, string::String};
 use alloy_chains::Chain;
-use alloy_primitives::{U256, uint};
+use alloy_primitives::{uint, U256};
 use core::{
     fmt,
     fmt::{Display, Formatter},

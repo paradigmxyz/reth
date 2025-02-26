@@ -1,10 +1,10 @@
 //! Database adapters for payload building.
 use alloy_primitives::{
-    Address, B256, U256,
     map::{Entry, HashMap},
+    Address, B256, U256,
 };
 use core::cell::RefCell;
-use revm::{Database, DatabaseRef, bytecode::Bytecode, state::AccountInfo};
+use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 
 /// A container type that caches reads from an underlying [`DatabaseRef`].
 ///

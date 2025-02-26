@@ -4,19 +4,19 @@ use clap::Parser;
 use itertools::Itertools;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{DatabaseError, mdbx::tx::Tx, static_file::iter_static_files};
+use reth_db::{mdbx::tx::Tx, static_file::iter_static_files, DatabaseError};
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::{
-    DbTool,
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
+    DbTool,
 };
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
 use reth_provider::{
-    DatabaseProviderFactory, StaticFileProviderFactory, writer::UnifiedStorageWriter,
+    writer::UnifiedStorageWriter, DatabaseProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::PruneSegment;
 use reth_stages::StageId;

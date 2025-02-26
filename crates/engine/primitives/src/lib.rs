@@ -15,14 +15,14 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip7685::Requests;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError,
-    InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes, PayloadOrAttributes,
-    PayloadTypes, validate_execution_requests,
+    validate_execution_requests, BuiltPayload, EngineApiMessageVersion,
+    EngineObjectValidationError, InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes,
+    PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock};
 use reth_primitives_traits::Block;
 use reth_trie_common::HashedPostState;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
 pub use reth_payload_primitives::ExecutionPayload;

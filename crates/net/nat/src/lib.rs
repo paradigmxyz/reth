@@ -14,11 +14,11 @@
 
 pub mod net_if;
 
-pub use net_if::{DEFAULT_NET_IF_NAME, NetInterfaceError};
+pub use net_if::{NetInterfaceError, DEFAULT_NET_IF_NAME};
 
 use std::{
     fmt,
-    future::{Future, poll_fn},
+    future::{poll_fn, Future},
     net::{AddrParseError, IpAddr},
     pin::Pin,
     str::FromStr,

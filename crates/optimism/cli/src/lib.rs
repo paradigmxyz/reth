@@ -36,7 +36,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use std::{ffi::OsString, fmt, sync::Arc};
 
 use chainspec::OpChainSpecParser;
-use clap::{Parser, command, value_parser};
+use clap::{command, value_parser, Parser};
 use commands::Commands;
 use futures_util::Future;
 use reth_chainspec::EthChainSpec;
@@ -199,7 +199,7 @@ where
 mod test {
     use crate::chainspec::OpChainSpecParser;
     use clap::Parser;
-    use reth_cli_commands::{NodeCommand, node::NoArgs};
+    use reth_cli_commands::{node::NoArgs, NodeCommand};
     use reth_optimism_chainspec::OP_DEV;
 
     #[test]

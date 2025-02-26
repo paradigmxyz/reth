@@ -9,17 +9,16 @@ pub mod fetcher;
 pub mod validation;
 
 pub use self::constants::{
-    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 pub use config::{TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig};
 pub use validation::*;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 
-use self::constants::{DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE, tx_manager::*};
+use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_BROADCAST_MESSAGE};
 use crate::{
-    NetworkHandle,
     budget::{
         DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
         DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
@@ -27,11 +26,12 @@ use crate::{
     },
     cache::LruCache,
     duration_metered_exec, metered_poll_nested_stream_with_budget,
-    metrics::{NETWORK_POOL_TRANSACTIONS_SCOPE, TransactionsManagerMetrics},
+    metrics::{TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
+    NetworkHandle,
 };
-use alloy_primitives::{B256, TxHash};
+use alloy_primitives::{TxHash, B256};
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-use futures::{Future, StreamExt, stream::FuturesUnordered};
+use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
     DedupPayload, EthNetworkPrimitives, EthVersion, GetPooledTransactions, HandleMempoolData,
     HandleVersionedMempoolData, NetworkPrimitives, NewPooledTransactionHashes,
@@ -40,8 +40,8 @@ use reth_eth_wire::{
 };
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{
-    NetworkEvent, NetworkEventListenerProvider, PeerRequest, PeerRequestSender, Peers,
     events::{PeerEvent, SessionInfo},
+    NetworkEvent, NetworkEventListenerProvider, PeerRequest, PeerRequestSender, Peers,
 };
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
@@ -53,16 +53,16 @@ use reth_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
+    error::{PoolError, PoolResult},
     GetPooledTransactionLimit, PoolTransaction, PropagateKind, PropagatedTransactions,
     TransactionPool, ValidPoolTransaction,
-    error::{PoolError, PoolResult},
 };
 use std::{
-    collections::{HashMap, HashSet, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap, HashSet},
     pin::Pin,
     sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     },
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -701,9 +701,9 @@ impl<Pool, N> TransactionsManager<Pool, N>
 where
     Pool: TransactionPool + 'static,
     N: NetworkPrimitives<
-            BroadcastedTransaction: SignedTransaction,
-            PooledTransaction: SignedTransaction,
-        >,
+        BroadcastedTransaction: SignedTransaction,
+        PooledTransaction: SignedTransaction,
+    >,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
@@ -1336,9 +1336,9 @@ impl<Pool, N> Future for TransactionsManager<Pool, N>
 where
     Pool: TransactionPool + Unpin + 'static,
     N: NetworkPrimitives<
-            BroadcastedTransaction: SignedTransaction,
-            PooledTransaction: SignedTransaction,
-        >,
+        BroadcastedTransaction: SignedTransaction,
+        PooledTransaction: SignedTransaction,
+    >,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
@@ -1909,7 +1909,7 @@ struct TxManagerPollDurations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NetworkConfigBuilder, NetworkManager, test_utils::Testnet};
+    use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
     use alloy_primitives::hex;
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
@@ -1921,7 +1921,7 @@ mod tests {
     };
     use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::test_utils::{
-        MockTransaction, MockTransactionFactory, TestPool, testing_pool,
+        testing_pool, MockTransaction, MockTransactionFactory, TestPool,
     };
     use secp256k1::SecretKey;
     use std::{
@@ -1933,8 +1933,8 @@ mod tests {
     use tests::fetcher::TxFetchMetadata;
     use tracing::error;
 
-    async fn new_tx_manager()
-    -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>)
+    async fn new_tx_manager(
+    ) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>)
     {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
         let client = NoopProvider::default();
@@ -2185,13 +2185,11 @@ mod tests {
             peer_id: *handle1.peer_id(),
             msg: Transactions(vec![signed_tx.clone()]),
         });
-        assert!(
-            transactions
-                .transactions_by_peers
-                .get(signed_tx.tx_hash())
-                .unwrap()
-                .contains(handle1.peer_id())
-        );
+        assert!(transactions
+            .transactions_by_peers
+            .get(signed_tx.tx_hash())
+            .unwrap()
+            .contains(handle1.peer_id()));
 
         // advance the transaction manager future
         poll_fn(|cx| {

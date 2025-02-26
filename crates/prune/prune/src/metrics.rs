@@ -1,6 +1,6 @@
 use reth_metrics::{
-    Metrics,
     metrics::{Gauge, Histogram},
+    Metrics,
 };
 use reth_prune_types::PruneSegment;
 use std::collections::HashMap;

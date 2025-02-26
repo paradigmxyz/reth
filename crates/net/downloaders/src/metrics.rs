@@ -1,6 +1,6 @@
 use reth_metrics::{
-    Metrics,
     metrics::{Counter, Gauge},
+    Metrics,
 };
 use reth_network_p2p::error::DownloadError;
 

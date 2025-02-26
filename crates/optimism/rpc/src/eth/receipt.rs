@@ -11,8 +11,8 @@ use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_provider::{ChainSpecProvider, ReceiptProvider, TransactionsProvider};
-use reth_rpc_eth_api::{FromEthApiError, RpcReceipt, helpers::LoadReceipt};
-use reth_rpc_eth_types::{EthApiError, receipt::build_receipt};
+use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
+use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
 
 use crate::{OpEthApi, OpEthApiError};
 

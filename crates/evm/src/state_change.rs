@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
-use alloy_primitives::{Address, map::HashMap};
+use alloy_primitives::{map::HashMap, Address};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;
 use revm::context::BlockEnv;
@@ -286,8 +286,8 @@ mod tests {
     /// Tests that the function correctly handles the case when Shanghai is active but there are no
     /// withdrawals provided.
     #[test]
-    fn test_insert_post_block_withdrawals_balance_increments_shanghai_active_with_empty_withdrawals()
-     {
+    fn test_insert_post_block_withdrawals_balance_increments_shanghai_active_with_empty_withdrawals(
+    ) {
         // Arrange
         // Create a ChainSpec with the Shanghai hardfork active
         let chain_spec = ChainSpec {

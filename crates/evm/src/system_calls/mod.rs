@@ -6,11 +6,11 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests,
 };
-use alloy_primitives::{B256, Bytes};
+use alloy_primitives::{Bytes, B256};
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
-use revm::{DatabaseCommit, state::EvmState};
+use revm::{state::EvmState, DatabaseCommit};
 
 mod eip2935;
 mod eip4788;

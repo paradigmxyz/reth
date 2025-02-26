@@ -13,13 +13,13 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, ChainStateBlockReader, ChainStateBlockWriter,
-    ProviderFactory, StaticFileProviderFactory, StorageLocation, providers::ProviderNodeTypes,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainStateBlockReader,
+    ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory, StorageLocation,
 };
 use reth_stages::{
-    ExecutionStageThresholds, Pipeline, StageSet,
     sets::{DefaultStages, OfflineStages},
     stages::ExecutionStage,
+    ExecutionStageThresholds, Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::sync::Arc;

@@ -3,7 +3,7 @@
 use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
-use futures::{Stream, StreamExt, future::Either};
+use futures::{future::Either, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
@@ -19,9 +19,8 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::{
-    Semaphore,
-    mpsc::{UnboundedSender, unbounded_channel},
-    oneshot,
+    mpsc::{unbounded_channel, UnboundedSender},
+    oneshot, Semaphore,
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 

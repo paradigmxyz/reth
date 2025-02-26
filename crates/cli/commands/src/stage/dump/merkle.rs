@@ -12,15 +12,15 @@ use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
-    DatabaseProviderFactory, ProviderFactory,
     providers::{ProviderNodeTypes, StaticFileProvider},
+    DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{
-    ExecutionStageThresholds, Stage, StageCheckpoint, UnwindInput,
     stages::{
-        AccountHashingStage, ExecutionStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD, MerkleStage,
-        StorageHashingStage,
+        AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage,
+        MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
+    ExecutionStageThresholds, Stage, StageCheckpoint, UnwindInput,
 };
 use tracing::info;
 

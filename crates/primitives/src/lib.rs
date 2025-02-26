@@ -23,22 +23,22 @@ mod block;
 mod receipt;
 pub use reth_static_file_types as static_file;
 pub mod transaction;
+#[cfg(any(test, feature = "arbitrary"))]
+pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{Block, BlockBody, SealedBlock};
 #[allow(deprecated)]
 pub use block::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders};
-#[cfg(any(test, feature = "arbitrary"))]
-pub use block::{generate_valid_header, valid_header_strategy};
 
-pub use receipt::{Receipt, gas_spent_by_transactions};
+pub use receipt::{gas_spent_by_transactions, Receipt};
 pub use reth_primitives_traits::{
-    Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log, LogData,
-    NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry, logs_bloom,
+    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
+    LogData, NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry,
 };
 pub use static_file::StaticFileSegment;
 
 pub use alloy_consensus::{
-    ReceiptWithBloom,
     transaction::{PooledTransaction, Recovered, TransactionMeta},
+    ReceiptWithBloom,
 };
 
 /// Recovered transaction
@@ -46,8 +46,8 @@ pub use alloy_consensus::{
 pub type RecoveredTx<T> = Recovered<T>;
 
 pub use transaction::{
-    InvalidTransactionError, Transaction, TransactionSigned, TxType,
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
+    InvalidTransactionError, Transaction, TransactionSigned, TxType,
 };
 #[allow(deprecated)]
 pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};

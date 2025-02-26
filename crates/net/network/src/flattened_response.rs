@@ -4,7 +4,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::sync::oneshot::{Receiver, error::RecvError};
+use tokio::sync::oneshot::{error::RecvError, Receiver};
 
 /// Flatten a [Receiver] message in order to get rid of the [RecvError] result
 #[derive(Debug)]

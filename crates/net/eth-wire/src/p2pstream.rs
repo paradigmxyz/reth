@@ -1,15 +1,15 @@
 use crate::{
-    DisconnectReason, HelloMessage, HelloMessageWithProtocols,
     capability::SharedCapabilities,
     disconnect::CanDisconnect,
     errors::{P2PHandshakeError, P2PStreamError},
     pinger::{Pinger, PingerEvent},
+    DisconnectReason, HelloMessage, HelloMessageWithProtocols,
 };
 use alloy_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     hex,
 };
-use alloy_rlp::{Decodable, EMPTY_LIST_CODE, Encodable, Error as RlpError};
+use alloy_rlp::{Decodable, Encodable, Error as RlpError, EMPTY_LIST_CODE};
 use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::add_arbitrary_tests;
@@ -19,7 +19,7 @@ use std::{
     collections::VecDeque,
     io,
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use tokio_stream::Stream;
@@ -793,7 +793,7 @@ impl TryFrom<u8> for P2PMessageID {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EthVersion, ProtocolVersion, capability::SharedCapability, test_utils::eth_hello};
+    use crate::{capability::SharedCapability, test_utils::eth_hello, EthVersion, ProtocolVersion};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_util::codec::Decoder;
 

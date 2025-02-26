@@ -4,18 +4,18 @@ use reth_network_api::NetworkInfo;
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, ProviderTx, StageCheckpointReader,
 };
-use reth_rpc_eth_api::{RpcNodeCore, helpers::EthApiSpec};
+use reth_rpc_eth_api::{helpers::EthApiSpec, RpcNodeCore};
 
 use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> EthApiSpec for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: RpcNodeCore<
-            Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
-                          + BlockNumReader
-                          + StageCheckpointReader,
-            Network: NetworkInfo,
-        >,
+        Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
+                      + BlockNumReader
+                      + StageCheckpointReader,
+        Network: NetworkInfo,
+    >,
     Provider: BlockReader,
 {
     type Transaction = ProviderTx<Provider>;

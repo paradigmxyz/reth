@@ -1,16 +1,15 @@
 use alloy_consensus::{
+    transaction::{from_eip155_value, RlpEcdsaTx},
     Header, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
-    transaction::{RlpEcdsaTx, from_eip155_value},
 };
 use alloy_eips::{
-    Typed2718,
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip4895::Withdrawals,
+    Typed2718,
 };
 use alloy_primitives::{
-    B256, PrimitiveSignature as Signature, TxHash, U256,
     bytes::{Buf, BytesMut},
-    keccak256,
+    keccak256, PrimitiveSignature as Signature, TxHash, B256, U256,
 };
 use alloy_rlp::{Decodable, Error as RlpError, RlpDecodable};
 use derive_more::{AsRef, Deref};
@@ -294,7 +293,7 @@ impl Decodable2718 for OvmTransactionSigned {
 mod tests {
     use crate::ovm_file_codec::OvmTransactionSigned;
     use alloy_consensus::Typed2718;
-    use alloy_primitives::{B256, TxKind, U256, address, hex};
+    use alloy_primitives::{address, hex, TxKind, B256, U256};
     use op_alloy_consensus::OpTypedTransaction;
     const DEPOSIT_FUNCTION_SELECTOR: [u8; 4] = [0xb6, 0xb5, 0x5f, 0x25];
     use alloy_rlp::Decodable;

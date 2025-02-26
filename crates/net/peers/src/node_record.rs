@@ -236,7 +236,7 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
 mod tests {
     use super::*;
     use alloy_rlp::Decodable;
-    use rand::{Rng, RngCore, thread_rng};
+    use rand::{thread_rng, Rng, RngCore};
     use std::net::Ipv6Addr;
 
     #[test]

@@ -1,16 +1,16 @@
 //! Optimism payload builder implementation.
 
 use crate::{
-    OpPayloadPrimitives,
     config::{OpBuilderConfig, OpDAConfig},
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
+    OpPayloadPrimitives,
 };
 use alloy_consensus::{
-    EMPTY_OMMER_ROOT_HASH, Header, Transaction, Typed2718, constants::EMPTY_WITHDRAWALS,
+    constants::EMPTY_WITHDRAWALS, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
@@ -19,8 +19,8 @@ use reth_basic_payload_builder::*;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{
-    ConfigureEvm, ConfigureEvmFor, Database, EvmEnv, HaltReasonFor, NextBlockEnvAttributes,
     execute::{BlockExecutionError, BlockExecutionStrategy, BlockValidationError},
+    ConfigureEvm, ConfigureEvmFor, Database, EvmEnv, HaltReasonFor, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
@@ -31,8 +31,8 @@ use reth_optimism_storage::predeploys;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives::{BlockBody, NodePrimitives, SealedHeader, transaction::SignedTransaction};
-use reth_primitives_traits::{RecoveredBlock, block::Block as _, proofs};
+use reth_primitives::{transaction::SignedTransaction, BlockBody, NodePrimitives, SealedHeader};
+use reth_primitives_traits::{block::Block as _, proofs, RecoveredBlock};
 use reth_provider::{
     BlockExecutionResult, HashedPostStateProvider, ProviderError, StateProofProvider,
     StateProviderFactory, StateRootProvider, StorageRootProvider,
@@ -40,7 +40,7 @@ use reth_provider::{
 use reth_revm::{
     cancelled::CancelOnDrop,
     database::StateProviderDatabase,
-    db::{State, states::bundle_state::BundleRetention},
+    db::{states::bundle_state::BundleRetention, State},
     witness::ExecutionWitnessRecord,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
@@ -719,7 +719,11 @@ where
         // OP doesn't support blobs/EIP-4844.
         // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
         // Need [Some] or [None] based on hardfork to match block hash.
-        if self.is_ecotone_active() { (Some(0), Some(0)) } else { (None, None) }
+        if self.is_ecotone_active() {
+            (Some(0), Some(0))
+        } else {
+            (None, None)
+        }
     }
 
     /// Returns the extra data for the block.

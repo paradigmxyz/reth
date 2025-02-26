@@ -14,26 +14,26 @@
 
 use crate::{
     metrics::{IncCounterOnDrop, TaskExecutorMetrics},
-    shutdown::{GracefulShutdown, GracefulShutdownGuard, Shutdown, Signal, signal},
+    shutdown::{signal, GracefulShutdown, GracefulShutdownGuard, Shutdown, Signal},
 };
 use dyn_clone::DynClone;
 use futures_util::{
+    future::{select, BoxFuture},
     Future, FutureExt, TryFutureExt,
-    future::{BoxFuture, select},
 };
 use std::{
     any::Any,
     fmt::{Display, Formatter},
-    pin::{Pin, pin},
+    pin::{pin, Pin},
     sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     },
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::{
     runtime::Handle,
-    sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
 use tracing::{debug, error};

@@ -2,8 +2,8 @@
 //! RPC methods.
 
 use super::SpawnBlocking;
-use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore, types::RpcTypes};
-use alloy_consensus::{BlockHeader, Transaction, transaction::Recovered};
+use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
+use alloy_consensus::{transaction::Recovered, BlockHeader, Transaction};
 use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::BlockNumberOrTag;
@@ -11,9 +11,9 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{
+    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
     ConfigureEvm, ConfigureEvmEnv, Evm, EvmEnv, EvmError, HaltReasonFor, InvalidTxError,
-    NextBlockEnvAttributes, state_change::post_block_withdrawals_balance_increments,
-    system_calls::SystemCaller,
+    NextBlockEnvAttributes,
 };
 use reth_primitives::{InvalidTransactionError, RecoveredBlock};
 use reth_primitives_traits::Receipt;
@@ -23,18 +23,18 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    db::{State, states::bundle_state::BundleRetention},
+    db::{states::bundle_state::BundleRetention, State},
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
-    BestTransactionsAttributes, PoolTransaction, TransactionPool,
-    error::InvalidPoolTransactionError,
+    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
+    TransactionPool,
 };
 use revm::{
     context::BlockEnv,
     context_interface::{
-        Block,
         result::{ExecutionResult, ResultAndState},
+        Block,
     },
 };
 use std::time::{Duration, Instant};

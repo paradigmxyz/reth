@@ -27,8 +27,8 @@ pub use builder::{
     ctx::EthApiBuilderCtx,
 };
 pub use cache::{
-    EthStateCache, config::EthStateCacheConfig, db::StateCacheDb,
-    multi_consumer::MultiConsumerLruCache,
+    config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
+    EthStateCache,
 };
 pub use error::{EthApiError, EthResult, RevertError, RpcInvalidTransactionError, SignError};
 pub use fee_history::{FeeHistoryCache, FeeHistoryCacheConfig, FeeHistoryEntry};

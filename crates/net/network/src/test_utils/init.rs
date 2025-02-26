@@ -1,4 +1,4 @@
-use enr::{Enr, EnrPublicKey, k256::ecdsa::SigningKey};
+use enr::{k256::ecdsa::SigningKey, Enr, EnrPublicKey};
 use reth_network_peers::PeerId;
 use std::{net::SocketAddr, time::Duration};
 

@@ -1,6 +1,6 @@
 use crate::{
-    DatabaseError,
     table::{Compress, Decompress},
+    DatabaseError,
 };
 use alloy_primitives::U256;
 

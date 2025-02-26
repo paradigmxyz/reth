@@ -16,7 +16,7 @@ use std::{
     mem,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 
 /// Body request implemented as a [Future].
@@ -263,7 +263,7 @@ mod tests {
     use super::*;
     use crate::{
         bodies::test_utils::zip_blocks,
-        test_utils::{TestBodiesClient, generate_bodies},
+        test_utils::{generate_bodies, TestBodiesClient},
     };
     use reth_consensus::test_utils::TestConsensus;
     use reth_testing_utils::{generators, generators::random_header_range};

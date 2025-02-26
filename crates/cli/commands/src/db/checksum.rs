@@ -7,12 +7,12 @@ use clap::Parser;
 use reth_chainspec::EthereumHardforks;
 use reth_db::DatabaseEnv;
 use reth_db_api::{
-    RawKey, RawTable, RawValue, TableViewer, Tables, cursor::DbCursorRO, table::Table,
-    transaction::DbTx,
+    cursor::DbCursorRO, table::Table, transaction::DbTx, RawKey, RawTable, RawValue, TableViewer,
+    Tables,
 };
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
-use reth_provider::{DBProvider, providers::ProviderNodeTypes};
+use reth_provider::{providers::ProviderNodeTypes, DBProvider};
 use std::{
     hash::{BuildHasher, Hasher},
     sync::Arc,

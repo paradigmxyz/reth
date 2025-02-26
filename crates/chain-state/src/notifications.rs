@@ -8,12 +8,12 @@ use reth_storage_api::NodePrimitivesProvider;
 use std::{
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::{broadcast, watch};
 use tokio_stream::{
-    Stream,
     wrappers::{BroadcastStream, WatchStream},
+    Stream,
 };
 use tracing::debug;
 
@@ -215,7 +215,7 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
 mod tests {
     use super::*;
     use alloy_consensus::BlockBody;
-    use alloy_primitives::{B256, b256};
+    use alloy_primitives::{b256, B256};
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{Receipt, SealedBlock, TransactionSigned, TxType};
 

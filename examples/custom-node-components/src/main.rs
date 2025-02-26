@@ -4,16 +4,16 @@
 
 use reth::{
     api::NodeTypes,
-    builder::{BuilderContext, FullNodeTypes, components::PoolBuilder},
+    builder::{components::PoolBuilder, BuilderContext, FullNodeTypes},
     chainspec::ChainSpec,
     cli::Cli,
     primitives::EthPrimitives,
     providers::CanonStateSubscriptions,
     transaction_pool::{
-        EthTransactionPool, TransactionValidationTaskExecutor, blobstore::InMemoryBlobStore,
+        blobstore::InMemoryBlobStore, EthTransactionPool, TransactionValidationTaskExecutor,
     },
 };
-use reth_node_ethereum::{EthereumNode, node::EthereumAddOns};
+use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::PoolConfig;
 

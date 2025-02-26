@@ -13,11 +13,11 @@ extern crate alloc;
 
 use alloc::{fmt::Debug, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
-use alloy_primitives::{B256, BlockHash, BlockNumber, Bloom, U256};
+use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
-    Block, GotExpected, GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock,
-    SealedHeader, constants::MINIMUM_GAS_LIMIT, transaction::error::InvalidTransactionError,
+    constants::MINIMUM_GAS_LIMIT, transaction::error::InvalidTransactionError, Block, GotExpected,
+    GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 
 /// A consensus implementation that does nothing.
@@ -236,7 +236,9 @@ pub enum ConsensusError {
     },
 
     /// Error when the block number does not match the parent block number.
-    #[error("block number {block_number} does not match parent block number {parent_block_number}")]
+    #[error(
+        "block number {block_number} does not match parent block number {parent_block_number}"
+    )]
     ParentBlockNumberMismatch {
         /// The parent block number.
         parent_block_number: BlockNumber,

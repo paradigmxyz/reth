@@ -13,13 +13,13 @@
 use futures::StreamExt;
 use reth_chainspec::DEV;
 use reth_network::{
-    BlockDownloaderProvider, FetchClient, NetworkConfig, NetworkEventListenerProvider,
-    NetworkHandle, NetworkInfo, NetworkManager, Peers,
     config::rng_secret_key,
     eth_requests::IncomingEthRequest,
     p2p::HeadersClient,
     transactions::NetworkTransactionEvent,
     types::{BlockHashOrNumber, NewPooledTransactionHashes68},
+    BlockDownloaderProvider, FetchClient, NetworkConfig, NetworkEventListenerProvider,
+    NetworkHandle, NetworkInfo, NetworkManager, Peers,
 };
 
 #[tokio::main]

@@ -1,29 +1,29 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
 use alloy_consensus::{
-    EMPTY_OMMER_ROOT_HASH, Header, Transaction, constants::EMPTY_WITHDRAWALS,
-    transaction::Recovered,
+    constants::EMPTY_WITHDRAWALS, transaction::Recovered, Header, Transaction,
+    EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{ConfigureEvm, HaltReasonFor};
-use reth_primitives::{BlockBody, Receipt, logs_bloom};
+use reth_primitives::{logs_bloom, BlockBody, Receipt};
 use reth_primitives_traits::proofs::calculate_transaction_root;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderReceipt, ProviderTx,
     StateProviderFactory,
 };
 use reth_rpc_eth_api::{
-    FromEvmError, RpcNodeCore,
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
+    FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::{
     context::BlockEnv,
-    context_interface::{Block, result::ExecutionResult},
+    context_interface::{result::ExecutionResult, Block},
 };
 use revm_primitives::B256;
 

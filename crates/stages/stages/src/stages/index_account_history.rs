@@ -144,24 +144,24 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
-        UnwindStageTestRunner, stage_test_suite_ext,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{B256, BlockNumber, address};
+    use alloy_primitives::{address, BlockNumber, B256};
     use itertools::Itertools;
     use reth_db_api::{
-        BlockNumberList,
         cursor::DbCursorRO,
         models::{
-            AccountBeforeTx, StoredBlockBodyIndices, sharded_key,
-            sharded_key::NUM_OF_INDICES_IN_SHARD,
+            sharded_key, sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx,
+            StoredBlockBodyIndices,
         },
         transaction::DbTx,
+        BlockNumberList,
     };
-    use reth_provider::{DatabaseProviderFactory, providers::StaticFileWriter};
+    use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
-        self, BlockRangeParams, random_block_range, random_changeset_range,
-        random_contract_account_range,
+        self, random_block_range, random_changeset_range, random_contract_account_range,
+        BlockRangeParams,
     };
     use std::collections::BTreeMap;
 

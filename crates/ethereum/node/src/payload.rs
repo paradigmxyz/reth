@@ -10,7 +10,7 @@ use reth_evm::ConfigureEvmFor;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{FullNodeTypes, NodeTypesWithEngine, PrimitivesTy, TxTy};
 use reth_node_builder::{
-    BuilderContext, PayloadBuilderConfig, PayloadTypes, components::PayloadBuilderBuilder,
+    components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -38,10 +38,10 @@ impl EthereumPayloadBuilder {
             + Unpin
             + 'static,
         Types::Engine: PayloadTypes<
-                BuiltPayload = EthBuiltPayload,
-                PayloadAttributes = EthPayloadAttributes,
-                PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-            >,
+            BuiltPayload = EthBuiltPayload,
+            PayloadAttributes = EthPayloadAttributes,
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        >,
     {
         let conf = ctx.payload_builder_config();
         Ok(reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
@@ -61,10 +61,10 @@ where
         + Unpin
         + 'static,
     Types::Engine: PayloadTypes<
-            BuiltPayload = EthBuiltPayload,
-            PayloadAttributes = EthPayloadAttributes,
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        >,
+        BuiltPayload = EthBuiltPayload,
+        PayloadAttributes = EthPayloadAttributes,
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+    >,
 {
     type PayloadBuilder =
         reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, EthEvmConfig>;

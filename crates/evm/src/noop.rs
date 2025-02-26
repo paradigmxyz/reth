@@ -1,9 +1,9 @@
 //! A no operation block executor implementation.
 
 use crate::{
-    Database,
     execute::{BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
+    Database,
 };
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult;

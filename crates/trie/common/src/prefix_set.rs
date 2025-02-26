@@ -70,7 +70,7 @@ pub struct TriePrefixSets {
 /// # Examples
 ///
 /// ```
-/// use reth_trie_common::{Nibbles, prefix_set::PrefixSetMut};
+/// use reth_trie_common::{prefix_set::PrefixSetMut, Nibbles};
 ///
 /// let mut prefix_set_mut = PrefixSetMut::default();
 /// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));

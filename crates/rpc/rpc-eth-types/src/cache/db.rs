@@ -4,12 +4,12 @@
 
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
-use reth_revm::{DatabaseRef, database::StateProviderDatabase};
+use reth_revm::{database::StateProviderDatabase, DatabaseRef};
 use reth_storage_api::{HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
-    Database,
     state::{AccountInfo, Bytecode},
+    Database,
 };
 use revm_database::CacheDB;
 

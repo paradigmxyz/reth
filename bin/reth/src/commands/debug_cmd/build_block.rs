@@ -3,9 +3,9 @@ use crate::primitives::kzg::KzgSettings;
 use alloy_consensus::{BlockHeader, TxEip4844};
 use alloy_eips::{
     eip2718::Encodable2718,
-    eip4844::{BlobTransactionSidecar, env_settings::EnvKzgSettings},
+    eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
 };
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
@@ -23,18 +23,18 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
-use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, consensus::EthBeaconConsensus};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
 use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignedTransaction};
 use reth_provider::{
+    providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
-    providers::{BlockchainProvider, ProviderNodeTypes},
 };
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop, database::StateProviderDatabase};
 use reth_stages::StageId;
 use reth_transaction_pool::{
-    BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin, TransactionPool,
-    TransactionValidationTaskExecutor, blobstore::InMemoryBlobStore,
+    blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
+    TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;

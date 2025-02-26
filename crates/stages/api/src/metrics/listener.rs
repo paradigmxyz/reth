@@ -1,9 +1,9 @@
-use crate::{StageCheckpoint, StageId, metrics::SyncMetrics};
+use crate::{metrics::SyncMetrics, StageCheckpoint, StageId};
 use alloy_primitives::BlockNumber;
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::trace;

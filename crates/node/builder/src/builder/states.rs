@@ -6,11 +6,11 @@
 //! before the node can be launched.
 
 use crate::{
-    AddOns, FullNode,
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     launch::LaunchNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
+    AddOns, FullNode,
 };
 use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};

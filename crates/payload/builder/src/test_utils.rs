@@ -1,8 +1,8 @@
 //! Utils for testing purposes.
 
 use crate::{
-    EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService,
-    PayloadJob, PayloadJobGenerator, traits::KeepPayloadJobAlive,
+    traits::KeepPayloadJobAlive, EthBuiltPayload, EthPayloadBuilderAttributes,
+    PayloadBuilderHandle, PayloadBuilderService, PayloadJob, PayloadJobGenerator,
 };
 
 use alloy_primitives::U256;

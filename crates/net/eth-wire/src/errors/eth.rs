@@ -1,7 +1,7 @@
 //! Error handling for (`EthStream`)[`crate::EthStream`]
 
 use crate::{
-    DisconnectReason, errors::P2PStreamError, message::MessageError, version::ParseVersionError,
+    errors::P2PStreamError, message::MessageError, version::ParseVersionError, DisconnectReason,
 };
 use alloy_chains::Chain;
 use alloy_primitives::B256;
@@ -50,7 +50,11 @@ pub enum EthStreamError {
 impl EthStreamError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
     pub const fn as_disconnected(&self) -> Option<DisconnectReason> {
-        if let Self::P2PStreamError(err) = self { err.as_disconnected() } else { None }
+        if let Self::P2PStreamError(err) = self {
+            err.as_disconnected()
+        } else {
+            None
+        }
     }
 
     /// Returns the [`io::Error`] if it was caused by IO

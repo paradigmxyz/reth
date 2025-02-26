@@ -47,7 +47,7 @@
 //! ```
 //! # async fn launch() {
 //! use reth_network::{
-//!     EthNetworkPrimitives, NetworkConfig, NetworkManager, config::rng_secret_key,
+//!     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
 //! };
 //! use reth_network_peers::mainnet_nodes;
 //! use reth_storage_api::noop::NoopProvider;
@@ -76,7 +76,7 @@
 //!
 //! ```
 //! use reth_network::{
-//!     EthNetworkPrimitives, NetworkConfig, NetworkManager, config::rng_secret_key,
+//!     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
 //! };
 //! use reth_network_peers::mainnet_nodes;
 //! use reth_storage_api::noop::NoopProvider;

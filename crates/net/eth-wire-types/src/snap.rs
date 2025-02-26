@@ -6,7 +6,7 @@
 //! Current version: snap/1
 
 use alloc::vec::Vec;
-use alloy_primitives::{B256, Bytes};
+use alloy_primitives::{Bytes, B256};
 
 /// Message IDs for the snap sync protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

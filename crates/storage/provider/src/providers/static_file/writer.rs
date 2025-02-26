@@ -1,10 +1,10 @@
 use super::{
-    StaticFileProvider, manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics,
+    manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
-use parking_lot::{RawRwLock, RwLock, lock_api::RwLockWriteGuard};
+use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
 use reth_db_api::models::{
     CompactU256, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals,
@@ -12,8 +12,8 @@ use reth_db_api::models::{
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
 use reth_primitives::{
-    StaticFileSegment,
     static_file::{SegmentHeader, SegmentRangeInclusive},
+    StaticFileSegment,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{

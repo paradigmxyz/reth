@@ -1,8 +1,8 @@
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
 use reth_metrics::{
-    Metrics,
     metrics::{Counter, Gauge},
+    Metrics,
 };
 use schnellru::{ByLength, LruMap};
 use std::fmt::Debug;

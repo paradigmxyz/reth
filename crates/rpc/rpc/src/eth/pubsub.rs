@@ -4,18 +4,18 @@ use std::sync::Arc;
 
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
-    FilteredParams, Header, Log,
     pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
+    FilteredParams, Header, Log,
 };
 use futures::StreamExt;
 use jsonrpsee::{
-    PendingSubscriptionSink, SubscriptionSink, server::SubscriptionMessage, types::ErrorObject,
+    server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
 };
 use reth_network_api::NetworkInfo;
 use reth_primitives::NodePrimitives;
 use reth_provider::{BlockNumReader, CanonStateSubscriptions};
 use reth_rpc_eth_api::{
-    EthApiTypes, RpcNodeCore, RpcTransaction, TransactionCompat, pubsub::EthPubSubApiServer,
+    pubsub::EthPubSubApiServer, EthApiTypes, RpcNodeCore, RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
@@ -23,8 +23,8 @@ use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, PoolConsensusTx, TransactionPool};
 use serde::Serialize;
 use tokio_stream::{
-    Stream,
     wrappers::{BroadcastStream, ReceiverStream},
+    Stream,
 };
 use tracing::error;
 

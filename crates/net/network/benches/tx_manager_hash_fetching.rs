@@ -1,8 +1,8 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::{
-    U256,
     private::proptest::test_runner::{RngAlgorithm, TestRng},
+    U256,
 };
 use criterion::*;
 use pprof::criterion::{Output, PProfProfiler};
@@ -13,7 +13,7 @@ use reth_network::{
     },
 };
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_transaction_pool::{PoolTransaction, TransactionPool, test_utils::TransactionGenerator};
+use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 use tokio::runtime::Runtime as TokioRuntime;
 
 criterion_group!(

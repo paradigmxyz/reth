@@ -49,9 +49,9 @@ impl<T: RlpDecodableReceipt> alloy_rlp::Decodable for Receipts<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GetReceipts, Receipts, message::RequestPair};
+    use crate::{message::RequestPair, GetReceipts, Receipts};
     use alloy_consensus::TxType;
-    use alloy_primitives::{Log, hex};
+    use alloy_primitives::{hex, Log};
     use alloy_rlp::{Decodable, Encodable};
 
     #[test]

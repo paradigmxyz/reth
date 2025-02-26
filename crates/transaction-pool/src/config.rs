@@ -1,7 +1,7 @@
 use crate::{
-    PoolSize, TransactionOrigin,
     maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
+    PoolSize, TransactionOrigin,
 };
 use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};

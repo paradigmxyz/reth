@@ -1,6 +1,6 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
-use alloy_primitives::{B256, U256, hex};
+use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
@@ -298,7 +298,7 @@ mod tests {
     use crate::{EthVersion, Status, StatusEth69};
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{B256, U256, hex};
+    use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};

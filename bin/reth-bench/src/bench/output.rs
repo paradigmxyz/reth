@@ -2,7 +2,7 @@
 //! serialization to / from files.
 
 use reth_primitives_traits::constants::GIGAGAS;
-use serde::{Serialize, ser::SerializeStruct};
+use serde::{ser::SerializeStruct, Serialize};
 use std::time::Duration;
 
 /// This is the suffix for gas output csv files.

@@ -4,17 +4,17 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
-use alloy_consensus::{BlockHeader, transaction::TransactionMeta};
-use alloy_eips::{BlockHashOrNumber, BlockNumHash, eip2718::Encodable2718};
-use alloy_primitives::{B256, TxHash, map::HashMap};
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
+use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
+use alloy_primitives::{map::HashMap, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_metrics::{Metrics, metrics::Gauge};
+use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{EthPrimitives, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
-use reth_trie::{HashedPostState, updates::TrieUpdates};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -944,7 +944,7 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, map::B256Map};
+    use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};

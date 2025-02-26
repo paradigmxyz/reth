@@ -5,14 +5,14 @@ use crate::{
     bench::{
         context::BenchContext,
         output::{
-            COMBINED_OUTPUT_SUFFIX, CombinedResult, GAS_OUTPUT_SUFFIX, NewPayloadResult,
-            TotalGasOutput, TotalGasRow,
+            CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow, COMBINED_OUTPUT_SUFFIX,
+            GAS_OUTPUT_SUFFIX,
         },
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
 use alloy_primitives::B256;
-use alloy_provider::{Provider, network::AnyRpcBlock};
+use alloy_provider::{network::AnyRpcBlock, Provider};
 use alloy_rpc_types_engine::{ExecutionPayload, ForkchoiceState};
 use clap::Parser;
 use csv::Writer;

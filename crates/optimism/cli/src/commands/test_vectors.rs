@@ -8,8 +8,8 @@ use reth_cli_commands::{
     test_vectors::{
         compact,
         compact::{
-            GENERATE_VECTORS as ETH_GENERATE_VECTORS, READ_VECTORS as ETH_READ_VECTORS,
-            generate_vector, read_vector,
+            generate_vector, read_vector, GENERATE_VECTORS as ETH_GENERATE_VECTORS,
+            READ_VECTORS as ETH_READ_VECTORS,
         },
         tables,
     },

@@ -1,15 +1,15 @@
 //! `EthApiBuilder` implementation
 
 use crate::{
+    eth::{core::EthApiInner, EthTxBuilder},
     EthApi,
-    eth::{EthTxBuilder, core::EthApiInner},
 };
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle};
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
-use reth_tasks::{TaskSpawner, TokioTaskExecutor, pool::BlockingTaskPool};
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use std::sync::Arc;
 
 /// A helper to build the `EthApi` handler instance.

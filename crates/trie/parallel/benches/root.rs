@@ -1,15 +1,15 @@
 #![allow(missing_docs, unreachable_pub)]
 use alloy_primitives::{B256, U256};
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
 use reth_primitives::Account;
 use reth_provider::{
-    StateWriter, TrieWriter, providers::ConsistentDbView, test_utils::create_test_provider_factory,
+    providers::ConsistentDbView, test_utils::create_test_provider_factory, StateWriter, TrieWriter,
 };
 use reth_trie::{
-    HashedPostState, HashedStorage, StateRoot, TrieInput,
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
+    TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use reth_trie_parallel::root::ParallelStateRoot;

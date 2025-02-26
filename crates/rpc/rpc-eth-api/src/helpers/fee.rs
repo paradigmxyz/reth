@@ -11,8 +11,8 @@ use reth_chainspec::EthChainSpec;
 use reth_primitives_traits::BlockBody;
 use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider};
 use reth_rpc_eth_types::{
-    EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
-    fee_history::calculate_reward_percentiles_for_block,
+    fee_history::calculate_reward_percentiles_for_block, EthApiError, FeeHistoryCache,
+    FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
 use tracing::debug;
 

@@ -15,8 +15,8 @@ use alloy_primitives::{Address, B256};
 use alloy_rlp::{Decodable, Encodable};
 
 use crate::{
-    BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde, SealedHeader,
-    SignedTransaction, block::error::BlockRecoveryError, transaction::signed::RecoveryError,
+    block::error::BlockRecoveryError, transaction::signed::RecoveryError, BlockBody, BlockHeader,
+    FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde, SealedHeader, SignedTransaction,
 };
 
 /// Bincode-compatible header type serde implementations.

@@ -13,7 +13,7 @@ use std::{
     future::Future,
     ops::RangeInclusive,
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
@@ -175,7 +175,7 @@ mod tests {
             bodies::BodiesDownloaderBuilder,
             test_utils::{insert_headers, zip_blocks},
         },
-        test_utils::{TestBodiesClient, generate_bodies},
+        test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;

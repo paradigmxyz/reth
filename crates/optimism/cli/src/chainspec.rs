@@ -1,6 +1,6 @@
-use reth_cli::chainspec::{ChainSpecParser, parse_genesis};
+use reth_cli::chainspec::{parse_genesis, ChainSpecParser};
 use reth_optimism_chainspec::{
-    BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA, OpChainSpec,
+    OpChainSpec, BASE_MAINNET, BASE_SEPOLIA, OP_DEV, OP_MAINNET, OP_SEPOLIA,
 };
 use std::sync::Arc;
 

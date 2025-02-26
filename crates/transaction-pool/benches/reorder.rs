@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 use criterion::{
-    BenchmarkGroup, Criterion, criterion_group, criterion_main, measurement::WallTime,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::test_utils::MockTransaction;

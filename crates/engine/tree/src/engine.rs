@@ -15,7 +15,7 @@ use std::{
     collections::HashSet,
     fmt::Display,
     sync::mpsc::Sender,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 

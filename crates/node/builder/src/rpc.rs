@@ -21,16 +21,16 @@ use reth_node_core::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_provider::ChainSpecProvider;
 use reth_rpc::{
-    EthApi,
     eth::{EthApiTypes, FullEthApiServer},
+    EthApi,
 };
-use reth_rpc_api::{IntoEngineApiRpcModule, eth::helpers::AddDevSigners};
+use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
-    RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
+    RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
-use reth_rpc_engine_api::{EngineApi, capabilities::EngineCapabilities};
+use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};

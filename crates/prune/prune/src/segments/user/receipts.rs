@@ -1,12 +1,12 @@
 use crate::{
-    PrunerError,
     segments::{PruneInput, Segment},
+    PrunerError,
 };
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, DBProvider, NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
-    errors::provider::ProviderResult,
+    errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
+    PruneCheckpointWriter, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use tracing::instrument;

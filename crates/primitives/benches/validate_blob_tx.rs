@@ -2,10 +2,10 @@
 
 use alloy_consensus::TxEip4844;
 use alloy_eips::eip4844::{
-    BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK, env_settings::EnvKzgSettings,
+    env_settings::EnvKzgSettings, BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK,
 };
 use criterion::{
-    BenchmarkGroup, Criterion, criterion_group, criterion_main, measurement::WallTime,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;

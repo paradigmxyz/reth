@@ -155,10 +155,10 @@ mod tests {
     use crate::JwtAuthValidator;
     use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
     use jsonrpsee::{
-        RpcModule,
         server::{RandomStringIdProvider, ServerBuilder, ServerHandle},
+        RpcModule,
     };
-    use reqwest::{StatusCode, header};
+    use reqwest::{header, StatusCode};
     use std::{
         net::SocketAddr,
         time::{SystemTime, UNIX_EPOCH},

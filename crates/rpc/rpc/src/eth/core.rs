@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::{EthApiBuilder, eth::EthTxBuilder};
+use crate::{eth::EthTxBuilder, EthApiBuilder};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
@@ -16,19 +16,19 @@ use reth_provider::{
     ProviderReceipt,
 };
 use reth_rpc_eth_api::{
-    EthApiTypes, RpcNodeCore,
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
+    EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
     PendingBlock,
 };
 use reth_tasks::{
-    TaskSpawner, TokioTaskExecutor,
     pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskSpawner, TokioTaskExecutor,
 };
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{broadcast, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -501,7 +501,7 @@ mod tests {
     use crate::{EthApi, EthApiBuilder};
     use alloy_consensus::Header;
     use alloy_eips::BlockNumberOrTag;
-    use alloy_primitives::{B256, PrimitiveSignature as Signature, U64};
+    use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::{BaseFeeParams, ChainSpec};
@@ -509,12 +509,12 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
-        BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory,
         test_utils::{MockEthProvider, NoopProvider},
+        BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory,
     };
     use reth_rpc_eth_api::EthApiServer;
     use reth_testing_utils::{generators, generators::Rng};
-    use reth_transaction_pool::test_utils::{TestPool, testing_pool};
+    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
     fn build_test_eth_api<
         P: BlockReaderIdExt<

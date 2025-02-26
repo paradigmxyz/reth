@@ -2,7 +2,7 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::version::{DB_VERSION, DatabaseVersionError, get_db_version};
+use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
 use std::io::{self, Write};
 

@@ -1,22 +1,20 @@
 use crate::{
-    StorageRootTargets, metrics::ParallelTrieMetrics, root::ParallelStateRootError,
-    stats::ParallelTrieTracker,
+    metrics::ParallelTrieMetrics, root::ParallelStateRootError, stats::ParallelTrieTracker,
+    StorageRootTargets,
 };
 use alloy_primitives::{
-    B256,
     map::{B256Map, HashMap},
+    B256,
 };
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    BlockReader, DBProvider, DatabaseProviderFactory, ProviderError, StateCommitmentProvider,
-    providers::ConsistentDbView,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+    StateCommitmentProvider,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
@@ -24,6 +22,8 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
+    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -338,12 +338,13 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::{
-        Address, U256, keccak256,
+        keccak256,
         map::{B256Set, DefaultHashBuilder},
+        Address, U256,
     };
     use rand::Rng;
     use reth_primitives::{Account, StorageEntry};
-    use reth_provider::{HashingWriter, test_utils::create_test_provider_factory};
+    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::proof::Proof;
 
     #[test]

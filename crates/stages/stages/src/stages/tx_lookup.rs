@@ -3,11 +3,11 @@ use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db_api::{
-    RawKey, RawValue,
     cursor::{DbCursorRO, DbCursorRW},
     table::Value,
     tables,
     transaction::DbTxMut,
+    RawKey, RawValue,
 };
 use reth_etl::Collector;
 use reth_primitives::NodePrimitives;
@@ -256,20 +256,20 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, StorageKind, TestRunnerError, TestStageDB,
-        UnwindStageTestRunner, stage_test_suite_ext,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{B256, BlockNumber};
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::transaction::DbTx;
     use reth_primitives::SealedBlock;
     use reth_provider::{
-        BlockBodyIndicesProvider, DatabaseProviderFactory, StaticFileProviderFactory,
-        providers::StaticFileWriter,
+        providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
+        StaticFileProviderFactory,
     };
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{
-        self, BlockParams, BlockRangeParams, random_block, random_block_range,
+        self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
     use std::ops::Sub;
 

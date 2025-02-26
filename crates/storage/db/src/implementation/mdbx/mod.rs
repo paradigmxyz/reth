@@ -1,14 +1,14 @@
 //! Module that interacts with MDBX.
 
 use crate::{
-    DatabaseError, TableSet,
     lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
     tables::{self, Tables},
     utils::default_page_size,
+    DatabaseError, TableSet,
 };
 use eyre::Context;
-use metrics::{Label, gauge};
+use metrics::{gauge, Label};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
@@ -17,8 +17,8 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode,
-    MaxReadTransactionDuration, Mode, PageSize, RO, RW, SyncMode, ffi,
+    ffi, DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode,
+    MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
 };
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
@@ -496,11 +496,11 @@ impl Deref for DatabaseEnv {
 mod tests {
     use super::*;
     use crate::{
-        AccountChangeSets,
         tables::{
             AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
         },
         test_utils::*,
+        AccountChangeSets,
     };
     use alloy_consensus::Header;
     use alloy_primitives::{Address, B256, U256};

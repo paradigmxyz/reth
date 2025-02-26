@@ -23,29 +23,29 @@ pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 pub use error::ParseDnsEntryError;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
-use reth_network_peers::{NodeRecord, pk2id};
+use reth_network_peers::{pk2id, NodeRecord};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
-    collections::{HashMap, HashSet, VecDeque, hash_map::Entry},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     net::IpAddr,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
 use sync::SyncTree;
 use tokio::{
     sync::{
         mpsc,
-        mpsc::{UnboundedSender, error::TrySendError},
+        mpsc::{error::TrySendError, UnboundedSender},
         oneshot,
     },
     task::JoinHandle,
 };
 use tokio_stream::{
-    Stream, StreamExt,
     wrappers::{ReceiverStream, UnboundedReceiverStream},
+    Stream, StreamExt,
 };
 use tracing::{debug, trace};
 

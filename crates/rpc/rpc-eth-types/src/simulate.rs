@@ -2,24 +2,24 @@
 
 use alloy_consensus::{BlockHeader, Transaction as _, TxType};
 use alloy_rpc_types_eth::{
-    Block, BlockTransactionsKind, Header,
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     transaction::TransactionRequest,
+    Block, BlockTransactionsKind, Header,
 };
 use jsonrpsee_types::ErrorObject;
 use reth_primitives::{Recovered, RecoveredBlock};
-use reth_primitives_traits::{BlockBody as _, SignedTransaction, block::BlockTx};
+use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types_compat::{TransactionCompat, block::from_block};
-use revm::{Database, context_interface::result::ExecutionResult};
+use reth_rpc_types_compat::{block::from_block, TransactionCompat};
+use revm::{context_interface::result::ExecutionResult, Database};
 use revm_primitives::{Address, Bytes, TxKind};
 
 use crate::{
-    EthApiError, RevertError,
     error::{
-        ToRpcError,
         api::{FromEthApiError, FromEvmHalt},
+        ToRpcError,
     },
+    EthApiError, RevertError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.

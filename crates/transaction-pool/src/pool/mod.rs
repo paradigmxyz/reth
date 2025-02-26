@@ -66,8 +66,6 @@
 //!    category (2.) and become pending.
 
 use crate::{
-    CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
-    TransactionValidator,
     error::{PoolError, PoolErrorKind, PoolResult},
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     pool::{
@@ -80,14 +78,16 @@ use crate::{
         PoolTransaction, PropagatedTransactions, TransactionOrigin,
     },
     validate::{TransactionValidationOutcome, ValidPoolTransaction},
+    CanonicalStateUpdate, EthPoolTransaction, PoolConfig, TransactionOrdering,
+    TransactionValidator,
 };
-use alloy_primitives::{Address, B256, TxHash};
+use alloy_primitives::{Address, TxHash, B256};
 use best::BestTransactions;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
-use alloy_eips::{Typed2718, eip4844::BlobTransactionSidecar};
+use alloy_eips::{eip4844::BlobTransactionSidecar, Typed2718};
 use reth_primitives::Recovered;
 use rustc_hash::FxHashMap;
 use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
@@ -1260,10 +1260,10 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
         blobstore::{BlobStore, InMemoryBlobStore},
         test_utils::{MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
+        BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
     use alloy_eips::eip4844::BlobTransactionSidecar;
     use reth_primitives::kzg::Blob;
@@ -1294,13 +1294,11 @@ mod tests {
             serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
 
         // Extract blob data from JSON and convert it to Blob.
-        let blobs: Vec<Blob> = vec![
-            Blob::from_hex(
-                // Extract the "data" field from the JSON and parse it as a string.
-                json_value.get("data").unwrap().as_str().expect("Data is not a valid string"),
-            )
-            .unwrap(),
-        ];
+        let blobs: Vec<Blob> = vec![Blob::from_hex(
+            // Extract the "data" field from the JSON and parse it as a string.
+            json_value.get("data").unwrap().as_str().expect("Data is not a valid string"),
+        )
+        .unwrap()];
 
         // Generate a BlobTransactionSidecar from the blobs.
         let sidecar = BlobTransactionSidecar::try_from_blobs(blobs).unwrap();

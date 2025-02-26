@@ -3,10 +3,10 @@
 
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{Address, B64, B256, Bytes, TxHash, U64, U256, hex_literal::hex};
+use alloy_primitives::{hex_literal::hex, Address, Bytes, TxHash, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
-    Block, FeeHistory, Filter, Header, Index, Log, PendingTransactionFilterKind, SyncStatus,
-    Transaction, TransactionReceipt, transaction::TransactionRequest,
+    transaction::TransactionRequest, Block, FeeHistory, Filter, Header, Index, Log,
+    PendingTransactionFilterKind, SyncStatus, Transaction, TransactionReceipt,
 };
 use alloy_rpc_types_trace::filter::TraceFilter;
 use jsonrpsee::{
@@ -21,12 +21,12 @@ use jsonrpsee::{
 use reth_network_peers::NodeRecord;
 use reth_primitives::Receipt;
 use reth_rpc_api::{
+    clients::{AdminApiClient, EthApiClient},
     DebugApiClient, EthCallBundleApiClient, EthFilterApiClient, NetApiClient, OtterscanClient,
     TraceApiClient, Web3ApiClient,
-    clients::{AdminApiClient, EthApiClient},
 };
 use reth_rpc_server_types::RethRpcModule;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -490,20 +490,16 @@ where
         .err()
         .unwrap()
     ));
-    assert!(
-        OtterscanClient::<Transaction, Header>::get_transaction_by_sender_and_nonce(
-            client, sender, nonce
-        )
+    assert!(OtterscanClient::<Transaction, Header>::get_transaction_by_sender_and_nonce(
+        client, sender, nonce
+    )
+    .await
+    .err()
+    .is_none());
+    assert!(OtterscanClient::<Transaction, Header>::get_contract_creator(client, address)
         .await
-        .err()
-        .is_none()
-    );
-    assert!(
-        OtterscanClient::<Transaction, Header>::get_contract_creator(client, address)
-            .await
-            .unwrap()
-            .is_none()
-    );
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]

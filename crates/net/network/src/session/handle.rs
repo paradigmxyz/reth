@@ -1,13 +1,13 @@
 //! Session handles.
 
 use crate::{
-    PendingSessionHandshakeError,
     message::PeerMessage,
-    session::{Direction, SessionId, conn::EthRlpxConnection},
+    session::{conn::EthRlpxConnection, Direction, SessionId},
+    PendingSessionHandshakeError,
 };
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
-    Capabilities, DisconnectReason, EthVersion, NetworkPrimitives, Status, errors::EthStreamError,
+    errors::EthStreamError, Capabilities, DisconnectReason, EthVersion, NetworkPrimitives, Status,
 };
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};

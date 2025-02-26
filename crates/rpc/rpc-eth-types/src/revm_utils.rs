@@ -2,11 +2,11 @@
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_eth::{
-    BlockOverrides,
     state::{AccountOverride, StateOverride},
+    BlockOverrides,
 };
 use reth_evm::TransactionEnv;
-use revm::{Database, DatabaseRef, context::BlockEnv, state::Bytecode};
+use revm::{context::BlockEnv, state::Bytecode, Database, DatabaseRef};
 use revm_database::CacheDB;
 use std::cmp::min;
 

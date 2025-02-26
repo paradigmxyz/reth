@@ -20,7 +20,7 @@ use std::{
 
 use alloy_primitives::B256;
 use clap::Parser;
-use futures_util::{StreamExt, stream::FuturesUnordered};
+use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
 use reth::{
     builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli,

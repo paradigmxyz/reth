@@ -4,7 +4,7 @@ use futures::{Stream, StreamExt};
 use reth_eth_wire::multiplex::ProtocolConnection;
 use std::{
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::UnboundedReceiverStream;

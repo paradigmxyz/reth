@@ -1,4 +1,4 @@
-use crate::{Pruner, segments::SegmentSet};
+use crate::{segments::SegmentSet, Pruner};
 use alloy_eips::eip2718::Encodable2718;
 use reth_chainspec::MAINNET_PRUNE_DELETE_LIMIT;
 use reth_config::PruneConfig;
@@ -6,8 +6,8 @@ use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, DBProvider, DatabaseProviderFactory, NodePrimitivesProvider,
-    PruneCheckpointWriter, StaticFileProviderFactory, providers::StaticFileProvider,
+    providers::StaticFileProvider, BlockReader, DBProvider, DatabaseProviderFactory,
+    NodePrimitivesProvider, PruneCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use std::time::Duration;

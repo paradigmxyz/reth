@@ -1,5 +1,5 @@
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{PrimitiveSignature, TxKind, hex, private::getrandom::getrandom};
+use alloy_primitives::{hex, private::getrandom::getrandom, PrimitiveSignature, TxKind};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -17,11 +17,11 @@ use reth_codecs::alloy::{
     withdrawal::Withdrawal,
 };
 use reth_db::{
-    ClientVersion,
     models::{
         AccountBeforeTx, StaticFileBlockWithdrawals, StoredBlockBodyIndices, StoredBlockOmmers,
         StoredBlockWithdrawals,
     },
+    ClientVersion,
 };
 use reth_fs_util as fs;
 use reth_primitives::{
@@ -33,8 +33,8 @@ use reth_stages_types::{
     HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint, StageUnitCheckpoint,
     StorageHashingCheckpoint,
 };
-use reth_trie::{TrieMask, hash_builder::HashBuilderValue};
-use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, hash_builder::HashBuilderState};
+use reth_trie::{hash_builder::HashBuilderValue, TrieMask};
+use reth_trie_common::{hash_builder::HashBuilderState, StoredNibbles, StoredNibblesSubKey};
 use std::{fs::File, io::BufReader};
 
 pub const VECTORS_FOLDER: &str = "testdata/micro/compact";

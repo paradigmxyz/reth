@@ -15,7 +15,7 @@ use reth_network_p2p::{
     error::{DownloadError, DownloadResult},
 };
 use reth_primitives::SealedHeader;
-use reth_primitives_traits::{Block, size::InMemorySize};
+use reth_primitives_traits::{size::InMemorySize, Block};
 use reth_storage_api::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -615,7 +615,7 @@ mod tests {
     use super::*;
     use crate::{
         bodies::test_utils::{insert_headers, zip_blocks},
-        test_utils::{TestBodiesClient, generate_bodies},
+        test_utils::{generate_bodies, TestBodiesClient},
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
@@ -623,9 +623,9 @@ mod tests {
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_provider::{
-        ProviderFactory, providers::StaticFileProvider, test_utils::MockNodeTypesWithDB,
+        providers::StaticFileProvider, test_utils::MockNodeTypesWithDB, ProviderFactory,
     };
-    use reth_testing_utils::generators::{self, BlockRangeParams, random_block_range};
+    use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of

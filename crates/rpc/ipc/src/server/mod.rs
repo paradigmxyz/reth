@@ -4,24 +4,23 @@ use crate::server::connection::{IpcConn, JsonRpcStream};
 use futures::StreamExt;
 use futures_util::future::Either;
 use interprocess::local_socket::{
-    GenericFilePath, ListenerOptions, ToFsName,
     tokio::prelude::{LocalSocketListener, LocalSocketStream},
     traits::tokio::{Listener, Stream},
+    GenericFilePath, ListenerOptions, ToFsName,
 };
 use jsonrpsee::{
-    BoundedSubscriptions, MethodSink, Methods,
     core::TEN_MB_SIZE_BYTES,
     server::{
-        ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider, ServerHandle,
-        StopHandle,
         middleware::rpc::{RpcLoggerLayer, RpcServiceT},
-        stop_channel,
+        stop_channel, ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider,
+        ServerHandle, StopHandle,
     },
+    BoundedSubscriptions, MethodSink, Methods,
 };
 use std::{
     future::Future,
     io,
-    pin::{Pin, pin},
+    pin::{pin, Pin},
     sync::Arc,
     task::{Context, Poll},
 };
@@ -29,8 +28,8 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     sync::oneshot,
 };
-use tower::{Layer, Service, layer::util::Identity};
-use tracing::{Instrument, debug, instrument, trace, warn};
+use tower::{layer::util::Identity, Layer, Service};
+use tracing::{debug, instrument, trace, warn, Instrument};
 // re-export so can be used during builder setup
 use crate::{
     server::{connection::IpcConnDriver, rpc_service::RpcServiceCfg},
@@ -38,7 +37,7 @@ use crate::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tower::layer::{LayerFn, util::Stack};
+use tower::layer::{util::Stack, LayerFn};
 
 mod connection;
 mod ipc;
@@ -718,17 +717,17 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// use std::{
     ///     net::SocketAddr,
     ///     sync::{
-    ///         Arc,
     ///         atomic::{AtomicUsize, Ordering},
+    ///         Arc,
     ///     },
     ///     time::Instant,
     /// };
     ///
     /// use futures_util::future::BoxFuture;
     /// use jsonrpsee::{
-    ///     MethodResponse,
-    ///     server::{ServerBuilder, middleware::rpc::RpcServiceT},
+    ///     server::{middleware::rpc::RpcServiceT, ServerBuilder},
     ///     types::Request,
+    ///     MethodResponse,
     /// };
     /// use reth_ipc::server::{Builder, RpcServiceBuilder};
     ///
@@ -807,7 +806,6 @@ mod tests {
     use crate::client::IpcClientBuilder;
     use futures::future::select;
     use jsonrpsee::{
-        PendingSubscriptionSink, RpcModule, SubscriptionMessage,
         core::{
             client,
             client::{ClientT, Error, Subscription, SubscriptionClientT},
@@ -815,6 +813,7 @@ mod tests {
         },
         rpc_params,
         types::Request,
+        PendingSubscriptionSink, RpcModule, SubscriptionMessage,
     };
     use reth_tracing::init_test_tracing;
     use std::pin::pin;

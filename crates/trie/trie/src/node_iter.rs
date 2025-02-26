@@ -1,4 +1,4 @@
-use crate::{Nibbles, hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker};
+use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 

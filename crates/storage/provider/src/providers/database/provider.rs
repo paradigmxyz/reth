@@ -1,4 +1,14 @@
 use crate::{
+    bundle_state::StorageRevertsIter,
+    providers::{
+        database::{chain::ChainStorage, metrics},
+        static_file::StaticFileWriter,
+        NodeTypesForProvider, StaticFileProvider,
+    },
+    to_range,
+    traits::{
+        AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
+    },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
     DBProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
@@ -8,37 +18,28 @@ use crate::{
     StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
     StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
-    bundle_state::StorageRevertsIter,
-    providers::{
-        NodeTypesForProvider, StaticFileProvider,
-        database::{chain::ChainStorage, metrics},
-        static_file::StaticFileWriter,
-    },
-    to_range,
-    traits::{
-        AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
-    },
 };
-use alloy_consensus::{BlockHeader, Header, TxReceipt, transaction::TransactionMeta};
-use alloy_eips::{BlockHashOrNumber, eip2718::Encodable2718, eip4895::Withdrawals};
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Header, TxReceipt};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
-    Address, B256, BlockHash, BlockNumber, TxHash, TxNumber, U256, keccak256,
-    map::{B256Map, HashMap, HashSet, hash_map},
+    keccak256,
+    map::{hash_map, B256Map, HashMap, HashSet},
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db_api::{
-    BlockNumberList, DatabaseError, PlainAccountState, PlainStorageState,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::{
-        AccountBeforeTx, BlockNumberAddress, ShardedKey, StoredBlockBodyIndices, sharded_key,
-        storage_sharded_key::StorageShardedKey,
+        sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
+        ShardedKey, StoredBlockBodyIndices,
     },
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
+    BlockNumberList, DatabaseError, PlainAccountState, PlainStorageState,
 };
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
@@ -49,7 +50,7 @@ use reth_primitives::{
 };
 use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{
-    MINIMUM_PRUNING_DISTANCE, PruneCheckpoint, PruneMode, PruneModes, PruneSegment,
+    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -58,9 +59,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
-    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::{StorageTrieUpdates, TrieUpdates},
+    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
 use revm_database::states::{
@@ -71,7 +72,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeInclusive},
-    sync::{Arc, mpsc},
+    sync::{mpsc, Arc},
 };
 use tokio::sync::watch;
 use tracing::{debug, trace};
@@ -414,9 +415,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> StateCommitmentProvider for DatabaseProvi
 }
 
 impl<
-    Tx: DbTx + DbTxMut + 'static,
-    N: NodeTypesForProvider<Primitives: NodePrimitives<BlockHeader = Header>>,
-> DatabaseProvider<Tx, N>
+        Tx: DbTx + DbTxMut + 'static,
+        N: NodeTypesForProvider<Primitives: NodePrimitives<BlockHeader = Header>>,
+    > DatabaseProvider<Tx, N>
 {
     // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
     // #[cfg(any(test, feature = "test-utils"))]
@@ -1153,7 +1154,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
-        if source.is_canonical() { self.block(hash.into()) } else { Ok(None) }
+        if source.is_canonical() {
+            self.block(hash.into())
+        } else {
+            Ok(None)
+        }
     }
 
     /// Returns the block with matching number from database.
@@ -1519,7 +1524,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
-        if let Some(id) = self.transaction_id(hash)? { self.receipt(id) } else { Ok(None) }
+        if let Some(id) = self.transaction_id(hash)? {
+            self.receipt(id)
+        } else {
+            Ok(None)
+        }
     }
 
     fn receipts_by_block(

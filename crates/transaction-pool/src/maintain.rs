@@ -1,19 +1,19 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
-    BlockInfo, PoolTransaction, PoolUpdateKind,
     blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
+    BlockInfo, PoolTransaction, PoolUpdateKind,
 };
 use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::Encodable;
 use futures_util::{
-    FutureExt, Stream, StreamExt,
     future::{BoxFuture, Fuse, FusedFuture},
+    FutureExt, Stream, StreamExt,
 };
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
@@ -21,7 +21,7 @@ use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::SealedHeader;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
-use reth_storage_api::{BlockReaderIdExt, StateProviderFactory, errors::provider::ProviderError};
+use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     borrow::Borrow,
@@ -703,11 +703,11 @@ pub async fn backup_local_transactions_task<P>(
 mod tests {
     use super::*;
     use crate::{
-        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
     use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{U256, hex};
+    use alloy_primitives::{hex, U256};
     use reth_fs_util as fs;
     use reth_primitives::{PooledTransaction, TransactionSigned};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};

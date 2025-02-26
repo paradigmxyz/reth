@@ -2,7 +2,7 @@
 
 use crate::{args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{B256, BlockNumber};
+use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
 use futures::StreamExt;
 use reth_chainspec::ChainSpec;
@@ -22,17 +22,17 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_network_p2p::{EthBlockClient, headers::client::HeadersClient};
+use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_ethereum::{EthExecutorProvider, consensus::EthBeaconConsensus};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
 use reth_node_events::node::NodeEvent;
 use reth_provider::{
-    ChainSpecProvider, ProviderFactory, StageCheckpointReader, providers::ProviderNodeTypes,
+    providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
-    ExecutionStageThresholds, Pipeline, StageId, StageSet, sets::DefaultStages,
-    stages::ExecutionStage,
+    sets::DefaultStages, stages::ExecutionStage, ExecutionStageThresholds, Pipeline, StageId,
+    StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;

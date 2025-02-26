@@ -1,14 +1,14 @@
 #![allow(missing_docs)]
 use alloy_primitives::Address;
 use criterion::{
-    BenchmarkGroup, Criterion, criterion_group, criterion_main, measurement::WallTime,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::{
-    SubPoolLimit,
     pool::{BasefeeOrd, ParkedPool, PendingPool, QueuedOrd},
     test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
+    SubPoolLimit,
 };
 
 /// Generates a set of `depth` dependent transactions, with the specified sender. Its values are

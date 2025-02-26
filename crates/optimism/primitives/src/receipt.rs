@@ -1,5 +1,5 @@
 use alloy_consensus::{
-    Eip658Value, Eip2718EncodableReceipt, Receipt, ReceiptWithBloom, RlpDecodableReceipt,
+    Eip2718EncodableReceipt, Eip658Value, Receipt, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, Typed2718,
 };
 use alloy_primitives::{Bloom, Log};
@@ -336,7 +336,7 @@ mod compact {
 mod tests {
     use super::*;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{Bytes, address, b256, bytes, hex_literal::hex};
+    use alloy_primitives::{address, b256, bytes, hex_literal::hex, Bytes};
     use alloy_rlp::Encodable;
     use reth_codecs::Compact;
 

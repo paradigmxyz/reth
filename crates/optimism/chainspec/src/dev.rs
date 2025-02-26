@@ -9,7 +9,7 @@ use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_optimism_forks::DEV_HARDFORKS;
 use reth_primitives_traits::SealedHeader;
 
-use crate::{LazyLock, OpChainSpec, make_op_genesis_header};
+use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
 
 /// OP dev testnet specification
 ///

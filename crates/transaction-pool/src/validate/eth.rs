@@ -2,21 +2,21 @@
 
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
-    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
-    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
     blobstore::BlobStore,
     error::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     },
     traits::TransactionOrigin,
-    validate::{MAX_INIT_CODE_BYTE_SIZE, ValidTransaction, ValidationTask},
+    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
+    EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use alloy_consensus::{
-    BlockHeader,
     constants::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
         LEGACY_TX_TYPE_ID,
     },
+    BlockHeader,
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
@@ -30,8 +30,8 @@ use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicU64},
+        Arc,
     },
 };
 use tokio::sync::Mutex;
@@ -918,13 +918,13 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
         blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
     use alloy_consensus::Transaction;
     use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{U256, hex};
-    use reth_primitives::{PooledTransaction, transaction::SignedTransaction};
+    use alloy_primitives::{hex, U256};
+    use reth_primitives::{transaction::SignedTransaction, PooledTransaction};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

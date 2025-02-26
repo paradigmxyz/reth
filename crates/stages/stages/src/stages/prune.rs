@@ -167,17 +167,17 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, StorageKind, TestRunnerError, TestStageDB,
-        UnwindStageTestRunner, stage_test_suite_ext,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use alloy_primitives::B256;
     use reth_primitives::SealedBlock;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::{
-        TransactionsProvider, TransactionsProviderExt, providers::StaticFileWriter,
+        providers::StaticFileWriter, TransactionsProvider, TransactionsProviderExt,
     };
     use reth_prune::PruneMode;
-    use reth_testing_utils::generators::{self, BlockRangeParams, random_block_range};
+    use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
 
     stage_test_suite_ext!(PruneTestRunner, prune);
 

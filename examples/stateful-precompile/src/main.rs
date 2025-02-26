@@ -2,24 +2,24 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_evm::{EvmFactory, eth::EthEvmContext};
+use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes};
 use parking_lot::RwLock;
 use reth::{
-    builder::{BuilderContext, NodeBuilder, components::ExecutorBuilder},
+    builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     revm::{
-        MainBuilder, MainContext,
         context::{Cfg, Context, TxEnv},
         context_interface::{
-            ContextTr,
             result::{EVMError, HaltReason},
+            ContextTr,
         },
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
-        interpreter::{InterpreterResult, interpreter::EthInterpreter},
+        interpreter::{interpreter::EthInterpreter, InterpreterResult},
         precompile::PrecompileErrors,
         specification::hardfork::SpecId,
+        MainBuilder, MainContext,
     },
     tasks::TaskManager,
 };
@@ -28,7 +28,7 @@ use reth_evm::{Database, EvmEnv};
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
-    BasicBlockExecutorProvider, EthEvmConfig, EthereumNode, evm::EthEvm, node::EthereumAddOns,
+    evm::EthEvm, node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig, EthereumNode,
 };
 use reth_primitives::EthPrimitives;
 use reth_tracing::{RethTracer, Tracer};

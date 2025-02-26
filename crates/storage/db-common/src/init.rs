@@ -2,21 +2,21 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, B256, U256, map::HashMap};
+use alloy_primitives::{map::HashMap, Address, B256, U256};
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
-use reth_db_api::{DatabaseError, tables, transaction::DbTxMut};
+use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
     Account, Bytecode, GotExpected, NodePrimitives, StaticFileSegment, StorageEntry,
 };
 use reth_provider::{
+    errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
     DatabaseProviderFactory, ExecutionOutcome, HashingWriter, HeaderProvider, HistoryWriter,
     OriginalValuesKnown, ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter,
     StateWriter, StaticFileProviderFactory, StorageLocation, TrieWriter,
-    errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -632,15 +632,15 @@ mod tests {
     use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
-        Database,
         cursor::DbCursorRO,
-        models::{IntegerList, ShardedKey, storage_sharded_key::StorageShardedKey},
+        models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
         table::{Table, TableRow},
         transaction::DbTx,
+        Database,
     };
     use reth_provider::{
+        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ProviderFactory,
-        test_utils::{MockNodeTypesWithDB, create_test_provider_factory_with_chain_spec},
     };
     use std::{collections::BTreeMap, sync::Arc};
 

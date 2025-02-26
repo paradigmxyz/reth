@@ -1,6 +1,6 @@
 //! Support for producing static files.
 
-use crate::{StaticFileProducerEvent, segments, segments::Segment};
+use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -8,8 +8,8 @@ use reth_codecs::Compact;
 use reth_db_api::table::Value;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    BlockReader, ChainStateBlockReader, DBProvider, DatabaseProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory, providers::StaticFileWriter,
+    providers::StaticFileWriter, BlockReader, ChainStateBlockReader, DBProvider,
+    DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::StageId;
@@ -263,14 +263,14 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db_api::{database::Database, transaction::DbTx};
     use reth_provider::{
-        ProviderError, ProviderFactory, StaticFileProviderFactory, providers::StaticFileWriter,
-        test_utils::MockNodeTypesWithDB,
+        providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, ProviderError,
+        ProviderFactory, StaticFileProviderFactory,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::{HighestStaticFiles, StaticFileSegment};
     use reth_testing_utils::generators::{
-        self, BlockRangeParams, random_block_range, random_receipt,
+        self, random_block_range, random_receipt, BlockRangeParams,
     };
     use std::{sync::mpsc::channel, time::Duration};
     use tempfile::TempDir;

@@ -4,9 +4,9 @@ use crate::PayloadTypes;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_db_api::{Database, database_metrics::DatabaseMetrics};
+use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
-use reth_evm::{ConfigureEvmFor, execute::BlockExecutorProvider};
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
@@ -48,17 +48,17 @@ where
 /// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
 pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
     PayloadBuilder<
-        Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
-        BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
-    >
+    Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+    BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+>
 {
 }
 
 impl<T, N: NodeTypesWithEngine> PayloadBuilderFor<N> for T where
     T: PayloadBuilder<
-            Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
-            BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
-        >
+        Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+    >
 {
 }
 

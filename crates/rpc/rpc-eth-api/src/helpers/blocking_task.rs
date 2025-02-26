@@ -4,10 +4,10 @@
 use futures::Future;
 use reth_rpc_eth_types::EthApiError;
 use reth_tasks::{
-    TaskSpawner,
     pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskSpawner,
 };
-use tokio::sync::{AcquireError, OwnedSemaphorePermit, oneshot};
+use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
 use crate::EthApiTypes;
 

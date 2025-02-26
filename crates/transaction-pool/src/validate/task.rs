@@ -1,12 +1,12 @@
 //! A validation service for transactions.
 
 use crate::{
-    EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
     blobstore::BlobStore,
     validate::{EthTransactionValidatorBuilder, TransactionValidatorError},
+    EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
+    TransactionValidator,
 };
-use futures_util::{StreamExt, lock::Mutex};
+use futures_util::{lock::Mutex, StreamExt};
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::Block;
 use reth_tasks::TaskSpawner;

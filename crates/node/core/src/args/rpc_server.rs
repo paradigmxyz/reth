@@ -10,15 +10,15 @@ use std::{
 use alloy_primitives::Address;
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
-    Arg, Args, Command,
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
+    Arg, Args, Command,
 };
 use rand::Rng;
-use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection, constants};
+use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 
 use crate::args::{
-    GasPriceOracleArgs, RpcStateCacheArgs,
     types::{MaxU32, ZeroAsNoneU64},
+    GasPriceOracleArgs, RpcStateCacheArgs,
 };
 
 /// Default max number of subscriptions per connection.

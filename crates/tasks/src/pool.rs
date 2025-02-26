@@ -2,13 +2,13 @@
 
 use std::{
     future::Future,
-    panic::{AssertUnwindSafe, catch_unwind},
+    panic::{catch_unwind, AssertUnwindSafe},
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
     thread,
 };
-use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore, oneshot};
+use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 
 /// RPC Tracing call guard semaphore.
 ///

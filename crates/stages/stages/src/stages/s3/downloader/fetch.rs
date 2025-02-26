@@ -1,4 +1,4 @@
-use crate::stages::s3::downloader::{RemainingChunkRange, worker::spawn_workers};
+use crate::stages::s3::downloader::{worker::spawn_workers, RemainingChunkRange};
 
 use super::{
     error::DownloaderError,
@@ -6,7 +6,7 @@ use super::{
     worker::{WorkerRequest, WorkerResponse},
 };
 use alloy_primitives::B256;
-use reqwest::{Client, header::CONTENT_LENGTH};
+use reqwest::{header::CONTENT_LENGTH, Client};
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},

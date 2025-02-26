@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
-    Address, B256, BlockNumber, Bytes, StorageKey, U256, keccak256,
+    keccak256,
     map::{B256Map, HashMap},
+    Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
@@ -10,8 +11,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
-    StorageMultiProof, StorageProof, TrieInput, updates::TrieUpdates,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Mock state for testing

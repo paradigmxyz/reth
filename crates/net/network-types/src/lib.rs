@@ -23,10 +23,10 @@ pub use peers::reputation::{Reputation, ReputationChangeKind, ReputationChangeWe
 
 pub use backoff::BackoffKind;
 pub use peers::{
-    ConnectionsConfig, Peer, PeersConfig,
     addr::PeerAddr,
     kind::PeerKind,
-    reputation::{DEFAULT_REPUTATION, ReputationChangeOutcome, is_banned_reputation},
+    reputation::{is_banned_reputation, ReputationChangeOutcome, DEFAULT_REPUTATION},
     state::PeerConnectionState,
+    ConnectionsConfig, Peer, PeersConfig,
 };
 pub use session::{SessionLimits, SessionsConfig};

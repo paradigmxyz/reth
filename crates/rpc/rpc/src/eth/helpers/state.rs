@@ -5,8 +5,8 @@ use reth_provider::{BlockReader, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::{
-    RpcNodeCoreExt,
     helpers::{EthState, LoadState, SpawnBlocking},
+    RpcNodeCoreExt,
 };
 
 use crate::EthApi;
@@ -24,11 +24,11 @@ where
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: RpcNodeCoreExt<
-            Provider: BlockReader
-                          + StateProviderFactory
-                          + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-            Pool: TransactionPool,
-        >,
+        Provider: BlockReader
+                      + StateProviderFactory
+                      + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Pool: TransactionPool,
+    >,
     Provider: BlockReader,
 {
 }
@@ -49,7 +49,7 @@ mod tests {
         DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
     };
     use reth_tasks::pool::BlockingTaskPool;
-    use reth_transaction_pool::test_utils::{TestPool, testing_pool};
+    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::collections::HashMap;
 
     fn noop_eth_api() -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig> {

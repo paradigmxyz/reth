@@ -121,15 +121,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        BlockWriter, StaticFileProviderFactory, StaticFileWriter,
-        test_utils::create_test_provider_factory_with_chain_spec,
+        test_utils::create_test_provider_factory_with_chain_spec, BlockWriter,
+        StaticFileProviderFactory, StaticFileWriter,
     };
     use alloy_primitives::Bytes;
     use assert_matches::assert_matches;
     use reth_chainspec::{EthChainSpec, MAINNET};
     use reth_ethereum_primitives::{Block, BlockBody};
     use reth_primitives::StaticFileSegment;
-    use reth_primitives_traits::{RecoveredBlock, SealedBlock, block::TestBlock};
+    use reth_primitives_traits::{block::TestBlock, RecoveredBlock, SealedBlock};
     use reth_storage_api::StorageLocation;
 
     #[test]

@@ -14,8 +14,8 @@ pub use error::{WalError, WalResult};
 use std::{
     path::Path,
     sync::{
-        Arc,
         atomic::{AtomicU32, Ordering},
+        Arc,
     },
 };
 
@@ -235,13 +235,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::wal::{Wal, cache::CachedBlock, error::WalResult};
+    use crate::wal::{cache::CachedBlock, error::WalResult, Wal};
     use alloy_primitives::B256;
     use itertools::Itertools;
     use reth_exex_types::ExExNotification;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{
-        self, BlockParams, BlockRangeParams, random_block, random_block_range,
+        self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
     use std::sync::Arc;
 

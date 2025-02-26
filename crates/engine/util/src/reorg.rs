@@ -2,7 +2,7 @@
 
 use alloy_consensus::{BlockHeader, Header, TxReceipt};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus};
-use futures::{Stream, StreamExt, TryFutureExt, stream::FuturesUnordered};
+use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{
@@ -13,20 +13,20 @@ use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResu
 use reth_evm::execute::{BlockExecutionStrategy, BlockExecutionStrategyFactory};
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
 use reth_primitives::{BlockBody, NodePrimitives, SealedBlock};
-use reth_primitives_traits::{BlockBody as _, SignedTransaction, block::Block as _, proofs};
+use reth_primitives_traits::{block::Block as _, proofs, BlockBody as _, SignedTransaction};
 use reth_provider::{
     BlockExecutionResult, BlockReader, ChainSpecProvider, ExecutionOutcome, ProviderError,
     StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    db::{State, states::bundle_state::BundleRetention},
+    db::{states::bundle_state::BundleRetention, State},
 };
 use std::{
     collections::VecDeque,
     future::Future,
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
 use tracing::*;
@@ -104,10 +104,10 @@ impl<S, Engine, Provider, Evm, Validator, N, T> Stream
 where
     T: SignedTransaction,
     N: NodePrimitives<
-            BlockHeader = alloy_consensus::Header,
-            SignedTx = T,
-            BlockBody = alloy_consensus::BlockBody<T>,
-        >,
+        BlockHeader = alloy_consensus::Header,
+        SignedTx = T,
+        BlockBody = alloy_consensus::BlockBody<T>,
+    >,
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     Provider: BlockReader<Header = N::BlockHeader, Block = N::Block>
@@ -257,10 +257,10 @@ fn create_reorg_head<Provider, Evm, Validator, N, T>(
 where
     T: SignedTransaction,
     N: NodePrimitives<
-            BlockHeader = alloy_consensus::Header,
-            SignedTx = T,
-            BlockBody = alloy_consensus::BlockBody<T>,
-        >,
+        BlockHeader = alloy_consensus::Header,
+        SignedTx = T,
+        BlockBody = alloy_consensus::BlockBody<T>,
+    >,
     Provider: BlockReader<Header = N::BlockHeader, Block = N::Block>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec>,

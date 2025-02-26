@@ -1,4 +1,4 @@
-use crate::{ControlFlow, util::opt};
+use crate::{util::opt, ControlFlow};
 use alloy_primitives::BlockNumber;
 
 #[derive(Debug, Default)]

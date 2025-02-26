@@ -8,8 +8,8 @@ use reth_db_api::{
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
-    BlockReader, BlockWriter, DBProvider, ProviderError, StaticFileProviderFactory, StatsReader,
-    StorageLocation, providers::StaticFileWriter,
+    providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
+    StaticFileProviderFactory, StatsReader, StorageLocation,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -18,7 +18,7 @@ use reth_stages_api::{
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     cmp::Ordering,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tracing::*;
 
@@ -261,7 +261,7 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner, stage_test_suite_ext,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
     use reth_provider::StaticFileProviderFactory;
@@ -483,7 +483,7 @@ mod tests {
             },
         };
         use alloy_consensus::{BlockHeader, Header};
-        use alloy_primitives::{B256, BlockNumber, TxNumber};
+        use alloy_primitives::{BlockNumber, TxNumber, B256};
         use futures_util::Stream;
         use reth_db::{static_file::HeaderWithHashMask, tables};
         use reth_db_api::{
@@ -500,12 +500,12 @@ mod tests {
         };
         use reth_primitives::{BlockBody, SealedBlock, SealedHeader, StaticFileSegment};
         use reth_provider::{
-            HeaderProvider, ProviderFactory, StaticFileProviderFactory, TransactionsProvider,
-            providers::StaticFileWriter, test_utils::MockNodeTypesWithDB,
+            providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, HeaderProvider,
+            ProviderFactory, StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
         use reth_testing_utils::generators::{
-            self, BlockRangeParams, random_block_range, random_signed_tx,
+            self, random_block_range, random_signed_tx, BlockRangeParams,
         };
         use std::{
             collections::{HashMap, VecDeque},

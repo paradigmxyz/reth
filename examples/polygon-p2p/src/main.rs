@@ -12,14 +12,14 @@
 use chain_cfg::{boot_nodes, head, polygon_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
-    NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager, config::NetworkMode,
+    config::NetworkMode, NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager,
 };
 use reth_network_api::events::SessionInfo;
 use reth_tracing::{
-    LayerInfo, LogFormat, RethTracer, Tracer, tracing::info,
-    tracing_subscriber::filter::LevelFilter,
+    tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
+    Tracer,
 };
-use secp256k1::{SecretKey, rand};
+use secp256k1::{rand, SecretKey};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     time::Duration,

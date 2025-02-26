@@ -1,12 +1,12 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
-    Eip658Value, Eip2718EncodableReceipt, ReceiptWithBloom, RlpDecodableReceipt,
+    Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{B256, Bloom, Log};
+use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
-use reth_primitives_traits::{InMemorySize, proofs::ordered_trie_root_with_encoder};
+use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
 use serde::{Deserialize, Serialize};
 
 /// Typed ethereum transaction receipt.
@@ -212,7 +212,7 @@ mod tests {
     use crate::TransactionSigned;
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{
-        Address, Bytes, Log, LogData, address, b256, bloom, bytes, hex_literal::hex,
+        address, b256, bloom, bytes, hex_literal::hex, Address, Bytes, Log, LogData,
     };
     use alloy_rlp::Decodable;
     use reth_codecs::Compact;

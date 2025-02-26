@@ -4,12 +4,12 @@
 //! Once a new payload is created, it is continuously updated.
 
 use crate::{
-    KeepPayloadJobAlive, PayloadJob, metrics::PayloadBuilderServiceMetrics,
-    traits::PayloadJobGenerator,
+    metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator, KeepPayloadJobAlive,
+    PayloadJob,
 };
 use alloy_consensus::BlockHeader;
 use alloy_rpc_types::engine::PayloadId;
-use futures_util::{Stream, StreamExt, future::FutureExt};
+use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind, PayloadTypes};

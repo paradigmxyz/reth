@@ -1,4 +1,4 @@
-use crate::{NippyJarError, compression::Compression};
+use crate::{compression::Compression, NippyJarError};
 use serde::{Deserialize, Serialize};
 
 /// Wrapper type for `lz4_flex` that implements [`Compression`].

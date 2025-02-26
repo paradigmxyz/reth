@@ -6,7 +6,6 @@ use once_cell as _;
 #[allow(deprecated)]
 pub use pooled::PooledTransactionsElementEcRecovered;
 pub use reth_primitives_traits::{
-    FillTxEnv, WithEncoded,
     sync::{LazyLock, OnceLock},
     transaction::{
         error::{
@@ -14,6 +13,7 @@ pub use reth_primitives_traits::{
         },
         signed::SignedTransaction,
     },
+    FillTxEnv, WithEncoded,
 };
 pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;

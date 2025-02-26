@@ -1,15 +1,16 @@
 use crate::blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode};
 use alloy_primitives::{
-    B256, hex, keccak256,
+    hex, keccak256,
     map::{Entry, HashMap, HashSet},
+    B256,
 };
 use alloy_rlp::Decodable;
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
-    BranchNodeCompact, BranchNodeRef, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH, ExtensionNodeRef,
-    LeafNodeRef, Nibbles, RlpNode, TrieMask, TrieNode,
     prefix_set::{PrefixSet, PrefixSetMut},
+    BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
+    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, fmt};
@@ -89,12 +90,20 @@ impl<P> SparseTrie<P> {
 
     /// Returns reference to revealed sparse trie if the trie is not blind.
     pub const fn as_revealed_ref(&self) -> Option<&RevealedSparseTrie<P>> {
-        if let Self::Revealed(revealed) = self { Some(revealed) } else { None }
+        if let Self::Revealed(revealed) = self {
+            Some(revealed)
+        } else {
+            None
+        }
     }
 
     /// Returns mutable reference to revealed sparse trie if the trie is not blind.
     pub fn as_revealed_mut(&mut self) -> Option<&mut RevealedSparseTrie<P>> {
-        if let Self::Revealed(revealed) = self { Some(revealed) } else { None }
+        if let Self::Revealed(revealed) = self {
+            Some(revealed)
+        } else {
+            None
+        }
     }
 
     /// Reveals the root node if the trie is blinded.
@@ -641,7 +650,11 @@ impl<P> RevealedSparseTrie<P> {
         // Take the current prefix set
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
         let rlp_node = self.rlp_node_allocate(&mut prefix_set);
-        if let Some(root_hash) = rlp_node.as_hash() { root_hash } else { keccak256(rlp_node) }
+        if let Some(root_hash) = rlp_node.as_hash() {
+            root_hash
+        } else {
+            keccak256(rlp_node)
+        }
     }
 
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
@@ -1563,7 +1576,7 @@ impl SparseTrieUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{U256, map::B256Set};
+    use alloy_primitives::{map::B256Set, U256};
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use itertools::Itertools;
@@ -1572,18 +1585,18 @@ mod tests {
     use proptest_arbitrary_interop::arb;
     use rand::seq::IteratorRandom;
     use reth_primitives_traits::Account;
-    use reth_provider::{TrieWriter, test_utils::create_test_provider_factory};
+    use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
-        BranchNode, ExtensionNode, HashedPostState, LeafNode,
-        hashed_cursor::{HashedPostStateAccountCursor, noop::NoopHashedAccountCursor},
+        hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
         node_iter::{TrieElement, TrieNodeIter},
-        trie_cursor::{TrieCursor, TrieCursorFactory, noop::NoopAccountTrieCursor},
+        trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
+        BranchNode, ExtensionNode, HashedPostState, LeafNode,
     };
     use reth_trie_common::{
-        HashBuilder,
         proof::{ProofNodes, ProofRetainer},
         updates::TrieUpdates,
+        HashBuilder,
     };
     use reth_trie_db::DatabaseTrieCursorFactory;
     use std::collections::{BTreeMap, BTreeSet};

@@ -6,7 +6,7 @@ use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::Block;
 use reth_storage_api::{NodePrimitivesProvider, StorageLocation};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{HashedPostStateSorted, updates::TrieUpdates};
+use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 
 /// `BlockExecution` Writer
 pub trait BlockExecutionWriter:

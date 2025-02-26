@@ -4,7 +4,7 @@
 use std::{
     net::SocketAddr,
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 
 use alloy_primitives::bytes::BytesMut;

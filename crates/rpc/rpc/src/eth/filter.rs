@@ -19,10 +19,10 @@ use reth_rpc_eth_api::{
     TransactionCompat,
 };
 use reth_rpc_eth_types::{
+    logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
-    logs_utils::{self, ProviderOrBlock, append_matching_block_logs},
 };
-use reth_rpc_server_types::{ToRpcResult, result::rpc_error_with_code};
+use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -34,7 +34,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    sync::{Mutex, mpsc::Receiver},
+    sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
 };
 use tracing::{error, trace};

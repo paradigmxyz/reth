@@ -1,10 +1,10 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::conditional::MaybeConditionalTransaction;
-use alloy_consensus::{BlockHeader, conditional::BlockConditionalAttributes};
-use futures_util::{FutureExt, Stream, StreamExt, future::BoxFuture};
+use alloy_consensus::{conditional::BlockConditionalAttributes, BlockHeader};
+use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
-use reth_metrics::{Metrics, metrics::Counter};
+use reth_metrics::{metrics::Counter, Metrics};
 use reth_primitives_traits::NodePrimitives;
 use reth_transaction_pool::TransactionPool;
 

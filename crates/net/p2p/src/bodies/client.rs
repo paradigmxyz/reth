@@ -1,6 +1,6 @@
 use std::{
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
@@ -27,7 +27,7 @@ pub trait BodiesClient: DownloadClient {
 
     /// Fetches the block body for the requested block with priority
     fn get_block_bodies_with_priority(&self, hashes: Vec<B256>, priority: Priority)
-    -> Self::Output;
+        -> Self::Output;
 
     /// Fetches a single block body for the requested hash.
     fn get_block_body(&self, hash: B256) -> SingleBodyRequest<Self::Output> {

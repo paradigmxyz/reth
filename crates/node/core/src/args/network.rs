@@ -9,19 +9,14 @@ use std::{
 use clap::Args;
 use reth_chainspec::EthChainSpec;
 use reth_config::Config;
-use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT, NodeRecord};
+use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
-    DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
+    discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
-    discv5::ListenConfig,
 };
-use reth_net_nat::{DEFAULT_NET_IF_NAME, NatResolver};
+use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
-    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
     transactions::{
-        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
-        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE, TransactionFetcherConfig,
-        TransactionsManagerConfig,
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -31,9 +26,13 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             },
         },
+        TransactionFetcherConfig, TransactionsManagerConfig,
+        DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
+        SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
+    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
 };
-use reth_network_peers::{TrustedPeer, mainnet_nodes};
+use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
 use tracing::error;
 

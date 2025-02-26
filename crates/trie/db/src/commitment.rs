@@ -4,7 +4,7 @@ use crate::{
 };
 use reth_db_api::transaction::DbTx;
 use reth_trie::{
-    KeccakKeyHasher, KeyHasher, StateRoot, StorageRoot, proof::Proof, witness::TrieWitness,
+    proof::Proof, witness::TrieWitness, KeccakKeyHasher, KeyHasher, StateRoot, StorageRoot,
 };
 
 /// The `StateCommitment` trait provides associated types for state commitment operations.

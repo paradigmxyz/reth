@@ -185,7 +185,7 @@ mod tests {
     use alloy_consensus::{Header, Receipt};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{Address, B256, LogData, bytes, map::HashMap};
+    use alloy_primitives::{bytes, map::HashMap, Address, LogData, B256};
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
     use reth_execution_types::{

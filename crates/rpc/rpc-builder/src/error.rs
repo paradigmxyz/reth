@@ -1,4 +1,4 @@
-use crate::{RethRpcModule, cors::CorsDomainError};
+use crate::{cors::CorsDomainError, RethRpcModule};
 use reth_ipc::server::IpcServerStartError;
 use std::{
     collections::HashSet,

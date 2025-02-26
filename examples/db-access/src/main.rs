@@ -1,16 +1,16 @@
 use alloy_primitives::{Address, B256};
 use reth_ethereum::{
-    TransactionSigned,
     chainspec::ChainSpecBuilder,
     node::EthereumNode,
     primitives::{
-        AlloyBlockHeader, SealedBlock, SealedHeader, transaction::signed::SignedTransaction,
+        transaction::signed::SignedTransaction, AlloyBlockHeader, SealedBlock, SealedHeader,
     },
     provider::{
-        AccountReader, BlockReader, BlockSource, HeaderProvider, ReceiptProvider, StateProvider,
-        TransactionsProvider, providers::ReadOnlyConfig,
+        providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
+        ReceiptProvider, StateProvider, TransactionsProvider,
     },
     rpc::eth::primitives::{Filter, FilteredParams},
+    TransactionSigned,
 };
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction

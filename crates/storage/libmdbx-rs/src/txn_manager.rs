@@ -1,11 +1,11 @@
 use crate::{
-    CommitLatency,
     environment::EnvPtr,
-    error::{Result, mdbx_result},
+    error::{mdbx_result, Result},
+    CommitLatency,
 };
 use std::{
     ptr,
-    sync::mpsc::{Receiver, SyncSender, sync_channel},
+    sync::mpsc::{sync_channel, Receiver, SyncSender},
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -108,7 +108,7 @@ mod read_transactions {
     use dashmap::{DashMap, DashSet};
     use std::{
         backtrace::Backtrace,
-        sync::{Arc, mpsc::sync_channel},
+        sync::{mpsc::sync_channel, Arc},
         time::{Duration, Instant},
     };
     use tracing::{error, trace, warn};
@@ -318,8 +318,8 @@ mod read_transactions {
     #[cfg(test)]
     mod tests {
         use crate::{
-            Environment, Error, MaxReadTransactionDuration,
-            txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL,
+            txn_manager::read_transactions::READ_TRANSACTIONS_CHECK_INTERVAL, Environment, Error,
+            MaxReadTransactionDuration,
         };
         use std::{thread::sleep, time::Duration};
         use tempfile::tempdir;

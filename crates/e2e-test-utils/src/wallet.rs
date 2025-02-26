@@ -1,5 +1,5 @@
 use alloy_signer::Signer;
-use alloy_signer_local::{MnemonicBuilder, PrivateKeySigner, coins_bip39::English};
+use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner};
 
 /// One of the accounts of the genesis allocations.
 #[derive(Debug)]

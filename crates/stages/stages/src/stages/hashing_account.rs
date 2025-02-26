@@ -1,11 +1,11 @@
-use alloy_primitives::{B256, keccak256};
+use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
-    RawKey, RawTable, RawValue,
     cursor::{DbCursorRO, DbCursorRW},
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_primitives::Account;
@@ -65,16 +65,16 @@ impl AccountHashingStage {
     ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError>
     where
         N::Primitives: reth_primitives_traits::FullNodePrimitives<
-                Block = reth_primitives::Block,
-                BlockHeader = reth_primitives::Header,
-            >,
+            Block = reth_primitives::Block,
+            BlockHeader = reth_primitives::Header,
+        >,
     {
         use alloy_primitives::U256;
         use reth_db_api::models::AccountBeforeTx;
         use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
         use reth_testing_utils::{
             generators,
-            generators::{BlockRangeParams, random_block_range, random_eoa_accounts},
+            generators::{random_block_range, random_eoa_accounts, BlockRangeParams},
         };
 
         let mut rng = generators::rng();
@@ -299,8 +299,8 @@ fn stage_checkpoint_progress(provider: &impl StatsReader) -> ProviderResult<Enti
 mod tests {
     use super::*;
     use crate::test_utils::{
-        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, UnwindStageTestRunner,
-        stage_test_suite_ext,
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
+        UnwindStageTestRunner,
     };
     use alloy_primitives::U256;
     use assert_matches::assert_matches;

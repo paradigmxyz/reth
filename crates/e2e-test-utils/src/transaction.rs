@@ -1,9 +1,9 @@
 use alloy_consensus::{EnvKzgSettings, SidecarBuilder, SimpleCoder, TxEip4844Variant, TxEnvelope};
 use alloy_eips::eip7702::SignedAuthorization;
 use alloy_network::{
-    Ethereum, EthereumWallet, TransactionBuilder, TransactionBuilder4844, eip2718::Encodable2718,
+    eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder, TransactionBuilder4844,
 };
-use alloy_primitives::{Address, B256, Bytes, TxKind, U256, hex};
+use alloy_primitives::{hex, Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types_eth::{Authorization, TransactionInput, TransactionRequest};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;

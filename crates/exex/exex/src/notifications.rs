@@ -12,7 +12,7 @@ use std::{
     fmt::Debug,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -446,10 +446,10 @@ mod tests {
     use reth_primitives::Block;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
-        BlockWriter, Chain, DatabaseProviderFactory, StorageLocation,
-        providers::BlockchainProvider, test_utils::create_test_provider_factory,
+        providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
+        Chain, DatabaseProviderFactory, StorageLocation,
     };
-    use reth_testing_utils::generators::{self, BlockParams, random_block};
+    use reth_testing_utils::generators::{self, random_block, BlockParams};
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -483,14 +483,12 @@ mod tests {
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![
-                    random_block(
-                        &mut rng,
-                        node_head.number + 1,
-                        BlockParams { parent: Some(node_head.hash), ..Default::default() },
-                    )
-                    .try_recover()?,
-                ],
+                vec![random_block(
+                    &mut rng,
+                    node_head.number + 1,
+                    BlockParams { parent: Some(node_head.hash), ..Default::default() },
+                )
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -549,18 +547,16 @@ mod tests {
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![
-                    Block {
-                        header: Header {
-                            parent_hash: node_head.hash,
-                            number: node_head.number + 1,
-                            ..Default::default()
-                        },
+                vec![Block {
+                    header: Header {
+                        parent_hash: node_head.hash,
+                        number: node_head.number + 1,
                         ..Default::default()
-                    }
-                    .seal_slow()
-                    .try_recover()?,
-                ],
+                    },
+                    ..Default::default()
+                }
+                .seal_slow()
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -636,14 +632,12 @@ mod tests {
 
         let new_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![
-                    random_block(
-                        &mut rng,
-                        node_head.number + 1,
-                        BlockParams { parent: Some(node_head.hash), ..Default::default() },
-                    )
-                    .try_recover()?,
-                ],
+                vec![random_block(
+                    &mut rng,
+                    node_head.number + 1,
+                    BlockParams { parent: Some(node_head.hash), ..Default::default() },
+                )
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -714,14 +708,12 @@ mod tests {
 
         let new_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![
-                    random_block(
-                        &mut rng,
-                        genesis_block.number + 1,
-                        BlockParams { parent: Some(genesis_hash), ..Default::default() },
-                    )
-                    .try_recover()?,
-                ],
+                vec![random_block(
+                    &mut rng,
+                    genesis_block.number + 1,
+                    BlockParams { parent: Some(genesis_hash), ..Default::default() },
+                )
+                .try_recover()?],
                 Default::default(),
                 None,
             )),

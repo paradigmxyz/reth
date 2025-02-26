@@ -1,15 +1,15 @@
 #![allow(missing_docs)]
 use alloy_primitives::{
-    U256,
     private::proptest::test_runner::{RngAlgorithm, TestRng},
+    U256,
 };
 use criterion::*;
 use futures::StreamExt;
 use pprof::criterion::{Output, PProfProfiler};
-use reth_network::{NetworkEventListenerProvider, test_utils::Testnet};
+use reth_network::{test_utils::Testnet, NetworkEventListenerProvider};
 use reth_network_api::Peers;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_transaction_pool::{PoolTransaction, test_utils::TransactionGenerator};
+use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction};
 use std::sync::Arc;
 use tokio::{runtime::Runtime as TokioRuntime, sync::mpsc::unbounded_channel};
 

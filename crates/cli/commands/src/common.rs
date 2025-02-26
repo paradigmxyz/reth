@@ -4,9 +4,9 @@ use alloy_primitives::B256;
 use clap::Parser;
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_config::{Config, config::EtlConfig};
-use reth_consensus::{ConsensusError, FullConsensus, noop::NoopConsensus};
-use reth_db::{DatabaseEnv, init_db, open_db_read_only};
+use reth_config::{config::EtlConfig, Config};
+use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
+use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
@@ -16,10 +16,10 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
-    ProviderFactory, StaticFileProviderFactory,
     providers::{NodeTypesForProvider, StaticFileProvider},
+    ProviderFactory, StaticFileProviderFactory,
 };
-use reth_stages::{Pipeline, PipelineTarget, sets::DefaultStages};
+use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;

@@ -4,8 +4,8 @@ use crate::session::PendingSessionHandshakeError;
 use reth_dns_discovery::resolver::ResolveError;
 use reth_ecies::ECIESErrorImpl;
 use reth_eth_wire::{
-    DisconnectReason,
     errors::{EthHandshakeError, EthStreamError, P2PHandshakeError, P2PStreamError},
+    DisconnectReason,
 };
 use reth_network_types::BackoffKind;
 use std::{fmt, io, io::ErrorKind, net::SocketAddr};

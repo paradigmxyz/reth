@@ -4,7 +4,7 @@ use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;

@@ -7,8 +7,9 @@ use crate::{
 use reth_trie_common::HashedPostState;
 
 use alloy_primitives::{
-    B256, Bytes, keccak256,
+    keccak256,
     map::{B256Map, B256Set, Entry, HashMap},
+    Bytes, B256,
 };
 use itertools::Itertools;
 use reth_execution_errors::{
@@ -17,10 +18,10 @@ use reth_execution_errors::{
 };
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
-    SparseStateTrie,
     blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
+    SparseStateTrie,
 };
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 
 /// State transition witness for the trie.
 #[derive(Debug)]

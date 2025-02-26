@@ -1,8 +1,8 @@
 //! Codec for reading raw receipts from a file.
 
 use alloy_primitives::{
-    Address, B256, Bloom, Bytes,
     bytes::{Buf, BytesMut},
+    Address, Bloom, Bytes, B256,
 };
 use alloy_rlp::{Decodable, RlpDecodable};
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
@@ -121,7 +121,7 @@ impl TryFrom<OpGethReceipt> for OpReceipt {
 #[cfg(test)]
 pub(crate) mod test {
     use alloy_consensus::{Receipt, TxReceipt};
-    use alloy_primitives::{LogData, hex};
+    use alloy_primitives::{hex, LogData};
 
     use super::*;
 

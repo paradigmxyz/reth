@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
+pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{
-    BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844,
-    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
-    TypedTransaction, transaction::RlpEcdsaTx,
+    transaction::RlpEcdsaTx, BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559,
+    TxEip2930, TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
+    Typed2718, TypedTransaction,
 };
-pub use alloy_consensus::{TxType, transaction::PooledTransaction};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
@@ -12,15 +12,15 @@ use alloy_eips::{
 };
 use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{
-    Address, B256, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, U256, keccak256,
+    keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
 use reth_primitives_traits::{
-    InMemorySize, SignedTransaction,
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
+    InMemorySize, SignedTransaction,
 };
 use revm_context::TxEnv;
 use serde::{Deserialize, Serialize};
@@ -908,11 +908,11 @@ impl From<PooledTransaction> for TransactionSigned {
 pub mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_consensus::{
-        TxEip4844,
         transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
+        TxEip4844,
     };
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
-    use reth_primitives_traits::{SignedTransaction, serde_bincode_compat::SerdeBincodeCompat};
+    use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
     use serde::{Deserialize, Serialize};
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
@@ -991,7 +991,7 @@ pub mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use super::super::{Transaction, TransactionSigned, serde_bincode_compat};
+        use super::super::{serde_bincode_compat, Transaction, TransactionSigned};
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_testing_utils::generators;
@@ -1038,15 +1038,15 @@ pub mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_consensus::{
-        Block, Transaction as _, TxEip1559, TxLegacy, constants::LEGACY_TX_TYPE_ID,
+        constants::LEGACY_TX_TYPE_ID, Block, Transaction as _, TxEip1559, TxLegacy,
     };
     use alloy_eips::{
         eip2718::{Decodable2718, Encodable2718},
         eip7702::constants::SECP256K1N_HALF,
     };
     use alloy_primitives::{
-        Address, B256, Bytes, PrimitiveSignature as Signature, TxKind, U256, address, b256, bytes,
-        hex,
+        address, b256, bytes, hex, Address, Bytes, PrimitiveSignature as Signature, TxKind, B256,
+        U256,
     };
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use reth_codecs::Compact;

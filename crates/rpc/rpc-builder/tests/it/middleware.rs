@@ -1,9 +1,9 @@
 use crate::utils::{test_address, test_rpc_builder};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use jsonrpsee::{
-    MethodResponse,
-    server::{RpcServiceBuilder, middleware::rpc::RpcServiceT},
+    server::{middleware::rpc::RpcServiceT, RpcServiceBuilder},
     types::Request,
+    MethodResponse,
 };
 use reth_rpc::EthApi;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
@@ -13,8 +13,8 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     },
 };
 use tower::Layer;

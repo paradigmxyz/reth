@@ -10,7 +10,7 @@
 
 use std::{
     fmt::Debug,
-    future::{Future, poll_fn},
+    future::{poll_fn, Future},
     sync::Arc,
     task::Poll,
 };
@@ -20,39 +20,39 @@ use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{
+    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
     DatabaseEnv,
-    test_utils::{TempDatabase, create_test_rw_db, create_test_static_files_dir},
 };
 use reth_db_common::init::init_genesis;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
-use reth_network::{NetworkConfigBuilder, NetworkManager, config::SecretKey};
+use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
     FullNodeTypes, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
     NodeTypesWithEngine,
 };
 use reth_node_builder::{
-    BuilderContext, Node, NodeAdapter, RethFullAdapter,
     components::{
         BasicPayloadServiceBuilder, Components, ComponentsBuilder, ConsensusBuilder,
         ExecutorBuilder, NodeComponentsBuilder, PoolBuilder,
     },
+    BuilderContext, Node, NodeAdapter, RethFullAdapter,
 };
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::{
-    EthEngineTypes, EthEvmConfig,
     node::{EthereumAddOns, EthereumNetworkBuilder, EthereumPayloadBuilder},
+    EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives::{EthPrimitives, RecoveredBlock, TransactionSigned};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
-    BlockReader, EthStorage, ProviderFactory,
     providers::{BlockchainProvider, StaticFileProvider},
+    BlockReader, EthStorage, ProviderFactory,
 };
 use reth_tasks::TaskManager;
-use reth_transaction_pool::test_utils::{TestPool, testing_pool};
+use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};

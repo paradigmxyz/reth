@@ -1,5 +1,5 @@
 use core::fmt::Debug;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 
 pub use super::{
     block::{serde_bincode_compat as block, serde_bincode_compat::*},

@@ -1,14 +1,14 @@
 //! Recovered Block variant.
 
 use crate::{
-    Block, BlockBody, InMemorySize, SealedHeader,
-    block::{SealedBlock, error::SealedBlockRecoveryError},
+    block::{error::SealedBlockRecoveryError, SealedBlock},
     transaction::signed::{RecoveryError, SignedTransaction},
+    Block, BlockBody, InMemorySize, SealedHeader,
 };
 use alloc::vec::Vec;
-use alloy_consensus::{BlockHeader, transaction::Recovered};
-use alloy_eips::{BlockNumHash, eip1898::BlockWithParent};
-use alloy_primitives::{Address, B64, B256, BlockHash, BlockNumber, Bloom, Bytes, Sealed, U256};
+use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bloom, Bytes, Sealed, B256, B64, U256};
 use derive_more::Deref;
 
 /// A block with senders recovered from the block's transactions.
@@ -527,8 +527,8 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::{
-        Block,
         serde_bincode_compat::{self, SerdeBincodeCompat},
+        Block,
     };
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_primitives::Address;
@@ -540,9 +540,9 @@ pub(super) mod serde_bincode_compat {
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
     /// use reth_primitives_traits::{
-    ///     Block,
     ///     block::RecoveredBlock,
     ///     serde_bincode_compat::{self, SerdeBincodeCompat},
+    ///     Block,
     /// };
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;

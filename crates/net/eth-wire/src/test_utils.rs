@@ -3,14 +3,14 @@
 #![allow(missing_docs)]
 
 use crate::{
-    EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion, Status, UnauthedP2PStream,
-    hello::DEFAULT_TCP_PORT,
+    hello::DEFAULT_TCP_PORT, EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion,
+    Status, UnauthedP2PStream,
 };
 use alloy_chains::Chain;
 use alloy_primitives::{B256, U256};
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::pk2id;
-use secp256k1::{SECP256K1, SecretKey};
+use secp256k1::{SecretKey, SECP256K1};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Decoder, Framed, LengthDelimitedCodec};
@@ -63,7 +63,7 @@ pub async fn connect_passthrough(
 /// An Rplx subprotocol for testing
 pub mod proto {
     use super::*;
-    use crate::{Capability, protocol::Protocol};
+    use crate::{protocol::Protocol, Capability};
     use bytes::{Buf, BufMut, BytesMut};
 
     /// Returns a new testing `HelloMessage` with eth and the test protocol

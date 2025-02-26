@@ -2,17 +2,17 @@ use std::{collections::HashMap, io, path::Path, sync::Arc};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{B256, BlockHash, BlockNumber, Sealable};
+use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
 use futures::Future;
 use itertools::Either;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
-    BlockClient,
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
     headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
+    BlockClient,
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{SealedBlock, SealedHeader};

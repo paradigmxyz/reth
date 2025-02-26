@@ -1,8 +1,8 @@
 //! Small database table utilities and helper functions.
 
 use crate::{
-    DatabaseError,
     table::{Decode, Decompress, Table, TableRow},
+    DatabaseError,
 };
 use std::borrow::Cow;
 

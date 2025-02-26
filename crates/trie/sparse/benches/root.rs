@@ -1,16 +1,16 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{B256, U256, map::B256Map};
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use alloy_primitives::{map::B256Map, B256, U256};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use itertools::Itertools;
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie::{
-    HashedStorage,
-    hashed_cursor::{HashedPostStateStorageCursor, noop::NoopHashedStorageCursor},
+    hashed_cursor::{noop::NoopHashedStorageCursor, HashedPostStateStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::{InMemoryStorageTrieCursor, noop::NoopStorageTrieCursor},
+    trie_cursor::{noop::NoopStorageTrieCursor, InMemoryStorageTrieCursor},
     updates::StorageTrieUpdates,
     walker::TrieWalker,
+    HashedStorage,
 };
 use reth_trie_common::{HashBuilder, Nibbles};
 use reth_trie_sparse::SparseTrie;

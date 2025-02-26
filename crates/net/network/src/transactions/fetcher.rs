@@ -26,20 +26,20 @@
 //! enough to buffer many hashes during network failure, to allow for recovery.
 
 use super::{
+    config::TransactionFetcherConfig,
+    constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
     MessageFilter, PeerMetadata, PooledTransactions,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-    config::TransactionFetcherConfig,
-    constants::{SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST, tx_fetcher::*},
 };
 use crate::{
     cache::{LruCache, LruMap},
     duration_metered_exec,
     metrics::TransactionFetcherMetrics,
-    transactions::{PartiallyFilterMessage, validation},
+    transactions::{validation, PartiallyFilterMessage},
 };
 use alloy_primitives::TxHash;
 use derive_more::{Constructor, Deref};
-use futures::{Future, FutureExt, Stream, StreamExt, stream::FuturesUnordered};
+use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
     DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
@@ -53,11 +53,11 @@ use reth_primitives::PooledTransaction;
 use reth_primitives_traits::SignedTransaction;
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
-use smallvec::{SmallVec, smallvec};
+use smallvec::{smallvec, SmallVec};
 use std::{
     collections::HashMap,
     pin::Pin,
-    task::{Context, Poll, ready},
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
@@ -271,7 +271,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         &self,
         hashes_to_request: &mut RequestTxHashes,
         hashes_from_announcement: impl HandleMempoolData
-        + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
+            + IntoIterator<Item = (TxHash, Option<(u8, usize)>)>,
     ) -> RequestTxHashes {
         let mut acc_size_response = 0;
 
@@ -1294,7 +1294,7 @@ struct TxFetcherSearchDurations {
 mod test {
     use super::*;
     use crate::transactions::tests::{default_cache, new_mock_session};
-    use alloy_primitives::{B256, hex};
+    use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
     use reth_primitives::TransactionSigned;

@@ -5,8 +5,8 @@ use futures::future;
 use reth_chain_state::ForkChoiceSubscriptions;
 use reth_chainspec::EthChainSpec;
 use reth_exex::{
-    DEFAULT_EXEX_MANAGER_CAPACITY, ExExContext, ExExHandle, ExExManager, ExExManagerHandle,
-    ExExNotificationSource, Wal,
+    ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
+    DEFAULT_EXEX_MANAGER_CAPACITY,
 };
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_primitives::Head;
