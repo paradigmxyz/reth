@@ -2707,6 +2707,7 @@ where
                     }
                 }
 
+                // We did not find any blocks that are not in the database.
                 ProviderResult::Ok(None)
             })
             .transpose()?
@@ -2733,7 +2734,7 @@ where
         Ok(input)
     }
 
-    /// Retrieve revert hashed state down to the given block hash.
+    /// Retrieve revert hashed state down to the given block hash or number.
     fn revert_state(
         &self,
         provider: P::Provider,
