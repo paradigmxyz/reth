@@ -292,7 +292,7 @@ mod tests {
         // non-list RLP encoding
         let invalid_rlp = [0x80];
 
-        // Attempt decode it as a GetAccountRangeMessage
+        // Attempt to decode it as a GetAccountRangeMessage
         let result = GetAccountRangeMessage::decode(&mut &invalid_rlp[..]);
 
         assert!(result.is_err());
