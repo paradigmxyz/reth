@@ -322,7 +322,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             in_memory_chain
                 .first()
                 .map(|b| b.number())
-                .unwrap_or_else(|| db_provider.last_block_number().unwrap_or_default())
+                .unwrap_or_else(|| db_provider.highest_known_block_number().unwrap_or_default())
         });
 
         if start > end {
@@ -429,7 +429,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         let last_database_block_number = in_mem_chain
             .last()
             .map(|b| Ok(b.anchor().number))
-            .unwrap_or_else(|| provider.last_block_number())?;
+            .unwrap_or_else(|| provider.highest_known_block_number())?;
 
         // Get the next tx number for the last block stored in the storage, which marks the start of
         // the in-memory state.
@@ -526,7 +526,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         let last_database_block_number = in_mem_chain
             .last()
             .map(|b| Ok(b.anchor().number))
-            .unwrap_or_else(|| provider.last_block_number())?;
+            .unwrap_or_else(|| provider.highest_known_block_number())?;
 
         // Get the next tx number for the last block stored in the database and consider it the
         // first tx number of the in-memory state
@@ -600,11 +600,11 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     ///
     /// Verifying the `block_number` would be expensive since we need to lookup sync table
     /// Instead, we ensure that the `block_number` is within the range of the
-    /// [`Self::best_block_number`] which is updated when a block is synced.
+    /// [`Self::highest_persisted_block_number`] which is updated when a block is synced.
     #[inline]
     pub(crate) fn ensure_canonical_block(&self, block_number: BlockNumber) -> ProviderResult<()> {
-        let latest = self.best_block_number()?;
-        if block_number > latest {
+        let highest = self.highest_persisted_block_number()?;
+        if block_number > highest {
             Err(ProviderError::HeaderNotFound(block_number.into()))
         } else {
             Ok(())
@@ -663,7 +663,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
             {
                 last_finalized_num_hash.number
             } else {
-                self.last_block_number()?
+                self.highest_known_block_number()?
             }
         } else {
             // Otherwise, return what we have on disk for the input block
@@ -752,16 +752,19 @@ impl<N: ProviderNodeTypes> BlockHashReader for ConsistentProvider<N> {
 
 impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
-        let best_number = self.best_block_number()?;
+        let best_number = self.highest_persisted_block_number()?;
         Ok(ChainInfo { best_hash: self.block_hash(best_number)?.unwrap_or_default(), best_number })
     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.head_block.as_ref().map(|b| Ok(b.number())).unwrap_or_else(|| self.last_block_number())
+    fn highest_persisted_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.head_block
+            .as_ref()
+            .map(|b| Ok(b.number()))
+            .unwrap_or_else(|| self.highest_known_block_number())
     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.storage_provider.last_block_number()
+    fn highest_known_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.storage_provider.highest_known_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {

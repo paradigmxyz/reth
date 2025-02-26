@@ -102,8 +102,10 @@ where
         mode: MiningMode,
         payload_builder: PayloadBuilderHandle<EngineT>,
     ) {
-        let latest_header =
-            provider.sealed_header(provider.best_block_number().unwrap()).unwrap().unwrap();
+        let latest_header = provider
+            .sealed_header(provider.highest_persisted_block_number().unwrap())
+            .unwrap()
+            .unwrap();
 
         let miner = Self {
             payload_attributes_builder,

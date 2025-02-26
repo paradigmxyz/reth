@@ -1601,12 +1601,12 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileProvider<N> {
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_persisted_block_number(&self) -> ProviderResult<BlockNumber> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_known_block_number(&self) -> ProviderResult<BlockNumber> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }

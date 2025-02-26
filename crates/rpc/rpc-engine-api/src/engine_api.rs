@@ -347,7 +347,7 @@ where
 
             // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
             // truncate the end if it's greater than the last block
-            if let Ok(best_block) = inner.provider.best_block_number() {
+            if let Ok(best_block) = inner.provider.highest_persisted_block_number() {
                 if end > best_block {
                     end = best_block;
                 }

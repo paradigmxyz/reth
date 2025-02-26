@@ -381,7 +381,7 @@ where
         return Err(eyre::eyre!("ETL file size cannot be zero"))
     }
 
-    let block = provider_rw.last_block_number()?;
+    let block = provider_rw.highest_known_block_number()?;
     let hash = provider_rw.block_hash(block)?.unwrap();
     let expected_state_root = provider_rw
         .header_by_number(block)?

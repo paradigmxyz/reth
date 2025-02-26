@@ -200,12 +200,12 @@ impl<N: NodePrimitives> BlockNumReader for StaticFileJarProvider<'_, N> {
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_persisted_block_number(&self) -> ProviderResult<BlockNumber> {
         // Information on live database
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_known_block_number(&self) -> ProviderResult<BlockNumber> {
         // Information on live database
         Err(ProviderError::UnsupportedProvider)
     }

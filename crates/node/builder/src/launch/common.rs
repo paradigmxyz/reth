@@ -794,7 +794,7 @@ where
             !self.is_dev() &&
             self.chain_id() == Chain::optimism_mainnet()
         {
-            let latest = self.blockchain_db().last_block_number()?;
+            let latest = self.blockchain_db().highest_known_block_number()?;
             // bedrock height
             if latest < 105235063 {
                 error!("Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended");

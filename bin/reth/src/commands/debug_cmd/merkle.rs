@@ -133,19 +133,19 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let block_range_client = FullBlockClient::new(fetch_client, consensus);
 
         // get best block number
-        let best_block_number = provider_rw.best_block_number()?;
-        assert!(best_block_number < self.to, "Nothing to run");
+        let highest_persisted_block_number = provider_rw.highest_persisted_block_number()?;
+        assert!(highest_persisted_block_number < self.to, "Nothing to run");
 
         // get the block range from the network
-        let block_range = best_block_number + 1..=self.to;
+        let block_range = highest_persisted_block_number + 1..=self.to;
         info!(target: "reth::cli", ?block_range, "Downloading range of blocks");
         let blocks = block_range_client
-            .get_full_block_range(to_header.hash_slow(), self.to - best_block_number)
+            .get_full_block_range(to_header.hash_slow(), self.to - highest_persisted_block_number)
             .await;
 
         let mut td = provider_rw
-            .header_td_by_number(best_block_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound(best_block_number))?;
+            .header_td_by_number(highest_persisted_block_number)?
+            .ok_or(ProviderError::TotalDifficultyNotFound(highest_persisted_block_number))?;
 
         let mut account_hashing_stage = AccountHashingStage::default();
         let mut storage_hashing_stage = StorageHashingStage::default();

@@ -730,11 +730,15 @@ where
         evm_config: C,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
-        let best_block_number = provider.best_block_number().unwrap_or(0);
-        let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
+        let highest_persisted_block_number = provider.highest_persisted_block_number().unwrap_or(0);
+        let header = provider
+            .sealed_header(highest_persisted_block_number)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
 
         let persistence_state = PersistenceState {
-            last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
+            last_persisted_block: BlockNumHash::new(highest_persisted_block_number, header.hash()),
             rx: None,
             remove_above_state: VecDeque::new(),
         };

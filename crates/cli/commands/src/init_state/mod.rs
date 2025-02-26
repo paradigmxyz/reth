@@ -95,9 +95,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
                 .ok_or_else(|| eyre::eyre!("Total difficulty must be provided"))?;
             let total_difficulty = U256::from_str(&total_difficulty)?;
 
-            let last_block_number = provider_rw.last_block_number()?;
+            let highest_known_block_number = provider_rw.highest_known_block_number()?;
 
-            if last_block_number == 0 {
+            if highest_known_block_number == 0 {
                 without_evm::setup_without_evm(
                     &provider_rw,
                     // &header,
@@ -112,7 +112,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
                 // Necessary to commit, so the header is accessible to provider_rw and
                 // init_state_dump
                 static_file_provider.commit()?;
-            } else if last_block_number > 0 && last_block_number < header.number {
+            } else if highest_known_block_number > 0 && highest_known_block_number < header.number {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-evm-history."
                 ));

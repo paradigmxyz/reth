@@ -245,7 +245,7 @@ where
         let end = if let Some(to_block) = to_block {
             to_block
         } else {
-            self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?
+            self.provider().highest_persisted_block_number().map_err(Eth::Error::from_eth_err)?
         };
 
         if start > end {

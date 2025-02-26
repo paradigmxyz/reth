@@ -30,7 +30,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let mut provider = provider_factory.provider_rw()?;
-        let best_block = provider.best_block_number()?;
+        let best_block = provider.highest_persisted_block_number()?;
         let best_header = provider
             .sealed_header(best_block)?
             .ok_or_else(|| ProviderError::HeaderNotFound(best_block.into()))?;
