@@ -3,44 +3,23 @@ use crate::tree::{
     payload_processor::{executor::WorkloadExecutor, multiproof::StateRootMessage, ExecutionCache},
     StateProviderBuilder,
 };
-use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{keccak256, map::B256Set, B256};
-use futures::SinkExt;
-use reth_evm::{
-    execute::BlockExecutorProvider,
-    system_calls::{NoopHook, OnStateHook},
-    ConfigureEvm, ConfigureEvmEnvFor, Evm,
-};
-use reth_primitives_traits::{
-    header::SealedHeaderFor, NodePrimitives, RecoveredBlock, SignedTransaction,
-};
-use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
-    StateCommitmentProvider, StateProviderFactory, StateReader,
-};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnvFor, Evm};
+use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, SignedTransaction};
+use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
-use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
-    trie_cursor::InMemoryTrieCursorFactory, MultiProofTargets, TrieInput,
-};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use reth_trie_parallel::root::ParallelStateRootError;
-use reth_trie_sparse::SparseStateTrie;
+use reth_trie::MultiProofTargets;
 use std::{
     collections::VecDeque,
-    sync::{
-        mpsc,
-        mpsc::{channel, Receiver, Sender},
-        Arc, RwLock,
-    },
-    time::Instant,
+    sync::mpsc::{channel, Receiver, Sender},
 };
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// A task that executes transactions individually in parallel.
 ///
 /// Note: This task runs until cancelled externally.
-pub struct PrewarmTask<N: NodePrimitives, P, Evm> {
+pub(super) struct PrewarmTask<N: NodePrimitives, P, Evm> {
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
     /// Shared execution cache.
@@ -109,7 +88,7 @@ where
     }
 
     /// Spawns the given transaction as a blocking task.
-    fn spawn_transaction(&mut self, tx: Recovered<N::SignedTx>) {
+    fn spawn_transaction(&self, tx: Recovered<N::SignedTx>) {
         let ctx = self.ctx.clone();
         let actions_tx = self.actions_tx.clone();
         let prepare_proof_targets = self.should_prepare_multi_proof_targets();
@@ -175,7 +154,7 @@ where
                     self.send_multi_proof_targets(proof_targets);
                 }
                 PrewarmTaskEvent::Terminate { block_output } => {
-                    /// terminate the task
+                    // terminate the task
                     if let Some(state) = block_output {
                         self.save_cache(state);
                     }
@@ -211,10 +190,7 @@ where
         + 'static,
 {
     /// Transacts the the transactions and transform the state into [`MultiProofTargets`].
-    fn prepare_multiproof_targets(
-        mut self,
-        tx: Recovered<N::SignedTx>,
-    ) -> Option<MultiProofTargets> {
+    fn prepare_multiproof_targets(self, tx: Recovered<N::SignedTx>) -> Option<MultiProofTargets> {
         let state = self.transact(tx)?;
 
         let mut targets =
@@ -256,7 +232,7 @@ where
     ///
     /// Note: Since here are no ordering guarantees this won't the state the tx produces when
     /// executed sequentially.
-    fn transact(mut self, tx: Recovered<N::SignedTx>) -> Option<EvmState> {
+    fn transact(self, tx: Recovered<N::SignedTx>) -> Option<EvmState> {
         let Self { header, evm_config, cache: caches, cache_metrics, provider } = self;
         // Create the state provider inside the thread
         let state_provider = match provider.build() {

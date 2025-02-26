@@ -4,46 +4,35 @@ use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::Sp
 use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use metrics::Histogram;
-use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::{OnStateHook, StateChangeSource};
 use reth_metrics::Metrics;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
-    StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
-    proof::ProofBlindedProviderFactory,
-    trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, Nibbles,
+    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
     TrieInput,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
-use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory},
-    errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    SparseStateTrie,
-};
 use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
-        mpsc::{self, channel, Receiver, Sender},
+        mpsc::{channel, Receiver, Sender},
         Arc,
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, error, trace, trace_span};
+use tracing::{debug, error, trace};
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
 #[derive(Debug)]
-pub struct StateRootComputeOutcome {
+pub(crate) struct StateRootComputeOutcome {
     /// The computed state root and trie updates
     pub state_root: (B256, TrieUpdates),
     /// The total time spent calculating the state root
@@ -55,7 +44,7 @@ pub struct StateRootComputeOutcome {
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
-pub struct SparseTrieUpdate {
+pub(super) struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
     pub(crate) state: HashedPostState,
     /// The calculated multiproof
@@ -64,17 +53,17 @@ pub struct SparseTrieUpdate {
 
 impl SparseTrieUpdate {
     /// Returns true if the update is empty.
-    pub fn is_empty(&self) -> bool {
+    pub(super) fn is_empty(&self) -> bool {
         self.state.is_empty() && self.multiproof.is_empty()
     }
 
     /// Construct update from multiproof.
-    pub fn from_multiproof(multiproof: MultiProof) -> Self {
+    pub(super) fn from_multiproof(multiproof: MultiProof) -> Self {
         Self { multiproof, ..Default::default() }
     }
 
     /// Extend update with contents of the other.
-    pub fn extend(&mut self, other: Self) {
+    pub(super) fn extend(&mut self, other: Self) {
         self.state.extend(other.state);
         self.multiproof.extend(other.multiproof);
     }
@@ -85,7 +74,7 @@ pub(crate) type StateRootResult = Result<StateRootComputeOutcome, ParallelStateR
 
 /// Common configuration for state root tasks
 #[derive(Debug, Clone)]
-pub struct StateRootConfig<Factory> {
+pub(super) struct StateRootConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
     /// The sorted collection of cached in-memory intermediate trie nodes that
@@ -101,7 +90,10 @@ pub struct StateRootConfig<Factory> {
 
 impl<Factory> StateRootConfig<Factory> {
     /// Creates a new state root config from the consistent view and the trie input.
-    pub fn new_from_input(consistent_view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+    pub(super) fn new_from_input(
+        consistent_view: ConsistentDbView<Factory>,
+        input: TrieInput,
+    ) -> Self {
         Self {
             consistent_view,
             nodes_sorted: Arc::new(input.nodes.into_sorted()),
@@ -113,7 +105,7 @@ impl<Factory> StateRootConfig<Factory> {
 
 /// Messages used internally by the state root task
 #[derive(Debug)]
-pub enum StateRootMessage {
+pub(super) enum StateRootMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution with its source
@@ -135,7 +127,7 @@ pub enum StateRootMessage {
 
 /// Message about completion of proof calculation for a specific state update
 #[derive(Debug)]
-pub struct ProofCalculated {
+pub(super) struct ProofCalculated {
     /// The index of this proof in the sequence of state updates
     sequence_number: u64,
     /// Sparse trie update
@@ -150,7 +142,7 @@ pub struct ProofCalculated {
 
 /// Whether or not a proof was fetched due to a state update, or due to a prefetch command.
 #[derive(Debug)]
-pub enum ProofFetchSource {
+pub(super) enum ProofFetchSource {
     /// The proof was fetched due to a prefetch command.
     Prefetch,
     /// The proof was fetched due to a state update.
@@ -224,7 +216,7 @@ impl ProofSequencer {
 
 /// A wrapper for the sender that signals completion when dropped
 #[derive(Deref, Debug)]
-pub struct StateHookSender(Sender<StateRootMessage>);
+pub(super) struct StateHookSender(Sender<StateRootMessage>);
 
 impl StateHookSender {
     pub(crate) const fn new(inner: Sender<StateRootMessage>) -> Self {
@@ -447,7 +439,7 @@ pub(crate) struct StateRootTaskMetrics {
 /// This feeds updates to the sparse trie task.
 // TODO(mattsse): rename to MultiProofTask
 #[derive(Debug)]
-pub struct StateRootTask2<Factory> {
+pub(super) struct StateRootTask2<Factory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
@@ -474,7 +466,7 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new state root task with the unified message channel
-    pub fn new(
+    pub(super) fn new(
         config: StateRootConfig<Factory>,
         executor: WorkloadExecutor,
         to_sparse_trie: Sender<SparseTrieEvent>,
@@ -495,17 +487,17 @@ where
     }
 
     /// Returns a [`Sender`] that can be used to send arbitrary [`StateRootMessage`]s to this task.
-    pub fn state_root_message_sender(&self) -> Sender<StateRootMessage> {
+    pub(super) fn state_root_message_sender(&self) -> Sender<StateRootMessage> {
         self.tx.clone()
     }
 
     /// Returns a [`StateHookSender`] that can be used to send state updates to this task.
-    pub fn state_hook_sender(&self) -> StateHookSender {
+    pub(super) fn state_hook_sender(&self) -> StateHookSender {
         StateHookSender::new(self.tx.clone())
     }
 
     /// Returns a state hook to be used to send state updates to this task.
-    pub fn state_hook(&self) -> impl OnStateHook {
+    pub(super) fn state_hook(&self) -> impl OnStateHook {
         let state_hook = self.state_hook_sender();
 
         move |source: StateChangeSource, state: &EvmState| {
@@ -673,9 +665,9 @@ where
         let mut updates_finished = false;
 
         // Timestamp when the first state update was received
-        let mut first_update_time = None;
+        let mut _first_update_time = None;
         // Timestamp when the last state update was received
-        let mut last_update_time = None;
+        let mut _last_update_time = None;
 
         loop {
             trace!(target: "engine::root", "entering main channel receiving loop");
@@ -698,10 +690,10 @@ where
                         trace!(target: "engine::root", "processing
         StateRootMessage::StateUpdate");
                         if updates_received == 0 {
-                            first_update_time = Some(Instant::now());
+                            _first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
-                        last_update_time = Some(Instant::now());
+                        _last_update_time = Some(Instant::now());
 
                         updates_received += 1;
                         debug!(
@@ -805,7 +797,7 @@ where
                             break
                         };
                     }
-                    StateRootMessage::ProofCalculationError(e) => {
+                    StateRootMessage::ProofCalculationError(_) => {
                         // TODO send error
                         // return Err(ParallelStateRootError::Other(format!(
                         //     "could not calculate multiproof: {e:?}"

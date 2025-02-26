@@ -497,7 +497,11 @@ pub(crate) struct SavedCache {
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub const fn new(hash: B256, caches: ProviderCaches, metrics: CachedStateMetrics) -> Self {
+    pub(super) const fn new(
+        hash: B256,
+        caches: ProviderCaches,
+        metrics: CachedStateMetrics,
+    ) -> Self {
         Self { hash, caches, metrics }
     }
 

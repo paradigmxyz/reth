@@ -31,7 +31,7 @@ use tracing::{debug, trace, trace_span};
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// A task responsible for populating the sparse trie.
-pub struct SparseTrieTask<F> {
+pub(super) struct SparseTrieTask<F> {
     /// Executor used to spawn subtasks.
     pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
@@ -52,7 +52,7 @@ where
     /// This waits for new incoming [`SparseTrieUpdate`].
     ///
     /// This concludes once the last trie update has been received.
-    pub(super) fn run(mut self) -> StateRootResult {
+    pub(super) fn run(self) -> StateRootResult {
         let now = Instant::now();
         let provider_ro = self.config.consistent_view.provider_ro()?;
         let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
@@ -113,7 +113,7 @@ where
 }
 
 /// Aliased for now to not introduce too many changes at once.
-pub type SparseTrieEvent = SparseTrieUpdate;
+pub(super) type SparseTrieEvent = SparseTrieUpdate;
 
 // /// The event type the sparse trie task operates on.
 // pub(crate) enum SparseTrieEvent {

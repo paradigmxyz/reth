@@ -4,12 +4,12 @@ use tokio::{runtime::Runtime, task::JoinHandle};
 
 /// An executor for mixed I/O and CPU workloads.
 #[derive(Debug, Clone)]
-pub struct WorkloadExecutor {
+pub(super) struct WorkloadExecutor {
     inner: WorkloadExecutorInner,
 }
 
 impl WorkloadExecutor {
-    pub fn new(cpu_threads: usize) -> Self {
+    pub(super) fn new(cpu_threads: usize) -> Self {
         // Create runtime for I/O operations
         let runtime = Arc::new(Runtime::new().unwrap());
 
@@ -17,17 +17,17 @@ impl WorkloadExecutor {
         let rayon_pool =
             Arc::new(rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap());
 
-        WorkloadExecutor { inner: WorkloadExecutorInner { runtime, rayon_pool } }
+        Self { inner: WorkloadExecutorInner { runtime, rayon_pool } }
     }
 
     /// Returns access to the tokio runtime
-    pub fn runtime(&self) -> &Arc<Runtime> {
+    pub(super) fn runtime(&self) -> &Arc<Runtime> {
         &self.inner.runtime
     }
 
-    /// Shorthand for [Runtime::spawn_blocking]
+    /// Shorthand for [`Runtime::spawn_blocking`]
     #[track_caller]
-    pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
+    pub(super) fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
     where
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
@@ -36,7 +36,7 @@ impl WorkloadExecutor {
     }
 
     /// Returns access to the rayon pool
-    pub fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
+    pub(super) fn rayon_pool(&self) -> &Arc<rayon::ThreadPool> {
         &self.inner.rayon_pool
     }
 }

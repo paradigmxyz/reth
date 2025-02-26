@@ -14,14 +14,11 @@ use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_primitives::B256;
 use multiproof::*;
 use parking_lot::RwLock;
-use reth_evm::{
-    execute::BlockExecutorProvider, system_calls::OnStateHook, ConfigureEvm, ConfigureEvmEnvFor,
-    Evm,
-};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SignedTransaction};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnvFor};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
-    StateCommitmentProvider, StateProviderFactory, StateReader,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
+    StateProviderFactory, StateReader,
 };
 use reth_revm::db::BundleState;
 use reth_trie::TrieInput;
@@ -38,7 +35,7 @@ mod prewarm;
 mod sparse_trie;
 
 /// Entrypoint for executing the payload.
-pub struct PayloadProcessor<N, Evm> {
+pub(super) struct PayloadProcessor<N, Evm> {
     /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
@@ -62,7 +59,7 @@ where
         + 'static,
 {
     /// Executes the payload based on the configured settings.
-    pub fn execute(&self) {
+    pub(super) fn execute(&self) {
         // TODO helpers for executing in sync?
     }
 
@@ -98,7 +95,7 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    pub fn spawn<P>(
+    pub(super) fn spawn<P>(
         &self,
         block: RecoveredBlock<N::Block>,
         consistent_view: ConsistentDbView<P>,
@@ -152,7 +149,7 @@ where
     }
 
     /// Spawn prewarming exclusively
-    pub fn spawn_prewarming<P>(
+    pub(super) fn spawn_prewarming<P>(
         &self,
         block: RecoveredBlock<N::Block>,
         provider_builder: StateProviderBuilder<N, P>,
@@ -223,7 +220,7 @@ where
 }
 
 /// Handle to all the spawned tasks.
-pub struct PayloadHandle {
+pub(super) struct PayloadHandle {
     /// Channel for evm state updates
     to_multi_proof: Option<Sender<StateRootMessage>>,
     // must include the receiver of the state root wired to the sparse trie
@@ -234,7 +231,7 @@ pub struct PayloadHandle {
 
 impl PayloadHandle {
     /// Awaits the state root
-    pub fn state_root(&self) -> StateRootResult {
+    pub(super) fn state_root(&self) -> StateRootResult {
         todo!()
     }
 
@@ -244,14 +241,14 @@ impl PayloadHandle {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
-    pub fn stop_prewarming_execution(&self) {
+    pub(super) fn stop_prewarming_execution(&self) {
         self.prewarm_handle.stop_prewarming_execution()
     }
 
     /// Terminates the entire pre-warming task.
     ///
     /// If the [`BundleState`] is provided it will update the shared cache.
-    pub fn terminate_prewarming_execution(&mut self, block_output: Option<BundleState>) {
+    pub(super) fn terminate_prewarming_execution(&mut self, block_output: Option<BundleState>) {
         self.prewarm_handle.terminate_prewarming_execution(block_output)
     }
 }
@@ -268,7 +265,7 @@ impl PrewarmTaskHandle {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
-    pub fn stop_prewarming_execution(&self) {
+    pub(super) fn stop_prewarming_execution(&self) {
         self.to_prewarm_task
             .as_ref()
             .map(|tx| tx.send(PrewarmTaskEvent::TerminateTransactionExecution).ok());
@@ -277,7 +274,7 @@ impl PrewarmTaskHandle {
     /// Terminates the entire pre-warming task.
     ///
     /// If the [`BundleState`] is provided it will update the shared cache.
-    pub fn terminate_prewarming_execution(&mut self, block_output: Option<BundleState>) {
+    pub(super) fn terminate_prewarming_execution(&mut self, block_output: Option<BundleState>) {
         self.to_prewarm_task
             .take()
             .map(|tx| tx.send(PrewarmTaskEvent::Terminate { block_output }).ok());
@@ -306,24 +303,20 @@ struct ExecutionCache {
 
 impl ExecutionCache {
     /// Returns the cache if the currently store cache is for the given `parent_hash`
-    pub fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
+    pub(crate) fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
         let cache = self.inner.read();
-        cache.as_ref().and_then(|cache| {
-            if cache.executed_block_hash() == parent_hash {
-                Some(cache.clone())
-            } else {
-                None
-            }
-        })
+        cache
+            .as_ref()
+            .and_then(|cache| (cache.executed_block_hash() == parent_hash).then(|| cache.clone()))
     }
 
     /// Clears the tracked cashe
-    pub fn clear(&self) {
+    pub(crate) fn clear(&self) {
         self.inner.write().take();
     }
 
     /// Stores the provider cache
-    pub fn save_cache(&self, cache: SavedCache) {
+    pub(crate) fn save_cache(&self, cache: SavedCache) {
         self.inner.write().replace(cache);
     }
 }
