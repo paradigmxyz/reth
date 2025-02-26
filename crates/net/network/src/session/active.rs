@@ -63,7 +63,7 @@ const TIMEOUT_SCALING: u32 = 3;
 /// With proper softlimits in place (2MB) this targets 10MB (4+1 * 2MB) of outgoing response data.
 ///
 /// This parameter serves as backpressure for reading additional requests from the remote.
-/// Once we've queued up more responses than this, the session should priorotize message flushing
+/// Once we've queued up more responses than this, the session should prioritize message flushing
 /// before reading any more messages from the remote peer, throttling the peer.
 const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 
