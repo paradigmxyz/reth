@@ -19,7 +19,7 @@ fn main() {
     if let Err(err) =
         Cli::<OpChainSpecParser, RollupArgs>::parse().run(|builder, rollup_args| async move {
             info!(target: "reth::cli", "Launching node");
-            let handle = builder.launch_node(OpNode::new(rollup_args)).await?;
+            let handle = builder.node(OpNode::new(rollup_args)).launch_debug().await?;
             handle.node_exit_future.await
         })
     {
