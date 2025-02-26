@@ -6378,6 +6378,22 @@
           "range": true,
           "refId": "I",
           "useBackend": false
+        }, 
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 min",
+          "range": true,
+          "refId": "J",
+          "useBackend": false
         }
       ],
       "title": "Engine API getPayloadBodies Latency",
