@@ -51,8 +51,7 @@ impl Command {
                 let block_res =
                     block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
-                let (header, blob_versioned_hashes, execution_payload) =
-                    from_any_rpc_block(block).unwrap();
+                let (header, versioned_hashes, payload) = from_any_rpc_block(block).unwrap();
                 let head_block_hash = header.hash;
                 let safe_block_hash = block_provider
                     .get_block_by_number(header.number.saturating_sub(32).into(), false.into());
@@ -70,8 +69,8 @@ impl Command {
                 sender
                     .send((
                         header,
-                        blob_versioned_hashes,
-                        execution_payload,
+                        versioned_hashes,
+                        payload,
                         head_block_hash,
                         safe_block_hash,
                         finalized_block_hash,
@@ -86,7 +85,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, blob_versioned_hashes, execution_payload, head, safe, finalized)) = {
+        while let Some((header, versioned_hashes, payload, head, safe, finalized)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -108,9 +107,9 @@ impl Command {
             let start = Instant::now();
             let message_version = call_new_payload(
                 &auth_provider,
-                execution_payload,
+                payload,
                 header.parent_beacon_block_root,
-                blob_versioned_hashes,
+                versioned_hashes,
             )
             .await?;
 

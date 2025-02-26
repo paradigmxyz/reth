@@ -56,7 +56,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, blob_versioned_hashes, execution_payload)) = {
+        while let Some((header, versioned_hashes, payload)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -65,7 +65,7 @@ impl Command {
             // just put gas used here
             let gas_used = header.gas_used;
 
-            let block_number = execution_payload.block_number();
+            let block_number = payload.block_number();
 
             debug!(
                 target: "reth-bench",
@@ -76,9 +76,9 @@ impl Command {
             let start = Instant::now();
             call_new_payload(
                 &auth_provider,
-                execution_payload,
+                payload,
                 header.parent_beacon_block_root,
-                blob_versioned_hashes,
+                versioned_hashes,
             )
             .await?;
 
