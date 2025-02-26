@@ -6378,22 +6378,6 @@
           "range": true,
           "refId": "I",
           "useBackend": false
-        }, 
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getBlobsV1 min",
-          "range": true,
-          "refId": "J",
-          "useBackend": false
         }
       ],
       "title": "Engine API getPayloadBodies Latency",
@@ -6724,6 +6708,52 @@
       ],
       "title": "Engine API forkchoiceUpdated Latency",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0.5\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 p50",
+          "range":true,
+          "refId": "A",
+          "useBackend":false
+        },
+        {
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0.95\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 p95",
+          "range":true,
+          "refId": "B",
+          "useBackend":false
+        },
+        {
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0.99\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 p99",
+          "range":true,
+          "refId": "C",
+          "useBackend":false
+        }
+      ],
+      "title": "Engine API - getBlobsV1 Latency",
+      "type": "timeseries"  
     },
     {
       "datasource": {
