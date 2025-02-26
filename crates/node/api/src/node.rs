@@ -45,6 +45,18 @@ where
     type Provider = Provider;
 }
 
+impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
+where
+    Types: NodeTypesWithEngine,
+    DB: Database + DatabaseMetrics + Clone + Unpin + Send + Sync + 'static,
+    Provider: FullProvider<NodeTypesWithDBAdapter<Types, DB>> + Send + Sync + Unpin + 'static,
+{
+    type Primitives = Types::Primitives;
+    type ChainSpec = Types::ChainSpec;
+    type StateCommitment = Types::StateCommitment;
+    type Storage = Types::Storage;
+}
+
 /// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
 pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
     PayloadBuilder<

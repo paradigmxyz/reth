@@ -364,7 +364,7 @@ where
     }
 }
 
-impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
+impl<T: FullNodeTypes<Types = T> + NodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
     /// Advances the state of the node builder to the next state where all components are configured
     pub fn with_components<CB>(
         self,
@@ -382,7 +382,7 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
 
 impl<T, CB> WithLaunchContext<NodeBuilderWithComponents<T, CB, ()>>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + NodeTypes,
     CB: NodeComponentsBuilder<T>,
 {
     /// Advances the state of the node builder to the next state where all customizable
@@ -403,13 +403,13 @@ where
 
 impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes<Types = T> + NodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
-        &self.builder.config
+        &self.builder.adapter.config()
     }
 
     /// Apply a function to the builder
@@ -561,18 +561,16 @@ where
     > {
         let Self { builder, task_executor } = self;
 
+        let config = builder.adapter.config();
         let engine_tree_config = TreeConfig::default()
-            .with_persistence_threshold(builder.config.engine.persistence_threshold)
-            .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
-            .with_legacy_state_root(builder.config.engine.legacy_state_root_task_enabled)
-            .with_caching_and_prewarming(builder.config.engine.caching_and_prewarming_enabled)
-            .with_always_compare_trie_updates(builder.config.engine.state_root_task_compare_updates)
-            .with_cross_block_cache_size(
-                builder.config.engine.cross_block_cache_size * 1024 * 1024,
-            );
+            .with_persistence_threshold(config.engine.persistence_threshold)
+            .with_memory_block_buffer_target(config.engine.memory_block_buffer_target)
+            .with_legacy_state_root(config.engine.legacy_state_root_task_enabled)
+            .with_caching_and_prewarming(config.engine.caching_and_prewarming_enabled)
+            .with_always_compare_trie_updates(config.engine.state_root_task_compare_updates)
+            .with_cross_block_cache_size(config.engine.cross_block_cache_size * 1024 * 1024);
 
-        let launcher =
-            EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
+        let launcher = EngineNodeLauncher::new(task_executor, config.datadir(), engine_tree_config);
         builder.launch_with(launcher).await
     }
 }

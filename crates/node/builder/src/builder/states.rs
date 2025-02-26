@@ -19,14 +19,17 @@ use reth_tasks::TaskExecutor;
 use std::{fmt, future::Future};
 
 /// A node builder that also has the configured types.
-pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
+pub struct NodeBuilderWithTypes<T: FullNodeTypes + NodeTypes> {
     /// All settings for how the node should be configured.
     config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
     /// The configured database for the node.
     adapter: NodeTypesAdapter<T>,
 }
 
-impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
+impl<T> NodeBuilderWithTypes<T>
+where
+    T: FullNodeTypes<Types = T> + NodeTypes,
+{
     /// Creates a new instance of the node builder with the given configuration and types.
     pub const fn new(
         config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
@@ -43,10 +46,12 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
         let Self { config, adapter } = self;
 
         NodeBuilderWithComponents {
-            config,
-            adapter,
-            components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
+            adapter: BuilderComponentsAdapter {
+                config,
+                database: adapter.database,
+                components_builder,
+                add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons: () },
+            },
         }
     }
 }
@@ -145,23 +150,16 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
 ///
 /// Supports adding additional addons to the node.
 pub struct NodeBuilderWithComponents<
-    T: FullNodeTypes,
+    T: FullNodeTypes + NodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
 > {
-    /// All settings for how the node should be configured.
-    pub config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
-    /// Adapter for the underlying node types and database
-    pub adapter: NodeTypesAdapter<T>,
-    /// container for type specific components
-    pub components_builder: CB,
-    /// Additional node extensions.
-    pub add_ons: AddOns<NodeAdapter<T, CB::Components>, AO>,
+    pub adapter: BuilderComponentsAdapter<T, CB, AO>,
 }
 
 impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + NodeTypes,
     CB: NodeComponentsBuilder<T>,
 {
     /// Advances the state of the node builder to the next state where all customizable
@@ -170,20 +168,22 @@ where
     where
         AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     {
-        let Self { config, adapter, components_builder, .. } = self;
+        let Self { adapter } = self;
 
         NodeBuilderWithComponents {
-            config,
-            adapter,
-            components_builder,
-            add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
+            adapter: BuilderComponentsAdapter {
+                config: adapter.config,
+                database: adapter.database,
+                components_builder: adapter.components_builder,
+                add_ons: AddOns { hooks: NodeHooks::default(), exexs: Vec::new(), add_ons },
+            },
         }
     }
 }
 
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + NodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
 {
@@ -192,7 +192,7 @@ where
     where
         F: FnOnce(NodeAdapter<T, CB::Components>) -> eyre::Result<()> + Send + 'static,
     {
-        self.add_ons.hooks.set_on_component_initialized(hook);
+        self.adapter.add_ons.hooks.set_on_component_initialized(hook);
         self
     }
 
@@ -203,7 +203,7 @@ where
             + Send
             + 'static,
     {
-        self.add_ons.hooks.set_on_node_started(hook);
+        self.adapter.add_ons.hooks.set_on_node_started(hook);
         self
     }
 
@@ -218,7 +218,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        self.add_ons.exexs.push((exex_id.into(), Box::new(exex)));
+        self.adapter.add_ons.exexs.push((exex_id.into(), Box::new(exex)));
         self
     }
 
@@ -242,14 +242,14 @@ where
     where
         F: FnOnce(AO) -> AO,
     {
-        self.add_ons.add_ons = f(self.add_ons.add_ons);
+        self.adapter.add_ons.add_ons = f(self.adapter.add_ons.add_ons);
         self
     }
 }
 
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + NodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
@@ -289,4 +289,78 @@ where
             add_ons
         })
     }
+}
+
+trait BuilderInternals {
+    /// The node types that this builder works with
+    type Types: FullNodeTypes + NodeTypes;
+
+    /// The components that will be built
+    type Components: NodeComponents<Self::Types>;
+
+    /// The add-ons that will be attached to the node
+    type AddOns: NodeAddOns<NodeAdapter<Self::Types, Self::Components>>;
+
+    /// The components builder type
+    type ComponentsBuilder: NodeComponentsBuilder<Self::Types, Components = Self::Components>
+        + Clone;
+}
+
+/// An adapter that manages the components and configuration for building a node.
+pub struct BuilderComponentsAdapter<T, C, AO = ()>
+where
+    T: FullNodeTypes + NodeTypes,
+    C: NodeComponentsBuilder<T>,
+    AO: NodeAddOns<NodeAdapter<T, C::Components>>,
+{
+    /// The node configuration
+    config: NodeConfig<<T as NodeTypes>::ChainSpec>,
+    /// The database
+    database: T::DB,
+    /// The components builder
+    components_builder: C,
+    /// The add-ons for the node
+    add_ons: AddOns<NodeAdapter<T, C::Components>, AO>,
+}
+
+impl<T, C, AO> BuilderComponentsAdapter<T, C, AO>
+where
+    T: FullNodeTypes + NodeTypes,
+    C: NodeComponentsBuilder<T> + Clone,
+    AO: NodeAddOns<NodeAdapter<T, C::Components>>,
+{
+    /// Returns a reference to the node configuration
+    pub fn config(&self) -> &NodeConfig<<T as NodeTypes>::ChainSpec> {
+        &self.config
+    }
+
+    /// Returns a reference to the database
+    pub fn database(&self) -> &T::DB {
+        &self.database
+    }
+
+    /// Returns a reference to the components builder
+    pub fn components_builder(&self) -> &C {
+        &self.components_builder
+    }
+
+    /// Returns a mutable reference to the add-ons.
+    ///
+    /// This method is intended to be used only by the builder implementation
+    /// for managing add-ons state during the node building process.
+    pub fn add_ons_mut(&mut self) -> &mut AddOns<NodeAdapter<T, C::Components>, AO> {
+        &mut self.add_ons
+    }
+}
+
+impl<T, C, AO> BuilderInternals for BuilderComponentsAdapter<T, C, AO>
+where
+    T: FullNodeTypes + NodeTypes,
+    C: NodeComponentsBuilder<T> + Clone,
+    AO: NodeAddOns<NodeAdapter<T, C::Components>>,
+{
+    type Types = T;
+    type Components = C::Components;
+    type AddOns = AO;
+    type ComponentsBuilder = C;
 }
