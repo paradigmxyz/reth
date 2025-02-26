@@ -46,7 +46,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
@@ -56,7 +56,7 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState,
     MultiProofTargets, TrieInput,
 };
-use reth_trie_db::DatabaseTrieCursorFactory;
+use reth_trie_db::{DatabaseHashedPostState, DatabaseTrieCursorFactory, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use root::{
     StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
@@ -2702,10 +2702,14 @@ where
     ) -> Result<TrieInput, ParallelStateRootError> {
         let mut input = TrieInput::default();
 
+        let provider = consistent_view.provider_ro()?;
+        let best_block_number = provider.best_block_number()?;
+
         // Fetch only in-memory blocks that are not yet persisted to disk.
-        let in_memory_blocks = self.state.tree_state.blocks_by_hash_while(parent_hash, |number| {
-            number > self.persistence_state.last_persisted_block.number
-        });
+        let in_memory_blocks = self
+            .state
+            .tree_state
+            .blocks_by_hash_while(parent_hash, |number| number > best_block_number);
 
         debug!(
             target: "engine::tree",
@@ -2725,7 +2729,7 @@ where
         if let Some((historical, blocks)) = in_memory_blocks {
             debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
             // Retrieve revert state for historical block.
-            let revert_state = consistent_view.revert_state(historical)?;
+            let revert_state = self.revert_state(provider, best_block_number, historical)?;
             input.append(revert_state);
 
             // Extend with contents of parent in-memory blocks.
@@ -2735,11 +2739,44 @@ where
         } else {
             // The block attaches to canonical persisted parent.
             debug!(target: "engine::tree", %parent_hash, "Parent found on disk");
-            let revert_state = consistent_view.revert_state(parent_hash)?;
+            let revert_state = self.revert_state(provider, best_block_number, parent_hash)?;
             input.append(revert_state);
         }
 
         Ok(input)
+    }
+
+    /// Retrieve revert hashed state down to the given block hash.
+    fn revert_state(
+        &self,
+        provider: P::Provider,
+        best_block_number: BlockNumber,
+        block_hash: B256,
+    ) -> ProviderResult<HashedPostState> {
+        let block_number = provider
+            .block_number(block_hash)?
+            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+
+        // We do not check against the `last_block_number` here because
+        // `HashedPostState::from_reverts` only uses the database tables, and not static files.
+        if block_number == best_block_number {
+            debug!(target: "engine::tree", ?block_hash, block_number, "Returning empty revert state");
+            Ok(HashedPostState::default())
+        } else {
+            let revert_state = HashedPostState::from_reverts::<
+                <P::StateCommitment as StateCommitment>::KeyHasher,
+            >(provider.tx_ref(), block_number + 1)?;
+            debug!(
+                target: "engine::tree",
+                ?block_hash,
+                block_number,
+                best_block_number,
+                accounts = revert_state.accounts.len(),
+                storages = revert_state.storages.len(),
+                "Returning non-empty revert state"
+            );
+            Ok(revert_state)
+        }
     }
 
     /// Runs execution for a single transaction, spawning it in the prewarm threadpool.
