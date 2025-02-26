@@ -82,9 +82,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Network API.
     type Network: FullNetwork;
 
-    /// Builds new blocks.
-    type PayloadBuilder: PayloadBuilderFor<Self::Types>;
-
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
 
@@ -99,9 +96,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
     /// Returns the handle to the network
     fn network(&self) -> &Self::Network;
-
-    /// Returns the configured payload builder.
-    fn payload_builder(&self) -> &Self::PayloadBuilder;
 
     /// Returns the handle to the payload builder service handling payload building requests from
     /// the engine.

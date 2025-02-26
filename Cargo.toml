@@ -531,7 +531,7 @@ smallvec = "1"
 strum = { version = "0.27", default-features = false }
 syn = "2.0"
 thiserror = { version = "2.0.0", default-features = false }
-tracing = "0.1.0"
+tracing = { version = "0.1.0", default-features = false }
 tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
@@ -623,8 +623,8 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 crunchy = "=0.2.2"
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "b77a39a" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "b77a39a" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "04fa394" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "04fa394" }
 
 revm = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }

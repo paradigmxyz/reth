@@ -8,9 +8,10 @@ use alloy_rpc_types_beacon::relay::{
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
-    PayloadError, PraguePayloadFields,
+    PraguePayloadFields,
 };
 use async_trait::async_trait;
+use core::fmt;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus};
@@ -18,6 +19,7 @@ use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_metrics::{metrics, metrics::Gauge, Metrics};
+use reth_node_api::NewPayloadError;
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{
     constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock, SealedHeaderFor,
@@ -355,17 +357,13 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> Result<(), ValidationApiError> {
-        let block = self
-            .payload_validator
-            .ensure_well_formed_payload(ExecutionData {
-                payload: ExecutionPayload::V3(request.request.execution_payload),
-                sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                    parent_beacon_block_root: request.parent_beacon_block_root,
-                    versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
-                }),
-            })?
-            .try_recover()
-            .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
+        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+            payload: ExecutionPayload::V3(request.request.execution_payload),
+            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                parent_beacon_block_root: request.parent_beacon_block_root,
+                versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
+            }),
+        })?;
 
         self.validate_message_against_block(
             block,
@@ -380,25 +378,20 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> Result<(), ValidationApiError> {
-        let block = self
-            .payload_validator
-            .ensure_well_formed_payload(ExecutionData {
-                payload: ExecutionPayload::V3(request.request.execution_payload),
-                sidecar: ExecutionPayloadSidecar::v4(
-                    CancunPayloadFields {
-                        parent_beacon_block_root: request.parent_beacon_block_root,
-                        versioned_hashes: self
-                            .validate_blobs_bundle(request.request.blobs_bundle)?,
-                    },
-                    PraguePayloadFields {
-                        requests: RequestsOrHash::Requests(
-                            request.request.execution_requests.to_requests(),
-                        ),
-                    },
-                ),
-            })?
-            .try_recover()
-            .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
+        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+            payload: ExecutionPayload::V3(request.request.execution_payload),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
+                },
+                PraguePayloadFields {
+                    requests: RequestsOrHash::Requests(
+                        request.request.execution_requests.to_requests(),
+                    ),
+                },
+            ),
+        })?;
 
         self.validate_message_against_block(
             block,
@@ -470,7 +463,6 @@ where
     }
 }
 
-#[derive(Debug)]
 pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     /// The provider that can interact with the chain.
     provider: Provider,
@@ -498,6 +490,12 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     task_spawner: Box<dyn TaskSpawner>,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+impl<Provider, E: BlockExecutorProvider> fmt::Debug for ValidationApiInner<Provider, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValidationApiInner").finish_non_exhaustive()
+    }
 }
 
 /// Configuration for validation API.
@@ -555,7 +553,7 @@ pub enum ValidationApiError {
     #[error(transparent)]
     Execution(#[from] BlockExecutionError),
     #[error(transparent)]
-    Payload(#[from] PayloadError),
+    Payload(#[from] NewPayloadError),
 }
 
 /// Metrics for the validation endpoint.
