@@ -50,7 +50,7 @@ const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 ///     - State Root Task spawned in [`StateRootTask::spawn`]
 /// - It should heave at least 3 threads to be used in:
 ///     - Sparse Trie spawned in [`run_sparse_trie`]
-///     - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+///     - Multiproof computation spawned in [`MultiProofManager::spawn_multiproof`]
 ///     - Storage root computation spawned in [`ParallelProof::multiproof`]
 ///
 /// NOTE: this value can be greater than the available cores in the host, it
