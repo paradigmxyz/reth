@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
-use alloy_eips::BlockNumHash;
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{
     keccak256,
     map::{B256Set, HashMap, HashSet},
@@ -2684,10 +2684,14 @@ where
         let provider = consistent_view.provider_ro()?;
         let best_block_number = provider.best_block_number()?;
 
-        let in_memory_blocks = self.state.tree_state.blocks_by_hash(parent_hash);
-
-        if let Some((mut historical, mut blocks)) = in_memory_blocks {
-            while let Some(block) = blocks.last() {
+        if let Some((_, mut blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
+            let historical: BlockHashOrNumber = loop {
+                // Iterate over the blocks in reverse order, from oldest to newest.
+                let Some(block) = blocks.last() else {
+                    // If no more blocks are left, set historical block hash to the original parent
+                    // hash.
+                    break parent_hash.into();
+                };
                 let recovered_block = block.recovered_block();
                 // Remove those blocks that lower than or equals to the highest database block and
                 // have an associated database block with a matching hash.
@@ -2695,12 +2699,15 @@ where
                     Some(recovered_block.hash()) ==
                         provider.block_hash(recovered_block.number())?
                 {
-                    historical = recovered_block.parent_hash();
                     blocks.pop();
                 } else {
-                    break
+                    // If the block is higher than the best block number or does not have an
+                    // associated database block, set historical block number to
+                    // the current block's parent, as it's the first block that's not in the
+                    // database.
+                    break (recovered_block.number() - 1).into();
                 }
-            }
+            };
 
             debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
             // Retrieve revert state for historical block.
@@ -2714,7 +2721,8 @@ where
         } else {
             // The block attaches to canonical persisted parent.
             debug!(target: "engine::tree", %parent_hash, "Parent found on disk");
-            let revert_state = self.revert_state(provider, best_block_number, parent_hash)?;
+            let revert_state =
+                self.revert_state(provider, best_block_number, parent_hash.into())?;
             input.append(revert_state);
         }
 
@@ -2726,16 +2734,19 @@ where
         &self,
         provider: P::Provider,
         best_block_number: BlockNumber,
-        block_hash: B256,
+        block: BlockHashOrNumber,
     ) -> ProviderResult<HashedPostState> {
-        let block_number = provider
-            .block_number(block_hash)?
-            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+        let block_number = match block {
+            BlockHashOrNumber::Hash(block_hash) => provider
+                .block_number(block_hash)?
+                .ok_or(ProviderError::BlockHashNotFound(block_hash))?,
+            BlockHashOrNumber::Number(block_number) => block_number,
+        };
 
         // We do not check against the `last_block_number` here because
         // `HashedPostState::from_reverts` only uses the database tables, and not static files.
         if block_number == best_block_number {
-            debug!(target: "engine::tree", ?block_hash, block_number, "Returning empty revert state");
+            debug!(target: "engine::tree", ?block, block_number, "Returning empty revert state");
             Ok(HashedPostState::default())
         } else {
             let revert_state = HashedPostState::from_reverts::<
@@ -2743,7 +2754,7 @@ where
             >(provider.tx_ref(), block_number + 1)?;
             debug!(
                 target: "engine::tree",
-                ?block_hash,
+                ?block,
                 block_number,
                 best_block_number,
                 accounts = revert_state.accounts.len(),
