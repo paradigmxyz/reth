@@ -1309,7 +1309,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let mut next_nonce_in_line = tx.transaction.nonce().saturating_add(1);
 
             // Update all consecutive transaction of this sender
-            while let Some((peek, ref mut tx)) = iter.peek_mut() {
+            while let Some((peek, tx)) = iter.peek_mut() {
                 if peek.sender != id.sender {
                     // Found the next sender we need to check
                     continue 'transactions

@@ -513,7 +513,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         new_announced_hashes.retain(|hash, metadata| {
 
             // occupied entry
-            if let Some(TxFetchMetadata{ tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
+            if let Some(TxFetchMetadata{ tx_encoded_length: previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
                     if let Some(prev_size) = previously_seen_size {

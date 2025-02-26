@@ -346,7 +346,7 @@ where
 
     balance_increments
         .iter()
-        .filter(|(_, &balance)| balance != 0)
+        .filter(|&(_, balance)| *balance != 0)
         .map(|(addr, _)| load_account(addr))
         .collect::<Result<EvmState, _>>()
 }

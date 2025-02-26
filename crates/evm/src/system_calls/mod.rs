@@ -194,7 +194,7 @@ where
     ) -> Result<Bytes, BlockExecutionError> {
         let result_and_state = eip7002::transact_withdrawal_requests_contract_call(evm)?;
 
-        if let Some(ref mut hook) = &mut self.hook {
+        if let Some(hook) = &mut self.hook {
             hook.on_state(
                 StateChangeSource::PostBlock(
                     StateChangePostBlockSource::WithdrawalRequestsContract,
@@ -214,7 +214,7 @@ where
     ) -> Result<Bytes, BlockExecutionError> {
         let result_and_state = eip7251::transact_consolidation_requests_contract_call(evm)?;
 
-        if let Some(ref mut hook) = &mut self.hook {
+        if let Some(hook) = &mut self.hook {
             hook.on_state(
                 StateChangeSource::PostBlock(
                     StateChangePostBlockSource::ConsolidationRequestsContract,
