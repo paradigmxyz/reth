@@ -272,10 +272,10 @@ mod tests {
                 "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
             )),
             starting_hash: B256::from_slice(&hex!(
-                "abcdef1234567890abcdef1234567890abcdef1234567890abcdef12345678"
+                "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
             )),
             limit_hash: B256::from_slice(&hex!(
-                "9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedc"
+                "9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba"
             )),
             response_bytes: 1024,
         };
