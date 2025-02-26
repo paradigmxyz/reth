@@ -38,7 +38,7 @@ pub struct PayloadProcessor<N, Evm> {
     /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
-    most_recent_cache: ExecutionCache,
+    execution_cache: ExecutionCache,
     /// Metrics for prewarmed execution
     cache_metrics: CachedStateMetrics,
     /// Metrics for trie operations
@@ -131,7 +131,7 @@ where
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
         let txs = block.transactions_recovered().map(Recovered::cloned).collect();
         let prewarm_task =
-            PrewarmTask::new(self.executor.clone(), prewarm_ctx, to_multi_proof, txs);
+            PrewarmTask::new(self.executor.clone(), self.execution_cache.clone(), prewarm_ctx, to_multi_proof, txs);
         let to_prewarm_task = prewarm_task.actions_tx();
 
         // spawn pre-warm task
@@ -165,7 +165,37 @@ where
     }
 
     /// Spawn prewarming exclusively
-    pub fn spawn_prewarming(&self) {}
+    pub fn spawn_prewarming<P>(&self,  block: RecoveredBlock<N::Block>,  provider_builder: StateProviderBuilder<N, P>,)
+    where P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
+    {
+        let caches = self.cache_for(block.header().parent_hash());
+        // configure prewarming
+        let prewarm_ctx = PrewarmContext {
+            header: block.clone_sealed_header(),
+            evm_config: self.evm_config.clone(),
+            caches,
+            cache_metrics: Default::default(),
+            provider: provider_builder,
+        };
+
+        // configure prewarming without multiproof
+        let to_multi_proof = None;
+        let txs = block.transactions_recovered().map(Recovered::cloned).collect();
+        let prewarm_task =
+            PrewarmTask::new(self.executor.clone(), self.execution_cache.clone(), prewarm_ctx, to_multi_proof, txs);
+        let to_prewarm_task = prewarm_task.actions_tx();
+
+        // spawn pre-warm task
+        self.executor.spawn_blocking(move || {
+            prewarm_task.run();
+        });
+
+
+        todo!()
+    }
+
+
+
 
     /// Returns the cache for the given parent hash.
     ///
@@ -194,7 +224,7 @@ impl PayloadTaskHandle {
     ///
     /// This will terminate all inprogress tx pre-warm execution.
     pub fn terminate_prewarming(&mut self) {
-        self.prewarm.take().map(|tx| tx.send(PrewarmTaskEvent::Terminate).ok());
+        self.prewarm.take().map(|tx| tx.send(PrewarmTaskEvent::TerminateTransactionExecution).ok());
     }
 }
 
@@ -212,8 +242,13 @@ pub(crate) struct PrewarmHandle {
 }
 
 /// Shared access to most recently used cache.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ExecutionCache {
-    // TODO: simplify internals
     inner: Arc<RwLock<Option<SavedCache>>>,
+}
+
+impl ExecutionCache {
+
+
+
 }

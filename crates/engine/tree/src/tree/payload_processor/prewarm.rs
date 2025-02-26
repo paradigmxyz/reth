@@ -37,11 +37,15 @@ use std::{
     time::Instant,
 };
 use tracing::{debug, trace};
+use reth_revm::db::BundleState;
+use crate::tree::payload_processor::ExecutionCache;
 
 /// A task that executes transactions individually in parallel.
 pub struct PrewarmTask<N: NodePrimitives, P, Evm> {
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
+    /// Shared execution cache.
+    execution_cache: ExecutionCache,
     /// Transactions pending execution.
     pending: VecDeque<Recovered<N::SignedTx>>,
     /// Context provided to execution tasks
@@ -70,6 +74,7 @@ where
     /// Intializes the task with the given transactions pending execution
     pub(super) fn new(
         executor: WorkloadExecutor,
+        execution_cache: ExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
         to_multi_proof: Option<Sender<StateRootMessage>>,
         pending: VecDeque<Recovered<N::SignedTx>>,
@@ -77,6 +82,7 @@ where
         let (actions_tx, actions_rx) = channel();
         Self {
             executor,
+            execution_cache,
             pending,
             ctx,
             in_progress: 0,
@@ -137,6 +143,11 @@ where
         }
     }
 
+    /// Save the state to the shared cache.
+    fn save_cache(&self, state: BundleState) {
+
+    }
+
     /// Executes the task.
     ///
     /// This will execute the transactions until all transactions have been processed or the task
@@ -147,25 +158,27 @@ where
 
         while let Ok(event) = self.actions_rx.recv() {
             match event {
-                PrewarmTaskEvent::Terminate => {
-                    // received terminate signal
-                    break
+                PrewarmTaskEvent::TerminateTransactionExecution => {
+                    // stop tx processing
+                    self.pending.clear();
                 }
                 PrewarmTaskEvent::Outcome { proof_targets } => {
                     // completed a transaction, frees up one slot
                     self.in_progress -= 1;
                     self.send_multi_proof_targets(proof_targets);
                 }
+                PrewarmTaskEvent::Terminate { block_output } => {
+                    /// terminate the task
+                    if let Some(state) = block_output {
+                        self.save_cache(state);
+                    }
+
+                    break
+                }
             }
 
             // schedule followup transactions
             self.spawn_next();
-
-            if self.is_done() {
-                /// we're done and terminate this task
-                // TODO should we wait for terminate signale and flush the cache here?
-                break
-            }
         }
     }
 }
@@ -288,8 +301,13 @@ where
 
 /// The events the pre-warm task can handle.
 pub(super) enum PrewarmTaskEvent {
-    /// Forcefully terminate the task on demand, e.g. when no longer required.
-    Terminate,
+    /// Forcefully terminate all remaining transaction execution.
+    TerminateTransactionExecution,
+    /// Forcefully terminate the task on demand and update the shared cache with the given output before exiting.
+    Terminate {
+        /// The final block state output.
+        block_output: Option<BundleState>,
+    },
     /// The outcome of a pre-warm task
     Outcome {
         /// The prepared proof targets based on the evm state outcome
