@@ -30,10 +30,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let mut provider = provider_factory.provider_rw()?;
-        let best_block = provider.highest_persisted_block_number()?;
-        let best_header = provider
-            .sealed_header(best_block)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(best_block.into()))?;
+        let highest_block = provider.highest_persisted_block_number()?;
+        let highest_header = provider
+            .sealed_header(highest_block)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(highest_block.into()))?;
 
         let mut deleted_tries = 0;
         let tx_mut = provider.tx_mut();
@@ -52,10 +52,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         }
 
         let state_root = StateRoot::from_tx(tx_mut).root()?;
-        if state_root != best_header.state_root() {
+        if state_root != highest_header.state_root() {
             eyre::bail!(
                 "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",
-                best_header.state_root(),
+                highest_header.state_root(),
                 state_root
             );
         }

@@ -77,26 +77,26 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    /// Fetches the best block from the database.
+    /// Fetches the highest block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
+    fn lookup_highest_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         factory: ProviderFactory<N>,
     ) -> RethResult<Arc<SealedBlock<BlockTy<N>>>> {
         let provider = factory.provider()?;
 
-        let best_number =
+        let highest_number =
             provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
-        let best_hash = provider
-            .block_hash(best_number)?
+        let highest_hash = provider
+            .block_hash(highest_number)?
             .expect("the hash for the latest block is missing, database is corrupt");
 
         Ok(Arc::new(
             provider
-                .block(best_number.into())?
+                .block(highest_number.into())?
                 .expect("the header for the latest block is missing, database is corrupt")
-                .seal_unchecked(best_hash),
+                .seal_unchecked(highest_hash),
         ))
     }
 
@@ -124,16 +124,16 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let consensus: Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        // fetch the best block from the database
-        let best_block = self
-            .lookup_best_block(provider_factory.clone())
+        // fetch the highest block from the database
+        let highest_block = self
+            .lookup_highest_block(provider_factory.clone())
             .wrap_err("the head block is missing")?;
 
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
         let validator = TransactionValidationTaskExecutor::eth_builder(blockchain_db.clone())
-            .with_head_timestamp(best_block.timestamp)
+            .with_head_timestamp(highest_block.timestamp)
             .kzg_settings(self.kzg_settings()?)
             .with_additional_tasks(1)
             .build_with_tasks(ctx.task_executor.clone(), blob_store.clone());
@@ -205,9 +205,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .then(Vec::new),
         };
         let payload_config = PayloadConfig::new(
-            Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
+            Arc::new(SealedHeader::new(highest_block.header().clone(), highest_block.hash())),
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
-                best_block.hash(),
+                highest_block.hash(),
                 payload_attrs,
                 EngineApiMessageVersion::default() as u8,
             )?,
