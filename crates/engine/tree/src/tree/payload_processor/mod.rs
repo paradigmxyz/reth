@@ -22,6 +22,7 @@ use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider, StateProviderFactory, StateReader,
 };
+use reth_revm::db::BundleState;
 use reth_trie::TrieInput;
 use reth_workload_executor::WorkloadExecutor;
 use std::sync::{
@@ -121,7 +122,7 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let to_prewarm_task = self.spawn_prewarming_with(block, provider_builder, to_multi_proof);
+        let prewarm_handle = self.spawn_prewarming_with(block, provider_builder, to_multi_proof);
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -145,7 +146,7 @@ where
             let _ = state_root_tx.send(res);
         });
 
-        PayloadTaskHandle { prewarm: Some(to_prewarm_task), state_root: Some(state_root_rx) }
+        PayloadTaskHandle { prewarm_handle, state_root: Some(state_root_rx) }
     }
 
     /// Spawn prewarming exclusively
@@ -153,7 +154,8 @@ where
         &self,
         block: RecoveredBlock<N::Block>,
         provider_builder: StateProviderBuilder<N, P>,
-    ) where
+    ) -> PrewarmTaskHandle
+    where
         P: BlockReader
             + StateProviderFactory
             + StateReader
@@ -170,7 +172,7 @@ where
         block: RecoveredBlock<N::Block>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<StateRootMessage>>,
-    ) -> Sender<PrewarmTaskEvent>
+    ) -> PrewarmTaskHandle
     where
         P: BlockReader
             + StateProviderFactory
@@ -184,7 +186,7 @@ where
         let prewarm_ctx = PrewarmContext {
             header: block.clone_sealed_header(),
             evm_config: self.evm_config.clone(),
-            cache,
+            cache: cache.clone(),
             cache_metrics,
             provider: provider_builder,
         };
@@ -203,7 +205,7 @@ where
         self.executor.spawn_blocking(move || {
             prewarm_task.run();
         });
-        to_prewarm_task
+        PrewarmTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task) }
     }
 
     /// Returns the cache for the given parent hash.
@@ -221,7 +223,7 @@ pub struct PayloadTaskHandle {
     // TODO should internals be an enum to represent no parallel workload
 
     // must include the receiver of the state root wired to the sparse trie
-    prewarm: Option<Sender<PrewarmTaskEvent>>,
+    prewarm_handle: PrewarmTaskHandle,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<StateRootResult>>,
 }
@@ -232,25 +234,54 @@ impl PayloadTaskHandle {
         todo!()
     }
 
-    /// Terminates the pre-warming processing.
+    /// Terminates the pre-warming transaction processing.
     ///
-    /// This will terminate all inprogress tx pre-warm execution.
-    pub fn terminate_prewarming(&mut self) {
-        self.prewarm.take().map(|tx| tx.send(PrewarmTaskEvent::TerminateTransactionExecution).ok());
+    /// Note: This does not terminate the task yet.
+    pub fn stop_prewarming_execution(&self) {
+        self.prewarm_handle.stop_prewarming_execution()
     }
-}
 
-impl Drop for PayloadTaskHandle {
-    fn drop(&mut self) {
-        // Ensure we drop clean up
-        self.terminate_prewarming();
+    /// Terminates the entire pre-warming task.
+    ///
+    /// If the [`BundleState`] is provided it will update the shared cache.
+    pub fn terminate_prewarming_execution(&mut self, block_output: Option<BundleState>) {
+        self.prewarm_handle.terminate_prewarming_execution(block_output)
     }
 }
 
 /// Access to the spawned [`PrewarmTask`].
-pub(crate) struct PrewarmHandle {
-    // must include the receiver of the state root wired to the sparse trie
-    prewarm: Option<Sender<PrewarmTaskEvent>>,
+pub(crate) struct PrewarmTaskHandle {
+    /// The shared cache the task operates with.
+    cache: ProviderCaches,
+    /// Channel to the spawned prewarm task if any
+    to_prewarm_task: Option<Sender<PrewarmTaskEvent>>,
+}
+
+impl PrewarmTaskHandle {
+    /// Terminates the pre-warming transaction processing.
+    ///
+    /// Note: This does not terminate the task yet.
+    pub fn stop_prewarming_execution(&self) {
+        self.to_prewarm_task
+            .as_ref()
+            .map(|tx| tx.send(PrewarmTaskEvent::TerminateTransactionExecution).ok());
+    }
+
+    /// Terminates the entire pre-warming task.
+    ///
+    /// If the [`BundleState`] is provided it will update the shared cache.
+    pub fn terminate_prewarming_execution(&mut self, block_output: Option<BundleState>) {
+        self.to_prewarm_task
+            .take()
+            .map(|tx| tx.send(PrewarmTaskEvent::Terminate { block_output }).ok());
+    }
+}
+
+impl Drop for PrewarmTaskHandle {
+    fn drop(&mut self) {
+        // Ensure we always terminate on drop
+        self.terminate_prewarming_execution(None);
+    }
 }
 
 /// Shared access to most recently used cache.
