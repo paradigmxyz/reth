@@ -96,14 +96,13 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    // TODO: needs config to determine how to run this (prewarim optional e.g.)
     pub fn spawn<P>(
         &self,
         block: RecoveredBlock<N::Block>,
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadTaskHandle
+    ) -> PayloadHandle
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -122,7 +121,8 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let prewarm_handle = self.spawn_prewarming_with(block, provider_builder, to_multi_proof);
+        let prewarm_handle =
+            self.spawn_prewarming_with(block, provider_builder, to_multi_proof.clone());
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -146,7 +146,7 @@ where
             let _ = state_root_tx.send(res);
         });
 
-        PayloadTaskHandle { prewarm_handle, state_root: Some(state_root_rx) }
+        PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }
     }
 
     /// Spawn prewarming exclusively
@@ -163,7 +163,7 @@ where
             + Clone
             + 'static,
     {
-        let to_prewarm_task = self.spawn_prewarming_with(block, provider_builder, None);
+        self.spawn_prewarming_with(block, provider_builder, None)
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
@@ -210,7 +210,8 @@ where
 
     /// Returns the cache for the given parent hash.
     ///
-    /// If the given hash is different then what is recently cached, the cache will be invalidated.
+    /// If the given hash is different then what is recently cached, then this will create a new
+    /// instance.
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
         self.execution_cache.get_cache_for(parent_hash).unwrap_or_else(|| {
             let cache = ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
@@ -219,20 +220,24 @@ where
     }
 }
 
-pub struct PayloadTaskHandle {
-    // TODO should internals be an enum to represent no parallel workload
-
+/// Handle to all the spawned tasks.
+pub struct PayloadHandle {
+    /// Channel for evm state updates
+    to_multi_proof: Option<Sender<StateRootMessage>>,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: PrewarmTaskHandle,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<StateRootResult>>,
 }
 
-impl PayloadTaskHandle {
+impl PayloadHandle {
     /// Awaits the state root
     pub fn state_root(&self) -> StateRootResult {
         todo!()
     }
+
+    // TODO add state hook
+    // pub fn state_hook(&self) -> impl OnStateHook {
 
     /// Terminates the pre-warming transaction processing.
     ///
