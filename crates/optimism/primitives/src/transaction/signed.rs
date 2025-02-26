@@ -2,8 +2,8 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, Sealed, SignableTransaction, Signed, Transaction, TxEip1559,
-    TxEip2930, TxEip7702, TxLegacy, Typed2718,
+    Sealed, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
+    Typed2718, transaction::RlpEcdsaTx,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -12,7 +12,7 @@ use alloy_eips::{
 };
 use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{
-    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
+    Address, B256, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, keccak256,
 };
 use alloy_rlp::Header;
 use core::{
@@ -27,10 +27,10 @@ use op_alloy_consensus::{
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
+    InMemorySize, SignedTransaction,
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
-    InMemorySize, SignedTransaction,
 };
 use revm_context::TxEnv;
 use revm_optimism::transaction::deposit::DepositTransactionParts;
@@ -347,11 +347,7 @@ impl alloy_rlp::Decodable for OpTransactionSigned {
 
 impl Encodable2718 for OpTransactionSigned {
     fn type_flag(&self) -> Option<u8> {
-        if Typed2718::is_legacy(self) {
-            None
-        } else {
-            Some(self.ty())
-        }
+        if Typed2718::is_legacy(self) { None } else { Some(self.ty()) }
     }
 
     fn encode_2718_len(&self) -> usize {
@@ -715,7 +711,7 @@ pub mod serde_bincode_compat {
         TxEip1559, TxEip2930, TxEip7702, TxLegacy,
     };
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
-    use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
+    use reth_primitives_traits::{SignedTransaction, serde_bincode_compat::SerdeBincodeCompat};
     use serde::{Deserialize, Serialize};
 
     /// Bincode-compatible [`super::OpTypedTransaction`] serde implementation.

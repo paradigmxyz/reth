@@ -1,8 +1,8 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, B256, Bytes};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{transaction::TransactionRequest, Block, Bundle, StateContext};
+use alloy_rpc_types_eth::{Block, Bundle, StateContext, transaction::TransactionRequest};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -140,7 +140,7 @@ pub trait DebugApi {
     /// The first argument is the block number or tag.
     #[method(name = "executionWitness")]
     async fn debug_execution_witness(&self, block: BlockNumberOrTag)
-        -> RpcResult<ExecutionWitness>;
+    -> RpcResult<ExecutionWitness>;
 
     /// The `debug_executionWitnessByBlockHash` method allows for re-execution of a block with the
     /// purpose of generating an execution witness. The witness comprises of a map of all hashed

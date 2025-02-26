@@ -6,7 +6,7 @@ use reth_storage_api::CanonChainTracker;
 use std::{
     fmt,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 use tokio::time::{Instant, Interval};

@@ -52,11 +52,11 @@ pub enum Error {
     /// busy.
     ///
     /// This can mean:
-    /// - The database size was extended by other processes beyond the environment map size, and
-    ///   the engine was unable to extend the mapping while starting a read transaction. The
-    ///   environment should be re-opened to continue.
-    /// - The engine was unable to extend the mapping during a write transaction or an explicit
-    ///   call to change the geometry of the environment.
+    /// - The database size was extended by other processes beyond the environment map size, and the
+    ///   engine was unable to extend the mapping while starting a read transaction. The environment
+    ///   should be re-opened to continue.
+    /// - The engine was unable to extend the mapping during a write transaction or an explicit call
+    ///   to change the geometry of the environment.
     #[error("database engine was unable to extend mapping")]
     UnableExtendMapSize,
     /// Environment or database is not compatible with the requested operation or flags.
@@ -88,7 +88,9 @@ pub enum Error {
     BadSignature,
     /// Database should be recovered, but cannot be done automatically since it's in read-only
     /// mode.
-    #[error("database should be recovered, but cannot be done automatically since it's in read-only mode")]
+    #[error(
+        "database should be recovered, but cannot be done automatically since it's in read-only mode"
+    )]
     WannaRecovery,
     /// The given key value is mismatched to the current cursor position.
     #[error("the given key value is mismatched to the current cursor position")]
@@ -97,7 +99,9 @@ pub enum Error {
     #[error("invalid parameter specified")]
     DecodeError,
     /// The environment opened in read-only.
-    #[error("the environment opened in read-only, check <https://reth.rs/run/troubleshooting.html> for more")]
+    #[error(
+        "the environment opened in read-only, check <https://reth.rs/run/troubleshooting.html> for more"
+    )]
     Access,
     /// Database is too large for the current system.
     #[error("database is too large for the current system")]

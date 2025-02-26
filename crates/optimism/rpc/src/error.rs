@@ -1,10 +1,10 @@
 //! RPC errors specific to OP.
 
-use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
+use alloy_rpc_types_eth::{BlockError, error::EthRpcErrorCode};
 use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_rpc_eth_api::AsEthApiError;
-use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
+use reth_rpc_eth_types::{EthApiError, error::api::FromEvmHalt};
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
 use revm::context_interface::result::{EVMError, InvalidTransaction};
 use revm_optimism::{OpHaltReason, OpTransactionError};

@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 use alloy_primitives::hex_literal::hex;
 use alloy_rlp::Decodable;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;

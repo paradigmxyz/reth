@@ -1,35 +1,35 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
 use crate::{
-    constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
     EthChainSpec,
+    constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
 };
 use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
+    Header,
     constants::{
         DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH,
         SEPOLIA_GENESIS_HASH,
     },
-    Header,
 };
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
     eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
 };
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+use alloy_primitives::{Address, B256, BlockNumber, U256, address, b256};
 use alloy_trie::root::state_root_ref_unhashed;
 use derive_more::From;
 use reth_ethereum_forks::{
-    ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
-    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
+    ChainHardforks, DEV_HARDFORKS, DisplayHardforks, EthereumHardfork, EthereumHardforks,
+    ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head,
 };
 use reth_network_peers::{
-    base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
-    sepolia_nodes, NodeRecord,
+    NodeRecord, base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes,
+    op_testnet_nodes, sepolia_nodes,
 };
-use reth_primitives_traits::{sync::LazyLock, SealedHeader};
+use reth_primitives_traits::{SealedHeader, sync::LazyLock};
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
@@ -1051,7 +1051,7 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
-    use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
+    use alloy_trie::{EMPTY_ROOT_HASH, TrieAccount};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use std::{collections::HashMap, str::FromStr};
@@ -1792,16 +1792,20 @@ Post-merge hard forks (timestamp based):
         // Check that Paris is not active on terminal PoW block #15537393.
         let terminal_block_ttd = U256::from(58750003716598352816469_u128);
         let terminal_block_difficulty = U256::from(11055787484078698_u128);
-        assert!(!chainspec
-            .fork(EthereumHardfork::Paris)
-            .active_at_ttd(terminal_block_ttd, terminal_block_difficulty));
+        assert!(
+            !chainspec
+                .fork(EthereumHardfork::Paris)
+                .active_at_ttd(terminal_block_ttd, terminal_block_difficulty)
+        );
 
         // Check that Paris is active on first PoS block #15537394.
         let first_pos_block_ttd = U256::from(58750003716598352816469_u128);
         let first_pos_difficulty = U256::ZERO;
-        assert!(chainspec
-            .fork(EthereumHardfork::Paris)
-            .active_at_ttd(first_pos_block_ttd, first_pos_difficulty));
+        assert!(
+            chainspec
+                .fork(EthereumHardfork::Paris)
+                .active_at_ttd(first_pos_block_ttd, first_pos_difficulty)
+        );
     }
 
     #[test]
@@ -1938,9 +1942,24 @@ Post-merge hard forks (timestamp based):
 
         // alloc key -> expected rlp mapping
         let key_rlp = vec![
-            (hex!("0x658bdf435d810c91414ec09147daa6db62406379"), &hex!("0xf84d8089487a9a304539440000a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")[..]),
-            (hex!("0xaa00000000000000000000000000000000000000"), &hex!("0xf8440101a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0ce92c756baff35fa740c3557c1a971fd24d2d35b7c8e067880d50cd86bb0bc99")[..]),
-            (hex!("0xbb00000000000000000000000000000000000000"), &hex!("0xf8440102a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0e25a53cbb501cec2976b393719c63d832423dd70a458731a0b64e4847bbca7d2")[..]),
+            (
+                hex!("0x658bdf435d810c91414ec09147daa6db62406379"),
+                &hex!(
+                    "0xf84d8089487a9a304539440000a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+                )[..],
+            ),
+            (
+                hex!("0xaa00000000000000000000000000000000000000"),
+                &hex!(
+                    "0xf8440101a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0ce92c756baff35fa740c3557c1a971fd24d2d35b7c8e067880d50cd86bb0bc99"
+                )[..],
+            ),
+            (
+                hex!("0xbb00000000000000000000000000000000000000"),
+                &hex!(
+                    "0xf8440102a08afc95b7d18a226944b9c2070b6bda1c3a36afcc3730429d47579c94b9fe5850a0e25a53cbb501cec2976b393719c63d832423dd70a458731a0b64e4847bbca7d2"
+                )[..],
+            ),
         ];
 
         for (key, expected_rlp) in key_rlp {
@@ -2280,9 +2299,11 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn holesky_paris_activated_at_genesis() {
-        assert!(HOLESKY
-            .fork(EthereumHardfork::Paris)
-            .active_at_ttd(HOLESKY.genesis.difficulty, HOLESKY.genesis.difficulty));
+        assert!(
+            HOLESKY
+                .fork(EthereumHardfork::Paris)
+                .active_at_ttd(HOLESKY.genesis.difficulty, HOLESKY.genesis.difficulty)
+        );
     }
 
     #[test]
@@ -2423,10 +2444,12 @@ Post-merge hard forks (timestamp based):
             EthereumHardfork::Cancun.boxed(),
         ];
 
-        assert!(expected_hardforks
-            .iter()
-            .zip(hardforks.iter())
-            .all(|(expected, actual)| &**expected == *actual));
+        assert!(
+            expected_hardforks
+                .iter()
+                .zip(hardforks.iter())
+                .all(|(expected, actual)| &**expected == *actual)
+        );
         assert_eq!(expected_hardforks.len(), hardforks.len());
     }
 }

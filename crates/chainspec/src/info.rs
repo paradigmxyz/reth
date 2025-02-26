@@ -1,5 +1,5 @@
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{B256, BlockNumber};
 
 /// Current status of the blockchain's head.
 #[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]

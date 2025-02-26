@@ -1,8 +1,8 @@
 //! Payload builder service metrics.
 
 use reth_metrics::{
-    metrics::{Counter, Gauge},
     Metrics,
+    metrics::{Counter, Gauge},
 };
 
 /// Payload builder service metrics

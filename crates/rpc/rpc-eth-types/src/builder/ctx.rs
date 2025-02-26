@@ -7,8 +7,8 @@ use reth_storage_api::{BlockReader, BlockReaderIdExt};
 use reth_tasks::TaskSpawner;
 
 use crate::{
-    fee_history::fee_history_cache_new_blocks_task, EthConfig, EthStateCache, FeeHistoryCache,
-    GasPriceOracle,
+    EthConfig, EthStateCache, FeeHistoryCache, GasPriceOracle,
+    fee_history::fee_history_cache_new_blocks_task,
 };
 
 /// Context for building the `eth` namespace API.

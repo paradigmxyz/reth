@@ -7,10 +7,10 @@ use alloy_json_rpc::{RequestPacket, ResponsePacket};
 use alloy_pubsub::{PubSubConnect, PubSubFrontend};
 use alloy_rpc_types_engine::{Claims, JwtSecret};
 use alloy_transport::{
-    utils::guess_local_url, Authorization, BoxTransport, TransportConnect, TransportError,
-    TransportErrorKind, TransportFut,
+    Authorization, BoxTransport, TransportConnect, TransportError, TransportErrorKind,
+    TransportFut, utils::guess_local_url,
 };
-use alloy_transport_http::{reqwest::Url, Http, ReqwestTransport};
+use alloy_transport_http::{Http, ReqwestTransport, reqwest::Url};
 use alloy_transport_ipc::IpcConnect;
 use alloy_transport_ws::WsConnect;
 use futures::FutureExt;

@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 mod utils;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 use reth_libmdbx::{ffi::*, *};
 use std::{hint::black_box, ptr};

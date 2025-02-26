@@ -1,7 +1,7 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
 use super::EthResult;
-use alloy_consensus::{transaction::TransactionMeta, ReceiptEnvelope, TxReceipt};
+use alloy_consensus::{ReceiptEnvelope, TxReceipt, transaction::TransactionMeta};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};

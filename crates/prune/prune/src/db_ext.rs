@@ -1,9 +1,9 @@
 use crate::PruneLimiter;
 use reth_db_api::{
+    DatabaseError,
     cursor::{DbCursorRO, DbCursorRW, RangeWalker},
     table::{Table, TableRow},
     transaction::DbTxMut,
-    DatabaseError,
 };
 use std::{fmt::Debug, ops::RangeBounds};
 use tracing::debug;

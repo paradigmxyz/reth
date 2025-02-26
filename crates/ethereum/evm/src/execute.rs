@@ -1,8 +1,8 @@
 //! Ethereum block execution strategy.
 
 use crate::{
-    dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
     EthEvmConfig,
+    dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Header, Transaction};
@@ -11,20 +11,20 @@ use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{Address, B256};
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_evm::{
+    ConfigureEvm, Database, Evm, EvmEnv, EvmFactory, TransactionEnv,
     execute::{
-        balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
-        BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError,
+        BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
+        BlockExecutionStrategyFactory, BlockValidationError, balance_increment_state,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvm, Database, Evm, EvmEnv, EvmFactory, TransactionEnv,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{EthPrimitives, Receipt, Recovered, SealedBlock, TransactionSigned};
 use reth_primitives_traits::NodePrimitives;
 use reth_revm::{
-    context_interface::result::ResultAndState, db::State, specification::hardfork::SpecId,
-    DatabaseCommit,
+    DatabaseCommit, context_interface::result::ResultAndState, db::State,
+    specification::hardfork::SpecId,
 };
 
 impl<EvmF> BlockExecutionStrategyFactory for EthEvmConfig<EvmF>
@@ -269,7 +269,7 @@ impl EthExecutorProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{constants::ETH_TO_WEI, Header, TxLegacy};
+    use alloy_consensus::{Header, TxLegacy, constants::ETH_TO_WEI};
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
@@ -277,19 +277,19 @@ mod tests {
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
         eip7685::EMPTY_REQUESTS_HASH,
     };
-    use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+    use alloy_primitives::{B256, Bytes, TxKind, U256, b256, fixed_bytes, keccak256};
     use reth_chainspec::{ChainSpecBuilder, ForkCondition, MAINNET};
     use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives::{Account, Block, BlockBody, RecoveredBlock, Transaction};
-    use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Block as _};
+    use reth_primitives_traits::{Block as _, crypto::secp256k1::public_key_to_address};
     use reth_revm::{
+        Database,
         database::StateProviderDatabase,
         db::TransitionState,
-        primitives::{address, BLOCKHASH_SERVE_WINDOW},
+        primitives::{BLOCKHASH_SERVE_WINDOW, address},
         state::EvmState,
         test_utils::StateProviderTest,
-        Database,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use secp256k1::{Keypair, Secp256k1};
@@ -665,10 +665,9 @@ mod tests {
         // we load the account first, because revm expects it to be
         // loaded
         executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
+        }));
     }
 
     #[test]
@@ -703,10 +702,9 @@ mod tests {
         // we load the account first, because revm expects it to be
         // loaded
         executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
+        }));
     }
 
     #[test]
@@ -745,8 +743,10 @@ mod tests {
             );
 
         // the hash for the ancestor of the fork activation block should be present
-        assert!(executor
-            .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some()));
+        assert!(
+            executor
+                .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some())
+        );
         assert_ne!(
             executor.with_state_mut(|state| state
                 .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block - 1))
@@ -755,10 +755,12 @@ mod tests {
         );
 
         // the hash of the block itself should not be in storage
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state
+                .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
+                .unwrap()
+                .is_zero()
+        }));
     }
 
     // <https://github.com/ethereum/EIPs/pull/9144>
@@ -799,8 +801,10 @@ mod tests {
             );
 
         // the hash for the ancestor of the fork activation block should be present
-        assert!(executor
-            .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some()));
+        assert!(
+            executor
+                .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some())
+        );
     }
 
     #[test]
@@ -836,10 +840,9 @@ mod tests {
         // we load the account first, because revm expects it to be
         // loaded
         executor.with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap());
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap().is_zero()
+        }));
 
         // attempt to execute block 1, this should not fail
         let header = Header {
@@ -863,18 +866,19 @@ mod tests {
             );
 
         // the block hash of genesis should now be in storage, but not block 1
-        assert!(executor
-            .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some()));
+        assert!(
+            executor
+                .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some())
+        );
         assert_ne!(
             executor.with_state_mut(|state| state
                 .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
                 .unwrap()),
             U256::ZERO
         );
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(1))
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap().is_zero()
+        }));
 
         // attempt to execute block 2, this should not fail
         let header = Header {
@@ -897,8 +901,10 @@ mod tests {
             );
 
         // the block hash of genesis and block 1 should now be in storage, but not block 2
-        assert!(executor
-            .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some()));
+        assert!(
+            executor
+                .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some())
+        );
         assert_ne!(
             executor.with_state_mut(|state| state
                 .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
@@ -911,10 +917,9 @@ mod tests {
                 .unwrap()),
             U256::ZERO
         );
-        assert!(executor.with_state_mut(|state| state
-            .storage(HISTORY_STORAGE_ADDRESS, U256::from(2))
-            .unwrap()
-            .is_zero()));
+        assert!(executor.with_state_mut(|state| {
+            state.storage(HISTORY_STORAGE_ADDRESS, U256::from(2)).unwrap().is_zero()
+        }));
     }
 
     #[test]
@@ -941,7 +946,9 @@ mod tests {
         );
 
         // https://github.com/lightclient/sys-asm/blob/9282bdb9fd64e024e27f60f507486ffb2183cba2/test/Withdrawal.t.sol.in#L36
-        let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+        let validator_public_key = fixed_bytes!(
+            "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+        );
         let withdrawal_amount = fixed_bytes!("0203040506070809");
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
         assert_eq!(input.len(), 56);
@@ -1016,7 +1023,9 @@ mod tests {
         );
 
         // Define the validator public key and withdrawal amount as fixed bytes
-        let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+        let validator_public_key = fixed_bytes!(
+            "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+        );
         let withdrawal_amount = fixed_bytes!("2222222222222222");
         // Concatenate the validator public key and withdrawal amount into a single byte array
         let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();

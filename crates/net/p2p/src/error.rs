@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use super::headers::client::HeadersRequest;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{B256, BlockNumber};
 use derive_more::{Display, Error};
 use reth_consensus::ConsensusError;
 use reth_network_peers::WithPeerId;

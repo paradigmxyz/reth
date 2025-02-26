@@ -1,12 +1,12 @@
 use super::headers::client::HeadersRequest;
 use crate::{
+    BlockClient,
     bodies::client::{BodiesClient, SingleBodyRequest},
     error::PeerRequestResult,
     headers::client::{HeadersClient, SingleHeaderRequest},
-    BlockClient,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{Sealable, B256};
+use alloy_primitives::{B256, Sealable};
 use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
@@ -19,7 +19,7 @@ use std::{
     hash::Hash,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tracing::debug;
 

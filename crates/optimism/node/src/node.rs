@@ -1,28 +1,28 @@
 //! Optimism Node types config.
 
 use crate::{
+    OpEngineApiBuilder, OpEngineTypes,
     args::RollupArgs,
     engine::OpEngineValidator,
     txpool::{OpTransactionPool, OpTransactionValidator},
-    OpEngineApiBuilder, OpEngineTypes,
 };
 use op_alloy_consensus::OpPooledTransaction;
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{
-    execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
+    ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor, execute::BasicBlockExecutorProvider,
 };
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder,
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
         NetworkBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
-    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
@@ -34,20 +34,20 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
+    OpEthApi, OpEthApiError, SequencerClient,
     eth::ext::OpEthExtApi,
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
-    OpEthApi, OpEthApiError, SequencerClient,
 };
 use reth_optimism_txpool::conditional::MaybeConditionalTransaction;
-use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_provider::{CanonStateSubscriptions, EthStorage, providers::ProviderFactoryBuilder};
 use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
-    TransactionPool, TransactionValidationTaskExecutor,
+    CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction, TransactionPool,
+    TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
@@ -240,14 +240,14 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOn
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Engine = OpEngineTypes,
+            Types: NodeTypesWithEngine<
+                ChainSpec = OpChainSpec,
+                Primitives = OpPrimitives,
+                Storage = OpStorage,
+                Engine = OpEngineTypes,
+            >,
+            Evm: ConfigureEvmEnv<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
         >,
-        Evm: ConfigureEvmEnv<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
-    >,
     OpEthApiError: FromEvmError<N::Evm>,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
 {
@@ -312,14 +312,14 @@ where
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Engine = OpEngineTypes,
+            Types: NodeTypesWithEngine<
+                ChainSpec = OpChainSpec,
+                Primitives = OpPrimitives,
+                Storage = OpStorage,
+                Engine = OpEngineTypes,
+            >,
+            Evm: ConfigureEvm<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
         >,
-        Evm: ConfigureEvm<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
-    >,
     OpEthApiError: FromEvmError<N::Evm>,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
 {
@@ -776,10 +776,10 @@ pub struct OpEngineValidatorBuilder;
 impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
     Types: NodeTypesWithEngine<
-        ChainSpec = OpChainSpec,
-        Primitives = OpPrimitives,
-        Engine = OpEngineTypes,
-    >,
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Engine = OpEngineTypes,
+        >,
     Node: FullNodeComponents<Types = Types>,
 {
     type Validator = OpEngineValidator<Node::Provider>;

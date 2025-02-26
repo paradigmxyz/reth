@@ -2,7 +2,7 @@
 
 use alloy_primitives::B256;
 use alloy_rpc_types_debug::ExecutionWitness;
-use jsonrpsee_core::{async_trait, RpcResult};
+use jsonrpsee_core::{RpcResult, async_trait};
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{ConfigureEvm, ConfigureEvmFor};
@@ -14,11 +14,11 @@ use reth_provider::{
     BlockReaderIdExt, NodePrimitivesProvider, ProviderError, ProviderResult, StateProviderFactory,
 };
 pub use reth_rpc_api::DebugExecutionWitnessApiServer;
-use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use reth_rpc_server_types::{ToRpcResult, result::internal_rpc_err};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{fmt::Debug, sync::Arc};
-use tokio::sync::{oneshot, Semaphore};
+use tokio::sync::{Semaphore, oneshot};
 
 /// An extension to the `debug_` namespace of the RPC API.
 pub struct OpDebugWitnessApi<Pool, Provider: NodePrimitivesProvider, EvmConfig: ConfigureEvm> {

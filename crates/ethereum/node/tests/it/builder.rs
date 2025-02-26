@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use reth_db::{
-    test_utils::{create_test_rw_db, TempDatabase},
     DatabaseEnv,
+    test_utils::{TempDatabase, create_test_rw_db},
 };
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_builder::{EngineNodeLauncher, FullNodeComponents, NodeBuilder, NodeConfig};

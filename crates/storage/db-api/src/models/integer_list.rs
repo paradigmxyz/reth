@@ -1,8 +1,8 @@
 //! Implements [`Compress`] and [`Decompress`] for [`IntegerList`]
 
 use crate::{
-    table::{Compress, Decompress},
     DatabaseError,
+    table::{Compress, Decompress},
 };
 use bytes::BufMut;
 use core::fmt;

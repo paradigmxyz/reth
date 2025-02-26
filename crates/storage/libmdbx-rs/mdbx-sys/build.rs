@@ -43,8 +43,8 @@ fn main() {
 
 fn generate_bindings(mdbx: &Path, out_file: &Path) {
     use bindgen::{
-        callbacks::{IntKind, ParseCallbacks},
         Formatter,
+        callbacks::{IntKind, ParseCallbacks},
     };
 
     #[derive(Debug)]

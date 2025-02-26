@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::PooledTransaction, Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844WithSidecar,
-    TxEip7702, TxLegacy, TxType,
+    Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType,
+    transaction::PooledTransaction,
 };
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash};

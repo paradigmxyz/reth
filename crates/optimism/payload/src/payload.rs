@@ -5,13 +5,13 @@ use std::{fmt::Debug, sync::Arc};
 use alloy_eips::{
     eip1559::BaseFeeParams, eip2718::Decodable2718, eip4895::Withdrawals, eip7685::Requests,
 };
-use alloy_primitives::{keccak256, Address, Bytes, B256, B64, U256};
+use alloy_primitives::{Address, B64, B256, Bytes, U256, keccak256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1,
     ExecutionPayloadV3, PayloadId,
 };
-use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
+use op_alloy_consensus::{EIP1559ParamError, encode_holocene_extra_data};
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
@@ -19,7 +19,7 @@ use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{transaction::WithEncoded, Block, NodePrimitives, SealedBlock};
+use reth_primitives::{Block, NodePrimitives, SealedBlock, transaction::WithEncoded};
 use reth_primitives_traits::SignedTransaction;
 
 /// Optimism Payload Builder Attributes
@@ -359,7 +359,7 @@ pub(crate) fn payload_id_optimism(
 mod tests {
     use super::*;
     use crate::OpPayloadAttributes;
-    use alloy_primitives::{address, b256, bytes, FixedBytes};
+    use alloy_primitives::{FixedBytes, address, b256, bytes};
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_payload_primitives::EngineApiMessageVersion;

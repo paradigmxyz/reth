@@ -3,15 +3,15 @@
 use boyer_moore_magiclen::BMByte;
 use eyre::Result;
 use reth_db_api::{
+    DatabaseError, RawTable, TableRawRow,
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
     table::{Decode, Decompress, DupSort, Table, TableRow},
     transaction::{DbTx, DbTxMut},
-    DatabaseError, RawTable, TableRawRow,
 };
 use reth_fs_util as fs;
 use reth_node_types::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, DBProvider, ProviderFactory};
+use reth_provider::{ChainSpecProvider, DBProvider, ProviderFactory, providers::ProviderNodeTypes};
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
 

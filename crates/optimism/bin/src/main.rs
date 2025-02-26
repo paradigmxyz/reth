@@ -1,8 +1,8 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
 use clap::Parser;
-use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
-use reth_optimism_node::{args::RollupArgs, OpNode};
+use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
+use reth_optimism_node::{OpNode, args::RollupArgs};
 use tracing::info;
 
 #[global_allocator]

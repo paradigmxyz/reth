@@ -1,9 +1,9 @@
 //! Helpers for testing.
 
 use crate::{
+    Database,
     execute::{BasicBlockExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
-    Database,
 };
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::eip7685::Requests;

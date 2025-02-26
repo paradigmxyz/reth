@@ -18,14 +18,14 @@ use reth::{
     api::NodeTypesWithDBAdapter,
     beacon_consensus::EthBeaconConsensus,
     providers::{
-        providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
+        providers::{BlockchainProvider, StaticFileProvider},
     },
     rpc::eth::EthApi,
     utils::open_db_read_only,
 };
 use reth_chainspec::ChainSpecBuilder;
-use reth_db::{mdbx::DatabaseArguments, ClientVersion, DatabaseEnv};
+use reth_db::{ClientVersion, DatabaseEnv, mdbx::DatabaseArguments};
 
 // Bringing up the RPC
 use reth::rpc::builder::{

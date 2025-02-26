@@ -1,10 +1,10 @@
 use crate::{
+    BlockClient,
     bodies::client::BodiesClient,
     download::DownloadClient,
     error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
-    BlockClient,
 };
 use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};

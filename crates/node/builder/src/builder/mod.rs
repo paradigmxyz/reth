@@ -3,11 +3,11 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
+    BlockReaderFor, EngineNodeLauncher, LaunchNode, Node,
     common::WithConfigs,
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    BlockReaderFor, EngineNodeLauncher, LaunchNode, Node,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
@@ -17,8 +17,8 @@ use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_engine_tree::tree::TreeConfig;
 use reth_exex::ExExContext;
 use reth_network::{
-    transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
-    NetworkHandle, NetworkManager, NetworkPrimitives,
+    NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
+    NetworkPrimitives, transactions::TransactionsManagerConfig,
 };
 use reth_node_api::{
     FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
@@ -31,8 +31,8 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider},
     ChainSpecProvider, FullProvider,
+    providers::{BlockchainProvider, NodeTypesForProvider},
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
@@ -173,11 +173,7 @@ impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     where
         F: FnOnce(Self) -> Self,
     {
-        if cond {
-            f(self)
-        } else {
-            self
-        }
+        if cond { f(self) } else { self }
     }
 }
 
@@ -425,11 +421,7 @@ where
     where
         F: FnOnce(Self) -> Self,
     {
-        if cond {
-            f(self)
-        } else {
-            self
-        }
+        if cond { f(self) } else { self }
     }
 
     /// Sets the hook that is run once the node's components are initialized.
@@ -512,11 +504,7 @@ where
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
-        if cond {
-            self.install_exex(exex_id, exex)
-        } else {
-            self
-        }
+        if cond { self.install_exex(exex_id, exex) } else { self }
     }
 
     /// Launches the node with the given launcher.

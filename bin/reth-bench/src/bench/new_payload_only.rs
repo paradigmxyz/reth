@@ -5,8 +5,8 @@ use crate::{
         context::BenchContext,
         new_payload_fcu::from_any_rpc_block,
         output::{
-            NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX,
-            NEW_PAYLOAD_OUTPUT_SUFFIX,
+            GAS_OUTPUT_SUFFIX, NEW_PAYLOAD_OUTPUT_SUFFIX, NewPayloadResult, TotalGasOutput,
+            TotalGasRow,
         },
     },
     valid_payload::call_new_payload,

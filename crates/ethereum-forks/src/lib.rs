@@ -25,7 +25,7 @@ mod forkcondition;
 mod hardfork;
 mod hardforks;
 
-pub use hardfork::{EthereumHardfork, Hardfork, DEV_HARDFORKS};
+pub use hardfork::{DEV_HARDFORKS, EthereumHardfork, Hardfork};
 
 pub use display::DisplayHardforks;
 pub use forkcondition::ForkCondition;

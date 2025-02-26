@@ -3,9 +3,9 @@
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
 use crate::{
+    Database,
     execute::Executor,
     system_calls::{OnStateHook, StateChangeSource},
-    Database,
 };
 use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};

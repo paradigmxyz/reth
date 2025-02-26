@@ -6,11 +6,11 @@ use reth_provider::BlockReader;
 /// a [`BlockReader`] whose associated types match the [`NetworkPrimitives`] associated types.
 pub trait BlockReaderFor<N: NetworkPrimitives>:
     BlockReader<
-    Block = N::Block,
-    Header = N::BlockHeader,
-    Transaction = <N::BlockBody as BlockBody>::Transaction,
-    Receipt = N::Receipt,
->
+        Block = N::Block,
+        Header = N::BlockHeader,
+        Transaction = <N::BlockBody as BlockBody>::Transaction,
+        Receipt = N::Receipt,
+    >
 {
 }
 
@@ -18,10 +18,10 @@ impl<N, T> BlockReaderFor<N> for T
 where
     N: NetworkPrimitives,
     T: BlockReader<
-        Block = N::Block,
-        Header = N::BlockHeader,
-        Transaction = <N::BlockBody as BlockBody>::Transaction,
-        Receipt = N::Receipt,
-    >,
+            Block = N::Block,
+            Header = N::BlockHeader,
+            Transaction = <N::BlockBody as BlockBody>::Transaction,
+            Receipt = N::Receipt,
+        >,
 {
 }

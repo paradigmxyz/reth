@@ -1,15 +1,15 @@
 //! Support for handling events emitted by node components.
 
 use crate::cl::ConsensusLayerHealthEvent;
-use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_consensus::{BlockHeader, constants::GWEI_TO_WEI};
+use alloy_primitives::{B256, BlockNumber};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
 use reth_network_api::PeersInfo;
-use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
+use reth_primitives_traits::{BlockBody, NodePrimitives, format_gas, format_gas_throughput};
 use reth_prune_types::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileProducerEvent;
@@ -289,16 +289,26 @@ impl NodeState {
         if self.current_stage.is_none() {
             match event {
                 ConsensusLayerHealthEvent::NeverSeen => {
-                    warn!("Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
+                    warn!(
+                        "Post-merge network, but never seen beacon client. Please launch one to follow the chain!"
+                    )
                 }
                 ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
-                    warn!(?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
+                    warn!(
+                        ?period,
+                        "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!"
+                    )
                 }
                 ConsensusLayerHealthEvent::NeverReceivedUpdates => {
-                    warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
+                    warn!(
+                        "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!"
+                    )
                 }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                    warn!(?period, "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!")
+                    warn!(
+                        ?period,
+                        "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!"
+                    )
                 }
             }
         }
@@ -338,11 +348,7 @@ struct OptionalField<T: Display>(Option<T>);
 
 impl<T: Display> Display for OptionalField<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(field) = &self.0 {
-            write!(f, "{field}")
-        } else {
-            write!(f, "None")
-        }
+        if let Some(field) = &self.0 { write!(f, "{field}") } else { write!(f, "None") }
     }
 }
 

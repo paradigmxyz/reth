@@ -15,12 +15,12 @@ use reth_execution_types::ExecutionOutcome;
 use reth_node_builder::ReceiptTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives, OpReceipt};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, bedrock::is_dup_tx};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
+    DatabaseProviderFactory, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StageCheckpointWriter, StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -146,7 +146,9 @@ where
             }
         }
         None => {
-            eyre::bail!("Receipts was not initialized. Please import blocks and transactions before calling this command.");
+            eyre::bail!(
+                "Receipts was not initialized. Please import blocks and transactions before calling this command."
+            );
         }
     }
 
@@ -235,12 +237,16 @@ where
         .expect("transaction static files must exist before importing receipts");
 
     if total_receipts != total_imported_txns {
-        eyre::bail!("Number of receipts ({total_receipts}) inconsistent with transactions {total_imported_txns}")
+        eyre::bail!(
+            "Number of receipts ({total_receipts}) inconsistent with transactions {total_imported_txns}"
+        )
     }
 
     // Only commit if the receipt block height matches the one from transactions.
     if highest_block_receipts != highest_block_transactions {
-        eyre::bail!("Receipt block height ({highest_block_receipts}) inconsistent with transactions' {highest_block_transactions}")
+        eyre::bail!(
+            "Receipt block height ({highest_block_receipts}) inconsistent with transactions' {highest_block_transactions}"
+        )
     }
 
     // Required or any access-write provider factory will attempt to unwind to 0.

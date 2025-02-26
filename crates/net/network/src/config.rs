@@ -1,22 +1,22 @@
 //! Network config support
 
 use crate::{
+    NetworkHandle, NetworkManager,
     error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
     transactions::TransactionsManagerConfig,
-    NetworkHandle, NetworkManager,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
-use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
+use reth_discv4::{DEFAULT_DISCOVERY_ADDRESS, Discv4Config, Discv4ConfigBuilder, NatResolver};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, Status,
 };
 use reth_ethereum_forks::{ForkFilter, Head};
-use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
+use reth_network_peers::{PeerId, TrustedPeer, mainnet_nodes, pk2id, sepolia_nodes};
 use reth_network_types::{PeersConfig, SessionsConfig};
-use reth_storage_api::{noop::NoopProvider, BlockNumReader, BlockReader, HeaderProvider};
+use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider, noop::NoopProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
@@ -466,11 +466,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Disables all discovery if the given condition is true.
     pub fn disable_discovery_if(self, disable: bool) -> Self {
-        if disable {
-            self.disable_discovery()
-        } else {
-            self
-        }
+        if disable { self.disable_discovery() } else { self }
     }
 
     /// Disable the Discv4 discovery.
@@ -481,20 +477,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Disable the DNS discovery if the given condition is true.
     pub fn disable_dns_discovery_if(self, disable: bool) -> Self {
-        if disable {
-            self.disable_dns_discovery()
-        } else {
-            self
-        }
+        if disable { self.disable_dns_discovery() } else { self }
     }
 
     /// Disable the Discv4 discovery if the given condition is true.
     pub fn disable_discv4_discovery_if(self, disable: bool) -> Self {
-        if disable {
-            self.disable_discv4_discovery()
-        } else {
-            self
-        }
+        if disable { self.disable_discv4_discovery() } else { self }
     }
 
     /// Adds a new additional protocol to the `RLPx` sub-protocol list.

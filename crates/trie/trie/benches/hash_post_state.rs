@@ -1,9 +1,9 @@
 #![allow(missing_docs, unreachable_pub)]
-use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use alloy_primitives::{Address, B256, U256, keccak256, map::HashMap};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher};
-use revm_database::{states::BundleBuilder, BundleAccount};
+use revm_database::{BundleAccount, states::BundleBuilder};
 
 pub fn hash_post_state(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash Post State");

@@ -22,8 +22,8 @@ use reth_consensus_common::validation::{
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
-    constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
     Block, BlockHeader,
+    constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 

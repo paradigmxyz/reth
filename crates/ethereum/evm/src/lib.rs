@@ -203,7 +203,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec};
-    use reth_evm::{execute::ProviderError, EvmEnv};
+    use reth_evm::{EvmEnv, execute::ProviderError};
     use reth_revm::{
         context::{BlockEnv, CfgEnv},
         database_interface::EmptyDBTyped,

@@ -1,11 +1,11 @@
 //! A generic [`NodeComponentsBuilder`]
 
 use crate::{
+    BuilderContext, FullNodeTypes,
     components::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
         PayloadServiceBuilder, PoolBuilder,
     },
-    BuilderContext, FullNodeTypes,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::{BlockExecutionStrategyFactory, BlockExecutorProvider};
@@ -296,22 +296,22 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
 where
     Node: FullNodeTypes,
     PoolB: PoolBuilder<
-        Node,
-        Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Pooled = <NetworkB::Primitives as NetworkPrimitives>::PooledTransaction,
+            Node,
+            Pool: TransactionPool<
+                Transaction: PoolTransaction<
+                    Pooled = <NetworkB::Primitives as NetworkPrimitives>::PooledTransaction,
+                >,
             >,
         >,
-    >,
     NetworkB: NetworkBuilder<
-        Node,
-        PoolB::Pool,
-        Primitives: NetworkPrimitives<
-            BlockHeader = HeaderTy<Node::Types>,
-            BlockBody = BodyTy<Node::Types>,
-            Block = BlockTy<Node::Types>,
+            Node,
+            PoolB::Pool,
+            Primitives: NetworkPrimitives<
+                BlockHeader = HeaderTy<Node::Types>,
+                BlockBody = BodyTy<Node::Types>,
+                Block = BlockTy<Node::Types>,
+            >,
         >,
-    >,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
     ExecB: ExecutorBuilder<Node>,
     ConsB: ConsensusBuilder<Node>,
@@ -392,10 +392,10 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
 impl<Node, N, F, Fut, Pool, EVM, Executor, Cons> NodeComponentsBuilder<Node> for F
 where
     N: NetworkPrimitives<
-        BlockHeader = HeaderTy<Node::Types>,
-        BlockBody = BodyTy<Node::Types>,
-        Block = BlockTy<Node::Types>,
-    >,
+            BlockHeader = HeaderTy<Node::Types>,
+            BlockBody = BodyTy<Node::Types>,
+            Block = BlockTy<Node::Types>,
+        >,
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Executor, Cons>>> + Send,

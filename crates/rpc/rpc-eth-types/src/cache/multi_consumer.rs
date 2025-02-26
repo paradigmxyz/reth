@@ -5,7 +5,7 @@ use super::metrics::CacheMetrics;
 use reth_primitives_traits::InMemorySize;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     fmt::{self, Debug, Formatter},
     hash::Hash,
 };

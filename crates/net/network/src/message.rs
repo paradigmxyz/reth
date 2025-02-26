@@ -4,20 +4,20 @@
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{B256, Bytes};
 use futures::FutureExt;
 use reth_eth_wire::{
-    capability::RawCapabilityMessage, message::RequestPair, BlockBodies, BlockHeaders, EthMessage,
-    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
-    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
-    SharedTransactions, Transactions,
+    BlockBodies, BlockHeaders, EthMessage, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders,
+    NetworkPrimitives, NewBlock, NewBlockHashes, NewPooledTransactionHashes, NodeData,
+    PooledTransactions, Receipts, SharedTransactions, Transactions,
+    capability::RawCapabilityMessage, message::RequestPair,
 };
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_primitives::ReceiptWithBloom;
 use std::{
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::sync::oneshot;
 

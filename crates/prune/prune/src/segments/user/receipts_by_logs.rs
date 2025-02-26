@@ -1,7 +1,7 @@
 use crate::{
+    PrunerError,
     db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
-    PrunerError,
 };
 use alloy_consensus::TxReceipt;
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
@@ -10,8 +10,8 @@ use reth_provider::{
     BlockReader, DBProvider, NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
 };
 use reth_prune_types::{
-    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig, SegmentOutput,
-    MINIMUM_PRUNING_DISTANCE,
+    MINIMUM_PRUNING_DISTANCE, PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
+    ReceiptsLogPruneConfig, SegmentOutput,
 };
 use tracing::{instrument, trace};
 #[derive(Debug)]
@@ -236,7 +236,7 @@ mod tests {
     use reth_prune_types::{PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
-        self, random_block_range, random_eoa_account, random_log, random_receipt, BlockRangeParams,
+        self, BlockRangeParams, random_block_range, random_eoa_account, random_log, random_receipt,
     };
     use std::collections::BTreeMap;
 

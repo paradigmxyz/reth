@@ -1,6 +1,7 @@
 //! Mock database
 
 use crate::{
+    DatabaseError,
     common::{IterPairResult, PairResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
@@ -9,7 +10,6 @@ use crate::{
     database::Database,
     table::{DupSort, Encode, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
-    DatabaseError,
 };
 use core::ops::Bound;
 use std::{collections::BTreeMap, ops::RangeBounds};

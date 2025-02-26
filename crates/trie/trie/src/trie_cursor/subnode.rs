@@ -1,4 +1,4 @@
-use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
+use crate::{BranchNodeCompact, CHILD_INDEX_RANGE, Nibbles, StoredSubNode};
 use alloy_primitives::B256;
 
 /// Cursor for iterating over a subtrie.

@@ -18,7 +18,7 @@ use std::{
     collections::HashMap,
     future::Future,
     net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{Arc, atomic::AtomicU64},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -30,12 +30,12 @@ use crate::{
     session::active::ActiveSession,
 };
 use counter::SessionCounter;
-use futures::{future::Either, io, FutureExt, StreamExt};
-use reth_ecies::{stream::ECIESStream, ECIESError};
+use futures::{FutureExt, StreamExt, future::Either, io};
+use reth_ecies::{ECIESError, stream::ECIESStream};
 use reth_eth_wire::{
-    errors::EthStreamError, multiplex::RlpxProtocolMultiplexer, Capabilities, DisconnectReason,
-    EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status, UnauthedEthStream,
-    UnauthedP2PStream,
+    Capabilities, DisconnectReason, EthVersion, HelloMessageWithProtocols, NetworkPrimitives,
+    Status, UnauthedEthStream, UnauthedP2PStream, errors::EthStreamError,
+    multiplex::RlpxProtocolMultiplexer,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;

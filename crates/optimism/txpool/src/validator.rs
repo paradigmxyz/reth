@@ -5,7 +5,7 @@ use reth_chainspec::ChainSpecProvider;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
+    Block, BlockBody, GotExpected, SealedBlock, transaction::error::InvalidTransactionError,
 };
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
@@ -14,8 +14,8 @@ use reth_transaction_pool::{
 };
 use revm_optimism::L1BlockInfo;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
 };
 
 /// Tracks additional infos for the current block.

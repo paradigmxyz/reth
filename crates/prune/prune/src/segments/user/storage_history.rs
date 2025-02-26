@@ -1,11 +1,11 @@
 use crate::{
-    db_ext::DbTxPruneExt,
-    segments::{user::history::prune_history_indices, PruneInput, Segment, SegmentOutput},
     PrunerError,
+    db_ext::DbTxPruneExt,
+    segments::{PruneInput, Segment, SegmentOutput, user::history::prune_history_indices},
 };
 use itertools::Itertools;
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
+    models::{BlockNumberAddress, storage_sharded_key::StorageShardedKey},
     tables,
     transaction::DbTxMut,
 };
@@ -134,17 +134,17 @@ where
 #[cfg(test)]
 mod tests {
     use crate::segments::{
-        user::storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE, PruneInput, PruneLimiter, Segment,
-        SegmentOutput, StorageHistory,
+        PruneInput, PruneLimiter, Segment, SegmentOutput, StorageHistory,
+        user::storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE,
     };
-    use alloy_primitives::{BlockNumber, B256};
+    use alloy_primitives::{B256, BlockNumber};
     use assert_matches::assert_matches;
-    use reth_db_api::{tables, BlockNumberList};
+    use reth_db_api::{BlockNumberList, tables};
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
-        self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
+        self, BlockRangeParams, random_block_range, random_changeset_range, random_eoa_accounts,
     };
     use std::{collections::BTreeMap, ops::AddAssign};
 

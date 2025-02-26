@@ -1,16 +1,16 @@
 use crate::error::{RpcError, ServerKind};
 use http::header::AUTHORIZATION;
 use jsonrpsee::{
-    core::RegisterMethodError,
-    http_client::{transport::HttpBackend, HeaderMap},
-    server::{AlreadyStoppedError, RpcModule},
     Methods,
+    core::RegisterMethodError,
+    http_client::{HeaderMap, transport::HttpBackend},
+    server::{AlreadyStoppedError, RpcModule},
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use reth_rpc_layer::{
-    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
-    JwtSecret,
+    AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator, JwtSecret,
+    secret_to_bearer_header,
 };
 use reth_rpc_server_types::constants;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

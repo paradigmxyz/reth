@@ -4,9 +4,9 @@ use std::{
 };
 
 use crate::{
+    DatabaseError,
     common::{IterPairResult, PairResult, ValueOnlyResult},
     table::{DupSort, Table, TableRow},
-    DatabaseError,
 };
 
 /// A read-only cursor over table `T`.

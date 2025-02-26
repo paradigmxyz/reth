@@ -1,16 +1,16 @@
 //! API of a signed transaction.
 
 use crate::{
-    crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat,
+    crypto::secp256k1::{recover_signer, recover_signer_unchecked},
 };
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::{
-    transaction::{PooledTransaction, Recovered},
     SignableTransaction,
+    transaction::{PooledTransaction, Recovered},
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
+use alloy_primitives::{Address, B256, PrimitiveSignature as Signature, TxHash, keccak256};
 use core::hash::Hash;
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.

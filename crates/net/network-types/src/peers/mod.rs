@@ -11,8 +11,8 @@ use alloy_eip2124::ForkId;
 use tracing::trace;
 
 use crate::{
-    is_banned_reputation, PeerAddr, PeerConnectionState, PeerKind, ReputationChangeOutcome,
-    DEFAULT_REPUTATION,
+    DEFAULT_REPUTATION, PeerAddr, PeerConnectionState, PeerKind, ReputationChangeOutcome,
+    is_banned_reputation,
 };
 
 /// Tracks info about a single peer.

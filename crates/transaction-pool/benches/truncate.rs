@@ -1,14 +1,14 @@
 #![allow(missing_docs)]
 use alloy_primitives::Address;
 use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    BenchmarkGroup, Criterion, criterion_group, criterion_main, measurement::WallTime,
 };
 use pprof::criterion::{Output, PProfProfiler};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::{
+    SubPoolLimit,
     pool::{BasefeeOrd, ParkedPool, PendingPool, QueuedOrd},
     test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
-    SubPoolLimit,
 };
 
 /// Generates a set of `depth` dependent transactions, with the specified sender. Its values are
@@ -76,7 +76,9 @@ fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTrans
 
 /// Benchmarks all pool types for the truncate function.
 fn benchmark_pools(group: &mut BenchmarkGroup<'_, WallTime>, senders: usize, max_depth: usize) {
-    println!("Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}...");
+    println!(
+        "Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}..."
+    );
     let txs = generate_many_transactions(senders, max_depth);
 
     // benchmark parked pool

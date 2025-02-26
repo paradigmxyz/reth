@@ -2,27 +2,27 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_evm::{eth::EthEvmContext, EvmFactory};
+use alloy_evm::{EvmFactory, eth::EthEvmContext};
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, Address, Bytes};
+use alloy_primitives::{Address, Bytes, address};
 use reth::{
     builder::{
-        components::{BasicPayloadServiceBuilder, ExecutorBuilder, PayloadBuilderBuilder},
         BuilderContext, NodeBuilder,
+        components::{BasicPayloadServiceBuilder, ExecutorBuilder, PayloadBuilderBuilder},
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
     revm::{
+        MainBuilder, MainContext,
         context::{Cfg, Context, TxEnv},
         context_interface::{
-            result::{EVMError, HaltReason},
             ContextTr,
+            result::{EVMError, HaltReason},
         },
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
-        interpreter::{interpreter::EthInterpreter, InterpreterResult},
+        interpreter::{InterpreterResult, interpreter::EthInterpreter},
         precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
         specification::hardfork::SpecId,
-        MainBuilder, MainContext,
     },
     rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
@@ -34,8 +34,8 @@ use reth_evm_ethereum::{EthEvm, EthEvmConfig};
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine, PayloadTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
-    node::{EthereumAddOns, EthereumPayloadBuilder},
     BasicBlockExecutorProvider, EthereumNode,
+    node::{EthereumAddOns, EthereumPayloadBuilder},
 };
 use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
@@ -112,10 +112,10 @@ where
         + Unpin
         + 'static,
     Types::Engine: PayloadTypes<
-        BuiltPayload = EthBuiltPayload,
-        PayloadAttributes = PayloadAttributes,
-        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-    >,
+            BuiltPayload = EthBuiltPayload,
+            PayloadAttributes = PayloadAttributes,
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        >,
 {
     type PayloadBuilder = reth_ethereum_payload_builder::EthereumPayloadBuilder<
         Pool,

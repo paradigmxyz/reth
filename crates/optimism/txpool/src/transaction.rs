@@ -1,9 +1,9 @@
 use crate::conditional::MaybeConditionalTransaction;
 use alloy_consensus::{
-    transaction::Recovered, BlobTransactionSidecar, BlobTransactionValidationError, Typed2718,
+    BlobTransactionSidecar, BlobTransactionValidationError, Typed2718, transaction::Recovered,
 };
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
-use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, TxHash, TxKind, U256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use c_kzg::KzgSettings;
 use core::fmt::Debug;
@@ -256,8 +256,8 @@ mod tests {
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
-        blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, TransactionOrigin,
-        TransactionValidationOutcome,
+        TransactionOrigin, TransactionValidationOutcome, blobstore::InMemoryBlobStore,
+        validate::EthTransactionValidatorBuilder,
     };
     #[test]
     fn validate_optimism_transaction() {

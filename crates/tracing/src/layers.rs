@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
+use tracing_subscriber::{EnvFilter, Layer, Registry, filter::Directive};
 
 use crate::formatter::LogFormat;
 

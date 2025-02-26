@@ -4,11 +4,11 @@ use std::{fmt, str::FromStr, time::Duration};
 
 use crate::version::default_client_version;
 use clap::{
+    Arg, Args, Command, Error,
     builder::{PossibleValue, TypedValueParser},
     error::ErrorKind,
-    Arg, Args, Command, Error,
 };
-use reth_db::{mdbx::MaxReadTransactionDuration, ClientVersion};
+use reth_db::{ClientVersion, mdbx::MaxReadTransactionDuration};
 use reth_storage_errors::db::LogLevel;
 
 /// Parameters for database configuration

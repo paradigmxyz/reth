@@ -1,6 +1,6 @@
 use crate::Tables;
 use metrics::Histogram;
-use reth_metrics::{metrics::Counter, Metrics};
+use reth_metrics::{Metrics, metrics::Counter};
 use rustc_hash::FxHashMap;
 use std::time::{Duration, Instant};
 use strum::{EnumCount, EnumIter, IntoEnumIterator};
@@ -75,8 +75,8 @@ impl DatabaseEnvMetrics {
 
     /// Generate a map of all possible transaction mode and outcome handles.
     /// Used for tracking various stats for finished transactions (e.g. commit duration).
-    fn generate_transaction_outcome_handles(
-    ) -> FxHashMap<(TransactionMode, TransactionOutcome), TransactionOutcomeMetrics> {
+    fn generate_transaction_outcome_handles()
+    -> FxHashMap<(TransactionMode, TransactionOutcome), TransactionOutcomeMetrics> {
         let mut transaction_outcomes = FxHashMap::with_capacity_and_hasher(
             TransactionMode::COUNT * TransactionOutcome::COUNT,
             Default::default(),

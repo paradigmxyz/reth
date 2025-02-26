@@ -2,11 +2,11 @@
 
 use alloy_consensus::BlockHeader;
 // Re-export execution types
-use crate::{system_calls::OnStateHook, ConfigureEvmFor, Database};
+use crate::{ConfigureEvmFor, Database, system_calls::OnStateHook};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{
-    map::{DefaultHashBuilder, HashMap},
     Address,
+    map::{DefaultHashBuilder, HashMap},
 };
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
@@ -16,7 +16,7 @@ pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives::{NodePrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock};
 pub use reth_storage_errors::provider::ProviderError;
 use revm::state::{Account, AccountStatus, EvmState};
-use revm_database::{states::bundle_state::BundleRetention, State};
+use revm_database::{State, states::bundle_state::BundleRetention};
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -139,11 +139,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// It is not expected to validate the state trie root, this must be done by the caller using
     /// the returned state.
-    type Executor<DB: Database>: Executor<
-        DB,
-        Primitives = Self::Primitives,
-        Error = BlockExecutionError,
-    >;
+    type Executor<DB: Database>: Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError>;
 
     /// Creates a new executor for single block execution.
     ///
@@ -359,7 +355,7 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_primitives::{address, U256};
+    use alloy_primitives::{U256, address};
     use core::marker::PhantomData;
     use reth_primitives::EthPrimitives;
     use revm::state::AccountInfo;

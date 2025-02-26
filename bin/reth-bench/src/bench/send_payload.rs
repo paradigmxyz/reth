@@ -2,8 +2,8 @@ use alloy_consensus::{
     Block as PrimitiveBlock, BlockBody, Header as PrimitiveHeader,
     Transaction as PrimitiveTransaction,
 };
-use alloy_eips::{eip7702::SignedAuthorization, Encodable2718, Typed2718};
-use alloy_primitives::{bytes::BufMut, Bytes, ChainId, TxKind, B256, U256};
+use alloy_eips::{Encodable2718, Typed2718, eip7702::SignedAuthorization};
+use alloy_primitives::{B256, Bytes, ChainId, TxKind, U256, bytes::BufMut};
 use alloy_rpc_types::{
     AccessList, Block as RpcBlock, BlockTransactions, Transaction as EthRpcTransaction,
 };
@@ -158,7 +158,9 @@ impl Command {
         // Extract transactions
         let transactions = match block.transactions {
             BlockTransactions::Hashes(_) => {
-                return Err(eyre::eyre!("Block must include full transaction data. Send the eth_getBlockByHash request with full: `true`"));
+                return Err(eyre::eyre!(
+                    "Block must include full transaction data. Send the eth_getBlockByHash request with full: `true`"
+                ));
             }
             BlockTransactions::Full(txs) => txs,
             BlockTransactions::Uncle => {

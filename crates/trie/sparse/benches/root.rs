@@ -1,16 +1,16 @@
 #![allow(missing_docs)]
 
-use alloy_primitives::{map::B256Map, B256, U256};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use alloy_primitives::{B256, U256, map::B256Map};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use itertools::Itertools;
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie::{
-    hashed_cursor::{noop::NoopHashedStorageCursor, HashedPostStateStorageCursor},
+    HashedStorage,
+    hashed_cursor::{HashedPostStateStorageCursor, noop::NoopHashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::{noop::NoopStorageTrieCursor, InMemoryStorageTrieCursor},
+    trie_cursor::{InMemoryStorageTrieCursor, noop::NoopStorageTrieCursor},
     updates::StorageTrieUpdates,
     walker::TrieWalker,
-    HashedStorage,
 };
 use reth_trie_common::{HashBuilder, Nibbles};
 use reth_trie_sparse::SparseTrie;
@@ -84,7 +84,9 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                 // hash builder
                 let benchmark_id = BenchmarkId::new(
                     "hash builder",
-                    format!("init size {init_size} | update size {update_size} | num updates {num_updates}"),
+                    format!(
+                        "init size {init_size} | update size {update_size} | num updates {num_updates}"
+                    ),
                 );
                 group.bench_function(benchmark_id, |b| {
                     b.iter_with_setup(
@@ -177,7 +179,9 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                 // sparse trie
                 let benchmark_id = BenchmarkId::new(
                     "sparse trie",
-                    format!("init size {init_size} | update size {update_size} | num updates {num_updates}"),
+                    format!(
+                        "init size {init_size} | update size {update_size} | num updates {num_updates}"
+                    ),
                 );
                 group.bench_function(benchmark_id, |b| {
                     b.iter_with_setup(

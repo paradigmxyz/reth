@@ -12,12 +12,13 @@ use reth_e2e_test_utils::{
 };
 use reth_node_api::{FullNodeTypes, NodeTypesWithEngine};
 use reth_node_builder::{
-    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     EngineNodeLauncher, NodeBuilder, NodeConfig,
+    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
 };
 use reth_node_core::args::DatadirArgs;
 use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_node::{
+    OpEngineTypes, OpNode,
     args::RollupArgs,
     node::{
         OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder,
@@ -25,7 +26,6 @@ use reth_optimism_node::{
     },
     txpool::OpPooledTransaction,
     utils::optimism_payload_attributes,
-    OpEngineTypes, OpNode,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_primitives::OpPrimitives;

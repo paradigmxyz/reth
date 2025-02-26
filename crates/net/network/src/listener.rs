@@ -1,6 +1,6 @@
 //! Contains connection-oriented interfaces.
 
-use futures::{ready, Stream};
+use futures::{Stream, ready};
 use std::{
     io,
     net::SocketAddr,

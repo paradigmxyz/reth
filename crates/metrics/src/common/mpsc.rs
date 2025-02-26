@@ -6,12 +6,11 @@ use futures::Stream;
 use metrics::Counter;
 use std::{
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::sync::mpsc::{
-    self,
+    self, OwnedPermit,
     error::{SendError, TryRecvError, TrySendError},
-    OwnedPermit,
 };
 use tokio_util::sync::{PollSendError, PollSender};
 

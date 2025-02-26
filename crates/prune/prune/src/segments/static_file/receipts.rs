@@ -1,12 +1,12 @@
 use crate::{
-    segments::{PruneInput, Segment},
     PrunerError,
+    segments::{PruneInput, Segment},
 };
 use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    errors::provider::ProviderResult, providers::StaticFileProvider, BlockReader, DBProvider,
-    PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
+    BlockReader, DBProvider, PruneCheckpointWriter, StaticFileProviderFactory,
+    TransactionsProvider, errors::provider::ProviderResult, providers::StaticFileProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use reth_static_file_types::StaticFileSegment;

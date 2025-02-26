@@ -1,11 +1,11 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{keccak256, map::hash_map, Address, BlockNumber, B256};
+use alloy_primitives::{Address, B256, BlockNumber, keccak256, map::hash_map};
 use reth_db_api::{
-    cursor::DbCursorRO, models::BlockNumberAddress, tables, transaction::DbTx, DatabaseError,
+    DatabaseError, cursor::DbCursorRO, models::BlockNumberAddress, tables, transaction::DbTx,
 };
 use reth_execution_errors::StorageRootError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
+    HashedPostState, HashedStorage, StorageRoot, hashed_cursor::HashedPostStateCursorFactory,
 };
 
 #[cfg(feature = "metrics")]

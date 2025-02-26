@@ -18,16 +18,16 @@ use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
 use reth_node_api::{BlockTy, NodePrimitives};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
+use reth_node_ethereum::{EthExecutorProvider, consensus::EthBeaconConsensus};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
-    DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, ProviderFactory, StateWriter, StorageLocation,
+    BlockNumReader, BlockWriter, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
+    StorageLocation, providers::ProviderNodeTypes,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
-    stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
     ExecInput, Stage, StageCheckpoint,
+    stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
 };
 use reth_tasks::TaskExecutor;
 use std::{path::PathBuf, sync::Arc};
@@ -58,13 +58,13 @@ pub struct Command<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network<
         N: ProviderNodeTypes<
-            ChainSpec = C::ChainSpec,
-            Primitives: NodePrimitives<
-                Block = reth_ethereum_primitives::Block,
-                Receipt = reth_ethereum_primitives::Receipt,
-                BlockHeader = alloy_consensus::Header,
+                ChainSpec = C::ChainSpec,
+                Primitives: NodePrimitives<
+                    Block = reth_ethereum_primitives::Block,
+                    Receipt = reth_ethereum_primitives::Receipt,
+                    BlockHeader = alloy_consensus::Header,
+                >,
             >,
-        >,
     >(
         &self,
         config: &Config,
@@ -245,7 +245,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     (Some(incremental), Some(clean)) => {
                         similar_asserts::assert_eq!(incremental.0, clean.0, "Nibbles don't match");
                         if incremental.1 != clean.1 &&
-                            clean.0 .0.len() > self.skip_node_depth.unwrap_or_default()
+                            clean.0.0.len() > self.skip_node_depth.unwrap_or_default()
                         {
                             incremental_account_mismatched.push(incremental);
                             clean_account_mismatched.push(clean);

@@ -3,16 +3,16 @@
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
-    helpers::estimate::EstimateCall, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore,
+    FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore, helpers::estimate::EstimateCall,
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{B256, Bytes, U256};
 use alloy_rpc_types_eth::{
+    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     transaction::TransactionRequest,
-    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
 use reth_chainspec::EthChainSpec;
@@ -25,20 +25,20 @@ use reth_node_api::BlockBody;
 use reth_primitives::Recovered;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockIdReader, ChainSpecProvider, ProviderHeader};
-use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
+use reth_revm::{DatabaseRef, database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
+    EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success},
     revm_utils::{apply_block_overrides, apply_state_overrides, caller_gas_allowance},
     simulate::{self, EthSimulateError},
-    EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
 use revm::{
-    context_interface::{
-        result::{ExecutionResult, ResultAndState},
-        Transaction,
-    },
     Database, DatabaseCommit,
+    context_interface::{
+        Transaction,
+        result::{ExecutionResult, ResultAndState},
+    },
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use tracing::trace;

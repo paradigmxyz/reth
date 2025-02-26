@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use reth_transaction_pool::{
-    test_utils::{MockTransactionFactory, TestPoolBuilder},
     TransactionOrigin, TransactionPool,
+    test_utils::{MockTransactionFactory, TestPoolBuilder},
 };
 
 #[tokio::test(flavor = "multi_thread")]

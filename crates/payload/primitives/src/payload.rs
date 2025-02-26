@@ -4,7 +4,7 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 /// An execution payload.
 pub trait ExecutionPayload:

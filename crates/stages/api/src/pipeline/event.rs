@@ -1,6 +1,6 @@
 use crate::{
-    stage::{ExecOutput, UnwindInput, UnwindOutput},
     StageCheckpoint, StageId,
+    stage::{ExecOutput, UnwindInput, UnwindOutput},
 };
 use alloy_primitives::BlockNumber;
 use std::fmt::{Display, Formatter};

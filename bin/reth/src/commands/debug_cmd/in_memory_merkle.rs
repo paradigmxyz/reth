@@ -21,12 +21,13 @@ use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_api::NodePrimitives;
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
+use reth_node_ethereum::{EthExecutorProvider, consensus::EthBeaconConsensus};
 use reth_primitives_traits::SealedBlock;
 use reth_provider::{
-    providers::ProviderNodeTypes, AccountExtReader, ChainSpecProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HashingWriter, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderFactory, StageCheckpointReader, StateWriter, StorageLocation, StorageReader,
+    AccountExtReader, ChainSpecProvider, DatabaseProviderFactory, HashedPostStateProvider,
+    HashingWriter, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
+    StageCheckpointReader, StateWriter, StorageLocation, StorageReader,
+    providers::ProviderNodeTypes,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -60,13 +61,13 @@ pub struct Command<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     async fn build_network<
         N: ProviderNodeTypes<
-            ChainSpec = C::ChainSpec,
-            Primitives: NodePrimitives<
-                Block = reth_ethereum_primitives::Block,
-                Receipt = reth_ethereum_primitives::Receipt,
-                BlockHeader = alloy_consensus::Header,
+                ChainSpec = C::ChainSpec,
+                Primitives: NodePrimitives<
+                    Block = reth_ethereum_primitives::Block,
+                    Receipt = reth_ethereum_primitives::Receipt,
+                    BlockHeader = alloy_consensus::Header,
+                >,
             >,
-        >,
     >(
         &self,
         config: &Config,

@@ -1,4 +1,4 @@
-use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber};
+use alloy_eips::{BlockHashOrNumber, eip4895::Withdrawals};
 use reth_storage_errors::provider::ProviderResult;
 
 ///  Client trait for fetching [`alloy_eips::eip4895::Withdrawal`] related data.

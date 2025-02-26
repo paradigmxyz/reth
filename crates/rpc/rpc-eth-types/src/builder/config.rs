@@ -6,8 +6,8 @@ use crate::{
     EthStateCacheConfig, FeeHistoryCacheConfig, GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_server_types::constants::{
-    default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
-    DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
+    DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
+    DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS, default_max_tracing_requests,
 };
 use serde::{Deserialize, Serialize};
 

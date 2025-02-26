@@ -1,9 +1,9 @@
 use alloy_primitives::{B256, U256};
 use reth_db_api::{
+    DatabaseError,
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_primitives_traits::Account;
 use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};

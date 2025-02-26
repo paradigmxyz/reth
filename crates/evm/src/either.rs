@@ -1,9 +1,9 @@
 //! Helper type that represents one of two possible executor types
 
 use crate::{
+    Database,
     execute::{BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
-    Database,
 };
 
 // re-export Either

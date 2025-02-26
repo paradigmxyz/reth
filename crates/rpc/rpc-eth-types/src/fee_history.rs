@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt::Debug,
-    sync::{atomic::Ordering::SeqCst, Arc},
+    sync::{Arc, atomic::Ordering::SeqCst},
 };
 
 use alloy_consensus::{BlockHeader, Transaction, TxReceipt};
@@ -11,8 +11,8 @@ use alloy_eips::{eip1559::calc_next_block_base_fee, eip7840::BlobParams};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TxGasAndReward;
 use futures::{
-    future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
+    future::{Fuse, FusedFuture},
 };
 use metrics::atomics::AtomicU64;
 use reth_chain_state::CanonStateNotification;

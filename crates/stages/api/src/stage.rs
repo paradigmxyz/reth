@@ -1,9 +1,9 @@
-use crate::{error::StageError, StageCheckpoint, StageId};
+use crate::{StageCheckpoint, StageId, error::StageError};
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_provider::{BlockReader, ProviderError};
 use std::{
     cmp::{max, min},
-    future::{poll_fn, Future},
+    future::{Future, poll_fn},
     ops::{Range, RangeInclusive},
     task::{Context, Poll},
 };

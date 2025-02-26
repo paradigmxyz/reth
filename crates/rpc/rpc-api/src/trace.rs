@@ -1,7 +1,7 @@
 use alloy_eips::BlockId;
-use alloy_primitives::{map::HashSet, Bytes, B256};
+use alloy_primitives::{B256, Bytes, map::HashSet};
 use alloy_rpc_types_eth::{
-    state::StateOverride, transaction::TransactionRequest, BlockOverrides, Index,
+    BlockOverrides, Index, state::StateOverride, transaction::TransactionRequest,
 };
 use alloy_rpc_types_trace::{
     filter::TraceFilter,

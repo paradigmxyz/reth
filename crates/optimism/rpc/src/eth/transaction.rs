@@ -1,7 +1,7 @@
 //! Loads and formats OP transaction RPC response.
 
 use alloy_consensus::Transaction as _;
-use alloy_primitives::{Bytes, PrimitiveSignature as Signature, Sealable, Sealed, B256};
+use alloy_primitives::{B256, Bytes, PrimitiveSignature as Signature, Sealable, Sealed};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
@@ -12,13 +12,13 @@ use reth_provider::{
     BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
 };
 use reth_rpc_eth_api::{
-    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
+    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::{EthApiError, utils::recover_raw_transaction};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
+use crate::{OpEthApi, OpEthApiError, SequencerClient, eth::OpNodeCore};
 
 impl<N> EthTransactions for OpEthApi<N>
 where

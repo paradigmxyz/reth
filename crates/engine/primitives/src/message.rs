@@ -1,6 +1,6 @@
 use crate::{
-    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, EngineApiMessageVersion,
-    EngineTypes, ExecutionPayload, ForkchoiceStatus,
+    BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes, ExecutionPayload,
+    ForkchoiceStatus, error::BeaconForkChoiceUpdateError,
 };
 use alloy_rpc_types_engine::{
     ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
@@ -10,9 +10,9 @@ use core::{
     fmt::{self, Display},
     future::Future,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
-use futures::{future::Either, FutureExt, TryFutureExt};
+use futures::{FutureExt, TryFutureExt, future::Either};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};

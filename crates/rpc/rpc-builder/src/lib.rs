@@ -18,7 +18,7 @@
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::PayloadValidator;
-//! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+//! use reth_evm::{ConfigureEvm, execute::BlockExecutorProvider};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
@@ -88,7 +88,7 @@
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::PayloadValidator;
-//! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+//! use reth_evm::{ConfigureEvm, execute::BlockExecutorProvider};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
@@ -96,8 +96,8 @@
 //! use reth_rpc::EthApi;
 //! use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 //! use reth_rpc_builder::{
-//!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
-//!     TransportRpcModuleConfig,
+//!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig,
+//!     auth::AuthServerConfig,
 //! };
 //! use reth_rpc_layer::JwtSecret;
 //! use reth_tasks::TokioTaskExecutor;
@@ -180,22 +180,22 @@ use std::{
 };
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
-use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
+use alloy_provider::{Provider, ProviderBuilder, fillers::RecommendedFillers};
 use error::{ConflictingModules, RpcError, ServerKind};
 use eth::DynEthApiBuilder;
-use http::{header::AUTHORIZATION, HeaderMap};
+use http::{HeaderMap, header::AUTHORIZATION};
 use jsonrpsee::{
+    Methods, RpcModule,
     core::RegisterMethodError,
     server::{
-        middleware::rpc::{RpcService, RpcServiceT},
         AlreadyStoppedError, IdProvider, RpcServiceBuilder, ServerHandle,
+        middleware::rpc::{RpcService, RpcServiceT},
     },
-    Methods, RpcModule,
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
-use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
+use reth_evm::{ConfigureEvm, execute::BlockExecutorProvider};
+use reth_network_api::{NetworkInfo, Peers, noop::NoopNetwork};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
@@ -207,13 +207,13 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
     EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+    helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
 };
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
-use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
+use reth_tasks::{TaskSpawner, TokioTaskExecutor, pool::BlockingTaskGuard};
+use reth_transaction_pool::{TransactionPool, noop::NoopTransactionPool};
 use serde::{Deserialize, Serialize};
 use tower::Layer;
 use tower_http::cors::CorsLayer;
@@ -225,7 +225,7 @@ pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{
     Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
 };
-pub use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+pub use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection, constants};
 pub use tower::layer::util::{Identity, Stack};
 
 /// Auth server utilities.
@@ -278,9 +278,9 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<
-        Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
-        Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
-    >,
+            Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+            Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
+        >,
     EthApi: FullEthApiServer<
         Provider: BlockReader<
             Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
@@ -576,9 +576,9 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EvmConfig: ConfigureEvm<
-        Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
-        Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
-    >,
+            Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+            Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
+        >,
     BlockExecutor: BlockExecutorProvider,
     Consensus: FullConsensus<BlockExecutor::Primitives, Error = ConsensusError> + Clone + 'static,
 {

@@ -21,7 +21,7 @@ pub use alloy_consensus::proofs::calculate_ommers_root;
 mod tests {
     use alloy_consensus::EMPTY_ROOT_HASH;
     use alloy_genesis::GenesisAccount;
-    use alloy_primitives::{b256, hex_literal::hex, Address, B256, U256};
+    use alloy_primitives::{Address, B256, U256, b256, hex_literal::hex};
     use alloy_trie::root::{state_root_ref_unhashed, state_root_unhashed};
     use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
     use std::collections::HashMap;

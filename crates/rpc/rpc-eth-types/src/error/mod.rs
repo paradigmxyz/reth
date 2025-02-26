@@ -4,7 +4,7 @@ pub mod api;
 use crate::error::api::FromEvmHalt;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, U256};
-use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
+use alloy_rpc_types_eth::{BlockError, error::EthRpcErrorCode, request::TransactionInputError};
 use alloy_sol_types::{ContractError, RevertReason};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
@@ -628,11 +628,7 @@ impl RevertError {
     ///
     /// Note: this is intended to wrap an revm output
     pub fn new(output: Bytes) -> Self {
-        if output.is_empty() {
-            Self { output: None }
-        } else {
-            Self { output: Some(output) }
-        }
+        if output.is_empty() { Self { output: None } } else { Self { output: Some(output) } }
     }
 
     /// Returns error code to return for this error.
@@ -820,13 +816,19 @@ mod tests {
                 "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
-        assert_eq!(err.message(), "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        assert_eq!(
+            err.message(),
+            "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+        );
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::hash_canonical(b256!(
                 "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
-        assert_eq!(err.message(), "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
+        assert_eq!(
+            err.message(),
+            "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+        );
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::number(100000)).into();
         assert_eq!(err.message(), "block not found: 0x186a0");

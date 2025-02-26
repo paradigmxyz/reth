@@ -15,10 +15,10 @@ use reth_node_core::{
 };
 use reth_provider::ChainSpecProvider;
 use reth_rpc_api::EngineApiClient;
-use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
+use reth_rpc_builder::{RpcServerHandle, auth::AuthServerHandle};
 use reth_tasks::TaskExecutor;
 
-use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
+use crate::{NodeAdapter, NodeAddOns, components::NodeComponentsBuilder, rpc::RethRpcAddOns};
 
 /// A [`crate::Node`] is a [`NodeTypesWithEngine`] that comes with preconfigured components.
 ///

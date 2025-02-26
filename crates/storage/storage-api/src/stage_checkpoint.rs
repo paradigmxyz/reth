@@ -22,7 +22,7 @@ pub trait StageCheckpointReader: Send + Sync {
 pub trait StageCheckpointWriter: Send + Sync {
     /// Save stage checkpoint.
     fn save_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint)
-        -> ProviderResult<()>;
+    -> ProviderResult<()>;
 
     /// Save stage checkpoint progress.
     fn save_stage_checkpoint_progress(

@@ -1,7 +1,7 @@
-use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request, MethodResponse, RpcModule};
+use jsonrpsee::{MethodResponse, RpcModule, server::middleware::rpc::RpcServiceT, types::Request};
 use reth_metrics::{
-    metrics::{Counter, Histogram},
     Metrics,
+    metrics::{Counter, Histogram},
 };
 use std::{
     collections::HashMap,

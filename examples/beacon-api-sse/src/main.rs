@@ -20,7 +20,7 @@
 use alloy_rpc_types_beacon::events::PayloadAttributesEvent;
 use clap::Parser;
 use futures_util::stream::StreamExt;
-use mev_share_sse::{client::EventStream, EventClient};
+use mev_share_sse::{EventClient, client::EventStream};
 use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
 use reth_node_ethereum::EthereumNode;
 use std::net::{IpAddr, Ipv4Addr};
@@ -81,7 +81,10 @@ impl BeaconEventsConfig {
             match client.subscribe(&payloads_url).await {
                 Ok(subscription) => return subscription,
                 Err(err) => {
-                    warn!("Failed to subscribe to payload attributes events: {:?}\nRetrying in 5 seconds...", err);
+                    warn!(
+                        "Failed to subscribe to payload attributes events: {:?}\nRetrying in 5 seconds...",
+                        err
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             }

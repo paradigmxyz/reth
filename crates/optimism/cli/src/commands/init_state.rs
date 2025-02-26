@@ -6,8 +6,8 @@ use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment};
 use reth_db_common::init::init_from_state_dump;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{
-    bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD},
     OpPrimitives,
+    bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD},
 };
 use reth_primitives::SealedHeader;
 use reth_provider::{

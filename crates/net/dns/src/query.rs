@@ -14,7 +14,7 @@ use std::{
     num::NonZeroUsize,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 
@@ -213,7 +213,7 @@ async fn lookup_with_timeout<R: Resolver>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{resolver::TimeoutResolver, DnsDiscoveryConfig, MapResolver};
+    use crate::{DnsDiscoveryConfig, MapResolver, resolver::TimeoutResolver};
     use std::future::poll_fn;
 
     #[tokio::test]

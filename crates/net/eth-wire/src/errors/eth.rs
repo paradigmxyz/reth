@@ -1,7 +1,7 @@
 //! Error handling for (`EthStream`)[`crate::EthStream`]
 
 use crate::{
-    errors::P2PStreamError, message::MessageError, version::ParseVersionError, DisconnectReason,
+    DisconnectReason, errors::P2PStreamError, message::MessageError, version::ParseVersionError,
 };
 use alloy_chains::Chain;
 use alloy_primitives::B256;
@@ -28,7 +28,9 @@ pub enum EthStreamError {
     #[error("message size ({0}) exceeds max length (10MB)")]
     /// Received a message whose size exceeds the standard limit.
     MessageTooBig(usize),
-    #[error("TransactionHashes invalid len of fields: hashes_len={hashes_len} types_len={types_len} sizes_len={sizes_len}")]
+    #[error(
+        "TransactionHashes invalid len of fields: hashes_len={hashes_len} types_len={types_len} sizes_len={sizes_len}"
+    )]
     /// Received malformed transaction hashes message with discrepancies in field lengths.
     TransactionHashesInvalidLenOfFields {
         /// The number of transaction hashes.
@@ -48,11 +50,7 @@ pub enum EthStreamError {
 impl EthStreamError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
     pub const fn as_disconnected(&self) -> Option<DisconnectReason> {
-        if let Self::P2PStreamError(err) = self {
-            err.as_disconnected()
-        } else {
-            None
-        }
+        if let Self::P2PStreamError(err) = self { err.as_disconnected() } else { None }
     }
 
     /// Returns the [`io::Error`] if it was caused by IO

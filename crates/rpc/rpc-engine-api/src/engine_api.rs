@@ -1,5 +1,5 @@
 use crate::{
-    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
+    EngineApiError, EngineApiResult, capabilities::EngineCapabilities, metrics::EngineApiMetrics,
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
@@ -7,7 +7,7 @@ use alloy_eips::{
     eip4895::Withdrawals,
     eip7685::{Requests, RequestsOrHash},
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{B256, BlockHash, BlockNumber, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
@@ -15,14 +15,14 @@ use alloy_rpc_types_engine::{
     PraguePayloadFields, TransitionConfiguration,
 };
 use async_trait::async_trait;
-use jsonrpsee_core::{server::RpcModule, RpcResult};
+use jsonrpsee_core::{RpcResult, server::RpcModule};
 use parking_lot::Mutex;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes, EngineValidator};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload,
-    PayloadBuilderAttributes, PayloadOrAttributes,
+    EngineApiMessageVersion, ExecutionPayload, PayloadBuilderAttributes, PayloadOrAttributes,
+    validate_payload_timestamp,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -1079,7 +1079,7 @@ mod tests {
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators::random_block;
     use reth_transaction_pool::noop::NoopTransactionPool;
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+    use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
     fn setup_engine_api() -> (
         EngineApiTestHandle,
@@ -1157,7 +1157,7 @@ mod tests {
     mod get_payload_bodies {
         use super::*;
         use alloy_rpc_types_engine::ExecutionPayloadBodyV1;
-        use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
+        use reth_testing_utils::generators::{self, BlockRangeParams, random_block_range};
 
         #[tokio::test]
         async fn invalid_params() {

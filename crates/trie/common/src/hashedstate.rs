@@ -1,12 +1,11 @@
 use crate::{
-    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     KeyHasher, Nibbles,
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
-    keccak256,
-    map::{hash_map, B256Map, B256Set, HashMap, HashSet},
-    Address, B256, U256,
+    Address, B256, U256, keccak256,
+    map::{B256Map, B256Set, HashMap, HashSet, hash_map},
 };
 use itertools::Itertools;
 #[cfg(feature = "rayon")]
@@ -381,7 +380,7 @@ mod tests {
     use super::*;
     use crate::KeccakKeyHasher;
     use alloy_primitives::Bytes;
-    use revm_database::{states::StorageSlot, StorageWithOriginalValues};
+    use revm_database::{StorageWithOriginalValues, states::StorageSlot};
     use revm_state::{AccountInfo, Bytecode};
 
     #[test]

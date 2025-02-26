@@ -1,9 +1,9 @@
-use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
+use alloy_consensus::{BlockHeader, TxReceipt, proofs::calculate_receipt_root};
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{Bloom, B256};
+use alloy_primitives::{B256, Bloom};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
-use reth_primitives::{gas_spent_by_transactions, GotExpected, RecoveredBlock};
+use reth_primitives::{GotExpected, RecoveredBlock, gas_spent_by_transactions};
 use reth_primitives_traits::{Block, Receipt};
 
 /// Validate a block with regard to execution results:
@@ -148,13 +148,15 @@ mod tests {
         let expected_receipts_root = calculated_receipts_root;
         let expected_logs_bloom = calculated_logs_bloom;
 
-        assert!(compare_receipts_root_and_logs_bloom(
-            calculated_receipts_root,
-            calculated_logs_bloom,
-            expected_receipts_root,
-            expected_logs_bloom
-        )
-        .is_ok());
+        assert!(
+            compare_receipts_root_and_logs_bloom(
+                calculated_receipts_root,
+                calculated_logs_bloom,
+                expected_receipts_root,
+                expected_logs_bloom
+            )
+            .is_ok()
+        );
     }
 
     #[test]

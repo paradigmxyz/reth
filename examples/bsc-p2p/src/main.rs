@@ -16,15 +16,15 @@ use chainspec::{boot_nodes, bsc_chain_spec};
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{NetworkConfig, NetworkEvent, NetworkEventListenerProvider, NetworkManager};
 use reth_network_api::{
-    events::{PeerEvent, SessionInfo},
     PeersInfo,
+    events::{PeerEvent, SessionInfo},
 };
 use reth_primitives::{ForkHash, ForkId};
 use reth_tracing::{
-    tracing::info, tracing_subscriber::filter::LevelFilter, LayerInfo, LogFormat, RethTracer,
-    Tracer,
+    LayerInfo, LogFormat, RethTracer, Tracer, tracing::info,
+    tracing_subscriber::filter::LevelFilter,
 };
-use secp256k1::{rand, SecretKey};
+use secp256k1::{SecretKey, rand};
 use std::{
     net::{Ipv4Addr, SocketAddr},
     time::Duration,

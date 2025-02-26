@@ -87,16 +87,16 @@ pub use receipt::{FullReceipt, Receipt};
 
 pub mod transaction;
 pub use transaction::{
+    FullTransaction, Transaction,
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
-    FullTransaction, Transaction,
 };
 
 pub mod block;
 pub use block::{
+    Block, FullBlock, RecoveredBlock, SealedBlock,
     body::{BlockBody, FullBlockBody},
     header::{AlloyBlockHeader, BlockHeader, FullBlockHeader},
-    Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
 mod encoded;
@@ -109,7 +109,7 @@ mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
 
 mod log;
-pub use alloy_primitives::{logs_bloom, Log, LogData};
+pub use alloy_primitives::{Log, LogData, logs_bloom};
 
 pub mod proofs;
 

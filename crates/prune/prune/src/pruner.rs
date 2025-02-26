@@ -1,8 +1,8 @@
 //! Support for pruning.
 
 use crate::{
-    segments::{PruneInput, Segment},
     Metrics, PruneLimiter, PrunerError, PrunerEvent,
+    segments::{PruneInput, Segment},
 };
 use alloy_primitives::BlockNumber;
 use reth_exex_types::FinishedExExHeight;

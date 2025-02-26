@@ -3,7 +3,7 @@
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_primitives::U256;
-use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
+use alloy_rpc_types_eth::{BlockId, state::StateOverride, transaction::TransactionRequest};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
@@ -11,12 +11,12 @@ use reth_evm::{ConfigureEvmEnv, Database, EvmEnv, TransactionEnv};
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
+    EthApiError, RevertError, RpcInvalidTransactionError,
     error::api::FromEvmHalt,
     revm_utils::{apply_state_overrides, caller_gas_allowance},
-    EthApiError, RevertError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
-use revm::context_interface::{result::ExecutionResult, Transaction};
+use revm::context_interface::{Transaction, result::ExecutionResult};
 use revm_primitives::TxKind;
 use tracing::trace;
 

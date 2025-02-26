@@ -5,7 +5,7 @@ use crate::{
     commands::debug_cmd,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{value_parser, Parser, Subcommand};
+use clap::{Parser, Subcommand, value_parser};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
@@ -18,7 +18,7 @@ use reth_db::DatabaseEnv;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_network::EthNetworkPrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider, EthereumNode};
+use reth_node_ethereum::{EthExecutorProvider, EthereumNode, consensus::EthBeaconConsensus};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};

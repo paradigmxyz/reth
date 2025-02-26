@@ -1,9 +1,9 @@
 use crate::{
+    BranchNodeCompact, Nibbles,
     prefix_set::PrefixSet,
     trie_cursor::{CursorSubNode, TrieCursor},
-    BranchNodeCompact, Nibbles,
 };
-use alloy_primitives::{map::HashSet, B256};
+use alloy_primitives::{B256, map::HashSet};
 use reth_storage_errors::db::DatabaseError;
 
 #[cfg(feature = "metrics")]

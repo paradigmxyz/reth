@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{B256, keccak256};
 
 /// Trait for hashing keys in state.
 pub trait KeyHasher: Default + Clone + Send + Sync + 'static {

@@ -9,21 +9,21 @@ use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_errors::ProviderError;
 use reth_evm::{
-    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv,
-    HaltReasonFor, InspectorFor,
+    ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv, HaltReasonFor, InspectorFor,
+    system_calls::SystemCaller,
 };
 use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
-    cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
+    cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
 };
 use revm::{
+    DatabaseCommit,
     context_interface::result::{ExecutionResult, ResultAndState},
     state::EvmState,
-    DatabaseCommit,
 };
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
@@ -31,13 +31,13 @@ use std::sync::Arc;
 /// Executes CPU heavy tasks.
 pub trait Trace:
     LoadState<
-    Provider: BlockReader,
-    Evm: ConfigureEvm<
-        Header = ProviderHeader<Self::Provider>,
-        Transaction = ProviderTx<Self::Provider>,
-    >,
-    Error: FromEvmError<Self::Evm>,
->
+        Provider: BlockReader,
+        Evm: ConfigureEvm<
+            Header = ProviderHeader<Self::Provider>,
+            Transaction = ProviderTx<Self::Provider>,
+        >,
+        Error: FromEvmError<Self::Evm>,
+    >
 {
     /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.

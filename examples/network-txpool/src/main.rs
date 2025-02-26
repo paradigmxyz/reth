@@ -8,12 +8,12 @@
 //! ```
 
 use alloy_consensus::Transaction;
-use reth_network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager};
+use reth_network::{EthNetworkPrimitives, NetworkConfig, NetworkManager, config::rng_secret_key};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
-    blobstore::InMemoryBlobStore, validate::ValidTransaction, CoinbaseTipOrdering,
-    EthPooledTransaction, PoolTransaction, TransactionListenerKind, TransactionOrigin,
-    TransactionPool, TransactionValidationOutcome, TransactionValidator,
+    CoinbaseTipOrdering, EthPooledTransaction, PoolTransaction, TransactionListenerKind,
+    TransactionOrigin, TransactionPool, TransactionValidationOutcome, TransactionValidator,
+    blobstore::InMemoryBlobStore, validate::ValidTransaction,
 };
 
 #[tokio::main]

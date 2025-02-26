@@ -1,6 +1,6 @@
 use crate::BlockHashReader;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{B256, BlockNumber};
 use reth_chainspec::ChainInfo;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 

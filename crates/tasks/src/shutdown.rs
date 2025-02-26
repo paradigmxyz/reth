@@ -1,14 +1,14 @@
 //! Helper for shutdown signals
 
 use futures_util::{
-    future::{FusedFuture, Shared},
     FutureExt,
+    future::{FusedFuture, Shared},
 };
 use std::{
     future::Future,
     pin::Pin,
-    sync::{atomic::AtomicUsize, Arc},
-    task::{ready, Context, Poll},
+    sync::{Arc, atomic::AtomicUsize},
+    task::{Context, Poll, ready},
 };
 use tokio::sync::oneshot;
 

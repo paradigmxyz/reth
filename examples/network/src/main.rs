@@ -8,7 +8,7 @@
 
 use futures::StreamExt;
 use reth_network::{
-    config::rng_secret_key, NetworkConfig, NetworkEventListenerProvider, NetworkManager,
+    NetworkConfig, NetworkEventListenerProvider, NetworkManager, config::rng_secret_key,
 };
 use reth_provider::test_utils::NoopProvider;
 

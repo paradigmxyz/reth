@@ -1,9 +1,9 @@
 //! Builder support for configuring the entire setup.
 
 use crate::{
+    NetworkHandle, NetworkManager,
     eth_requests::EthRequestHandler,
     transactions::{TransactionsManager, TransactionsManagerConfig},
-    NetworkHandle, NetworkManager,
 };
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::test_utils::PeersHandleProvider;

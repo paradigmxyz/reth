@@ -5,12 +5,12 @@
 //! - [`crate::segments::static_file::Receipts`] is responsible for pruning receipts on an archive
 //!   node after static file producer has finished
 
-use crate::{db_ext::DbTxPruneExt, segments::PruneInput, PrunerError};
+use crate::{PrunerError, db_ext::DbTxPruneExt, segments::PruneInput};
 use reth_db_api::{table::Value, tables, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
-    PruneCheckpointWriter, TransactionsProvider,
+    BlockReader, DBProvider, NodePrimitivesProvider, PruneCheckpointWriter, TransactionsProvider,
+    errors::provider::ProviderResult,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use tracing::trace;
@@ -82,7 +82,7 @@ pub(crate) fn save_checkpoint(
 #[cfg(test)]
 mod tests {
     use crate::segments::{PruneInput, PruneLimiter, SegmentOutput};
-    use alloy_primitives::{BlockNumber, TxNumber, B256};
+    use alloy_primitives::{B256, BlockNumber, TxNumber};
     use assert_matches::assert_matches;
     use itertools::{
         FoldWhile::{Continue, Done},
@@ -95,7 +95,7 @@ mod tests {
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
-        self, random_block_range, random_receipt, BlockRangeParams,
+        self, BlockRangeParams, random_block_range, random_receipt,
     };
     use std::ops::Sub;
 

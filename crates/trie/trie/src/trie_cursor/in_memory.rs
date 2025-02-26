@@ -3,7 +3,7 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
-use alloy_primitives::{map::HashSet, B256};
+use alloy_primitives::{B256, map::HashSet};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 
@@ -294,11 +294,7 @@ fn compare_trie_node_entries(
     if let Some((in_memory_entry, db_entry)) = in_memory_item.as_ref().zip(db_item.as_ref()) {
         // If both are not empty, return the smallest of the two
         // In-memory is given precedence if keys are equal
-        if in_memory_entry.0 <= db_entry.0 {
-            in_memory_item.take()
-        } else {
-            db_item.take()
-        }
+        if in_memory_entry.0 <= db_entry.0 { in_memory_item.take() } else { db_item.take() }
     } else {
         // Return either non-empty entry
         db_item.or(in_memory_item)

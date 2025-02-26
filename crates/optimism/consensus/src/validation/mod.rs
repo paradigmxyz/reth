@@ -7,13 +7,13 @@ pub mod shanghai;
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
 use alloy_consensus::{BlockHeader, TxReceipt};
-use alloy_primitives::{Bloom, B256};
-use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
+use alloy_primitives::{B256, Bloom};
+use op_alloy_consensus::{EIP1559ParamError, decode_holocene_extra_data};
 use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_consensus::ConsensusError;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{receipt::gas_spent_by_transactions, GotExpected};
+use reth_primitives_traits::{GotExpected, receipt::gas_spent_by_transactions};
 
 /// Validate a block with regard to execution results:
 ///
@@ -147,9 +147,9 @@ pub fn next_block_base_fee(
 mod tests {
     use super::*;
     use alloy_consensus::Header;
-    use alloy_primitives::{hex, Bytes, U256};
+    use alloy_primitives::{Bytes, U256, hex};
     use reth_chainspec::{ChainSpec, ForkCondition, Hardfork};
-    use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
+    use reth_optimism_chainspec::{BASE_SEPOLIA, OpChainSpec};
     use reth_optimism_forks::OpHardfork;
     use std::sync::Arc;
 

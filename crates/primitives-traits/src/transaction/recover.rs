@@ -8,7 +8,7 @@ pub use iter::*;
 
 #[cfg(feature = "rayon")]
 mod rayon {
-    use crate::{transaction::signed::RecoveryError, SignedTransaction};
+    use crate::{SignedTransaction, transaction::signed::RecoveryError};
     use alloc::vec::Vec;
     use alloy_primitives::Address;
     use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -39,7 +39,7 @@ mod rayon {
 
 #[cfg(not(feature = "rayon"))]
 mod iter {
-    use crate::{transaction::signed::RecoveryError, SignedTransaction};
+    use crate::{SignedTransaction, transaction::signed::RecoveryError};
     use alloc::vec::Vec;
     use alloy_primitives::Address;
 

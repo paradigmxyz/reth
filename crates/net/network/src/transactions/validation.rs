@@ -6,8 +6,8 @@ use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
-    DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
-    MAX_MESSAGE_SIZE,
+    DedupPayload, Eth68TxMetadata, HandleMempoolData, MAX_MESSAGE_SIZE, PartiallyValidData,
+    ValidAnnouncementData,
 };
 use reth_primitives::TxType;
 use std::{fmt, fmt::Display, mem};

@@ -1,7 +1,7 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
 
-use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction};
+use alloy_consensus::{BlockHeader, Transaction, constants::GWEI_TO_WEI};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;

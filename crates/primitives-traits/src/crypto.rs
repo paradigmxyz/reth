@@ -65,10 +65,10 @@ mod impl_secp256k1 {
     use super::*;
     pub(crate) use ::secp256k1::Error;
     use ::secp256k1::{
+        Message, PublicKey, SECP256K1, SecretKey,
         ecdsa::{RecoverableSignature, RecoveryId},
-        Message, PublicKey, SecretKey, SECP256K1,
     };
-    use alloy_primitives::{keccak256, Address, B256, U256};
+    use alloy_primitives::{Address, B256, U256, keccak256};
 
     /// Recovers the address of the sender using secp256k1 pubkey recovery.
     ///
@@ -115,7 +115,7 @@ mod impl_secp256k1 {
 #[cfg_attr(feature = "secp256k1", allow(unused, unreachable_pub))]
 mod impl_k256 {
     use super::*;
-    use alloy_primitives::{keccak256, Address, B256};
+    use alloy_primitives::{Address, B256, keccak256};
     pub(crate) use k256::ecdsa::Error;
     use k256::ecdsa::{RecoveryId, SigningKey, VerifyingKey};
 
@@ -161,7 +161,7 @@ mod impl_k256 {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{keccak256, B256};
+    use alloy_primitives::{B256, keccak256};
 
     #[cfg(feature = "secp256k1")]
     #[test]

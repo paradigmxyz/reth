@@ -2,7 +2,7 @@
 use alloc::{string::ToString, vec::Vec};
 use alloy_eips::eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS;
 use alloy_primitives::{Address, Bytes, Log};
-use alloy_sol_types::{sol, SolEvent};
+use alloy_sol_types::{SolEvent, sol};
 use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_evm::execute::BlockValidationError;
 use reth_primitives::Receipt;

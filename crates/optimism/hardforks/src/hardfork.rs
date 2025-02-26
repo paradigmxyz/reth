@@ -9,7 +9,7 @@ use core::{
 
 use alloy_chains::Chain;
 use alloy_primitives::U256;
-use reth_ethereum_forks::{hardfork, ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
+use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork, hardfork};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

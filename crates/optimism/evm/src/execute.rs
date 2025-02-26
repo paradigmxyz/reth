@@ -1,31 +1,31 @@
 //! Optimism block execution strategy.
 
 use crate::{
-    l1::ensure_create2_deployer, BasicOpReceiptBuilder, OpBlockExecutionError, OpEvmConfig,
-    OpReceiptBuilder, ReceiptBuilderCtx,
+    BasicOpReceiptBuilder, OpBlockExecutionError, OpEvmConfig, OpReceiptBuilder, ReceiptBuilderCtx,
+    l1::ensure_create2_deployer,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
-    transaction::Recovered, BlockHeader, Eip658Value, Header, Receipt, Transaction as _, TxReceipt,
+    BlockHeader, Eip658Value, Header, Receipt, Transaction as _, TxReceipt, transaction::Recovered,
 };
 use alloy_evm::FromRecoveredTx;
 use op_alloy_consensus::OpDepositReceipt;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
+    ConfigureEvm, Database, Evm,
     execute::{
-        balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
-        BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError,
+        BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
+        BlockExecutionStrategyFactory, BlockValidationError, balance_increment_state,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    ConfigureEvm, Database, Evm,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{transaction::signed::OpTransaction, DepositReceipt};
+use reth_optimism_primitives::{DepositReceipt, transaction::signed::OpTransaction};
 use reth_primitives_traits::{Block, NodePrimitives, SealedBlock, SignedTransaction};
-use revm::{context::TxEnv, context_interface::result::ResultAndState, DatabaseCommit};
+use revm::{DatabaseCommit, context::TxEnv, context_interface::result::ResultAndState};
 use revm_database::State;
 use revm_primitives::{Address, B256};
 use tracing::trace;
@@ -292,7 +292,7 @@ mod tests {
     use crate::OpChainSpec;
     use alloy_consensus::{Block, BlockBody, Header, TxEip1559};
     use alloy_primitives::{
-        b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256,
+        Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256, b256,
     };
     use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_chainspec::MIN_TRANSACTION_GAS;

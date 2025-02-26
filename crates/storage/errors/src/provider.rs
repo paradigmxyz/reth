@@ -3,9 +3,9 @@ use crate::{
 };
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
+use alloy_primitives::{Address, B256, BlockHash, BlockNumber, TxNumber};
 use derive_more::Display;
-use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
+use reth_primitives_traits::{GotExpected, transaction::signed::RecoveryError};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
 use revm_database_interface::DBErrorMarker;
@@ -39,7 +39,9 @@ pub enum ProviderError {
     BlockBodyIndicesNotFound(BlockNumber),
     /// The transition ID was found for the given address and storage key, but the changeset was
     /// not found.
-    #[error("storage change set for address {address} and key {storage_key} at block #{block_number} does not exist")]
+    #[error(
+        "storage change set for address {address} and key {storage_key} at block #{block_number} does not exist"
+    )]
     StorageChangesetNotFound {
         /// The block number found for the address and storage key.
         block_number: BlockNumber,

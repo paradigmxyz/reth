@@ -4,7 +4,7 @@ use futures::{Stream, StreamExt};
 use reth_engine_primitives::{BeaconEngineMessage, EngineTypes, OnForkChoiceUpdated};
 use std::{
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 /// Engine API stream wrapper that skips the specified number of forkchoice updated messages.
