@@ -2711,21 +2711,6 @@ where
             .tree_state
             .blocks_by_hash_while(parent_hash, |number| number > best_block_number);
 
-        debug!(
-            target: "engine::tree",
-            ?parent_hash,
-            last_persisted_block = ?self.persistence_state.last_persisted_block,
-            in_memory_blocks = ?in_memory_blocks.as_ref()
-                .map(|(hash, blocks)| (
-                    hash,
-                    blocks
-                        .iter()
-                        .map(|block| (block.recovered_block().number(), block.recovered_block().hash()))
-                        .collect::<Vec<_>>()
-                )),
-            "Computing trie input"
-        );
-
         if let Some((historical, blocks)) = in_memory_blocks {
             debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
             // Retrieve revert state for historical block.
