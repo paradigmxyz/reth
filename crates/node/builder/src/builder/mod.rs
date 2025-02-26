@@ -576,7 +576,10 @@ where
         builder.launch_with(launcher).await
     }
 
-    /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
+    /// Launches the node with the [`DebugNodeLauncher`].
+    ///
+    /// This is equivalent to [`WithLaunchContext::launch`], but will enable the debugging features,
+    /// if they are configured.
     pub async fn launch_debug(
         self,
     ) -> eyre::Result<
