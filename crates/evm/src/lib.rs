@@ -25,7 +25,6 @@ use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{context::TxEnv, inspector::Inspector};
 
-pub mod batch;
 pub mod either;
 /// EVM environment configuration.
 pub mod execute;

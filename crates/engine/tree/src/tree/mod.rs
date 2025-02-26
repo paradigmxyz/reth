@@ -2167,7 +2167,7 @@ where
             self.update_reorg_metrics(old.len());
             self.reinsert_reorged_blocks(new.clone());
             // Try reinserting the reorged canonical chain. This is only possible if we have
-            // `persisted_trie_updatess` for those blocks.
+            // `persisted_trie_updates` for those blocks.
             let old = old
                 .iter()
                 .filter_map(|block| {
@@ -2523,6 +2523,15 @@ where
         }
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
+
+        if let Err(err) = self
+            .payload_validator
+            .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
+        {
+            // call post-block hook
+            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            return Err(err.into())
+        }
 
         trace!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
         let root_time = Instant::now();

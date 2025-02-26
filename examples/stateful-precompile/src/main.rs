@@ -2,13 +2,11 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_consensus::Header;
 use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes};
 use parking_lot::RwLock;
 use reth::{
-    api::NextBlockEnvAttributes,
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     revm::{
         context::{Cfg, Context, TxEnv},
@@ -27,16 +25,15 @@ use reth::{
 };
 use reth_chainspec::{Chain, ChainSpec};
 use reth_evm::{Database, EvmEnv};
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
-    evm::EthEvm, node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig,
-    EthExecutionStrategyFactory, EthereumNode,
+    evm::EthEvm, node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig, EthereumNode,
 };
-use reth_primitives::{EthPrimitives, TransactionSigned};
+use reth_primitives::EthPrimitives;
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
-use std::{collections::HashMap, convert::Infallible, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
 type PrecompileLRUCache = LruMap<(SpecId, Bytes, u64), Result<InterpreterResult, PrecompileErrors>>;
@@ -90,21 +87,6 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
         inspector: I,
     ) -> Self::Evm<DB, I> {
         EthEvm::new(self.create_evm(db, input).into_inner().with_inspector(inspector), true)
-    }
-}
-
-/// Custom EVM configuration
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct MyEvmConfig {
-    inner: EthEvmConfig,
-    evm_factory: MyEvmFactory,
-}
-
-impl MyEvmConfig {
-    /// Creates a new instance.
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { inner: EthEvmConfig::new(chain_spec), evm_factory: MyEvmFactory::default() }
     }
 }
 
@@ -179,34 +161,6 @@ impl<P: PrecompileProvider<Output = InterpreterResult>> PrecompileProvider
     }
 }
 
-impl ConfigureEvmEnv for MyEvmConfig {
-    type Header = Header;
-    type Transaction = TransactionSigned;
-    type Error = Infallible;
-    type TxEnv = TxEnv;
-    type Spec = SpecId;
-
-    fn evm_env(&self, header: &Self::Header) -> EvmEnv {
-        self.inner.evm_env(header)
-    }
-
-    fn next_evm_env(
-        &self,
-        parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
-    ) -> Result<EvmEnv, Self::Error> {
-        self.inner.next_evm_env(parent, attributes)
-    }
-}
-
-impl ConfigureEvm for MyEvmConfig {
-    type EvmFactory = MyEvmFactory;
-
-    fn evm_factory(&self) -> &Self::EvmFactory {
-        &self.evm_factory
-    }
-}
-
 /// Builds a regular ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
@@ -219,24 +173,18 @@ impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = MyEvmConfig;
-    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;
+    type EVM = EthEvmConfig<MyEvmFactory>;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = MyEvmConfig {
-            inner: EthEvmConfig::new(ctx.chain_spec()),
-            evm_factory: MyEvmFactory { precompile_cache: self.precompile_cache.clone() },
-        };
-        Ok((
-            evm_config.clone(),
-            BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::new(
-                ctx.chain_spec(),
-                evm_config,
-            )),
-        ))
+        let evm_config = EthEvmConfig::new_with_evm_factory(
+            ctx.chain_spec(),
+            MyEvmFactory { precompile_cache: self.precompile_cache.clone() },
+        );
+        Ok((evm_config.clone(), BasicBlockExecutorProvider::new(evm_config)))
     }
 }
 
