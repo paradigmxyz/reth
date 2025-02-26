@@ -37,7 +37,6 @@ alloy-transport-http.workspace = true
 alloy-transport-ipc.workspace = true
 alloy-transport-ws.workspace = true
 alloy-transport.workspace = true
-op-alloy-rpc-types.workspace = true
 
 # reqwest
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots"] }
@@ -59,7 +58,6 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
-delegate = "0.13"
 eyre.workspace = true
 thiserror.workspace = true
 
