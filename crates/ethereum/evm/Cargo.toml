@@ -53,4 +53,5 @@ std = [
     "alloy-evm/std",
     "reth-execution-types/std",
     "reth-evm/std",
+    "reth-primitives-traits/std",
 ]
