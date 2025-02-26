@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
+use alloy_primitives::map::HashSet;
 use alloy_rpc_types::engine::{ClientVersionV1, ExecutionData};
 use futures::TryFutureExt;
 use reth_chainspec::EthereumHardforks;
@@ -664,6 +665,17 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
 #[derive(Debug, Default)]
 pub struct BasicEngineApiBuilder<EV> {
     engine_validator_builder: EV,
+    capabilities: Option<EngineCapabilities>,
+}
+
+impl<EV> BasicEngineApiBuilder<EV> {
+    /// Sets list of capabilities supported by engine API. Takes list of method names.
+    pub fn capabilities(mut self, caps: &[&str]) -> Self {
+        self.capabilities = Some(EngineCapabilities::new(
+            caps.iter().map(|cap| cap.to_string()).collect::<HashSet<_>>(),
+        ));
+        self
+    }
 }
 
 impl<N, EV> EngineApiBuilder<N> for BasicEngineApiBuilder<EV>
@@ -685,7 +697,7 @@ where
     >;
 
     async fn build_engine_api(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
-        let Self { engine_validator_builder } = self;
+        let Self { engine_validator_builder, capabilities } = self;
 
         let engine_validator = engine_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
@@ -702,7 +714,7 @@ where
             ctx.node.pool().clone(),
             Box::new(ctx.node.task_executor().clone()),
             client,
-            EngineCapabilities::default(),
+            capabilities.unwrap_or_default(),
             engine_validator,
         ))
     }
