@@ -157,10 +157,32 @@ impl<N: NodePrimitives> TreeState<N> {
     ///
     /// Returns `None` if the block for the given hash is not found.
     fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlockWithTrieUpdates<N>>)> {
+        self.blocks_by_hash_while(hash, |_| true)
+    }
+
+    /// Returns all available blocks for the given hash that lead back to the canonical chain, from
+    /// newest to oldest, while `cond` returns `true`. And the parent hash of the oldest block that
+    /// is missing from the buffer.
+    ///
+    /// Returns `None` if the block for the given hash is not found or `cond` immediately returns
+    /// `false`.
+    fn blocks_by_hash_while(
+        &self,
+        hash: B256,
+        cond: impl Fn(BlockNumber) -> bool,
+    ) -> Option<(B256, Vec<ExecutedBlockWithTrieUpdates<N>>)> {
         let block = self.blocks_by_hash.get(&hash).cloned()?;
+        if !cond(block.recovered_block().number()) {
+            return None;
+        }
+
         let mut parent_hash = block.recovered_block().parent_hash();
         let mut blocks = vec![block];
-        while let Some(executed) = self.blocks_by_hash.get(&parent_hash) {
+        while let Some(executed) = self
+            .blocks_by_hash
+            .get(&parent_hash)
+            .filter(|block| cond(block.recovered_block().number()))
+        {
             parent_hash = executed.recovered_block().parent_hash();
             blocks.push(executed.clone());
         }
@@ -2680,7 +2702,12 @@ where
     ) -> Result<TrieInput, ParallelStateRootError> {
         let mut input = TrieInput::default();
 
-        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
+        // Fetch only in-memory blocks that are not yet persisted to disk.
+        let in_memory_blocks = self.state.tree_state.blocks_by_hash_while(parent_hash, |number| {
+            number > self.persistence_state.last_persisted_block.number
+        });
+
+        if let Some((historical, blocks)) = in_memory_blocks {
             debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
             // Retrieve revert state for historical block.
             let revert_state = consistent_view.revert_state(historical)?;
