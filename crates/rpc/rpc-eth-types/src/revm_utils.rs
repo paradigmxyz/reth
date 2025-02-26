@@ -6,9 +6,16 @@ use alloy_rpc_types_eth::{
     BlockOverrides,
 };
 use reth_evm::TransactionEnv;
-use revm::{context::BlockEnv, state::Bytecode, Database, DatabaseRef};
-use revm_database::CacheDB;
-use std::cmp::min;
+use revm::{
+    context::BlockEnv,
+    state::{Account, AccountStatus, Bytecode, EvmStorageSlot},
+    Database, DatabaseCommit,
+};
+use revm_database::{CacheDB, State};
+use std::{
+    cmp::min,
+    collections::{BTreeMap, HashMap},
+};
 
 use super::{EthApiError, EthResult, RpcInvalidTransactionError};
 
@@ -186,10 +193,31 @@ impl CallFees {
     }
 }
 
+/// Helper trait implemented for databases that support overriding block hashes.
+///
+/// Used for applying [`BlockOverrides::block_hash`]
+pub trait OverrideBlockHashes {
+    /// Overrides the given block hashes.
+    fn override_block_hashes(&mut self, block_hashes: BTreeMap<u64, B256>);
+}
+
+impl<DB> OverrideBlockHashes for CacheDB<DB> {
+    fn override_block_hashes(&mut self, block_hashes: BTreeMap<u64, B256>) {
+        self.block_hashes
+            .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
+    }
+}
+
+impl<DB> OverrideBlockHashes for State<DB> {
+    fn override_block_hashes(&mut self, block_hashes: BTreeMap<u64, B256>) {
+        self.block_hashes.extend(block_hashes);
+    }
+}
+
 /// Applies the given block overrides to the env and updates overridden block hashes in the db.
-pub fn apply_block_overrides<DB>(
+pub fn apply_block_overrides(
     overrides: BlockOverrides,
-    db: &mut CacheDB<DB>,
+    db: &mut impl OverrideBlockHashes,
     env: &mut BlockEnv,
 ) {
     let BlockOverrides {
@@ -205,7 +233,7 @@ pub fn apply_block_overrides<DB>(
 
     if let Some(block_hashes) = block_hash {
         // override block hashes
-        db.block_hashes.extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
+        db.override_block_hashes(block_hashes);
     }
 
     if let Some(number) = number {
@@ -232,10 +260,10 @@ pub fn apply_block_overrides<DB>(
 }
 
 /// Applies the given state overrides (a set of [`AccountOverride`]) to the [`CacheDB`].
-pub fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
+pub fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut DB) -> EthResult<()>
 where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
+    DB: Database + DatabaseCommit,
+    EthApiError: From<DB::Error>,
 {
     for (account, account_overrides) in overrides {
         apply_account_override(account, account_overrides, db)?;
@@ -247,60 +275,68 @@ where
 fn apply_account_override<DB>(
     account: Address,
     account_override: AccountOverride,
-    db: &mut CacheDB<DB>,
+    db: &mut DB,
 ) -> EthResult<()>
 where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
+    DB: Database + DatabaseCommit,
+    EthApiError: From<DB::Error>,
 {
-    // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
-    // which is modified via `Database::basic_ref`
-    let mut account_info = db.basic_ref(account)?.unwrap_or_default();
+    let mut info = db.basic(account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
-        account_info.nonce = nonce;
+        info.nonce = nonce;
     }
     if let Some(code) = account_override.code {
-        account_info.code = Some(
+        info.code = Some(
             Bytecode::new_raw_checked(code)
                 .map_err(|err| EthApiError::InvalidBytecode(err.to_string()))?,
         );
     }
     if let Some(balance) = account_override.balance {
-        account_info.balance = balance;
+        info.balance = balance;
     }
 
-    db.insert_account_info(account, account_info);
+    // Create a new account marked as touched
+    let mut acc =
+        revm::state::Account { info, status: AccountStatus::Touched, storage: HashMap::default() };
 
-    // We ensure that not both state and state_diff are set.
-    // If state is set, we must mark the account as "NewlyCreated", so that the old storage
-    // isn't read from
-    match (account_override.state, account_override.state_diff) {
+    let storage_diff = match (account_override.state, account_override.state_diff) {
         (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
-        (None, None) => {
-            // nothing to do
-        }
-        (Some(new_account_state), None) => {
-            db.replace_account_storage(
+        (None, None) => None,
+        // If we need to override the entire state, we firstly mark account as destroyed to clear
+        // its storage, and then we mark it is "NewlyCreated" to make sure that old storage won't be
+        // used.
+        (Some(state), None) => {
+            // Destroy the account to ensure that its storage is cleared
+            db.commit(HashMap::from_iter([(
                 account,
-                new_account_state
-                    .into_iter()
-                    .map(|(slot, value)| {
-                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
-                    })
-                    .collect(),
-            )?;
+                Account {
+                    status: AccountStatus::SelfDestructed | AccountStatus::Touched,
+                    ..Default::default()
+                },
+            )]));
+            // Mark the account as created to ensure that old storage is not read
+            acc.mark_created();
+            Some(state)
         }
-        (None, Some(account_state_diff)) => {
-            for (slot, value) in account_state_diff {
-                db.insert_account_storage(
-                    account,
-                    U256::from_be_bytes(slot.0),
-                    U256::from_be_bytes(value.0),
-                )?;
-            }
-        }
+        (None, Some(state)) => Some(state),
     };
+
+    if let Some(state) = storage_diff {
+        for (slot, value) in state {
+            acc.storage.insert(
+                slot.into(),
+                EvmStorageSlot {
+                    // we use inverted value here to ensure that storage is treated as changed
+                    original_value: (!value).into(),
+                    present_value: value.into(),
+                    is_cold: false,
+                },
+            );
+        }
+    }
+
+    db.commit(HashMap::from_iter([(account, acc)]));
 
     Ok(())
 }

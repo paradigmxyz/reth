@@ -492,7 +492,7 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     metrics: ValidationMetrics,
 }
 
-impl<Proivder, E: BlockExecutorProvider> fmt::Debug for ValidationApiInner<Proivder, E> {
+impl<Provider, E: BlockExecutorProvider> fmt::Debug for ValidationApiInner<Provider, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidationApiInner").finish_non_exhaustive()
     }

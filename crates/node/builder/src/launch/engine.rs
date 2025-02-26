@@ -411,7 +411,6 @@ where
             pool: ctx.components().pool().clone(),
             network: ctx.components().network().clone(),
             provider: ctx.node_adapter().provider.clone(),
-            payload_builder: ctx.components().payload_builder().clone(),
             payload_builder_handle: ctx.components().payload_builder_handle().clone(),
             task_executor: ctx.task_executor().clone(),
             config: ctx.node_config().clone(),

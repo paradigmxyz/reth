@@ -30,6 +30,7 @@ reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
+reth-payload-builder.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
