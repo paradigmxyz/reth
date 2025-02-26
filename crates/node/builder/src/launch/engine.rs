@@ -16,7 +16,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodePrimitives,
+    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodePrimitives, NodeTypes,
     NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
@@ -39,8 +39,9 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
-    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
+    AddOns, AddOnsContext, BuilderComponentsAdapter, ExExLauncher, FullNode, LaunchContext,
+    LaunchNode, NodeAdapter, NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder,
+    NodeHandle,
 };
 
 /// The engine node launcher.
@@ -79,10 +80,10 @@ where
         >,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     T: FullNodeTypes<
-        Types = Types,
-        DB = DB,
-        Provider = BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
-    >,
+            Types = Types,
+            DB = DB,
+            Provider = BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
+        > + NodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
@@ -97,12 +98,13 @@ where
         target: NodeBuilderWithComponents<T, CB, AO>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx, engine_tree_config } = self;
-        let NodeBuilderWithComponents {
-            adapter: NodeTypesAdapter { database },
+        let NodeBuilderWithComponents { adapter } = target;
+        let BuilderComponentsAdapter {
+            config,
             components_builder,
             add_ons: AddOns { hooks, exexs: installed_exex, add_ons },
-            config,
-        } = target;
+            database,
+        } = adapter;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
         // setup the launch context

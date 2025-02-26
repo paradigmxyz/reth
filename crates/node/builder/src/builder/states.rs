@@ -314,13 +314,13 @@ where
     AO: NodeAddOns<NodeAdapter<T, C::Components>>,
 {
     /// The node configuration
-    config: NodeConfig<<T as NodeTypes>::ChainSpec>,
+    pub config: NodeConfig<<T as NodeTypes>::ChainSpec>,
     /// The database
-    database: T::DB,
+    pub database: T::DB,
     /// The components builder
-    components_builder: C,
+    pub components_builder: C,
     /// The add-ons for the node
-    add_ons: AddOns<NodeAdapter<T, C::Components>, AO>,
+    pub add_ons: AddOns<NodeAdapter<T, C::Components>, AO>,
 }
 
 impl<T, C, AO> BuilderComponentsAdapter<T, C, AO>
