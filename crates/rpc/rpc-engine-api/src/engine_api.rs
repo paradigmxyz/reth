@@ -49,7 +49,7 @@ const MAX_BLOB_LIMIT: usize = 128;
 /// API processing. It can be reused by other non L1 engine APIs that deviate from the L1 spec but
 /// are still follow the engine API model.
 ///
-/// ## Implementors
+/// ## Implementers
 ///
 /// Implementing support for an engine API jsonrpsee RPC handler is done by defining the engine API
 /// server trait and implementing it on a type that can wrap this [`EngineApi`] type.
