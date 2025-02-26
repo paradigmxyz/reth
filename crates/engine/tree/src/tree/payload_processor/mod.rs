@@ -242,13 +242,23 @@ pub(crate) struct PrewarmHandle {
 }
 
 /// Shared access to most recently used cache.
+///
+/// This cache is intended to used for processing the payload in the following manner:
+///  - Get Cache if the payload's parent block matches the parent block
+///  - Update cache upon successful payload execution
+///
+/// This process assumes that payloads are received sequentially.
 #[derive(Clone, Debug)]
 struct ExecutionCache {
+    /// Guarded cloneable cache identified by a block hash.
     inner: Arc<RwLock<Option<SavedCache>>>,
 }
 
 impl ExecutionCache {
 
-
+    /// Returns the cache if the currently store cache is for the given `parent_hash`
+    pub fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
+        todo!()
+    }
 
 }
