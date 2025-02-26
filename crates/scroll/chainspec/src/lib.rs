@@ -18,7 +18,9 @@ use reth_chainspec::{
     BaseFeeParams, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec, EthereumHardforks,
     ForkFilter, ForkId, Hardforks, Head,
 };
-use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
+use reth_ethereum_forks::{
+    ChainHardforks, EthereumHardfork, ForkCondition, ForkFilterKey, ForkHash, Hardfork,
+};
 use reth_network_peers::NodeRecord;
 use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
 
@@ -33,11 +35,11 @@ extern crate alloc;
 mod constants;
 pub use constants::{
     SCROLL_DEV_L1_CONFIG, SCROLL_DEV_L1_MESSAGE_QUEUE_ADDRESS, SCROLL_DEV_L1_PROXY_ADDRESS,
-    SCROLL_DEV_MAX_L1_MESSAGES, SCROLL_FEE_VAULT_ADDRESS, SCROLL_MAINNET_L1_CONFIG,
-    SCROLL_MAINNET_L1_MESSAGE_QUEUE_ADDRESS, SCROLL_MAINNET_L1_PROXY_ADDRESS,
-    SCROLL_MAINNET_MAX_L1_MESSAGES, SCROLL_SEPOLIA_L1_CONFIG,
-    SCROLL_SEPOLIA_L1_MESSAGE_QUEUE_ADDRESS, SCROLL_SEPOLIA_L1_PROXY_ADDRESS,
-    SCROLL_SEPOLIA_MAX_L1_MESSAGES,
+    SCROLL_DEV_MAX_L1_MESSAGES, SCROLL_FEE_VAULT_ADDRESS, SCROLL_MAINNET_GENESIS_HASH,
+    SCROLL_MAINNET_L1_CONFIG, SCROLL_MAINNET_L1_MESSAGE_QUEUE_ADDRESS,
+    SCROLL_MAINNET_L1_PROXY_ADDRESS, SCROLL_MAINNET_MAX_L1_MESSAGES, SCROLL_SEPOLIA_GENESIS_HASH,
+    SCROLL_SEPOLIA_L1_CONFIG, SCROLL_SEPOLIA_L1_MESSAGE_QUEUE_ADDRESS,
+    SCROLL_SEPOLIA_L1_PROXY_ADDRESS, SCROLL_SEPOLIA_MAX_L1_MESSAGES,
 };
 
 mod dev;
@@ -261,7 +263,35 @@ impl Hardforks for ScrollChainSpec {
     }
 
     fn fork_id(&self, head: &Head) -> ForkId {
-        self.inner.fork_id(head)
+        // TODO: Geth does not support time based hard forks for its `ForkID` calculation. As such,
+        // we are only using block based hard forks for now.
+        // self.inner.fork_id(head)
+
+        // The following code is modified version of self.inner.fork_id(head) to ignore time based
+        // hard forks.
+        let mut forkhash = ForkHash::from(self.inner.genesis_hash());
+        let mut current_applied = 0;
+        // handle all block forks before handling timestamp based forks. see: https://eips.ethereum.org/EIPS/eip-6122
+        for (_, cond) in self.hardforks.forks_iter() {
+            // handle block based forks and the sepolia merge netsplit block edge case (TTD
+            // ForkCondition with Some(block))
+            if let ForkCondition::Block(block) |
+            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            {
+                if cond.active_at_head(head) {
+                    // skip duplicated hardforks: hardforks enabled at genesis block
+                    if block != current_applied {
+                        forkhash += block;
+                        current_applied = block;
+                    }
+                } else {
+                    // we can return here because this block fork is not active, so we set the
+                    // `next` value
+                    return ForkId { hash: forkhash, next: block }
+                }
+            }
+        }
+        ForkId { hash: forkhash, next: 0 }
     }
 
     fn latest_fork_id(&self) -> ForkId {
@@ -269,7 +299,17 @@ impl Hardforks for ScrollChainSpec {
     }
 
     fn fork_filter(&self, head: Head) -> ForkFilter {
-        self.inner.fork_filter(head)
+        let forks = self.inner.hardforks.forks_iter().filter_map(|(_, condition)| {
+            // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
+            // fork filter.
+            Some(match condition {
+                ForkCondition::Block(block) |
+                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                _ => return None,
+            })
+        });
+
+        ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 }
 
@@ -381,7 +421,7 @@ mod tests {
     use crate::*;
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::b256;
-    use reth_chainspec::test_fork_ids;
+    use reth_chainspec::{test_fork_ids, ForkFilterKey};
     use reth_ethereum_forks::{EthereumHardfork, ForkHash};
     use reth_scroll_forks::ScrollHardfork;
 
@@ -406,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn scroll_mainnet_forkids() {
+    fn scroll_mainnet_forkids_deref() {
         test_fork_ids(
             &SCROLL_MAINNET,
             &[
@@ -432,6 +472,53 @@ mod tests {
                 ),
             ],
         );
+    }
+
+    #[test]
+    fn scroll_mainnet_forkids() {
+        let cases = [
+            (
+                Head { number: 0, ..Default::default() },
+                ForkId { hash: ForkHash([0xea, 0x6b, 0x56, 0xca]), next: 5220340 },
+            ),
+            (
+                Head { number: 5220340, ..Default::default() },
+                ForkId { hash: ForkHash([0xee, 0x46, 0xae, 0x2a]), next: 7096836 },
+            ),
+            (
+                Head { number: 7096836, ..Default::default() },
+                ForkId { hash: ForkHash([0x18, 0xd3, 0xc8, 0xd9]), next: 0 },
+            ),
+        ];
+
+        for (block, expected_id) in cases {
+            let computed_id = SCROLL_MAINNET.fork_id(&block);
+            assert_eq!(
+                expected_id, computed_id,
+                "Expected fork ID {:?}, computed fork ID {:?} at block {}",
+                expected_id, computed_id, block.number
+            );
+        }
+    }
+
+    #[test]
+    fn scroll_mainnet_fork_filter_excludes_time_based_forks() {
+        let head = Default::default();
+        let fork_filter = SCROLL_MAINNET.fork_filter(head);
+
+        let forks = vec![
+            ForkFilterKey::Block(0),
+            ForkFilterKey::Block(5220340),
+            ForkFilterKey::Block(7096836),
+        ];
+        let expected_fork_filter = ForkFilter::new(
+            head,
+            SCROLL_MAINNET.genesis_hash(),
+            SCROLL_MAINNET.genesis_timestamp(),
+            forks,
+        );
+
+        assert_eq!(fork_filter, expected_fork_filter);
     }
 
     #[test]

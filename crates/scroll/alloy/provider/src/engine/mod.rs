@@ -1,4 +1,5 @@
 mod provider;
+
 pub use provider::ScrollAuthEngineApiProvider;
 
 use alloy_primitives::{BlockHash, U64};
