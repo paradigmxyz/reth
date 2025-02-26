@@ -2686,7 +2686,7 @@ where
 
         if let Some((_, mut blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
             let historical: BlockHashOrNumber = loop {
-                // Iterate over the blocks in reverse order, from oldest to newest.
+                // Iterate over the blocks from oldest to newest.
                 let Some(block) = blocks.last() else {
                     // If no more blocks are left, set historical block hash to the original parent
                     // hash.
