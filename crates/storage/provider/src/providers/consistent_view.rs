@@ -8,6 +8,7 @@ use reth_trie::HashedPostState;
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 
 pub use reth_storage_errors::provider::ConsistentViewError;
+use tracing::debug;
 
 /// A consistent view over state in the database.
 ///
@@ -54,14 +55,27 @@ where
         let block_number = provider
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        if block_number == provider.best_block_number()? &&
-            block_number == provider.last_block_number()?
-        {
+        let best_block_number = provider.best_block_number()?;
+        let last_block_number = provider.last_block_number()?;
+
+        if block_number == best_block_number && block_number == last_block_number {
+            debug!(target: "providers::consistent_view", ?block_hash, block_number, "Returning empty revert state");
             Ok(HashedPostState::default())
         } else {
-            Ok(HashedPostState::from_reverts::<
+            let revert_state = HashedPostState::from_reverts::<
                 <Factory::StateCommitment as StateCommitment>::KeyHasher,
-            >(provider.tx_ref(), block_number + 1)?)
+            >(provider.tx_ref(), block_number + 1)?;
+            debug!(
+                target: "providers::consistent_view",
+                ?block_hash,
+                block_number,
+                best_block_number,
+                last_block_number,
+                accounts = revert_state.accounts.len(),
+                storages = revert_state.storages.len(),
+                "Returning non-empty revert state"
+            );
+            Ok(revert_state)
         }
     }
 

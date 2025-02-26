@@ -437,19 +437,11 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
     // If Isthmus is active, overwrite the withdrawals root with the storage root of predeploy
     // `L2ToL1MessagePasser.sol`
     if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) {
-        match genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
-            Some(predeploy) => {
-                if let Some(ref storage) = predeploy.storage {
-                    header.withdrawals_root =
-                        Some(storage_root_unhashed(storage.iter().map(|(k, v)| (*k, (*v).into()))))
-                }
+        if let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
+            if let Some(storage) = &predeploy.storage {
+                header.withdrawals_root =
+                    Some(storage_root_unhashed(storage.iter().map(|(k, v)| (*k, (*v).into()))))
             }
-            None =>
-                // todo: log this when no_std tracing available <https://github.com/paradigmxyz/reth/issues/14526>
-            /*debug!(target: "reth::cli",
-                "Isthmus active but predeploy L2ToL1MessagePasser.sol not found in genesis alloc"
-            ),*/
-                {}
         }
     }
 

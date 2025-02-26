@@ -24,7 +24,6 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
-use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::test_utils::MockExecutorProvider;
 use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
@@ -35,8 +34,8 @@ use reth_node_api::{
 };
 use reth_node_builder::{
     components::{
-        Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder,
-        PoolBuilder,
+        BasicPayloadServiceBuilder, Components, ComponentsBuilder, ConsensusBuilder,
+        ExecutorBuilder, NodeComponentsBuilder, PoolBuilder,
     },
     BuilderContext, Node, NodeAdapter, RethFullAdapter,
 };
@@ -143,7 +142,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         TestPoolBuilder,
-        EthereumPayloadBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
         TestExecutorBuilder,
         TestConsensusBuilder,
@@ -156,7 +155,7 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(TestPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
+            .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(TestExecutorBuilder::default())
             .consensus(TestConsensusBuilder::default())
@@ -288,13 +287,6 @@ pub async fn test_exex_context_with_chain_spec(
     let task_executor = tasks.executor();
     tasks.executor().spawn(network_manager);
 
-    let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
-        provider.clone(),
-        transaction_pool.clone(),
-        evm_config.clone(),
-        EthereumBuilderConfig::new(Default::default()),
-    );
-
     let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
     let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
@@ -304,7 +296,6 @@ pub async fn test_exex_context_with_chain_spec(
             executor,
             consensus,
             network,
-            payload_builder,
             payload_builder_handle,
         },
         task_executor,

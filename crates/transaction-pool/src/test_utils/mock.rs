@@ -29,10 +29,7 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    transaction::{
-        SignedTransactionIntoRecoveredExt, TransactionConversionError,
-        TryFromRecoveredTransactionError,
-    },
+    transaction::{TransactionConversionError, TryFromRecoveredTransactionError},
     PooledTransaction, Recovered, Transaction, TransactionSigned, TxType,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
