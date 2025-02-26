@@ -161,18 +161,18 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
-    /// newest to oldest, while `cond` returns `true`. And the parent hash of the oldest block that
-    /// is missing from the buffer.
+    /// newest to oldest, while `predicate` returns `true`. And the parent hash of the oldest block
+    /// that is missing from the buffer.
     ///
-    /// Returns `None` if the block for the given hash is not found or `cond` immediately returns
-    /// `false`.
+    /// Returns `None` if the block for the given hash is not found or `predicate` immediately
+    /// returns `false`.
     fn blocks_by_hash_while(
         &self,
         hash: B256,
-        cond: impl Fn(BlockNumber) -> bool,
+        predicate: impl Fn(BlockNumber) -> bool,
     ) -> Option<(B256, Vec<ExecutedBlockWithTrieUpdates<N>>)> {
         let block = self.blocks_by_hash.get(&hash).cloned()?;
-        if !cond(block.recovered_block().number()) {
+        if !predicate(block.recovered_block().number()) {
             return None;
         }
 
@@ -181,7 +181,7 @@ impl<N: NodePrimitives> TreeState<N> {
         while let Some(executed) = self
             .blocks_by_hash
             .get(&parent_hash)
-            .filter(|block| cond(block.recovered_block().number()))
+            .filter(|block| predicate(block.recovered_block().number()))
         {
             parent_hash = executed.recovered_block().parent_hash();
             blocks.push(executed.clone());
