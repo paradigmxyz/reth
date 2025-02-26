@@ -22,6 +22,8 @@ pub const CAPABILITIES: &[&str] = &[
 /// The list of all supported Engine capabilities available over the engine endpoint.
 ///
 /// Spec: <https://specs.optimism.io/protocol/exec-engine.html>
+///
+/// Spec: <https://specs.optimism.io/protocol/exec-engine.html>
 pub const OPSTACK_CAPABILITIES:&[&str]=&[
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
