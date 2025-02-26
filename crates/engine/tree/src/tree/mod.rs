@@ -46,9 +46,10 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_provider::{
-    providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    providers::ConsistentDbView, BlockHashReader, BlockNumReader, BlockReader, DBProvider,
+    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    StateCommitmentProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant,
 };
 use reth_revm::{cancelled::ManualCancel, database::StateProviderDatabase};
 use reth_stages_api::ControlFlow;
@@ -157,32 +158,10 @@ impl<N: NodePrimitives> TreeState<N> {
     ///
     /// Returns `None` if the block for the given hash is not found.
     fn blocks_by_hash(&self, hash: B256) -> Option<(B256, Vec<ExecutedBlockWithTrieUpdates<N>>)> {
-        self.blocks_by_hash_while(hash, |_| true)
-    }
-
-    /// Returns all available blocks for the given hash that lead back to the canonical chain, from
-    /// newest to oldest, while `predicate` returns `true`. And the parent hash of the oldest block
-    /// that is missing from the buffer.
-    ///
-    /// Returns `None` if the block for the given hash is not found or `predicate` immediately
-    /// returns `false`.
-    fn blocks_by_hash_while(
-        &self,
-        hash: B256,
-        predicate: impl Fn(BlockNumber) -> bool,
-    ) -> Option<(B256, Vec<ExecutedBlockWithTrieUpdates<N>>)> {
         let block = self.blocks_by_hash.get(&hash).cloned()?;
-        if !predicate(block.recovered_block().number()) {
-            return None;
-        }
-
         let mut parent_hash = block.recovered_block().parent_hash();
         let mut blocks = vec![block];
-        while let Some(executed) = self
-            .blocks_by_hash
-            .get(&parent_hash)
-            .filter(|block| predicate(block.recovered_block().number()))
-        {
+        while let Some(executed) = self.blocks_by_hash.get(&parent_hash) {
             parent_hash = executed.recovered_block().parent_hash();
             blocks.push(executed.clone());
         }
@@ -2705,11 +2684,37 @@ where
         let provider = consistent_view.provider_ro()?;
         let best_block_number = provider.best_block_number()?;
 
-        // Fetch only in-memory blocks that are not yet persisted to disk.
         let in_memory_blocks = self
             .state
             .tree_state
-            .blocks_by_hash_while(parent_hash, |number| number > best_block_number);
+            .blocks_by_hash(parent_hash)
+            .map(|(_, blocks)| {
+                let mut filtered_blocks = Vec::with_capacity(blocks.len());
+                let mut historical = None;
+                for block in blocks {
+                    let recovered_block = block.recovered_block();
+
+                    // Take only those blocks that are either:
+                    // 1. Higher than the highest database block
+                    // 2. Or have no associated database block, meaning that it's on a non-canonical
+                    //    chain
+                    if recovered_block.number() > best_block_number ||
+                        Some(recovered_block.hash()) !=
+                            provider.block_hash(recovered_block.number())?
+                    {
+                        historical = Some(recovered_block.parent_hash());
+                        filtered_blocks.push(block);
+                    } else {
+                        // Since we're iterating from highest to lowest, we can stop here, meaning
+                        // that we started seeing blocks that are present in the database.
+                        break
+                    }
+                }
+
+                ProviderResult::Ok(historical.map(|historical| (historical, filtered_blocks)))
+            })
+            .transpose()?
+            .flatten();
 
         if let Some((historical, blocks)) = in_memory_blocks {
             debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
