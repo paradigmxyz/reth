@@ -18,10 +18,7 @@ pub struct OpEngineApiBuilder<EV> {
 impl<N, EV> EngineApiBuilder<N> for OpEngineApiBuilder<EV>
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
-            ChainSpec: EthereumHardforks,
-            Engine: EngineTypes<ExecutionData = ExecutionData>,
-        >,
+        Types: NodeTypesWithEngine<ChainSpec: EthereumHardforks, Engine: EngineTypes>,
     >,
     EV: EngineValidatorBuilder<N>,
 {

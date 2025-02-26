@@ -924,7 +924,7 @@ mod tests {
     use alloy_consensus::Transaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, PooledTransaction};
+    use reth_primitives::{transaction::SignedTransaction, PooledTransaction};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

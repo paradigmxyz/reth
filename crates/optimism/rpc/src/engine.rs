@@ -206,7 +206,7 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> OpEngineApiServer<EngineT>
     for OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes<ExecutionData = ExecutionData>,
+    EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,

@@ -65,5 +65,11 @@ pub type HeaderTy<N> = <N as NodePrimitives>::BlockHeader;
 /// Helper adapter type for accessing [`NodePrimitives`] block body types.
 pub type BodyTy<N> = <N as NodePrimitives>::BlockBody;
 
+/// Helper adapter type for accessing [`NodePrimitives`] block types.
+pub type BlockTy<N> = <N as NodePrimitives>::Block;
+
 /// Helper adapter type for accessing [`NodePrimitives`] receipt types.
 pub type ReceiptTy<N> = <N as NodePrimitives>::Receipt;
+
+/// Helper adapter type for accessing [`NodePrimitives`] signed transaction types.
+pub type TxTy<N> = <N as NodePrimitives>::SignedTx;
