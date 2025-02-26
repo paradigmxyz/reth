@@ -2684,34 +2684,38 @@ where
         let provider = consistent_view.provider_ro()?;
         let best_block_number = provider.best_block_number()?;
 
-        if let Some((_, mut blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
-            let historical: BlockHashOrNumber = loop {
+        let in_memory_blocks = self
+            .state
+            .tree_state
+            .blocks_by_hash(parent_hash)
+            .map(|(_, mut blocks)| {
                 // Iterate over the blocks from oldest to newest.
-                let Some(block) = blocks.last() else {
-                    // If no more blocks are left, set historical block hash to the original parent
-                    // hash.
-                    break parent_hash.into();
-                };
-                let recovered_block = block.recovered_block();
-                // Remove those blocks that lower than or equals to the highest database block and
-                // have an associated database block with a matching hash.
-                if recovered_block.number() <= best_block_number &&
-                    Some(recovered_block.hash()) ==
-                        provider.block_hash(recovered_block.number())?
-                {
-                    blocks.pop();
-                } else {
-                    // If the block is higher than the best block number or does not have an
-                    // associated database block, set historical block number to
-                    // the current block's parent, as it's the first block that's not in the
-                    // database.
-                    break (recovered_block.number() - 1).into();
+                while let Some(block) = blocks.last() {
+                    let recovered_block = block.recovered_block();
+                    // Remove those blocks that lower than or equal to the highest database block
+                    // and have an associated database block with a matching hash.
+                    if recovered_block.number() <= best_block_number &&
+                        Some(recovered_block.hash()) ==
+                            provider.block_hash(recovered_block.number())?
+                    {
+                        blocks.pop();
+                    } else {
+                        // If the block is higher than the best block number or does not have an
+                        // associated database block, return current block's parent, as it's the
+                        // first block that's not in the database.
+                        return Ok(Some(((recovered_block.number() - 1), blocks)))
+                    }
                 }
-            };
 
+                ProviderResult::Ok(None)
+            })
+            .transpose()?
+            .flatten();
+
+        if let Some((historical, blocks)) = in_memory_blocks {
             debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
             // Retrieve revert state for historical block.
-            let revert_state = self.revert_state(provider, best_block_number, historical)?;
+            let revert_state = self.revert_state(provider, best_block_number, historical.into())?;
             input.append(revert_state);
 
             // Extend with contents of parent in-memory blocks.
