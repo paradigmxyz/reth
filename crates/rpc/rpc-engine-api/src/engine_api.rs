@@ -666,8 +666,8 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
-    // Metrics version of `new_payload_v3`
-    async fn new_payload_v3_metered(
+    /// Metrics version of `new_payload_v3`
+    pub async fn new_payload_v3_metered(
         &self,
         payload: EngineT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
@@ -704,7 +704,7 @@ where
     }
 
     /// Metrics version of `new_payload_v4`
-    async fn new_payload_v4_metered(
+    pub async fn new_payload_v4_metered(
         &self,
         payload: EngineT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {

@@ -1,11 +1,10 @@
 //! Implements the Optimism engine API RPC methods.
 
-use alloy_eips::eip7685::{Requests, RequestsOrHash};
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
-    ExecutionPayloadSidecar, ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId,
-    PayloadStatus, PraguePayloadFields,
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
@@ -233,10 +232,7 @@ where
 {
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
-        let payload = OpExecutionData {
-            payload: payload.into_payload(),
-            sidecar: ExecutionPayloadSidecar::none(),
-        };
+        let payload = OpExecutionData::v2(payload);
         Ok(self.inner.new_payload_v2_metered(payload).await?)
     }
 
@@ -247,13 +243,7 @@ where
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
-        let payload = OpExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                versioned_hashes,
-                parent_beacon_block_root,
-            }),
-        };
+        let payload = OpExecutionData::v3(payload, versioned_hashes, parent_beacon_block_root);
 
         Ok(self.inner.new_payload_v3_metered(payload).await?)
     }
@@ -266,13 +256,12 @@ where
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
-        let payload = OpExecutionData {
-            payload: payload.into(),
-            sidecar: ExecutionPayloadSidecar::v4(
-                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
-                PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
-            ),
-        };
+        let payload = OpExecutionData::v4(
+            payload,
+            versioned_hashes,
+            parent_beacon_block_root,
+            execution_requests,
+        );
 
         Ok(self.inner.new_payload_v4_metered(payload).await?)
     }
