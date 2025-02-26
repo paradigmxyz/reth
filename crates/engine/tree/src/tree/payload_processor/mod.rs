@@ -118,31 +118,10 @@ where
         let multi_proof_task =
             StateRootTask2::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie);
 
-        let (cache, cache_metrics) = self.cache_for(block.header().parent_hash()).split();
-        // configure prewarming
-        let prewarm_ctx = PrewarmContext {
-            header: block.clone_sealed_header(),
-            evm_config: self.evm_config.clone(),
-            cache,
-            cache_metrics,
-            provider: provider_builder,
-        };
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
-        let txs = block.transactions_recovered().map(Recovered::cloned).collect();
-        let prewarm_task = PrewarmTask::new(
-            self.executor.clone(),
-            self.execution_cache.clone(),
-            prewarm_ctx,
-            to_multi_proof,
-            txs,
-        );
-        let to_prewarm_task = prewarm_task.actions_tx();
 
-        // spawn pre-warm task
-        self.executor.spawn_blocking(move || {
-            prewarm_task.run();
-        });
+        let to_prewarm_task = self.spawn_prewarming_with(block, provider_builder, to_multi_proof);
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -182,6 +161,24 @@ where
             + Clone
             + 'static,
     {
+        let to_prewarm_task = self.spawn_prewarming_with(block, provider_builder, None);
+    }
+
+    /// Spawn prewarming optionally wired to the multiproof task for target updates.
+    fn spawn_prewarming_with<P>(
+        &self,
+        block: RecoveredBlock<N::Block>,
+        provider_builder: StateProviderBuilder<N, P>,
+        to_multi_proof: Option<Sender<StateRootMessage>>,
+    ) -> Sender<PrewarmTaskEvent>
+    where
+        P: BlockReader
+            + StateProviderFactory
+            + StateReader
+            + StateCommitmentProvider
+            + Clone
+            + 'static,
+    {
         let (cache, cache_metrics) = self.cache_for(block.header().parent_hash()).split();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
@@ -192,8 +189,6 @@ where
             provider: provider_builder,
         };
 
-        // configure prewarming without multiproof
-        let to_multi_proof = None;
         let txs = block.transactions_recovered().map(Recovered::cloned).collect();
         let prewarm_task = PrewarmTask::new(
             self.executor.clone(),
@@ -208,8 +203,7 @@ where
         self.executor.spawn_blocking(move || {
             prewarm_task.run();
         });
-
-        todo!()
+        to_prewarm_task
     }
 
     /// Returns the cache for the given parent hash.
