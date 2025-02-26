@@ -56,9 +56,10 @@ where
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
         let best_block_number = provider.best_block_number()?;
-        let last_block_number = provider.last_block_number()?;
 
-        if block_number == best_block_number && block_number == last_block_number {
+        // We do not check against the `last_block_number` here because
+        // `HashedPostState::from_reverts` only uses the database tables, and not static files.
+        if block_number == best_block_number {
             debug!(target: "providers::consistent_view", ?block_hash, block_number, "Returning empty revert state");
             Ok(HashedPostState::default())
         } else {
@@ -70,7 +71,6 @@ where
                 ?block_hash,
                 block_number,
                 best_block_number,
-                last_block_number,
                 accounts = revert_state.accounts.len(),
                 storages = revert_state.storages.len(),
                 "Returning non-empty revert state"
