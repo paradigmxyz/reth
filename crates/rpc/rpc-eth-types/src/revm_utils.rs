@@ -300,12 +300,12 @@ where
     let mut acc =
         revm::state::Account { info, status: AccountStatus::Touched, storage: HashMap::default() };
 
-    // We ensure that not both state and state_diff are set.
-    // If state is set, we must mark the account as "NewlyCreated", so that the old storage
-    // isn't read from
     let storage_diff = match (account_override.state, account_override.state_diff) {
         (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
         (None, None) => None,
+        // If we need to override the entire state, we firstly mark account as destroyed to clear
+        // its storage, and then we mark it is "NewlyCreated" to make sure that old storage won't be
+        // used.
         (Some(state), None) => {
             // Destroy the account to ensure that its storage is cleared
             db.commit(HashMap::from_iter([(
@@ -315,6 +315,8 @@ where
                     ..Default::default()
                 },
             )]));
+            // Mark the account as created to ensure that old storage is not read
+            acc.mark_created();
             Some(state)
         }
         (None, Some(state)) => Some(state),
