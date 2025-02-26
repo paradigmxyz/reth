@@ -2684,39 +2684,24 @@ where
         let provider = consistent_view.provider_ro()?;
         let best_block_number = provider.best_block_number()?;
 
-        let in_memory_blocks = self
-            .state
-            .tree_state
-            .blocks_by_hash(parent_hash)
-            .map(|(_, blocks)| {
-                let mut filtered_blocks = Vec::with_capacity(blocks.len());
-                let mut historical = None;
-                for block in blocks {
-                    let recovered_block = block.recovered_block();
+        let in_memory_blocks = self.state.tree_state.blocks_by_hash(parent_hash);
 
-                    // Take only those blocks that are either:
-                    // 1. Higher than the highest database block
-                    // 2. Or have no associated database block, meaning that it's on a non-canonical
-                    //    chain
-                    if recovered_block.number() > best_block_number ||
-                        Some(recovered_block.hash()) !=
-                            provider.block_hash(recovered_block.number())?
-                    {
-                        historical = Some(recovered_block.parent_hash());
-                        filtered_blocks.push(block);
-                    } else {
-                        // Since we're iterating from highest to lowest, we can stop here, meaning
-                        // that we started seeing blocks that are present in the database.
-                        break
-                    }
+        if let Some((mut historical, mut blocks)) = in_memory_blocks {
+            while let Some(block) = blocks.last() {
+                let recovered_block = block.recovered_block();
+                // Remove those blocks that lower than or equals to the highest database block and
+                // have an associated database block with a matching hash.
+                if recovered_block.number() <= best_block_number &&
+                    Some(recovered_block.hash()) ==
+                        provider.block_hash(recovered_block.number())?
+                {
+                    historical = recovered_block.parent_hash();
+                    blocks.pop();
+                } else {
+                    break
                 }
+            }
 
-                ProviderResult::Ok(historical.map(|historical| (historical, filtered_blocks)))
-            })
-            .transpose()?
-            .flatten();
-
-        if let Some((historical, blocks)) = in_memory_blocks {
             debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
             // Retrieve revert state for historical block.
             let revert_state = self.revert_state(provider, best_block_number, historical)?;
