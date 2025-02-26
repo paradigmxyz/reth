@@ -28,7 +28,6 @@ exclude_crates=(
   reth-ethereum-cli
   reth-ethereum-payload-builder
   reth-etl
-  reth-evm
   reth-exex
   reth-exex-test-utils
   reth-ipc
@@ -45,6 +44,8 @@ exclude_crates=(
   reth-optimism-payload-builder
   reth-optimism-rpc
   reth-optimism-chain-registry
+  reth-optimism-consensus
+  reth-optimism-evm
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util

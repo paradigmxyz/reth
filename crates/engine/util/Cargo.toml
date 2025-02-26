@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-ethereum-primitives.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-errors.workspace = true
@@ -25,6 +26,7 @@ reth-revm.workspace = true
 reth-provider.workspace = true
 reth-ethereum-forks.workspace = true
 revm-primitives.workspace = true
+revm-database.workspace = true
 reth-trie.workspace = true
 reth-payload-primitives.workspace = true
 
@@ -50,8 +52,3 @@ itertools.workspace = true
 
 # tracing
 tracing.workspace = true
-
-[features]
-optimism = [
-    "revm-primitives/optimism",
-]

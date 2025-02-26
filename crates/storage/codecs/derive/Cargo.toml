@@ -15,7 +15,7 @@ workspace = true
 proc-macro = true
 
 [dependencies]
-convert_case = "0.6.0"
+convert_case = "0.7.0"
 proc-macro2.workspace = true
 quote.workspace = true
 syn.workspace = true

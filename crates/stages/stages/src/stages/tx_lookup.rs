@@ -2,10 +2,12 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
-use reth_db::{table::Value, tables, RawKey, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
+    table::Value,
+    tables,
     transaction::DbTxMut,
+    RawKey, RawValue,
 };
 use reth_etl::Collector;
 use reth_primitives::NodePrimitives;
@@ -259,7 +261,7 @@ mod tests {
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
-    use reth_db::transaction::DbTx;
+    use reth_db_api::transaction::DbTx;
     use reth_primitives::SealedBlock;
     use reth_provider::{
         providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,

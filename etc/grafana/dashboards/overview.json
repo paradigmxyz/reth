@@ -3616,7 +3616,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "description": "The time it takes for operations that are part of block validation, but not execution or state root, to complete.",
       "fieldConfig": {
@@ -3698,7 +3698,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -3715,7 +3715,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -3732,7 +3732,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -3749,7 +3749,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -6952,7 +6952,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "s"
         },
         "overrides": []
       },
@@ -6962,7 +6963,7 @@
         "x": 12,
         "y": 245
       },
-      "id": 216,
+      "id": 253,
       "options": {
         "legend": {
           "calcs": [],
@@ -6986,7 +6987,7 @@
           "instant": false,
           "legendFormat": "{{type}} branch nodes p{{quantile}}",
           "range": true,
-          "refId": "Branch Nodes"
+          "refId": "Trie Root Duration"
         },
         {
           "datasource": {
@@ -6999,10 +7000,312 @@
           "instant": false,
           "legendFormat": "{{type}} leaves added p{{quantile}}",
           "range": true,
-          "refId": "Leaf Nodes"
+          "refId": "A"
         }
       ],
       "title": "Trie Nodes Added",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 253
+      },
+      "id": 216,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_proof_calculation_storage_targets_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "{{type}} storage proof targets p{{quantile}}",
+          "range": true,
+          "refId": "Branch Nodes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_proof_calculation_account_targets_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "{{type}} account proof targets p{{quantile}}",
+          "range": true,
+          "refId": "Leaf Nodes"
+        }
+      ],
+      "title": "Proof Targets",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 253
+      },
+      "id": 255,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_proofs_processed_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "{{type}} proofs processed p{{quantile}}",
+          "range": true,
+          "refId": "Branch Nodes"
+        }
+      ],
+      "title": "Proofs Processed",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 261
+      },
+      "id": 254,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_proof_calculation_duration_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "{{type}} Proof calculation duration p{{quantile}}",
+          "range": true,
+          "refId": "Branch Nodes"
+        }
+      ],
+      "title": "Proof calculation duration",
       "type": "timeseries"
     },
     {
@@ -7011,7 +7314,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 253
+        "y": 269
       },
       "id": 68,
       "panels": [],
@@ -7084,7 +7387,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 254
+        "y": 270
       },
       "id": 60,
       "options": {
@@ -7180,7 +7483,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 254
+        "y": 270
       },
       "id": 62,
       "options": {
@@ -7276,7 +7579,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 262
+        "y": 278
       },
       "id": 64,
       "options": {
@@ -7313,7 +7616,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 270
+        "y": 286
       },
       "id": 97,
       "panels": [],
@@ -7398,7 +7701,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 271
+        "y": 287
       },
       "id": 98,
       "options": {
@@ -7561,7 +7864,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 271
+        "y": 287
       },
       "id": 101,
       "options": {
@@ -7659,7 +7962,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 279
+        "y": 295
       },
       "id": 99,
       "options": {
@@ -7757,7 +8060,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 279
+        "y": 295
       },
       "id": 100,
       "options": {
@@ -7795,7 +8098,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 287
+        "y": 303
       },
       "id": 105,
       "panels": [],
@@ -7868,7 +8171,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 288
+        "y": 304
       },
       "id": 106,
       "options": {
@@ -7966,7 +8269,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 288
+        "y": 304
       },
       "id": 107,
       "options": {
@@ -8063,7 +8366,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 296
+        "y": 312
       },
       "id": 217,
       "options": {
@@ -8101,7 +8404,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 304
+        "y": 320
       },
       "id": 108,
       "panels": [],
@@ -8199,7 +8502,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 305
+        "y": 321
       },
       "id": 109,
       "options": {
@@ -8261,7 +8564,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 305
+        "y": 321
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -8391,7 +8694,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 313
+        "y": 329
       },
       "id": 120,
       "options": {
@@ -8449,7 +8752,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 313
+        "y": 329
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -8615,7 +8918,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 321
+        "y": 337
       },
       "id": 198,
       "options": {
@@ -8835,7 +9138,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 321
+        "y": 337
       },
       "id": 246,
       "options": {
@@ -8874,7 +9177,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 329
+        "y": 345
       },
       "id": 236,
       "panels": [],
@@ -8946,7 +9249,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 330
+        "y": 346
       },
       "id": 237,
       "options": {
@@ -9043,7 +9346,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 330
+        "y": 346
       },
       "id": 238,
       "options": {
@@ -9140,7 +9443,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 338
+        "y": 354
       },
       "id": 239,
       "options": {
@@ -9249,7 +9552,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 338
+        "y": 354
       },
       "id": 219,
       "options": {
@@ -9314,7 +9617,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 346
+        "y": 362
       },
       "id": 220,
       "options": {
@@ -9358,7 +9661,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 354
+        "y": 370
       },
       "id": 241,
       "panels": [],
@@ -9431,7 +9734,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 355
+        "y": 371
       },
       "id": 243,
       "options": {
@@ -9543,7 +9846,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 355
+        "y": 371
       },
       "id": 244,
       "options": {
@@ -9656,7 +9959,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 363
+        "y": 379
       },
       "id": 245,
       "options": {
@@ -9695,7 +9998,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 371
+        "y": 387
       },
       "id": 226,
       "panels": [],
@@ -9793,7 +10096,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 372
+        "y": 388
       },
       "id": 225,
       "options": {
@@ -9922,7 +10225,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 372
+        "y": 388
       },
       "id": 227,
       "options": {
@@ -10051,7 +10354,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 380
+        "y": 396
       },
       "id": 235,
       "options": {
@@ -10180,7 +10483,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 380
+        "y": 396
       },
       "id": 234,
       "options": {
@@ -10264,7 +10567,7 @@
     ]
   },
   "time": {
-    "from": "now-7d",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {},

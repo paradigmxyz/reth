@@ -14,8 +14,7 @@ use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, RecoveredBlock};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives::{transaction::SignedTransaction, RecoveredBlock};
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
@@ -38,8 +37,7 @@ use std::sync::Arc;
 /// There are subtle differences between when transacting [`TransactionRequest`]:
 ///
 /// The endpoints `eth_call` and `eth_estimateGas` and `eth_createAccessList` should always
-/// __disable__ the base fee check in the
-/// [`EnvWithHandlerCfg`](revm_primitives::CfgEnvWithHandlerCfg).
+/// __disable__ the base fee check in the [`CfgEnv`](revm::context::CfgEnv).
 ///
 /// The behaviour for tracing endpoints is not consistent across clients.
 /// Geth also disables the basefee check for tracing: <https://github.com/ethereum/go-ethereum/blob/bc0b87ca196f92e5af49bd33cc190ef0ec32b197/eth/tracers/api.go#L955-L955>

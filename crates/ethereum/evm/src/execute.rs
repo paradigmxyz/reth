@@ -5,194 +5,195 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::{eip6110, eip7685::Requests};
-use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
-use reth_consensus::ConsensusError;
-use reth_ethereum_consensus::validate_block_post_execution;
+use alloy_consensus::{Header, Transaction};
+use alloy_eips::{eip4895::Withdrawals, eip6110, eip7685::Requests};
+use alloy_evm::FromRecoveredTx;
+use alloy_primitives::{Address, B256};
+use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_evm::{
     execute::{
         balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
-        BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
+        BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError,
     },
     state_change::post_block_balance_increments,
-    system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm, Database, Evm,
+    system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
+    ConfigureEvm, Database, Evm, EvmEnv, EvmFactory, TransactionEnv,
 };
-use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
-use reth_primitives_traits::{BlockBody, SignedTransaction};
-use revm::db::State;
-use revm_primitives::{db::DatabaseCommit, ResultAndState};
+use reth_execution_types::BlockExecutionResult;
+use reth_primitives::{EthPrimitives, Receipt, Recovered, SealedBlock, TransactionSigned};
+use reth_primitives_traits::NodePrimitives;
+use reth_revm::{
+    context_interface::result::ResultAndState, db::State, specification::hardfork::SpecId,
+    DatabaseCommit,
+};
 
-/// Factory for [`EthExecutionStrategy`].
-#[derive(Debug, Clone)]
-pub struct EthExecutionStrategyFactory<EvmConfig = EthEvmConfig> {
-    /// The chainspec
-    chain_spec: Arc<ChainSpec>,
-    /// How to create an EVM.
-    evm_config: EvmConfig,
-}
-
-impl EthExecutionStrategyFactory {
-    /// Creates a new default ethereum executor strategy factory.
-    pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
-        Self::new(chain_spec.clone(), EthEvmConfig::new(chain_spec))
-    }
-
-    /// Returns a new factory for the mainnet.
-    pub fn mainnet() -> Self {
-        Self::ethereum(MAINNET.clone())
-    }
-}
-
-impl<EvmConfig> EthExecutionStrategyFactory<EvmConfig> {
-    /// Creates a new executor strategy factory.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        Self { chain_spec, evm_config }
-    }
-}
-
-impl<EvmConfig> BlockExecutionStrategyFactory for EthExecutionStrategyFactory<EvmConfig>
+impl<EvmF> BlockExecutionStrategyFactory for EthEvmConfig<EvmF>
 where
-    EvmConfig: Clone
-        + Unpin
-        + Sync
+    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
         + Send
-        + 'static
-        + ConfigureEvm<
-            Header = alloy_consensus::Header,
-            Transaction = reth_primitives::TransactionSigned,
-        >,
+        + Sync
+        + Unpin
+        + Clone,
 {
     type Primitives = EthPrimitives;
 
-    type Strategy<DB: Database> = EthExecutionStrategy<DB, EvmConfig>;
-
-    fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
+    fn create_strategy<'a, DB>(
+        &'a self,
+        db: &'a mut State<DB>,
+        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
     where
         DB: Database,
     {
-        let state =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
-        EthExecutionStrategy::new(state, self.chain_spec.clone(), self.evm_config.clone())
+        let evm = self.evm_for_block(db, block.header());
+        EthExecutionStrategy::new(evm, block, &self.chain_spec)
+    }
+}
+
+/// Input for block execution.
+#[derive(Debug, Clone, Copy)]
+pub struct EthBlockExecutionInput<'a> {
+    /// Block number.
+    pub number: u64,
+    /// Block timestamp.
+    pub timestamp: u64,
+    /// Parent block hash.
+    pub parent_hash: B256,
+    /// Block gas limit.
+    pub gas_limit: u64,
+    /// Parent beacon block root.
+    pub parent_beacon_block_root: Option<B256>,
+    /// Block beneficiary.
+    pub beneficiary: Address,
+    /// Block ommers
+    pub ommers: &'a [Header],
+    /// Block withdrawals.
+    pub withdrawals: Option<&'a Withdrawals>,
+}
+
+impl<'a> From<&'a SealedBlock> for EthBlockExecutionInput<'a> {
+    fn from(block: &'a SealedBlock) -> Self {
+        Self {
+            number: block.header().number,
+            timestamp: block.header().timestamp,
+            parent_hash: block.header().parent_hash,
+            gas_limit: block.header().gas_limit,
+            parent_beacon_block_root: block.header().parent_beacon_block_root,
+            beneficiary: block.header().beneficiary,
+            ommers: &block.body().ommers,
+            withdrawals: block.body().withdrawals.as_ref(),
+        }
     }
 }
 
 /// Block execution strategy for Ethereum.
-#[allow(missing_debug_implementations)]
-pub struct EthExecutionStrategy<DB, EvmConfig>
-where
-    EvmConfig: Clone,
-{
-    /// The chainspec
-    chain_spec: Arc<ChainSpec>,
-    /// How to create an EVM.
-    evm_config: EvmConfig,
-    /// Current state for block execution.
-    state: State<DB>,
+#[derive(Debug)]
+pub struct EthExecutionStrategy<'a, Evm> {
+    /// Reference to the [`ChainSpec`].
+    chain_spec: &'a ChainSpec,
+
+    /// Input for block execution.
+    input: EthBlockExecutionInput<'a>,
+    /// The EVM used by strategy.
+    evm: Evm,
     /// Utility to call system smart contracts.
-    system_caller: SystemCaller<EvmConfig, ChainSpec>,
+    system_caller: SystemCaller<&'a ChainSpec>,
+
+    /// Receipts of executed transactions.
+    receipts: Vec<Receipt>,
+    /// Total gas used by transactions in this block.
+    gas_used: u64,
 }
 
-impl<DB, EvmConfig> EthExecutionStrategy<DB, EvmConfig>
-where
-    EvmConfig: Clone,
-{
+impl<'a, Evm> EthExecutionStrategy<'a, Evm> {
     /// Creates a new [`EthExecutionStrategy`]
-    pub fn new(state: State<DB>, chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self { state, chain_spec, evm_config, system_caller }
+    pub fn new(
+        evm: Evm,
+        input: impl Into<EthBlockExecutionInput<'a>>,
+        chain_spec: &'a ChainSpec,
+    ) -> Self {
+        Self {
+            evm,
+            chain_spec,
+            input: input.into(),
+            receipts: Vec::new(),
+            gas_used: 0,
+            system_caller: SystemCaller::new(chain_spec),
+        }
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
+impl<'db, DB, E> BlockExecutionStrategy for EthExecutionStrategy<'_, E>
 where
-    DB: Database,
-    EvmConfig: ConfigureEvm<
-        Header = alloy_consensus::Header,
-        Transaction = reth_primitives::TransactionSigned,
-    >,
+    DB: Database + 'db,
+    E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<TransactionSigned>>,
 {
-    type DB = DB;
     type Error = BlockExecutionError;
     type Primitives = EthPrimitives;
 
-    fn apply_pre_execution_changes(
-        &mut self,
-        block: &RecoveredBlock<reth_primitives::Block>,
-    ) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
-        let state_clear_flag = self.chain_spec.is_spurious_dragon_active_at_block(block.number());
-        self.state.set_state_clear_flag(state_clear_flag);
-
-        let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
-
-        self.system_caller.apply_pre_execution_changes(block.header(), &mut evm)?;
+        let state_clear_flag =
+            self.chain_spec.is_spurious_dragon_active_at_block(self.input.number);
+        self.evm.db_mut().set_state_clear_flag(state_clear_flag);
+        self.system_caller
+            .apply_blockhashes_contract_call(self.input.parent_hash, &mut self.evm)?;
+        self.system_caller
+            .apply_beacon_root_contract_call(self.input.parent_beacon_block_root, &mut self.evm)?;
 
         Ok(())
     }
 
-    fn execute_transactions(
+    fn execute_transaction(
         &mut self,
-        block: &RecoveredBlock<reth_primitives::Block>,
-    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
-        let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
-
-        let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body().transaction_count());
-        for (sender, transaction) in block.transactions_with_sender() {
-            // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
-            // must be no greater than the block's gasLimit.
-            let block_available_gas = block.gas_limit() - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
-                }
-                .into())
+        tx: Recovered<&TransactionSigned>,
+    ) -> Result<u64, Self::Error> {
+        // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
+        // must be no greater than the block's gasLimit.
+        let block_available_gas = self.input.gas_limit - self.gas_used;
+        if tx.gas_limit() > block_available_gas {
+            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                transaction_gas_limit: tx.gas_limit(),
+                block_available_gas,
             }
-
-            let tx_env = self.evm_config.tx_env(transaction, *sender);
-
-            // Execute transaction.
-            let result_and_state = evm.transact(tx_env).map_err(move |err| {
-                // Ensure hash is calculated for error log, if not already done
-                BlockValidationError::EVM {
-                    hash: transaction.recalculate_hash(),
-                    error: Box::new(err),
-                }
-            })?;
-            self.system_caller.on_state(&result_and_state.state);
-            let ResultAndState { result, state } = result_and_state;
-            evm.db_mut().commit(state);
-
-            // append gas used
-            cumulative_gas_used += result.gas_used();
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(Receipt {
-                tx_type: transaction.tx_type(),
-                // Success flag was added in `EIP-658: Embedding transaction status code in
-                // receipts`.
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.into_logs(),
-            });
+            .into())
         }
-        Ok(ExecuteOutput { receipts, gas_used: cumulative_gas_used })
+
+        let hash = tx.hash();
+
+        // Execute transaction.
+        let result_and_state =
+            self.evm.transact(&tx).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
+        self.system_caller
+            .on_state(StateChangeSource::Transaction(self.receipts.len()), &result_and_state.state);
+        let ResultAndState { result, state } = result_and_state;
+        self.evm.db_mut().commit(state);
+
+        let gas_used = result.gas_used();
+
+        // append gas used
+        self.gas_used += gas_used;
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        self.receipts.push(Receipt {
+            tx_type: tx.tx_type(),
+            // Success flag was added in `EIP-658: Embedding transaction status code in
+            // receipts`.
+            success: result.is_success(),
+            cumulative_gas_used: self.gas_used,
+            logs: result.into_logs(),
+        });
+
+        Ok(gas_used)
     }
 
     fn apply_post_execution_changes(
-        &mut self,
-        block: &RecoveredBlock<reth_primitives::Block>,
-        receipts: &[Receipt],
-    ) -> Result<Requests, Self::Error> {
-        let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
-
-        let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+        mut self,
+    ) -> Result<BlockExecutionResult<Receipt>, Self::Error> {
+        let requests = if self.chain_spec.is_prague_active_at_timestamp(self.input.timestamp) {
             // Collect all EIP-6110 deposits
             let deposit_requests =
-                crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, receipts)?;
+                crate::eip6110::parse_deposits_from_receipts(self.chain_spec, &self.receipts)?;
 
             let mut requests = Requests::default();
 
@@ -200,20 +201,25 @@ where
                 requests.push_request_with_type(eip6110::DEPOSIT_REQUEST_TYPE, deposit_requests);
             }
 
-            requests.extend(self.system_caller.apply_post_execution_changes(&mut evm)?);
+            requests.extend(self.system_caller.apply_post_execution_changes(&mut self.evm)?);
             requests
         } else {
             Requests::default()
         };
-        drop(evm);
 
-        let mut balance_increments = post_block_balance_increments(&self.chain_spec, block);
+        let mut balance_increments = post_block_balance_increments(
+            self.chain_spec,
+            self.evm.block(),
+            self.input.ommers,
+            self.input.withdrawals,
+        );
 
         // Irregular state change at Ethereum DAO hardfork
-        if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(block.number()) {
+        if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(self.input.number) {
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
-                .state
+                .evm
+                .db_mut()
                 .drain_balances(DAO_HARDFORK_ACCOUNTS)
                 .map_err(|_| BlockValidationError::IncrementBalanceFailed)?
                 .into_iter()
@@ -223,39 +229,23 @@ where
             *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
         }
         // increment balances
-        self.state
+        self.evm
+            .db_mut()
             .increment_balances(balance_increments.clone())
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
         // call state hook with changes due to balance increments.
-        let balance_state = balance_increment_state(&balance_increments, &mut self.state)?;
-        self.system_caller.on_state(&balance_state);
+        let balance_state = balance_increment_state(&balance_increments, self.evm.db_mut())?;
+        self.system_caller.on_state(
+            StateChangeSource::PostBlock(StateChangePostBlockSource::BalanceIncrements),
+            &balance_state,
+        );
 
-        Ok(requests)
-    }
-
-    fn state_ref(&self) -> &State<DB> {
-        &self.state
-    }
-
-    fn state_mut(&mut self) -> &mut State<DB> {
-        &mut self.state
-    }
-
-    fn into_state(self) -> State<Self::DB> {
-        self.state
+        let gas_used = self.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or_default();
+        Ok(BlockExecutionResult { receipts: self.receipts, requests, gas_used })
     }
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
-    }
-
-    fn validate_block_post_execution(
-        &self,
-        block: &RecoveredBlock<reth_primitives::Block>,
-        receipts: &[Receipt],
-        requests: &Requests,
-    ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec.clone(), receipts, requests)
     }
 }
 
@@ -266,15 +256,13 @@ pub struct EthExecutorProvider;
 
 impl EthExecutorProvider {
     /// Creates a new default ethereum executor provider.
-    pub fn ethereum(
-        chain_spec: Arc<ChainSpec>,
-    ) -> BasicBlockExecutorProvider<EthExecutionStrategyFactory> {
-        BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::ethereum(chain_spec))
+    pub fn ethereum(chain_spec: Arc<ChainSpec>) -> BasicBlockExecutorProvider<EthEvmConfig> {
+        BasicBlockExecutorProvider::new(EthEvmConfig::new(chain_spec))
     }
 
     /// Returns a new provider for the mainnet.
-    pub fn mainnet() -> BasicBlockExecutorProvider<EthExecutionStrategyFactory> {
-        BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::mainnet())
+    pub fn mainnet() -> BasicBlockExecutorProvider<EthEvmConfig> {
+        BasicBlockExecutorProvider::new(EthEvmConfig::mainnet())
     }
 }
 
@@ -290,16 +278,20 @@ mod tests {
         eip7685::EMPTY_REQUESTS_HASH,
     };
     use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
-    use reth_chainspec::{ChainSpecBuilder, ForkCondition};
+    use reth_chainspec::{ChainSpecBuilder, ForkCondition, MAINNET};
     use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
     use reth_execution_types::BlockExecutionResult;
-    use reth_primitives::{Account, Block, BlockBody, Transaction};
+    use reth_primitives::{Account, Block, BlockBody, RecoveredBlock, Transaction};
     use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Block as _};
     use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, Database, TransitionState,
+        database::StateProviderDatabase,
+        db::TransitionState,
+        primitives::{address, BLOCKHASH_SERVE_WINDOW},
+        state::EvmState,
+        test_utils::StateProviderTest,
+        Database,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{address, EvmState, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
     use std::{collections::HashMap, sync::mpsc};
 
@@ -341,13 +333,8 @@ mod tests {
         db
     }
 
-    fn executor_provider(
-        chain_spec: Arc<ChainSpec>,
-    ) -> BasicBlockExecutorProvider<EthExecutionStrategyFactory> {
-        let strategy_factory =
-            EthExecutionStrategyFactory::new(chain_spec.clone(), EthEvmConfig::new(chain_spec));
-
-        BasicBlockExecutorProvider::new(strategy_factory)
+    fn executor_provider(chain_spec: Arc<ChainSpec>) -> BasicBlockExecutorProvider<EthEvmConfig> {
+        BasicBlockExecutorProvider::new(EthEvmConfig::new(chain_spec))
     }
 
     #[test]
@@ -1131,7 +1118,7 @@ mod tests {
         let tx_clone = tx.clone();
 
         let _output = executor
-            .execute_with_state_hook(block, move |state: &EvmState| {
+            .execute_with_state_hook(block, move |_, state: &EvmState| {
                 if let Some(account) = state.get(&withdrawal_recipient) {
                     let _ = tx_clone.send(account.info.balance);
                 }

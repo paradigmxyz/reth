@@ -8,11 +8,11 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives_traits::{
-    transaction::signed::SignedTransactionIntoRecoveredExt, Block, BlockBody, NodePrimitives,
-    RecoveredBlock, SealedHeader, SignedTransaction,
+    transaction::signed::SignedTransaction, Block, BlockBody, NodePrimitives, RecoveredBlock,
+    SealedHeader,
 };
 use reth_trie_common::updates::TrieUpdates;
-use revm::db::BundleState;
+use revm_database::BundleState;
 
 /// A chain of blocks and their final state.
 ///
@@ -706,7 +706,7 @@ mod tests {
     use alloy_consensus::TxType;
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
-    use revm::primitives::{AccountInfo, HashMap};
+    use revm::{primitives::HashMap, state::AccountInfo};
 
     #[test]
     fn chain_append() {

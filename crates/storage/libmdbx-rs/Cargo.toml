@@ -34,7 +34,6 @@ read-tx-timeouts = ["dep:dashmap"]
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
 rand.workspace = true
-rand_xorshift = "0.3"
 tempfile.workspace = true
 
 [[bench]]

@@ -1,11 +1,11 @@
 use alloy_primitives::{bytes::BufMut, keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
-use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
     models::{BlockNumberAddress, CompactU256},
     table::Decompress,
+    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;

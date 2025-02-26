@@ -330,7 +330,6 @@ pub(crate) mod test {
     }
 
     #[test]
-    #[allow(clippy::needless_update)]
     fn receipts_codec() {
         // rig
 

@@ -18,4 +18,5 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 
 # alloy
-alloy-rpc-types = { workspace = true, features = ["engine"] }
+alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true

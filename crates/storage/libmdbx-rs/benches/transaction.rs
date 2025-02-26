@@ -2,8 +2,7 @@
 mod utils;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use rand::{prelude::SliceRandom, SeedableRng};
-use rand_xorshift::XorShiftRng;
+use rand::{prelude::SliceRandom, rngs::StdRng, SeedableRng};
 use reth_libmdbx::{ffi::*, ObjectLength, WriteFlags};
 use std::{hint::black_box, ptr};
 use utils::*;
@@ -15,7 +14,7 @@ fn bench_get_rand(c: &mut Criterion) {
     let db = txn.open_db(None).unwrap();
 
     let mut keys: Vec<String> = (0..n).map(get_key).collect();
-    keys.shuffle(&mut XorShiftRng::from_seed(Default::default()));
+    keys.shuffle(&mut StdRng::from_seed(Default::default()));
 
     c.bench_function("bench_get_rand", |b| {
         b.iter(|| {
@@ -35,7 +34,7 @@ fn bench_get_rand_raw(c: &mut Criterion) {
     let db = txn.open_db(None).unwrap();
 
     let mut keys: Vec<String> = (0..n).map(get_key).collect();
-    keys.shuffle(&mut XorShiftRng::from_seed(Default::default()));
+    keys.shuffle(&mut StdRng::from_seed(Default::default()));
 
     let dbi = db.dbi();
 
@@ -71,7 +70,7 @@ fn bench_put_rand(c: &mut Criterion) {
     let db = txn.commit_and_rebind_open_dbs().unwrap().2.remove(0);
 
     let mut items: Vec<(String, String)> = (0..n).map(|n| (get_key(n), get_data(n))).collect();
-    items.shuffle(&mut XorShiftRng::from_seed(Default::default()));
+    items.shuffle(&mut StdRng::from_seed(Default::default()));
 
     c.bench_function("bench_put_rand", |b| {
         b.iter(|| {
@@ -88,7 +87,7 @@ fn bench_put_rand_raw(c: &mut Criterion) {
     let (_dir, env) = setup_bench_db(0);
 
     let mut items: Vec<(String, String)> = (0..n).map(|n| (get_key(n), get_data(n))).collect();
-    items.shuffle(&mut XorShiftRng::from_seed(Default::default()));
+    items.shuffle(&mut StdRng::from_seed(Default::default()));
 
     let dbi = env.begin_ro_txn().unwrap().open_db(None).unwrap().dbi();
 
