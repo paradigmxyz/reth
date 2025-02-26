@@ -483,7 +483,7 @@ impl Default for ProviderCacheBuilder {
 
 /// A saved cache that has been used for executing a specific block, which has been updated for its
 /// execution.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct SavedCache {
     /// The hash of the block these caches were used to execute.
     hash: B256,
@@ -496,6 +496,11 @@ pub(crate) struct SavedCache {
 }
 
 impl SavedCache {
+    /// Creates a new instance with the internals
+    pub const fn new(hash: B256, caches: ProviderCaches, metrics: CachedStateMetrics) -> Self {
+        Self { hash, caches, metrics }
+    }
+
     /// Returns the hash for this cache
     pub(crate) const fn executed_block_hash(&self) -> B256 {
         self.hash
@@ -504,6 +509,11 @@ impl SavedCache {
     /// Splits the cache into its caches and metrics, consuming it.
     pub(crate) fn split(self) -> (ProviderCaches, CachedStateMetrics) {
         (self.caches, self.metrics)
+    }
+
+    /// Returns the [`ProviderCaches`] belonging to the tracked hash.
+    pub(crate) fn cache(&self) -> &ProviderCaches {
+        &self.caches
     }
 }
 

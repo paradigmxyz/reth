@@ -2,7 +2,7 @@
 #![allow(dead_code)] // TODO remove
 
 use crate::tree::{
-    cached_state::{CachedStateMetrics, ProviderCaches, SavedCache},
+    cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
     payload_processor::{
         prewarm::{PrewarmContext, PrewarmTask, PrewarmTaskEvent},
         sparse_trie::SparseTrieTask,
@@ -12,6 +12,7 @@ use crate::tree::{
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_primitives::B256;
 use multiproof::*;
+use parking_lot::RwLock;
 use reth_evm::{
     execute::BlockExecutorProvider, system_calls::OnStateHook, ConfigureEvm, ConfigureEvmEnvFor,
     Evm,
@@ -26,7 +27,7 @@ use reth_workload_executor::WorkloadExecutor;
 use std::sync::{
     mpsc,
     mpsc::{channel, Sender},
-    Arc, RwLock,
+    Arc,
 };
 
 mod multiproof;
@@ -39,10 +40,10 @@ pub struct PayloadProcessor<N, Evm> {
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
     execution_cache: ExecutionCache,
-    /// Metrics for prewarmed execution
-    cache_metrics: CachedStateMetrics,
     /// Metrics for trie operations
     trie_metrics: StateRootTaskMetrics,
+    /// Cross-block cache size in bytes.
+    cross_block_cache_size: u64,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
 
@@ -74,7 +75,6 @@ where
     ///
     /// This task runs until:
     ///  - externally cancelled (e.g. sequential block execution is complete)
-    ///  - all transaction have been processed
     ///
     /// ## Multi proof task
     ///
@@ -118,20 +118,25 @@ where
         let multi_proof_task =
             StateRootTask2::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie);
 
-        let caches = self.cache_for(block.header().parent_hash());
+        let (cache, cache_metrics) = self.cache_for(block.header().parent_hash()).split();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             header: block.clone_sealed_header(),
             evm_config: self.evm_config.clone(),
-            caches,
-            cache_metrics: Default::default(),
+            cache,
+            cache_metrics,
             provider: provider_builder,
         };
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
         let txs = block.transactions_recovered().map(Recovered::cloned).collect();
-        let prewarm_task =
-            PrewarmTask::new(self.executor.clone(), self.execution_cache.clone(), prewarm_ctx, to_multi_proof, txs);
+        let prewarm_task = PrewarmTask::new(
+            self.executor.clone(),
+            self.execution_cache.clone(),
+            prewarm_ctx,
+            to_multi_proof,
+            txs,
+        );
         let to_prewarm_task = prewarm_task.actions_tx();
 
         // spawn pre-warm task
@@ -165,24 +170,38 @@ where
     }
 
     /// Spawn prewarming exclusively
-    pub fn spawn_prewarming<P>(&self,  block: RecoveredBlock<N::Block>,  provider_builder: StateProviderBuilder<N, P>,)
-    where P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
+    pub fn spawn_prewarming<P>(
+        &self,
+        block: RecoveredBlock<N::Block>,
+        provider_builder: StateProviderBuilder<N, P>,
+    ) where
+        P: BlockReader
+            + StateProviderFactory
+            + StateReader
+            + StateCommitmentProvider
+            + Clone
+            + 'static,
     {
-        let caches = self.cache_for(block.header().parent_hash());
+        let (cache, cache_metrics) = self.cache_for(block.header().parent_hash()).split();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             header: block.clone_sealed_header(),
             evm_config: self.evm_config.clone(),
-            caches,
-            cache_metrics: Default::default(),
+            cache,
+            cache_metrics,
             provider: provider_builder,
         };
 
         // configure prewarming without multiproof
         let to_multi_proof = None;
         let txs = block.transactions_recovered().map(Recovered::cloned).collect();
-        let prewarm_task =
-            PrewarmTask::new(self.executor.clone(), self.execution_cache.clone(), prewarm_ctx, to_multi_proof, txs);
+        let prewarm_task = PrewarmTask::new(
+            self.executor.clone(),
+            self.execution_cache.clone(),
+            prewarm_ctx,
+            to_multi_proof,
+            txs,
+        );
         let to_prewarm_task = prewarm_task.actions_tx();
 
         // spawn pre-warm task
@@ -190,18 +209,17 @@ where
             prewarm_task.run();
         });
 
-
         todo!()
     }
-
-
-
 
     /// Returns the cache for the given parent hash.
     ///
     /// If the given hash is different then what is recently cached, the cache will be invalidated.
-    fn cache_for(&self, parent_hash: B256) -> ProviderCaches {
-        todo!()
+    fn cache_for(&self, parent_hash: B256) -> SavedCache {
+        self.execution_cache.get_cache_for(parent_hash).unwrap_or_else(|| {
+            let cache = ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
+            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+        })
     }
 }
 
@@ -255,10 +273,25 @@ struct ExecutionCache {
 }
 
 impl ExecutionCache {
-
     /// Returns the cache if the currently store cache is for the given `parent_hash`
     pub fn get_cache_for(&self, parent_hash: B256) -> Option<SavedCache> {
-        todo!()
+        let cache = self.inner.read();
+        cache.as_ref().and_then(|cache| {
+            if cache.executed_block_hash() == parent_hash {
+                Some(cache.clone())
+            } else {
+                None
+            }
+        })
     }
 
+    /// Clears the tracked cashe
+    pub fn clear(&self) {
+        self.inner.write().take();
+    }
+
+    /// Stores the provider cache
+    pub fn save_cache(&self, cache: SavedCache) {
+        self.inner.write().replace(cache);
+    }
 }

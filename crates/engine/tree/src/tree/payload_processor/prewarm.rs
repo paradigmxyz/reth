@@ -1,6 +1,6 @@
 use crate::tree::{
     cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
-    payload_processor::multiproof::StateRootMessage,
+    payload_processor::{multiproof::StateRootMessage, ExecutionCache},
     StateProviderBuilder,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
@@ -18,7 +18,7 @@ use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider, StateProviderFactory, StateReader,
 };
-use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
     trie_cursor::InMemoryTrieCursorFactory, MultiProofTargets, TrieInput,
@@ -37,10 +37,10 @@ use std::{
     time::Instant,
 };
 use tracing::{debug, trace};
-use reth_revm::db::BundleState;
-use crate::tree::payload_processor::ExecutionCache;
 
 /// A task that executes transactions individually in parallel.
+///
+/// Note: This task runs until cancelled externally.
 pub struct PrewarmTask<N: NodePrimitives, P, Evm> {
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
@@ -55,7 +55,7 @@ pub struct PrewarmTask<N: NodePrimitives, P, Evm> {
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
     /// Sender to emit evm state outcome messages, if any.
-    to_multi_proof: Option<mpsc::Sender<StateRootMessage>>,
+    to_multi_proof: Option<Sender<StateRootMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
     /// Sender the transactions use to send their result back
@@ -127,10 +127,6 @@ where
         });
     }
 
-    fn is_done(&self) -> bool {
-        self.in_progress == 0 && self.pending.is_empty()
-    }
-
     /// Returns true if the tx prewarming tasks should prepare multiproof targets.
     fn should_prepare_multi_proof_targets(&self) -> bool {
         self.to_multi_proof.is_some()
@@ -143,10 +139,21 @@ where
         }
     }
 
-    /// Save the state to the shared cache.
+    /// Save the state to the shared cache for the given block.
     fn save_cache(&self, state: BundleState) {
-        //
-        todo!()
+        let cache = SavedCache::new(
+            self.ctx.header.hash(),
+            self.ctx.cache.clone(),
+            self.ctx.cache_metrics.clone(),
+        );
+        if cache.cache().insert_state(&state).is_err() {
+            return
+        }
+
+        // TODO: update metrics
+
+        // update the cache for the executed block
+        self.execution_cache.save_cache(cache);
     }
 
     /// Executes the task.
@@ -189,7 +196,7 @@ where
 pub(super) struct PrewarmContext<N: NodePrimitives, P, Evm> {
     pub(super) header: SealedHeaderFor<N>,
     pub(super) evm_config: Evm,
-    pub(super) caches: ProviderCaches,
+    pub(super) cache: ProviderCaches,
     pub(super) cache_metrics: CachedStateMetrics,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
@@ -251,7 +258,7 @@ where
     /// Note: Since here are no ordering guarantees this won't the state the tx produces when
     /// executed sequentially.
     fn transact(mut self, tx: Recovered<N::SignedTx>) -> Option<EvmState> {
-        let Self { header, evm_config, caches, cache_metrics, provider } = self;
+        let Self { header, evm_config, cache: caches, cache_metrics, provider } = self;
         // Create the state provider inside the thread
         let state_provider = match provider.build() {
             Ok(provider) => provider,
@@ -304,7 +311,8 @@ where
 pub(super) enum PrewarmTaskEvent {
     /// Forcefully terminate all remaining transaction execution.
     TerminateTransactionExecution,
-    /// Forcefully terminate the task on demand and update the shared cache with the given output before exiting.
+    /// Forcefully terminate the task on demand and update the shared cache with the given output
+    /// before exiting.
     Terminate {
         /// The final block state output.
         block_output: Option<BundleState>,
