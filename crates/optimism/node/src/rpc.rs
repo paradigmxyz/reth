@@ -1,11 +1,14 @@
 //! RPC component builder
 
+pub use reth_optimism_rpc::OpEngineApi;
+
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
     AddOnsContext, EngineTypes, FullNodeComponents, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_builder::rpc::{BasicEngineApiBuilder, EngineApiBuilder, EngineValidatorBuilder};
+use reth_optimism_rpc::engine::OP_CAPABILITIES;
 pub use reth_optimism_rpc::OpEngineApi;
 
 /// Builder for basic [`OpEngineApi`] implementation.
@@ -33,7 +36,7 @@ where
     >;
 
     async fn build_engine_api(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
-        let inner = self.inner.build_engine_api(ctx).await?;
+        let inner = self.inner.capabilities(OP_CAPABILITIES).build_engine_api(ctx).await?;
 
         Ok(OpEngineApi::new(inner))
     }
