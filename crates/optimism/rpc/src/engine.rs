@@ -1,21 +1,23 @@
 //! Implements the Optimism engine API RPC methods.
 
-use alloy_eips::eip7685::Requests;
+use alloy_eips::eip7685::{Requests, RequestsOrHash};
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
+    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV3, ForkchoiceState,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields,
 };
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
-use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
+use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayloadV4};
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, EngineValidator};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::{EngineApi, EngineApiServer};
 use reth_transaction_pool::TransactionPool;
+use tracing::trace;
 
 /// Extension trait that gives access to Optimism engine API RPC methods.
 ///
@@ -206,13 +208,18 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> OpEngineApiServer<EngineT>
     for OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes,
+    EngineT: EngineTypes<ExecutionData = OpExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
-        EngineApiServer::new_payload_v2(&self.inner, payload).await
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
+        let payload = OpExecutionData {
+            payload: payload.into_payload(),
+            sidecar: ExecutionPayloadSidecar::none(),
+        };
+        Ok(self.inner.new_payload_v2_metered(payload).await?)
     }
 
     async fn new_payload_v3(
@@ -221,13 +228,16 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
-        EngineApiServer::new_payload_v3(
-            &self.inner,
-            payload,
-            versioned_hashes,
-            parent_beacon_block_root,
-        )
-        .await
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
+        let payload = OpExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                versioned_hashes,
+                parent_beacon_block_root,
+            }),
+        };
+
+        Ok(self.inner.new_payload_v3_metered(payload).await?)
     }
 
     async fn new_payload_v4(
@@ -237,16 +247,16 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
-        // todo: custom op engine validator <https://github.com/paradigmxyz/reth/pull/14207>
-        let payload = payload.payload_inner;
-        EngineApiServer::new_payload_v4(
-            &self.inner,
-            payload,
-            versioned_hashes,
-            parent_beacon_block_root,
-            execution_requests,
-        )
-        .await
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
+        let payload = OpExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
+            ),
+        };
+
+        Ok(self.inner.new_payload_v4_metered(payload).await?)
     }
 
     async fn fork_choice_updated_v2(
