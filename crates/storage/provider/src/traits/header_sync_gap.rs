@@ -1,6 +1,6 @@
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_primitives::{B256, BlockNumber, Sealable};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::SealedHeader;
 use reth_storage_errors::provider::ProviderResult;

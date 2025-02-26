@@ -15,15 +15,15 @@ use reth_provider::ProviderTx;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
-    helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
+    helpers::{Call, EthTransactions, block::LoadBlock},
 };
 use reth_rpc_eth_types::{
-    revm_utils::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
+    EthApiError, revm_utils::apply_block_overrides, utils::recover_raw_transaction,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm::{DatabaseCommit, DatabaseRef, context_interface::result::ResultAndState};
 use std::{sync::Arc, time::Duration};
 use tracing::info;
 

@@ -6,17 +6,17 @@ use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
-    StateCommitmentProvider,
+    BlockReader, DBProvider, DatabaseProviderFactory, ProviderError, StateCommitmentProvider,
+    providers::ConsistentDbView,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
+    HashBuilder, Nibbles, StorageRoot, TRIE_ACCOUNT_RLP_MAX_SIZE, TrieInput,
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, Nibbles, StorageRoot, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
@@ -253,11 +253,11 @@ impl From<ParallelStateRootError> for ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, Address, U256};
+    use alloy_primitives::{Address, U256, keccak256};
     use rand::Rng;
     use reth_primitives::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
-    use reth_trie::{test_utils, HashedPostState, HashedStorage};
+    use reth_provider::{HashingWriter, test_utils::create_test_provider_factory};
+    use reth_trie::{HashedPostState, HashedStorage, test_utils};
 
     #[test]
     fn random_parallel_root() {
@@ -269,14 +269,14 @@ mod tests {
             .map(|_| {
                 let address = Address::random();
                 let account =
-                    Account { balance: U256::from(rng.gen::<u64>()), ..Default::default() };
+                    Account { balance: U256::from(rng.r#gen::<u64>()), ..Default::default() };
                 let mut storage = HashMap::<B256, U256>::default();
                 let has_storage = rng.gen_bool(0.7);
                 if has_storage {
                     for _ in 0..100 {
                         storage.insert(
-                            B256::from(U256::from(rng.gen::<u64>())),
-                            U256::from(rng.gen::<u64>()),
+                            B256::from(U256::from(rng.r#gen::<u64>())),
+                            U256::from(rng.r#gen::<u64>()),
                         );
                     }
                 }
@@ -317,7 +317,7 @@ mod tests {
 
             let should_update_account = rng.gen_bool(0.5);
             if should_update_account {
-                *account = Account { balance: U256::from(rng.gen::<u64>()), ..*account };
+                *account = Account { balance: U256::from(rng.r#gen::<u64>()), ..*account };
                 hashed_state.accounts.insert(hashed_address, Some(*account));
             }
 
@@ -325,7 +325,7 @@ mod tests {
             if should_update_storage {
                 for (slot, value) in storage.iter_mut() {
                     let hashed_slot = keccak256(slot);
-                    *value = U256::from(rng.gen::<u64>());
+                    *value = U256::from(rng.r#gen::<u64>());
                     hashed_state
                         .storages
                         .entry(hashed_address)

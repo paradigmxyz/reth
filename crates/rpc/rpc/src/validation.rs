@@ -18,11 +18,11 @@ use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
-use reth_metrics::{metrics, metrics::Gauge, Metrics};
+use reth_metrics::{Metrics, metrics, metrics::Gauge};
 use reth_node_api::NewPayloadError;
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{
-    constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock, SealedHeaderFor,
+    BlockBody, SealedBlock, SealedHeaderFor, constants::GAS_LIMIT_BOUND_DIVISOR,
 };
 use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
@@ -32,7 +32,7 @@ use reth_tasks::TaskSpawner;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
@@ -54,9 +54,9 @@ where
         task_spawner: Box<dyn TaskSpawner>,
         payload_validator: Arc<
             dyn PayloadValidator<
-                Block = <E::Primitives as NodePrimitives>::Block,
-                ExecutionData = ExecutionData,
-            >,
+                    Block = <E::Primitives as NodePrimitives>::Block,
+                    ExecutionData = ExecutionData,
+                >,
         >,
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
@@ -80,11 +80,7 @@ where
     /// Returns the cached reads for the given head hash.
     async fn cached_reads(&self, head: B256) -> CachedReads {
         let cache = self.inner.cached_state.read().await;
-        if cache.0 == head {
-            cache.1.clone()
-        } else {
-            Default::default()
-        }
+        if cache.0 == head { cache.1.clone() } else { Default::default() }
     }
 
     /// Updates the cached state for the given head hash.
@@ -471,9 +467,9 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     /// Execution payload validator.
     payload_validator: Arc<
         dyn PayloadValidator<
-            Block = <E::Primitives as NodePrimitives>::Block,
-            ExecutionData = ExecutionData,
-        >,
+                Block = <E::Primitives as NodePrimitives>::Block,
+                ExecutionData = ExecutionData,
+            >,
     >,
     /// Block executor factory.
     executor_provider: E,

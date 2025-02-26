@@ -1,5 +1,5 @@
 //! Implements a state provider that has a shared cache in front of it.
-use alloy_primitives::{map::B256Map, Address, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, B256, StorageKey, StorageValue, map::B256Map};
 use metrics::Gauge;
 use mini_moka::sync::CacheBuilder;
 use reth_errors::ProviderResult;
@@ -11,8 +11,8 @@ use reth_provider::{
 };
 use reth_revm::db::BundleState;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput, updates::TrieUpdates,
 };
 use revm_primitives::map::DefaultHashBuilder;
 use std::time::{Duration, Instant};
@@ -615,7 +615,7 @@ mod tests {
         let mut rng = rand::thread_rng();
 
         let key = StorageKey::random();
-        let value = StorageValue::from(rng.gen::<u128>());
+        let value = StorageValue::from(rng.r#gen::<u128>());
         let (first_slot, _) = measure_allocation(|| {
             cache.insert_storage(key, Some(value));
         });
@@ -625,7 +625,7 @@ mod tests {
         let (test_slots, _) = measure_allocation(|| {
             for _ in 0..TOTAL_SLOTS {
                 let key = StorageKey::random();
-                let value = StorageValue::from(rng.gen::<u128>());
+                let value = StorageValue::from(rng.r#gen::<u128>());
                 cache.insert_storage(key, Some(value));
             }
         });

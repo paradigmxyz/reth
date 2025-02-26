@@ -1,6 +1,6 @@
 use crate::utils::{advance_with_random_transactions, eth_payload_attributes};
 use alloy_provider::{Provider, ProviderBuilder};
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup, setup_engine, transaction::TransactionTestContext};
 use reth_node_ethereum::EthereumNode;
@@ -53,7 +53,7 @@ async fn can_sync() -> eyre::Result<()> {
 async fn e2e_test_send_transactions() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::thread_rng().r#gen();
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {:?}", seed);
 
@@ -90,7 +90,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
 async fn test_long_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::thread_rng().r#gen();
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {:?}", seed);
 
@@ -140,7 +140,7 @@ async fn test_long_reorg() -> eyre::Result<()> {
 async fn test_reorg_through_backfill() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::thread_rng().r#gen();
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {:?}", seed);
 

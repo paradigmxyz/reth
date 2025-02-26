@@ -3,7 +3,7 @@
 
 use discv5::enr::{CombinedPublicKey, EnrPublicKey, NodeId};
 use enr::Enr;
-use reth_network_peers::{id2pk, pk2id, PeerId};
+use reth_network_peers::{PeerId, id2pk, pk2id};
 use secp256k1::{PublicKey, SecretKey};
 
 /// Extracts a [`CombinedPublicKey::Secp256k1`] from a [`discv5::Enr`] and converts it to a

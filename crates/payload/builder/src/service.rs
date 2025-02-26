@@ -207,7 +207,7 @@ where
     /// The type that knows how to create new payloads.
     generator: Gen,
     /// All active payload jobs.
-    payload_jobs: Vec<(Gen::Job, PayloadId)>,
+    payload_jobs: Vec<(r#gen::Job, PayloadId)>,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
     service_tx: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
     /// Receiver half of the command channel.

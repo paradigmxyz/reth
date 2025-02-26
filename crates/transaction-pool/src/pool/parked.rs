@@ -1,13 +1,13 @@
 use crate::{
+    PoolTransaction, SubPoolLimit, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, ValidPoolTransaction,
     identifier::{SenderId, TransactionId},
     pool::size::SizeTracker,
-    PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
 };
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, hash_map::Entry},
     ops::{Bound::Unbounded, Deref},
     sync::Arc,
 };
@@ -108,11 +108,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
             Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
                 value.count -= 1;
-                if value.count == 0 {
-                    entry.remove()
-                } else {
-                    return
-                }
+                if value.count == 0 { entry.remove() } else { return }
             }
             Entry::Vacant(_) => {
                 // This should never happen because the bisection between the two maps

@@ -8,32 +8,32 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::{OnStateHook, StateChangeSource};
 use reth_metrics::Metrics;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
-    StateCommitmentProvider,
+    BlockReader, DBProvider, DatabaseProviderFactory, StateCommitmentProvider,
+    providers::ConsistentDbView,
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
+    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, Nibbles,
+    TrieInput,
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
     proof::ProofBlindedProviderFactory,
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, Nibbles,
-    TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
+    SparseStateTrie,
     blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    SparseStateTrie,
 };
-use revm_primitives::{keccak256, B256};
+use revm_primitives::{B256, keccak256};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
-        mpsc::{self, channel, Receiver, Sender},
         Arc,
+        mpsc::{self, Receiver, Sender, channel},
     },
     time::{Duration, Instant},
 };
@@ -1272,11 +1272,11 @@ mod tests {
     use reth_evm::system_calls::StateChangeSource;
     use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
-        providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
+        HashingWriter, providers::ConsistentDbView, test_utils::create_test_provider_factory,
     };
     use reth_testing_utils::generators::{self, Rng};
-    use reth_trie::{test_utils::state_root, TrieInput};
-    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
+    use reth_trie::{TrieInput, test_utils::state_root};
+    use revm_primitives::{Address, B256, HashMap, KECCAK_EMPTY, U256};
     use revm_state::{
         Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot,
     };
@@ -1296,7 +1296,7 @@ mod tests {
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
-        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.gen()).collect();
+        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.r#gen()).collect();
         let mut updates = Vec::new();
 
         for _ in 0..updates_per_account {
@@ -1309,18 +1309,18 @@ mod tests {
                 let mut storage = HashMap::default();
                 if rng.gen_bool(0.7) {
                     for _ in 0..rng.gen_range(1..10) {
-                        let slot = U256::from(rng.gen::<u64>());
+                        let slot = U256::from(rng.r#gen::<u64>());
                         storage.insert(
                             slot,
-                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.gen::<u64>())),
+                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.r#gen::<u64>())),
                         );
                     }
                 }
 
                 let account = RevmAccount {
                     info: AccountInfo {
-                        balance: U256::from(rng.gen::<u64>()),
-                        nonce: rng.gen::<u64>(),
+                        balance: U256::from(rng.r#gen::<u64>()),
+                        nonce: rng.r#gen::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
                     },

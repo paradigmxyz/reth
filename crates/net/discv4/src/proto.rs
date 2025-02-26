@@ -1,9 +1,10 @@
 //! Discovery v4 protocol implementation.
 
-use crate::{error::DecodePacketError, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
+use crate::{MAX_PACKET_SIZE, MIN_PACKET_SIZE, error::DecodePacketError};
 use alloy_primitives::{
+    B256,
     bytes::{Buf, BufMut, Bytes, BytesMut},
-    keccak256, B256,
+    keccak256,
 };
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable,
@@ -11,10 +12,10 @@ use alloy_rlp::{
 };
 use enr::Enr;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
-use reth_network_peers::{pk2id, NodeRecord, PeerId};
+use reth_network_peers::{NodeRecord, PeerId, pk2id};
 use secp256k1::{
+    SECP256K1, SecretKey,
     ecdsa::{RecoverableSignature, RecoveryId},
-    SecretKey, SECP256K1,
 };
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -588,13 +589,13 @@ impl Decodable for Pong {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
         DEFAULT_DISCOVERY_PORT, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
+        test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
     };
     use alloy_primitives::hex;
     use assert_matches::assert_matches;
     use enr::EnrPublicKey;
-    use rand::{thread_rng, Rng, RngCore};
+    use rand::{Rng, RngCore, thread_rng};
     use reth_ethereum_forks::ForkHash;
 
     #[test]
@@ -605,8 +606,8 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = NodeEndpoint {
                 address: IpAddr::V4(ip.into()),
-                tcp_port: rng.gen(),
-                udp_port: rng.gen(),
+                tcp_port: rng.r#gen(),
+                udp_port: rng.r#gen(),
             };
 
             let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
@@ -622,8 +623,8 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = NodeEndpoint {
                 address: IpAddr::V6(ip.into()),
-                tcp_port: rng.gen(),
-                udp_port: rng.gen(),
+                tcp_port: rng.r#gen(),
+                udp_port: rng.r#gen(),
             };
 
             let decoded = NodeEndpoint::decode(&mut alloy_rlp::encode(msg).as_slice()).unwrap();
@@ -659,7 +660,7 @@ mod tests {
                 from: rng_endpoint(&mut rng),
                 to: rng_endpoint(&mut rng),
                 expire: 0,
-                enr_sq: Some(rng.gen()),
+                enr_sq: Some(rng.r#gen()),
             };
 
             let decoded = Ping::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
@@ -675,8 +676,8 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
-                echo: rng.gen(),
-                expire: rng.gen(),
+                echo: rng.r#gen(),
+                expire: rng.r#gen(),
                 enr_sq: None,
             };
 
@@ -693,9 +694,9 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let msg = Pong {
                 to: rng_endpoint(&mut rng),
-                echo: rng.gen(),
-                expire: rng.gen(),
-                enr_sq: Some(rng.gen()),
+                echo: rng.r#gen(),
+                expire: rng.r#gen(),
+                enr_sq: Some(rng.r#gen()),
             };
 
             let decoded = Pong::decode(&mut alloy_rlp::encode(&msg).as_slice()).unwrap();
@@ -725,7 +726,7 @@ mod tests {
         let mut rng = thread_rng();
         let msg = Message::Neighbours(Neighbours {
             nodes: std::iter::repeat_with(|| rng_ipv4_record(&mut rng)).take(16).collect(),
-            expire: rng.gen(),
+            expire: rng.r#gen(),
         });
         let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
 
@@ -742,7 +743,7 @@ mod tests {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
                     .take(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS)
                     .collect(),
-                expire: rng.gen(),
+                expire: rng.r#gen(),
             });
             let (secret_key, _) = SECP256K1.generate_keypair(&mut rng);
 
@@ -753,7 +754,7 @@ mod tests {
                 nodes: std::iter::repeat_with(|| rng_ipv6_record(&mut rng))
                     .take(SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS - 1)
                     .collect(),
-                expire: rng.gen(),
+                expire: rng.r#gen(),
             };
             neighbours.nodes.push(rng_ipv4_record(&mut rng));
             let msg = Message::Neighbours(neighbours);
@@ -816,7 +817,7 @@ mod tests {
             builder.build(&key).unwrap()
         };
 
-        let enr_response = EnrResponse { request_hash: rng.gen(), enr };
+        let enr_response = EnrResponse { request_hash: rng.r#gen(), enr };
 
         let mut buf = Vec::new();
         enr_response.encode(&mut buf);
@@ -833,11 +834,15 @@ mod tests {
     #[test]
     fn encode_known_rlp_enr() {
         use alloy_rlp::Decodable;
-        use enr::{secp256k1::SecretKey, EnrPublicKey};
+        use enr::{EnrPublicKey, secp256k1::SecretKey};
         use std::net::Ipv4Addr;
 
-        let valid_record = hex!("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f");
-        let signature = hex!("7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c");
+        let valid_record = hex!(
+            "f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f"
+        );
+        let signature = hex!(
+            "7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c"
+        );
         let expected_pubkey =
             hex!("03ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd3138");
 
@@ -865,8 +870,12 @@ mod tests {
         use enr::secp256k1::SecretKey;
         use std::net::Ipv4Addr;
 
-        let valid_record = hex!("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f");
-        let signature = hex!("7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c");
+        let valid_record = hex!(
+            "f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f"
+        );
+        let signature = hex!(
+            "7098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c"
+        );
         let expected_pubkey =
             hex!("03ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd3138");
 
@@ -889,7 +898,9 @@ mod tests {
     // test for failing message decode
     #[test]
     fn decode_failing_packet() {
-        let packet = hex!("2467ab56952aedf4cfb8bb7830ddc8922d0f992185229919dad9de3841fe95d9b3a7b52459398235f6d3805644666d908b45edb3670414ed97f357afba51f71f7d35c1f45878ba732c3868b04ca42ff0ed347c99efcf3a5768afed68eb21ef960001db04c3808080c9840a480e8f82765f808466a9a06386019106833efe");
+        let packet = hex!(
+            "2467ab56952aedf4cfb8bb7830ddc8922d0f992185229919dad9de3841fe95d9b3a7b52459398235f6d3805644666d908b45edb3670414ed97f357afba51f71f7d35c1f45878ba732c3868b04ca42ff0ed347c99efcf3a5768afed68eb21ef960001db04c3808080c9840a480e8f82765f808466a9a06386019106833efe"
+        );
 
         let _message = Message::decode(&packet[..]).unwrap();
     }
@@ -905,7 +916,7 @@ mod tests {
     // <https://github.com/sigp/enr/blob/e59dcb45ea07e423a7091d2a6ede4ad6d8ef2840/src/lib.rs#LL1206C35-L1206C35>
     #[test]
     fn encode_decode_enr_rlp() {
-        use enr::{secp256k1::SecretKey, EnrPublicKey};
+        use enr::{EnrPublicKey, secp256k1::SecretKey};
         use std::net::Ipv4Addr;
 
         let key = SecretKey::new(&mut rand::rngs::OsRng);
@@ -973,12 +984,16 @@ mod tests {
         // test vector from eip-8: https://eips.ethereum.org/EIPS/eip-8
         #[test]
         fn eip8_decode_findnode() {
-            let findnode_with_junk = hex!("c7c44041b9f7c7e41934417ebac9a8e1a4c6298f74553f2fcfdcae6ed6fe53163eb3d2b52e39fe91831b8a927bf4fc222c3902202027e5e9eb812195f95d20061ef5cd31d502e47ecb61183f74a504fe04c51e73df81f25c4d506b26db4517490103f84eb840ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f8443b9a35582999983999999280dc62cc8255c73471e0a61da0c89acdc0e035e260add7fc0c04ad9ebf3919644c91cb247affc82b69bd2ca235c71eab8e49737c937a2c396");
+            let findnode_with_junk = hex!(
+                "c7c44041b9f7c7e41934417ebac9a8e1a4c6298f74553f2fcfdcae6ed6fe53163eb3d2b52e39fe91831b8a927bf4fc222c3902202027e5e9eb812195f95d20061ef5cd31d502e47ecb61183f74a504fe04c51e73df81f25c4d506b26db4517490103f84eb840ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f8443b9a35582999983999999280dc62cc8255c73471e0a61da0c89acdc0e035e260add7fc0c04ad9ebf3919644c91cb247affc82b69bd2ca235c71eab8e49737c937a2c396"
+            );
 
             let buf = findnode_with_junk.as_slice();
             let decoded = Message::decode(buf).unwrap();
 
-            let expected_id = hex!("ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f");
+            let expected_id = hex!(
+                "ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
+            );
             assert_matches!(decoded.msg, Message::FindNode(FindNode { id, expire: 1136239445 }) if id == expected_id);
         }
 
@@ -987,7 +1002,9 @@ mod tests {
         // test vector from eip-8: https://eips.ethereum.org/EIPS/eip-8
         #[test]
         fn eip8_decode_neighbours() {
-            let neighbours_with_junk = hex!("c679fc8fe0b8b12f06577f2e802d34f6fa257e6137a995f6f4cbfc9ee50ed3710faf6e66f932c4c8d81d64343f429651328758b47d3dbc02c4042f0fff6946a50f4a49037a72bb550f3a7872363a83e1b9ee6469856c24eb4ef80b7535bcf99c0004f9015bf90150f84d846321163782115c82115db8403155e1427f85f10a5c9a7755877748041af1bcd8d474ec065eb33df57a97babf54bfd2103575fa829115d224c523596b401065a97f74010610fce76382c0bf32f84984010203040101b840312c55512422cf9b8a4097e9a6ad79402e87a15ae909a4bfefa22398f03d20951933beea1e4dfa6f968212385e829f04c2d314fc2d4e255e0d3bc08792b069dbf8599020010db83c4d001500000000abcdef12820d05820d05b84038643200b172dcfef857492156971f0e6aa2c538d8b74010f8e140811d53b98c765dd2d96126051913f44582e8c199ad7c6d6819e9a56483f637feaac9448aacf8599020010db885a308d313198a2e037073488203e78203e8b8408dcab8618c3253b558d459da53bd8fa68935a719aff8b811197101a4b2b47dd2d47295286fc00cc081bb542d760717d1bdd6bec2c37cd72eca367d6dd3b9df738443b9a355010203b525a138aa34383fec3d2719a0");
+            let neighbours_with_junk = hex!(
+                "c679fc8fe0b8b12f06577f2e802d34f6fa257e6137a995f6f4cbfc9ee50ed3710faf6e66f932c4c8d81d64343f429651328758b47d3dbc02c4042f0fff6946a50f4a49037a72bb550f3a7872363a83e1b9ee6469856c24eb4ef80b7535bcf99c0004f9015bf90150f84d846321163782115c82115db8403155e1427f85f10a5c9a7755877748041af1bcd8d474ec065eb33df57a97babf54bfd2103575fa829115d224c523596b401065a97f74010610fce76382c0bf32f84984010203040101b840312c55512422cf9b8a4097e9a6ad79402e87a15ae909a4bfefa22398f03d20951933beea1e4dfa6f968212385e829f04c2d314fc2d4e255e0d3bc08792b069dbf8599020010db83c4d001500000000abcdef12820d05820d05b84038643200b172dcfef857492156971f0e6aa2c538d8b74010f8e140811d53b98c765dd2d96126051913f44582e8c199ad7c6d6819e9a56483f637feaac9448aacf8599020010db885a308d313198a2e037073488203e78203e8b8408dcab8618c3253b558d459da53bd8fa68935a719aff8b811197101a4b2b47dd2d47295286fc00cc081bb542d760717d1bdd6bec2c37cd72eca367d6dd3b9df738443b9a355010203b525a138aa34383fec3d2719a0"
+            );
 
             let buf = neighbours_with_junk.as_slice();
             let decoded = Message::decode(buf).unwrap();

@@ -1,8 +1,8 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    HashedPostStateProvider, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
+    providers::state::macros::delegate_provider_impls,
 };
-use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, B256, BlockNumber, Bytes, StorageKey, StorageValue, map::B256Map};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
@@ -10,11 +10,11 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
+    StorageMultiProof, StorageRoot, TrieInput,
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
-    StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,

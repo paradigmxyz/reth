@@ -4,7 +4,7 @@ use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::EthereumHardforks;
 use reth_db::DatabaseEnv;
-use reth_db_api::{database::Database, table::Table, RawValue, TableViewer, Tables};
+use reth_db_api::{RawValue, TableViewer, Tables, database::Database, table::Table};
 use reth_db_common::{DbTool, ListFilter};
 use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use std::{cell::RefCell, sync::Arc};

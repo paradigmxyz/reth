@@ -4,7 +4,7 @@ use alloy_consensus::transaction::TransactionMeta;
 use reth_chainspec::EthChainSpec;
 use reth_primitives::{Receipt, TransactionSigned};
 use reth_provider::{BlockReader, ChainSpecProvider, ReceiptProvider, TransactionsProvider};
-use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
+use reth_rpc_eth_api::{FromEthApiError, RpcNodeCoreExt, RpcReceipt, helpers::LoadReceipt};
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 
 use crate::EthApi;

@@ -1,6 +1,6 @@
 use reth_metrics::{
-    metrics::{Gauge, Histogram},
     Metrics,
+    metrics::{Gauge, Histogram},
 };
 
 /// Metrics for the `BasicBlockDownloader`.

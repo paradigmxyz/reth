@@ -1,6 +1,6 @@
 mod downloader;
-pub use downloader::{fetch, Metadata};
 use downloader::{DownloaderError, S3DownloaderResponse};
+pub use downloader::{Metadata, fetch};
 
 mod filelist;
 use filelist::DOWNLOAD_FILE_LIST;
@@ -15,9 +15,9 @@ use reth_stages_api::{
 };
 use std::{
     path::PathBuf,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 /// S3 `StageId`
 const S3_STAGE_ID: StageId = StageId::Other("S3");

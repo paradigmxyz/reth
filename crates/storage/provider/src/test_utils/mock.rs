@@ -1,18 +1,18 @@
 use crate::{
-    traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, EthStorage, HeaderProvider, ReceiptProviderIdExt,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    traits::{BlockSource, ReceiptProvider},
 };
 use alloy_consensus::{
-    constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header, Transaction,
+    Header, Transaction, constants::EMPTY_ROOT_HASH, transaction::TransactionMeta,
 };
-use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag, eip4895::Withdrawals};
 use alloy_primitives::{
+    Address, B256, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, U256,
     keccak256,
     map::{B256Map, HashMap},
-    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
 use reth_chainspec::{ChainInfo, EthChainSpec};
@@ -36,8 +36,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput, updates::TrieUpdates,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use std::{

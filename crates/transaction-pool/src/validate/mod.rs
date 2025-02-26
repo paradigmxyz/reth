@@ -1,13 +1,13 @@
 //! Transaction validation abstractions.
 
 use crate::{
+    PriceBumpConfig,
     error::InvalidPoolTransactionError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
-    PriceBumpConfig,
 };
 use alloy_eips::eip4844::BlobTransactionSidecar;
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{Address, B256, TxHash, U256};
 use futures_util::future::Either;
 use reth_primitives::{Recovered, SealedBlock};
 use std::{fmt, future::Future, time::Instant};

@@ -4,6 +4,10 @@
 //! to be generic over it.
 
 use crate::{
+    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPoolTransaction,
+    EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
+    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
+    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
     blobstore::BlobStoreError,
     error::PoolError,
     traits::{
@@ -11,16 +15,12 @@ use crate::{
         TransactionListenerKind,
     },
     validate::ValidTransaction,
-    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPoolTransaction,
-    EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
-    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
-    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
     eip4844::{BlobAndProofV1, BlobTransactionSidecar},
 };
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{Address, B256, TxHash, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::Recovered;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};

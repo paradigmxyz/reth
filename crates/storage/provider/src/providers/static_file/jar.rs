@@ -1,14 +1,14 @@
 use super::{
-    metrics::{StaticFileProviderMetrics, StaticFileProviderOperation},
     LoadedJarRef,
+    metrics::{StaticFileProviderMetrics, StaticFileProviderOperation},
 };
 use crate::{
-    to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
-    TransactionsProvider,
+    BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider, TransactionsProvider,
+    to_range,
 };
 use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_eips::{BlockHashOrNumber, eip2718::Encodable2718, eip4895::Withdrawals};
+use alloy_primitives::{Address, B256, BlockHash, BlockNumber, TxHash, TxNumber, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{
     BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,

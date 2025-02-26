@@ -1,15 +1,15 @@
 #![allow(missing_docs)]
 use alloy_primitives::{
-    private::proptest::test_runner::{RngAlgorithm, TestRng},
     U256,
+    private::proptest::test_runner::{RngAlgorithm, TestRng},
 };
 use criterion::*;
 use futures::StreamExt;
 use pprof::criterion::{Output, PProfProfiler};
-use reth_network::{test_utils::Testnet, NetworkEventListenerProvider};
+use reth_network::{NetworkEventListenerProvider, test_utils::Testnet};
 use reth_network_api::Peers;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction};
+use reth_transaction_pool::{PoolTransaction, test_utils::TransactionGenerator};
 use std::sync::Arc;
 use tokio::{runtime::Runtime as TokioRuntime, sync::mpsc::unbounded_channel};
 
@@ -51,14 +51,14 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         }
 
                         // prepare some transactions
-                        let mut gen = TransactionGenerator::new(TestRng::deterministic_rng(
+                        let mut tx_gen = TransactionGenerator::new(TestRng::deterministic_rng(
                             RngAlgorithm::ChaCha,
                         ));
                         let num_broadcasts = 10;
                         for _ in 0..num_broadcasts {
                             for _ in 0..2 {
                                 let mut txs = Vec::new();
-                                let tx = gen.gen_eip1559_pooled();
+                                let tx = tx_gen.gen_eip1559_pooled();
                                 // ensure the sender has balance
                                 provider.add_account(
                                     tx.sender(),

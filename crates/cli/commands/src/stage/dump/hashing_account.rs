@@ -6,10 +6,10 @@ use reth_db_api::{database::Database, table::TableImporter, tables};
 use reth_db_common::DbTool;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
-    providers::{ProviderNodeTypes, StaticFileProvider},
     DatabaseProviderFactory, ProviderFactory,
+    providers::{ProviderNodeTypes, StaticFileProvider},
 };
-use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
+use reth_stages::{Stage, StageCheckpoint, UnwindInput, stages::AccountHashingStage};
 use std::sync::Arc;
 use tracing::info;
 

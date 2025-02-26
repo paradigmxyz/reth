@@ -1,13 +1,13 @@
 use alloy_consensus::{BlockHeader, Header};
-use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_primitives::{B256, BlockNumber, U256};
 use alloy_rlp::Decodable;
 use reth_codecs::Compact;
 use reth_node_builder::NodePrimitives;
 use reth_primitives::{SealedBlock, SealedHeader, StaticFileSegment};
 use reth_primitives_traits::SealedHeaderFor;
 use reth_provider::{
-    providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileProviderFactory,
-    StaticFileWriter, StorageLocation,
+    BlockWriter, StageCheckpointWriter, StaticFileProviderFactory, StaticFileWriter,
+    StorageLocation, providers::StaticFileProvider,
 };
 use reth_stages::{StageCheckpoint, StageId};
 use std::{fs::File, io::Read, path::PathBuf};

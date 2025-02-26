@@ -1,8 +1,8 @@
 use super::StageId;
 use alloc::{format, string::String, vec::Vec};
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{Address, B256, BlockNumber};
 use core::ops::RangeInclusive;
-use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
+use reth_trie_common::{StoredSubNode, hash_builder::HashBuilderState};
 
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
@@ -414,11 +414,11 @@ mod tests {
     fn merkle_checkpoint_roundtrip() {
         let mut rng = rand::thread_rng();
         let checkpoint = MerkleCheckpoint {
-            target_block: rng.gen(),
-            last_account_key: rng.gen(),
+            target_block: rng.r#gen(),
+            last_account_key: rng.r#gen(),
             walker_stack: vec![StoredSubNode {
                 key: B256::random_with(&mut rng).to_vec(),
-                nibble: Some(rng.gen()),
+                nibble: Some(rng.r#gen()),
                 node: None,
             }],
             state: HashBuilderState::default(),

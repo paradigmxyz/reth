@@ -1,5 +1,5 @@
-use crate::{traits::PropagateKind, PoolTransaction, ValidPoolTransaction};
-use alloy_primitives::{TxHash, B256};
+use crate::{PoolTransaction, ValidPoolTransaction, traits::PropagateKind};
+use alloy_primitives::{B256, TxHash};
 use std::sync::Arc;
 
 #[cfg(feature = "serde")]

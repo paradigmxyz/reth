@@ -155,16 +155,16 @@
 pub use crate::{
     blobstore::{BlobStore, BlobStoreError},
     config::{
-        LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
-        DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
-        REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
-        TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+        DEFAULT_PRICE_BUMP, DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, LocalTransactionConfig,
+        MAX_NEW_PENDING_TXS_NOTIFICATIONS, PoolConfig, PriceBumpConfig, REPLACE_BLOB_PRICE_BUMP,
+        SubPoolLimit, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+        TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
     error::PoolResult,
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
-        blob_tx_priority, fee_delta, state::SubPool, AllTransactionsEvents, FullTransactionEvent,
-        TransactionEvent, TransactionEvents,
+        AllTransactionsEvents, FullTransactionEvent, TransactionEvent, TransactionEvents,
+        blob_tx_priority, fee_delta, state::SubPool,
     },
     traits::*,
     validate::{
@@ -174,7 +174,7 @@ pub use crate::{
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{Address, B256, TxHash, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;

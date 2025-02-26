@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header, TxEip2930};
+use alloy_consensus::{BlockHeader, Header, TxEip2930, constants::ETH_TO_WEI};
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_primitives::{b256, Address, TxKind, U256};
+use alloy_primitives::{Address, TxKind, U256, b256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
@@ -10,8 +10,8 @@ use reth_node_api::FullNodePrimitives;
 use reth_primitives::{Block, BlockBody, Receipt, RecoveredBlock, Transaction};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
-    ProviderFactory,
+    BlockWriter as _, ExecutionOutcome, LatestStateProviderRef, ProviderFactory,
+    providers::ProviderNodeTypes,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_testing_utils::generators::sign_tx_with_key_pair;

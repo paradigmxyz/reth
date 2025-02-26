@@ -1,7 +1,7 @@
 //! Collection of methods for block validation.
 
 use alloy_consensus::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH,
+    BlockHeader as _, EMPTY_OMMER_ROOT_HASH, constants::MAXIMUM_EXTRA_DATA_SIZE,
 };
 use alloy_eips::{calc_next_block_base_fee, eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
@@ -356,7 +356,7 @@ mod tests {
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
-            blob_versioned_hashes: std::iter::repeat_with(|| rng.gen()).take(num_blobs).collect(),
+            blob_versioned_hashes: std::iter::repeat_with(|| rng.r#gen()).take(num_blobs).collect(),
         });
 
         let signature = Signature::new(U256::default(), U256::default(), true);

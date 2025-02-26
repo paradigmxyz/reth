@@ -1,18 +1,18 @@
 //! Mock types.
 
 use crate::{
+    CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
+    ValidPoolTransaction,
     identifier::{SenderIdentifiers, TransactionId},
     pool::txpool::TxPool,
     traits::TransactionOrigin,
-    CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction,
-    ValidPoolTransaction,
 };
 use alloy_consensus::{
+    TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, Typed2718,
     constants::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
         LEGACY_TX_TYPE_ID,
     },
-    TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
@@ -21,7 +21,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
-    Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
+    Address, B256, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, U256,
 };
 use paste::paste;
 use rand::{
@@ -29,8 +29,8 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    transaction::{TransactionConversionError, TryFromRecoveredTransactionError},
     PooledTransaction, Recovered, Transaction, TransactionSigned, TxType,
+    transaction::{TransactionConversionError, TryFromRecoveredTransactionError},
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -1279,8 +1279,7 @@ impl MockTransactionRatio {
     pub fn new(legacy_pct: u32, access_list_pct: u32, dynamic_fee_pct: u32, blob_pct: u32) -> Self {
         let total = legacy_pct + access_list_pct + dynamic_fee_pct + blob_pct;
         assert_eq!(
-            total,
-            100,
+            total, 100,
             "percentages must sum up to 100, instead got legacy: {legacy_pct}, access_list: {access_list_pct}, dynamic_fee: {dynamic_fee_pct}, blob: {blob_pct}, total: {total}",
         );
 

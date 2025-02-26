@@ -1,4 +1,4 @@
-use alloy_primitives::{bytes::BufMut, keccak256, B256};
+use alloy_primitives::{B256, bytes::BufMut, keccak256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
@@ -209,8 +209,8 @@ fn stage_checkpoint_progress(provider: &impl StatsReader) -> ProviderResult<Enti
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
-        TestStageDB, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
+        UnwindStageTestRunner, stage_test_suite_ext,
     };
     use alloy_primitives::{Address, U256};
     use assert_matches::assert_matches;
@@ -223,7 +223,7 @@ mod tests {
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::providers::StaticFileWriter;
     use reth_testing_utils::generators::{
-        self, random_block_range, random_contract_account_range, BlockRangeParams,
+        self, BlockRangeParams, random_block_range, random_contract_account_range,
     };
 
     stage_test_suite_ext!(StorageHashingTestRunner, storage_hashing);
@@ -362,13 +362,14 @@ mod tests {
                             )?;
                             tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
 
-                            let (addr, _) =
-                                accounts.get_mut(rng.gen::<usize>() % n_accounts as usize).unwrap();
+                            let (addr, _) = accounts
+                                .get_mut(rng.r#gen::<usize>() % n_accounts as usize)
+                                .unwrap();
 
                             for _ in 0..2 {
                                 let new_entry = StorageEntry {
-                                    key: keccak256([rng.gen::<u8>()]),
-                                    value: U256::from(rng.gen::<u8>() % 30 + 1),
+                                    key: keccak256([rng.r#gen::<u8>()]),
+                                    value: U256::from(rng.r#gen::<u8>() % 30 + 1),
                                 };
                                 self.insert_storage_entry(
                                     tx,
@@ -384,14 +385,14 @@ mod tests {
                     )?;
 
                     // Randomize rewards
-                    let has_reward: bool = rng.gen();
+                    let has_reward: bool = rng.r#gen();
                     if has_reward {
                         self.insert_storage_entry(
                             tx,
                             (block_number, Address::random()).into(),
                             StorageEntry {
                                 key: keccak256("mining"),
-                                value: U256::from(rng.gen::<u32>()),
+                                value: U256::from(rng.r#gen::<u32>()),
                             },
                             progress.number == stage_progress,
                         )?;

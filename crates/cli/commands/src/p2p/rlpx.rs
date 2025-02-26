@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{HelloMessage, UnauthedP2PStream};
 use reth_network::config::rng_secret_key;
-use reth_network_peers::{pk2id, AnyNode};
+use reth_network_peers::{AnyNode, pk2id};
 use secp256k1::SECP256K1;
 use tokio::net::TcpStream;
 

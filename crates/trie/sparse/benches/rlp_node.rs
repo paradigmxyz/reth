@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::{B256, U256};
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use prop::strategy::ValueTree;
 use proptest::{prelude::*, test_runner::TestRunner};
 use rand::seq::IteratorRandom;
@@ -38,7 +38,7 @@ fn update_rlp_node_level(c: &mut Criterion) {
                 sparse
                     .update_leaf(
                         Nibbles::unpack(key),
-                        alloy_rlp::encode_fixed_size(&rng.gen::<U256>()).to_vec(),
+                        alloy_rlp::encode_fixed_size(&rng.r#gen::<U256>()).to_vec(),
                     )
                     .unwrap();
             }

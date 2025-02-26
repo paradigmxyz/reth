@@ -2,23 +2,23 @@
 
 use node::NodeTestContext;
 use reth_chainspec::EthChainSpec;
-use reth_db::{test_utils::TempDatabase, DatabaseEnv};
+use reth_db::{DatabaseEnv, test_utils::TempDatabase};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{
-    components::NodeComponentsBuilder,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns},
     EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
     NodeConfig, NodeHandle, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
     PayloadTypes,
+    components::NodeComponentsBuilder,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns},
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
-use tracing::{span, Level};
+use tracing::{Level, span};
 use wallet::Wallet;
 
 /// Wrapper type to create test nodes
@@ -54,13 +54,13 @@ pub async fn setup<N>(
 where
     N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider + NodeTypesWithEngine,
     N::Primitives: NodePrimitives<
-        BlockHeader = alloy_consensus::Header,
-        BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
-    >,
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
+        >,
     N::ComponentsBuilder: NodeComponentsBuilder<
-        TmpNodeAdapter<N>,
-        Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
-    >,
+            TmpNodeAdapter<N>,
+            Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
+        >,
     N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
@@ -129,16 +129,16 @@ where
         + NodeTypesWithEngine
         + NodeTypesForProvider,
     N::Primitives: NodePrimitives<
-        BlockHeader = alloy_consensus::Header,
-        BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
-    >,
-    N::ComponentsBuilder: NodeComponentsBuilder<
-        TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-        Components: NodeComponents<
-            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-            Network: PeersHandleProvider,
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
         >,
-    >,
+    N::ComponentsBuilder: NodeComponentsBuilder<
+            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+            Components: NodeComponents<
+                TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+                Network: PeersHandleProvider,
+            >,
+        >,
     N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
         + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<

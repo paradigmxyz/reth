@@ -1,6 +1,6 @@
 use crate::{
-    compression::{Compression, Compressors, Zstd},
     DataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
+    compression::{Compression, Compressors, Zstd},
 };
 use std::{ops::Range, sync::Arc};
 use zstd::bulk::Decompressor;

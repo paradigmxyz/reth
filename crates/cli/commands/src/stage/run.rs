@@ -34,16 +34,16 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    writer::UnifiedStorageWriter, ChainSpecProvider, DatabaseProviderFactory,
-    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    ChainSpecProvider, DatabaseProviderFactory, StageCheckpointReader, StageCheckpointWriter,
+    StaticFileProviderFactory, writer::UnifiedStorageWriter,
 };
 use reth_stages::{
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, HeaderStage, IndexAccountHistoryStage,
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TransactionLookupStage,
     },
-    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::watch;

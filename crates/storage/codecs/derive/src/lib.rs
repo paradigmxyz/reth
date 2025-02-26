@@ -12,9 +12,9 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    bracketed,
+    DeriveInput, Result, Token, bracketed,
     parse::{Parse, ParseStream},
-    parse_macro_input, DeriveInput, Result, Token,
+    parse_macro_input,
 };
 
 mod arbitrary;

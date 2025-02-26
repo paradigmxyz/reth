@@ -2,21 +2,21 @@
 
 use alloy_consensus::{Block, Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
+    NumHash,
     eip1898::BlockWithParent,
     eip4895::{Withdrawal, Withdrawals},
-    NumHash,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
+use alloy_primitives::{Address, B256, BlockNumber, Bytes, TxKind, U256};
 pub use rand::Rng;
 use rand::{
-    distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
+    SeedableRng, distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng,
 };
 use reth_primitives::{
     Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
     TransactionSigned,
 };
 
-use reth_primitives_traits::{crypto::secp256k1::sign_message, proofs, Block as _};
+use reth_primitives_traits::{Block as _, crypto::secp256k1::sign_message, proofs};
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
@@ -111,7 +111,7 @@ pub fn random_block_with_parent<R: Rng>(
     number: u64,
     parent: Option<B256>,
 ) -> BlockWithParent {
-    BlockWithParent { parent: parent.unwrap_or_default(), block: NumHash::new(number, rng.gen()) }
+    BlockWithParent { parent: parent.unwrap_or_default(), block: NumHash::new(number, rng.r#gen()) }
 }
 
 /// Generate a random [`SealedHeader`].
@@ -120,8 +120,8 @@ pub fn random_block_with_parent<R: Rng>(
 pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
     let header = alloy_consensus::Header {
         number,
-        nonce: rng.gen(),
-        difficulty: U256::from(rng.gen::<u32>()),
+        nonce: rng.r#gen(),
+        difficulty: U256::from(rng.r#gen::<u32>()),
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
@@ -137,11 +137,11 @@ pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> 
 pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
     Transaction::Legacy(TxLegacy {
         chain_id: Some(1),
-        nonce: rng.gen::<u16>().into(),
-        gas_price: rng.gen::<u16>().into(),
-        gas_limit: rng.gen::<u16>().into(),
-        to: TxKind::Call(rng.gen()),
-        value: U256::from(rng.gen::<u16>()),
+        nonce: rng.r#gen::<u16>().into(),
+        gas_price: rng.r#gen::<u16>().into(),
+        gas_limit: rng.r#gen::<u16>().into(),
+        to: TxKind::Call(rng.r#gen()),
+        value: U256::from(rng.r#gen::<u16>()),
         input: Bytes::default(),
     })
 }
@@ -193,7 +193,7 @@ pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
 /// The ommer headers are not assumed to be valid.
 pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams) -> SealedBlock {
     // Generate transactions
-    let tx_count = block_params.tx_count.unwrap_or_else(|| rng.gen::<u8>());
+    let tx_count = block_params.tx_count.unwrap_or_else(|| rng.r#gen::<u8>());
     let transactions: Vec<TransactionSigned> =
         (0..tx_count).map(|_| random_signed_tx(rng)).collect();
     let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction().gas_limit());
@@ -211,10 +211,10 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     let withdrawals = block_params.withdrawals_count.map(|count| {
         (0..count)
             .map(|i| Withdrawal {
-                amount: rng.gen(),
+                amount: rng.r#gen(),
                 index: i.into(),
                 validator_index: i.into(),
-                address: rng.gen(),
+                address: rng.r#gen(),
             })
             .collect::<Vec<_>>()
     });
@@ -227,7 +227,7 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         gas_limit: total_gas,
         transactions_root,
         ommers_hash,
-        base_fee_per_gas: Some(rng.gen()),
+        base_fee_per_gas: Some(rng.r#gen()),
         // TODO(onbjerg): Proper EIP-7685 request support
         requests_hash: None,
         withdrawals_root,
@@ -374,7 +374,7 @@ pub fn random_account_change<R: Rng>(
     let addr_from = addresses.next().unwrap_or_else(Address::random);
     let addr_to = addresses.next().unwrap_or_else(Address::random);
 
-    let balance_change = U256::from(rng.gen::<u64>());
+    let balance_change = U256::from(rng.r#gen::<u64>());
 
     let storage_changes = if n_storage_changes.is_empty() {
         Vec::new()
@@ -395,16 +395,16 @@ pub fn random_storage_entry<R: Rng>(rng: &mut R, key_range: Range<u64>) -> Stora
         m[24..32].copy_from_slice(&n.to_be_bytes());
         m
     });
-    let value = U256::from(rng.gen::<u64>());
+    let value = U256::from(rng.r#gen::<u64>());
 
     StorageEntry { key, value }
 }
 
 /// Generate random Externally Owned Account (EOA account without contract).
 pub fn random_eoa_account<R: Rng>(rng: &mut R) -> (Address, Account) {
-    let nonce: u64 = rng.gen();
-    let balance = U256::from(rng.gen::<u32>());
-    let addr = rng.gen();
+    let nonce: u64 = rng.r#gen();
+    let balance = U256::from(rng.r#gen::<u32>());
+    let addr = rng.r#gen();
 
     (addr, Account { nonce, balance, bytecode_hash: None })
 }
@@ -427,7 +427,7 @@ pub fn random_contract_account_range<R: Rng>(
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
         // todo: can a non-eoa account have a nonce > 0?
-        let account = Account { bytecode_hash: Some(rng.gen()), ..eoa_account };
+        let account = Account { bytecode_hash: Some(rng.r#gen()), ..eoa_account };
         accounts.push((address, account))
     }
     accounts
@@ -439,8 +439,8 @@ pub fn random_receipt<R: Rng>(
     transaction: &TransactionSigned,
     logs_count: Option<u8>,
 ) -> Receipt {
-    let success = rng.gen::<bool>();
-    let logs_count = logs_count.unwrap_or_else(|| rng.gen::<u8>());
+    let success = rng.r#gen::<bool>();
+    let logs_count = logs_count.unwrap_or_else(|| rng.r#gen::<u8>());
     #[allow(clippy::needless_update)] // side-effect of optimism fields
     Receipt {
         tx_type: transaction.tx_type(),
@@ -457,12 +457,12 @@ pub fn random_receipt<R: Rng>(
 
 /// Generate random log
 pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: Option<u8>) -> Log {
-    let data_byte_count = rng.gen::<u8>() as usize;
-    let topics_count = topics_count.unwrap_or_else(|| rng.gen()) as usize;
+    let data_byte_count = rng.r#gen::<u8>() as usize;
+    let topics_count = topics_count.unwrap_or_else(|| rng.r#gen()) as usize;
     Log::new_unchecked(
-        address.unwrap_or_else(|| rng.gen()),
-        std::iter::repeat_with(|| rng.gen()).take(topics_count).collect(),
-        std::iter::repeat_with(|| rng.gen()).take(data_byte_count).collect::<Vec<_>>().into(),
+        address.unwrap_or_else(|| rng.r#gen()),
+        std::iter::repeat_with(|| rng.r#gen()).take(topics_count).collect(),
+        std::iter::repeat_with(|| rng.r#gen()).take(data_byte_count).collect::<Vec<_>>().into(),
     )
 }
 
@@ -471,10 +471,10 @@ mod tests {
     use super::*;
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{hex, PrimitiveSignature as Signature};
+    use alloy_primitives::{PrimitiveSignature as Signature, hex};
     use reth_primitives_traits::{
-        crypto::secp256k1::{public_key_to_address, sign_message},
         SignedTransaction,
+        crypto::secp256k1::{public_key_to_address, sign_message},
     };
     use std::str::FromStr;
 

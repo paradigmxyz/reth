@@ -3,9 +3,9 @@
 #![allow(dead_code)]
 
 use crate::{
-    pool::{txpool::TxPool, AddedTransaction},
-    test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
     TransactionOrdering,
+    pool::{AddedTransaction, txpool::TxPool},
+    test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
 };
 use alloy_primitives::{Address, U256};
 use rand::Rng;
@@ -85,7 +85,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
         let senders = config.addresses(&mut rng);
         Self {
             base_fee: config.base_fee,
-            balances: senders.iter().copied().map(|a| (a, rng.gen())).collect(),
+            balances: senders.iter().copied().map(|a| (a, rng.r#gen())).collect(),
             nonces: senders.iter().copied().map(|a| (a, 0)).collect(),
             senders,
             scenarios: config.scenarios,

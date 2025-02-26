@@ -5,13 +5,13 @@ use std::collections::HashMap;
 use crate::EthApi;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
-use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
-use alloy_primitives::{eip191_hash_message, Address, PrimitiveSignature as Signature, B256};
+use alloy_network::{EthereumWallet, TransactionBuilder, eip2718::Encodable2718};
+use alloy_primitives::{Address, B256, PrimitiveSignature as Signature, eip191_hash_message};
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use reth_provider::BlockReader;
-use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
+use reth_rpc_eth_api::helpers::{AddDevSigners, EthSigner, signer::Result};
 use reth_rpc_eth_types::SignError;
 
 impl<Provider, Pool, Network, EvmConfig> AddDevSigners

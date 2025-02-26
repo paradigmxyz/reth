@@ -9,9 +9,9 @@ use alloy_rpc_types_engine::{
 };
 use assert_matches::assert_matches;
 use reth_ethereum_primitives::{Block, TransactionSigned};
-use reth_primitives_traits::{proofs, SealedBlock};
+use reth_primitives_traits::{SealedBlock, proofs};
 use reth_testing_utils::generators::{
-    self, random_block, random_block_range, BlockParams, BlockRangeParams, Rng,
+    self, BlockParams, BlockRangeParams, Rng, random_block, random_block_range,
 };
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock<Block>, f: F) -> ExecutionPayload {
@@ -52,7 +52,7 @@ fn payload_body_roundtrip() {
 #[test]
 fn payload_validation_conversion() {
     let mut rng = generators::rng();
-    let parent = rng.gen();
+    let parent = rng.r#gen();
     let block = random_block(
         &mut rng,
         100,

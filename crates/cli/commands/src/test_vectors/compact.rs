@@ -1,5 +1,5 @@
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{hex, private::getrandom::getrandom, PrimitiveSignature, TxKind};
+use alloy_primitives::{PrimitiveSignature, TxKind, hex, private::getrandom::getrandom};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -17,11 +17,11 @@ use reth_codecs::alloy::{
     withdrawal::Withdrawal,
 };
 use reth_db::{
+    ClientVersion,
     models::{
         AccountBeforeTx, StaticFileBlockWithdrawals, StoredBlockBodyIndices, StoredBlockOmmers,
         StoredBlockWithdrawals,
     },
-    ClientVersion,
 };
 use reth_fs_util as fs;
 use reth_primitives::{
@@ -33,8 +33,8 @@ use reth_stages_types::{
     HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint, StageUnitCheckpoint,
     StorageHashingCheckpoint,
 };
-use reth_trie::{hash_builder::HashBuilderValue, TrieMask};
-use reth_trie_common::{hash_builder::HashBuilderState, StoredNibbles, StoredNibblesSubKey};
+use reth_trie::{TrieMask, hash_builder::HashBuilderValue};
+use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, hash_builder::HashBuilderState};
 use std::{fs::File, io::BufReader};
 
 pub const VECTORS_FOLDER: &str = "testdata/micro/compact";
@@ -146,7 +146,7 @@ pub fn read_vectors() -> Result<()> {
 }
 
 /// Generates a vector of type `T` to a file.
-pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
+pub fn generate_vectors_with(generator: &[fn(&mut TestRunner) -> eyre::Result<()>]) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
     let mut seed = [0u8; 32];
     getrandom(&mut seed)?;
@@ -159,7 +159,7 @@ pub fn generate_vectors_with(gen: &[fn(&mut TestRunner) -> eyre::Result<()>]) ->
 
     fs::create_dir_all(VECTORS_FOLDER)?;
 
-    for generate_fn in gen {
+    for generate_fn in generator {
         generate_fn(&mut runner)?;
     }
 

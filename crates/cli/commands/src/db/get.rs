@@ -1,17 +1,18 @@
 use alloy_consensus::Header;
-use alloy_primitives::{hex, BlockHash};
+use alloy_primitives::{BlockHash, hex};
 use clap::Parser;
 use reth_db::static_file::{
     ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
 };
 use reth_db_api::{
+    RawKey, RawTable, Receipts, TableViewer, Transactions,
     table::{Decompress, DupSort, Table},
-    tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
+    tables,
 };
 use reth_db_common::DbTool;
 use reth_node_api::{ReceiptTy, TxTy};
 use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, StaticFileProviderFactory};
+use reth_provider::{StaticFileProviderFactory, providers::ProviderNodeTypes};
 use reth_static_file_types::StaticFileSegment;
 use tracing::error;
 
@@ -208,8 +209,8 @@ mod tests {
     use alloy_primitives::{Address, B256};
     use clap::{Args, Parser};
     use reth_db_api::{
-        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory,
+        models::{ShardedKey, storage_sharded_key::StorageShardedKey},
     };
     use std::str::FromStr;
 

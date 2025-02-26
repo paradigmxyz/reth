@@ -42,11 +42,7 @@ pub fn generate_from_to(
     };
 
     let has_ref_fields = fields.iter().any(|field| {
-        if let FieldTypes::StructField(field) = field {
-            field.is_reference
-        } else {
-            false
-        }
+        if let FieldTypes::StructField(field) = field { field.is_reference } else { false }
     });
 
     let fn_from_compact = if has_ref_fields {

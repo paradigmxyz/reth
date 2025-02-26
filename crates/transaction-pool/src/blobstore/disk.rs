@@ -2,7 +2,7 @@
 
 use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{B256, TxHash};
 use parking_lot::{Mutex, RwLock};
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};

@@ -1,38 +1,38 @@
 //! The internal transaction pool implementation.
 
 use crate::{
+    PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig, TransactionOrdering,
+    U256, ValidPoolTransaction,
     config::{LocalTransactionConfig, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER},
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind},
     identifier::{SenderId, TransactionId},
     metrics::{AllTransactionsMetrics, TxPoolMetrics},
     pool::{
+        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
         best::BestTransactions,
         blob::BlobTransactions,
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
         pending::PendingPool,
         state::{SubPool, TxState},
         update::{Destination, PoolUpdate},
-        AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
-    PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig, TransactionOrdering,
-    ValidPoolTransaction, U256,
 };
 use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
 use alloy_eips::{
+    Typed2718,
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE},
     eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
-    Typed2718,
 };
-use alloy_primitives::{Address, TxHash, B256};
+use alloy_primitives::{Address, B256, TxHash};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{
     cmp::Ordering,
-    collections::{btree_map::Entry, hash_map, BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet, btree_map::Entry, hash_map},
     fmt,
     ops::Bound::{Excluded, Unbounded},
     sync::Arc,
@@ -1038,7 +1038,11 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn assert_invariants(&self) {
         let size = self.size();
         let actual = size.basefee + size.pending + size.queued + size.blob;
-        assert_eq!(size.total, actual, "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}, blob:{}", size.basefee, size.pending, size.queued, size.blob);
+        assert_eq!(
+            size.total, actual,
+            "total size must be equal to the sum of all sub-pools, basefee:{}, pending:{}, queued:{}, blob:{}",
+            size.basefee, size.pending, size.queued, size.blob
+        );
         self.all_transactions.assert_invariants();
         self.pending_pool.assert_invariants();
         self.basefee_pool.assert_invariants();
@@ -1975,9 +1979,9 @@ impl SenderInfo {
 mod tests {
     use super::*;
     use crate::{
+        SubPoolLimit,
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         traits::TransactionOrigin,
-        SubPoolLimit,
     };
     use alloy_consensus::Transaction;
     use alloy_primitives::address;
@@ -2672,9 +2676,9 @@ mod tests {
             pool.insert_tx(f.validated(tx.next()), on_chain_balance, on_chain_nonce).unwrap_err();
         assert!(matches!(err, InsertErr::ExceededSenderTransactionsCapacity { .. }));
 
-        assert!(pool
-            .insert_tx(f.validated(unblocked_tx), on_chain_balance, on_chain_nonce)
-            .is_ok());
+        assert!(
+            pool.insert_tx(f.validated(unblocked_tx), on_chain_balance, on_chain_nonce).is_ok()
+        );
     }
 
     #[test]

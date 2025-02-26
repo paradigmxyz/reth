@@ -8,8 +8,8 @@ use alloy_primitives::{Bytes, PrimitiveSignature as Signature, TxKind, U256};
 use rand::Rng;
 use reth_eth_wire::HeadersDirection;
 use reth_network::{
-    test_utils::{NetworkEventStream, Testnet},
     BlockDownloaderProvider, NetworkEventListenerProvider,
+    test_utils::{NetworkEventStream, Testnet},
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::{
@@ -22,12 +22,12 @@ use reth_provider::test_utils::MockEthProvider;
 /// Returns a new [`TransactionSigned`] with some random parameters
 pub fn rng_transaction(rng: &mut impl rand::RngCore) -> TransactionSigned {
     let request = Transaction::Eip2930(TxEip2930 {
-        chain_id: rng.gen(),
-        nonce: rng.gen(),
-        gas_price: rng.gen(),
-        gas_limit: rng.gen(),
+        chain_id: rng.r#gen(),
+        nonce: rng.r#gen(),
+        gas_price: rng.r#gen(),
+        gas_limit: rng.r#gen(),
         to: TxKind::Create,
-        value: U256::from(rng.gen::<u128>()),
+        value: U256::from(rng.r#gen::<u128>()),
         input: Bytes::from(vec![1, 2]),
         access_list: Default::default(),
     });
@@ -63,7 +63,7 @@ async fn test_get_body() {
     // request some blocks
     for _ in 0..100 {
         // Set a new random block to the mock storage and request it via the network
-        let block_hash = rng.gen();
+        let block_hash = rng.r#gen();
         let mut block: Block = Block::default();
         block.body.transactions.push(rng_transaction(&mut rng));
 
@@ -102,13 +102,13 @@ async fn test_get_header() {
     let connected = events0.next_session_established().await.unwrap();
     assert_eq!(connected, *handle1.peer_id());
 
-    let start: u64 = rng.gen();
-    let mut hash = rng.gen();
+    let start: u64 = rng.r#gen();
+    let mut hash = rng.r#gen();
     // request some headers
     for idx in 0..100 {
         // Set a new random header to the mock storage and request it via the network
         let header = Header { number: start + idx, parent_hash: hash, ..Default::default() };
-        hash = rng.gen();
+        hash = rng.r#gen();
 
         mock_provider.add_header(hash, header.clone());
 

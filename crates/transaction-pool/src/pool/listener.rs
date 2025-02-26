@@ -1,20 +1,20 @@
 //! Listeners for the transaction-pool
 
 use crate::{
+    PoolTransaction, ValidPoolTransaction,
     pool::events::{FullTransactionEvent, TransactionEvent},
     traits::PropagateKind,
-    PoolTransaction, ValidPoolTransaction,
 };
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{B256, TxHash};
 use futures_util::Stream;
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 use tokio::sync::mpsc::{
-    error::TrySendError, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    Receiver, Sender, UnboundedReceiver, UnboundedSender, error::TrySendError,
 };
 
 /// The size of the event channel used to propagate transaction events.

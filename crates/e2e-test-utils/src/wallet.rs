@@ -1,5 +1,5 @@
 use alloy_signer::Signer;
-use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner};
+use alloy_signer_local::{MnemonicBuilder, PrivateKeySigner, coins_bip39::English};
 
 /// One of the accounts of the genesis allocations.
 #[derive(Debug)]
@@ -32,7 +32,7 @@ impl Wallet {
     }
 
     /// Generates a list of wallets
-    pub fn gen(&self) -> Vec<PrivateKeySigner> {
+    pub fn wallet_gen(&self) -> Vec<PrivateKeySigner> {
         let builder = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC);
 
         // use the derivation path

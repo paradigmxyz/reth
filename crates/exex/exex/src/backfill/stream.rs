@@ -2,8 +2,8 @@ use super::job::BackfillJobResult;
 use crate::{BackfillJob, SingleBlockBackfillJob};
 use alloy_primitives::BlockNumber;
 use futures::{
-    stream::{FuturesOrdered, Stream},
     StreamExt,
+    stream::{FuturesOrdered, Stream},
 };
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
 use reth_node_api::NodePrimitives;
@@ -15,7 +15,7 @@ use reth_tracing::tracing::debug;
 use std::{
     ops::RangeInclusive,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::task::JoinHandle;
 
@@ -236,10 +236,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
+        BackfillJobFactory,
         backfill::test_utils::{
             blocks_and_execution_outcome, blocks_and_execution_outputs, chain_spec,
         },
-        BackfillJobFactory,
     };
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;

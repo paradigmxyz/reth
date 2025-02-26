@@ -3,7 +3,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use jsonrpsee::{
     core::client::ClientT,
-    http_client::{transport::HttpBackend, HttpClient},
+    http_client::{HttpClient, transport::HttpBackend},
 };
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, NodePrimitives};

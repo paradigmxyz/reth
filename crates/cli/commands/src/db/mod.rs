@@ -2,7 +2,7 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
+use reth_db::version::{DB_VERSION, DatabaseVersionError, get_db_version};
 use reth_db_common::DbTool;
 use std::io::{self, Write};
 
@@ -110,7 +110,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::Drop { force } => {
                 if !force {
                     // Ask for confirmation
-                    print!("Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): ");
+                    print!(
+                        "Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): "
+                    );
                     // Flush the buffer to ensure the message is printed immediately
                     io::stdout().flush().unwrap();
 

@@ -1,8 +1,8 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::{
-    private::proptest::test_runner::{RngAlgorithm, TestRng},
     U256,
+    private::proptest::test_runner::{RngAlgorithm, TestRng},
 };
 use criterion::*;
 use pprof::criterion::{Output, PProfProfiler};
@@ -13,7 +13,7 @@ use reth_network::{
     },
 };
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, TransactionPool, test_utils::TransactionGenerator};
 use tokio::runtime::Runtime as TokioRuntime;
 
 criterion_group!(
@@ -64,11 +64,11 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
                             let peer_pool = peer.pool().unwrap();
 
                             for _ in 0..num_tx_per_peer {
-                                let mut gen = TransactionGenerator::new(
+                                let mut tx_gen = TransactionGenerator::new(
                                     TestRng::deterministic_rng(RngAlgorithm::ChaCha),
                                 );
 
-                                let tx = gen.gen_eip1559_pooled();
+                                let tx = tx_gen.gen_eip1559_pooled();
                                 let sender = tx.sender();
                                 provider.add_account(
                                     sender,

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use eyre::{bail, WrapErr};
+use eyre::{WrapErr, bail};
 use reth_config::Config;
 
 /// `reth config` command

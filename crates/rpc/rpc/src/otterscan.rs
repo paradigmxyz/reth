@@ -1,7 +1,7 @@
 use alloy_consensus::{BlockHeader, Transaction, Typed2718};
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::{ReceiptResponse, TransactionResponse};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, TxHash, U256};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
 use alloy_rpc_types_trace::{
     otterscan::{
@@ -14,14 +14,14 @@ use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceExt},
     FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction, TransactionCompat,
+    helpers::{EthTransactions, TraceExt},
 };
-use reth_rpc_eth_types::{utils::binary_search, EthApiError};
+use reth_rpc_eth_types::{EthApiError, utils::binary_search};
 use reth_rpc_server_types::result::internal_rpc_err;
 use revm::context_interface::result::ExecutionResult;
 use revm_inspectors::{
-    tracing::{types::CallTraceNode, TracingInspectorConfig},
+    tracing::{TracingInspectorConfig, types::CallTraceNode},
     transfer::{TransferInspector, TransferKind},
 };
 

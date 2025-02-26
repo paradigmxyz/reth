@@ -236,7 +236,7 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
 mod tests {
     use super::*;
     use alloy_rlp::Decodable;
-    use rand::{thread_rng, Rng, RngCore};
+    use rand::{Rng, RngCore, thread_rng};
     use std::net::Ipv6Addr;
 
     #[test]
@@ -248,9 +248,9 @@ mod tests {
 
         let record = NodeRecord {
             address: v6.into(),
-            tcp_port: rng.gen(),
-            udp_port: rng.gen(),
-            id: rng.gen(),
+            tcp_port: rng.r#gen(),
+            udp_port: rng.r#gen(),
+            id: rng.r#gen(),
         };
 
         assert!(record.clone().convert_ipv4_mapped());
@@ -264,9 +264,9 @@ mod tests {
 
         let record = NodeRecord {
             address: v4.into(),
-            tcp_port: rng.gen(),
-            udp_port: rng.gen(),
-            id: rng.gen(),
+            tcp_port: rng.r#gen(),
+            udp_port: rng.r#gen(),
+            id: rng.r#gen(),
         };
 
         assert!(!record.clone().convert_ipv4_mapped());
@@ -281,9 +281,9 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let record = NodeRecord {
                 address: IpAddr::V4(ip.into()),
-                tcp_port: rng.gen(),
-                udp_port: rng.gen(),
-                id: rng.gen(),
+                tcp_port: rng.r#gen(),
+                udp_port: rng.r#gen(),
+                id: rng.r#gen(),
             };
 
             let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();
@@ -299,9 +299,9 @@ mod tests {
             rng.fill_bytes(&mut ip);
             let record = NodeRecord {
                 address: IpAddr::V6(ip.into()),
-                tcp_port: rng.gen(),
-                udp_port: rng.gen(),
-                id: rng.gen(),
+                tcp_port: rng.r#gen(),
+                udp_port: rng.r#gen(),
+                id: rng.r#gen(),
             };
 
             let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();

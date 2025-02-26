@@ -3,7 +3,7 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::{B256, U256};
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
 use revm_primitives::{Address, HashMap};
@@ -24,7 +24,7 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
             info: AccountInfo {
                 balance: U256::from(100),
                 nonce: 10,
-                code_hash: B256::from_slice(&rng.gen::<[u8; 32]>()),
+                code_hash: B256::from_slice(&rng.r#gen::<[u8; 32]>()),
                 code: Default::default(),
             },
             storage,

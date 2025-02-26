@@ -1,15 +1,15 @@
 use crate::{
+    Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
     identifier::{SenderId, TransactionId},
     pool::{
         best::{BestTransactions, BestTransactionsWithFees},
         size::SizeTracker,
     },
-    Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{
     cmp::Ordering,
-    collections::{hash_map::Entry, BTreeMap},
+    collections::{BTreeMap, hash_map::Entry},
     ops::Bound::Unbounded,
     sync::Arc,
 };
@@ -610,8 +610,8 @@ impl<T: TransactionOrdering> Ord for PendingTransaction<T> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
     };
     use alloy_consensus::Transaction;
     use alloy_primitives::address;

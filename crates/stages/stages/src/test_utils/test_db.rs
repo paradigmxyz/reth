@@ -1,10 +1,11 @@
-use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{Address, B256, BlockNumber, TxHash, TxNumber, U256, keccak256};
 use reth_chainspec::MAINNET;
 use reth_db::{
-    test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
+    test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
 };
 use reth_db_api::{
+    DatabaseError as DbError,
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
@@ -12,15 +13,14 @@ use reth_db_api::{
     table::Table,
     tables,
     transaction::{DbTx, DbTxMut},
-    DatabaseError as DbError,
 };
 use reth_primitives::{
     Account, EthPrimitives, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
 };
 use reth_provider::{
+    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     test_utils::MockNodeTypesWithDB,
-    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_testing_utils::generators::ChangeSet;

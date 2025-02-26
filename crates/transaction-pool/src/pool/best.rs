@@ -1,8 +1,8 @@
 use crate::{
+    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     identifier::{SenderId, TransactionId},
     pool::pending::PendingTransaction,
-    PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
@@ -13,7 +13,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
 };
-use tokio::sync::broadcast::{error::TryRecvError, Receiver};
+use tokio::sync::broadcast::{Receiver, error::TryRecvError};
 use tracing::debug;
 
 /// An iterator that returns transactions that can be executed on the current state (*best*
@@ -341,11 +341,7 @@ where
             }
         }
 
-        if let Some(item) = self.buffer.pop_front() {
-            Some(item)
-        } else {
-            self.inner.next()
-        }
+        if let Some(item) = self.buffer.pop_front() { Some(item) } else { self.inner.next() }
     }
 }
 
@@ -374,9 +370,9 @@ where
 mod tests {
     use super::*;
     use crate::{
+        BestTransactions, Priority,
         pool::pending::PendingPool,
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
-        BestTransactions, Priority,
     };
     use alloy_primitives::U256;
 

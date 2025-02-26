@@ -2,26 +2,26 @@
 
 use alloy_node_bindings::Geth;
 use alloy_primitives::map::HashSet;
-use alloy_provider::{ext::AdminApi, ProviderBuilder};
+use alloy_provider::{ProviderBuilder, ext::AdminApi};
 use futures::StreamExt;
 use reth_chainspec::{MAINNET, SEPOLIA};
 use reth_discv4::Discv4Config;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, HeadersDirection};
 use reth_net_banlist::BanList;
 use reth_network::{
-    test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
     BlockDownloaderProvider, NetworkConfigBuilder, NetworkEvent, NetworkEventListenerProvider,
     NetworkManager, PeersConfig,
+    test_utils::{GETH_TIMEOUT, NetworkEventStream, PeerConfig, Testnet, enr_to_peer_id},
 };
 use reth_network_api::{
-    events::{PeerEvent, SessionInfo},
     NetworkInfo, Peers, PeersInfo,
+    events::{PeerEvent, SessionInfo},
 };
 use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     sync::{NetworkSyncUpdater, SyncState},
 };
-use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
+use reth_network_peers::{NodeRecord, TrustedPeer, mainnet_nodes};
 use reth_storage_api::noop::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;

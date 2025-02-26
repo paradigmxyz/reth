@@ -19,7 +19,7 @@ use std::{
 use ::enr::Enr;
 use alloy_primitives::bytes::Bytes;
 use discv5::ListenConfig;
-use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
+use enr::{EnrCombinedKeyWrapper, discv4_id_to_discv5_id};
 use futures::future::join_all;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
@@ -608,7 +608,7 @@ pub fn get_lookup_target(
         // Clear.
         target[byte] &= !bits_to_randomize;
         // Randomize.
-        target[byte] |= rng.gen::<u8>() & bits_to_randomize;
+        target[byte] |= rng.r#gen::<u8>() & bits_to_randomize;
     }
     // Randomize remaining bytes.
     rng.fill_bytes(&mut target[byte + 1..]);
@@ -778,8 +778,8 @@ mod test {
     mod sigp {
         use alloy_primitives::U256;
         use enr::{
-            k256::sha2::digest::generic_array::{typenum::U32, GenericArray},
             NodeId,
+            k256::sha2::digest::generic_array::{GenericArray, typenum::U32},
         };
 
         /// A `Key` is a cryptographic hash, identifying both the nodes participating in

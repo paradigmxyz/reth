@@ -10,7 +10,7 @@ pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 mod metrics;
 
 use reth_nippy_jar::NippyJar;
-use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
+use reth_primitives::{StaticFileSegment, static_file::SegmentHeader};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::Deref, sync::Arc};
 
@@ -56,18 +56,18 @@ impl Deref for LoadedJar {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
+        HeaderProvider, StaticFileProviderFactory, test_utils::create_test_provider_factory,
     };
     use alloy_consensus::{Header, Transaction};
-    use alloy_primitives::{BlockHash, TxNumber, B256, U256};
+    use alloy_primitives::{B256, BlockHash, TxNumber, U256};
     use rand::seq::SliceRandom;
     use reth_db::test_utils::create_test_static_files_dir;
     use reth_db_api::{
-        transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers,
+        CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers, transaction::DbTxMut,
     };
     use reth_primitives::{
-        static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
         EthPrimitives, Receipt, TransactionSigned,
+        static_file::{DEFAULT_BLOCKS_PER_STATIC_FILE, SegmentRangeInclusive, find_fixed_range},
     };
     use reth_storage_api::{ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};

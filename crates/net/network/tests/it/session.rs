@@ -3,12 +3,12 @@
 use futures::StreamExt;
 use reth_eth_wire::EthVersion;
 use reth_network::{
-    test_utils::{NetworkEventStream, PeerConfig, Testnet},
     NetworkEvent, NetworkEventListenerProvider,
+    test_utils::{NetworkEventStream, PeerConfig, Testnet},
 };
 use reth_network_api::{
-    events::{PeerEvent, SessionInfo},
     NetworkInfo, Peers,
+    events::{PeerEvent, SessionInfo},
 };
 use reth_storage_api::noop::NoopProvider;
 

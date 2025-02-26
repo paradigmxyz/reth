@@ -1,9 +1,9 @@
-use alloy_primitives::{map::HashMap, B256};
+use alloy_primitives::{B256, map::HashMap};
 use reth_db::DatabaseError;
 use reth_trie::{
+    BranchNodeCompact, Nibbles,
     trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::{StorageTrieUpdates, TrieUpdates},
-    BranchNodeCompact, Nibbles,
 };
 use std::collections::BTreeSet;
 use tracing::warn;

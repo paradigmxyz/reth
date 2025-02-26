@@ -1,4 +1,4 @@
-use crate::{compression::Compression, NippyJarError};
+use crate::{NippyJarError, compression::Compression};
 use derive_more::Deref;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
@@ -371,6 +371,8 @@ impl PartialEq for ZstdDictionary<'_> {
         if let (Self::Raw(a), Self::Raw(b)) = (self, &other) {
             return a == b
         }
-        unimplemented!("`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value.");
+        unimplemented!(
+            "`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value."
+        );
     }
 }

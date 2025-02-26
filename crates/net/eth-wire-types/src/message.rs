@@ -7,14 +7,14 @@
 //! Reference: [Ethereum Wire Protocol](https://github.com/ethereum/wiki/wiki/Ethereum-Wire-Protocol).
 
 use super::{
-    broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
-    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, Transactions,
+    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions,
+    GetReceipts, NewBlock, NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData,
+    PooledTransactions, Receipts, Status, Transactions, broadcast::NewBlockHashes,
 };
 use crate::{EthNetworkPrimitives, EthVersion, NetworkPrimitives, SharedTransactions};
 use alloc::{boxed::Box, sync::Arc};
 use alloy_primitives::bytes::{Buf, BufMut};
-use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
+use alloy_rlp::{Decodable, Encodable, Header, length_of_length};
 use core::fmt::Debug;
 
 /// [`MAX_MESSAGE_SIZE`] is the maximum cap on the size of a protocol message.
@@ -533,8 +533,8 @@ where
 mod tests {
     use super::MessageError;
     use crate::{
-        message::RequestPair, EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion,
-        GetNodeData, NodeData, ProtocolMessage,
+        EthMessage, EthMessageID, EthNetworkPrimitives, EthVersion, GetNodeData, NodeData,
+        ProtocolMessage, message::RequestPair,
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};

@@ -19,8 +19,8 @@ pub use error::{ECIESError, ECIESErrorImpl};
 pub mod codec;
 
 use alloy_primitives::{
-    bytes::{Bytes, BytesMut},
     B512 as PeerId,
+    bytes::{Bytes, BytesMut},
 };
 
 /// Raw egress values for an ECIES protocol

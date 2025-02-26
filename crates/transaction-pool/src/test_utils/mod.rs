@@ -1,10 +1,10 @@
 //! Internal helpers for testing.
 
-use crate::{blobstore::InMemoryBlobStore, noop::MockTransactionValidator, Pool, PoolConfig};
+use crate::{Pool, PoolConfig, blobstore::InMemoryBlobStore, noop::MockTransactionValidator};
 use std::ops::Deref;
 
-mod gen;
-pub use gen::*;
+mod tx_gen;
+pub use tx_gen::*;
 
 mod mock;
 pub use mock::*;

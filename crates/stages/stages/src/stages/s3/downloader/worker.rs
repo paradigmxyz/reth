@@ -1,10 +1,10 @@
 use super::error::DownloaderError;
-use reqwest::{header::RANGE, Client};
+use reqwest::{Client, header::RANGE};
 use std::path::{Path, PathBuf};
 use tokio::{
     fs::OpenOptions,
     io::{AsyncSeekExt, AsyncWriteExt, BufWriter},
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
 };
 use tracing::debug;
 

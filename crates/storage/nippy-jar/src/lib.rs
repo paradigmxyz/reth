@@ -422,7 +422,7 @@ impl DataReader {
 mod tests {
     use super::*;
     use compression::Compression;
-    use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
+    use rand::{RngCore, SeedableRng, rngs::SmallRng, seq::SliceRandom};
     use std::{fs::OpenOptions, io::Read};
 
     type ColumnResults<T> = Vec<ColumnResult<T>>;
@@ -435,7 +435,7 @@ mod tests {
         let mut vec: Vec<u8> = vec![0; value_length];
         let mut rng = seed.map(SmallRng::seed_from_u64).unwrap_or_else(SmallRng::from_entropy);
 
-        let mut gen = || {
+        let mut entry_gen = || {
             (0..num_rows)
                 .map(|_| {
                     rng.fill_bytes(&mut vec[..]);
@@ -444,7 +444,7 @@ mod tests {
                 .collect()
         };
 
-        (gen(), gen())
+        (entry_gen(), entry_gen())
     }
 
     fn clone_with_result(col: &ColumnValues) -> ColumnResults<Vec<u8>> {
@@ -760,11 +760,13 @@ mod tests {
                 const BLOCKS_EMPTY_MASK: usize = 0b00;
                 for (row_num, _) in &data {
                     // Simulates `by_number` queries
-                    assert!(cursor
-                        .row_by_number_with_cols(*row_num, BLOCKS_EMPTY_MASK)
-                        .unwrap()
-                        .unwrap()
-                        .is_empty());
+                    assert!(
+                        cursor
+                            .row_by_number_with_cols(*row_num, BLOCKS_EMPTY_MASK)
+                            .unwrap()
+                            .unwrap()
+                            .is_empty()
+                    );
                 }
             }
         }

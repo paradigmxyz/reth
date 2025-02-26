@@ -1,11 +1,11 @@
 //! Main node command for launching a node
 
-use clap::{value_parser, Args, Parser};
+use clap::{Args, Parser, value_parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{DatabaseEnv, init_db};
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
@@ -132,10 +132,8 @@ impl<C: ChainSpecParser> NodeCommand<C> {
     }
 }
 
-impl<
-        C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>,
-        Ext: clap::Args + fmt::Debug,
-    > NodeCommand<C, Ext>
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>, Ext: clap::Args + fmt::Debug>
+    NodeCommand<C, Ext>
 {
     /// Launches the node
     ///

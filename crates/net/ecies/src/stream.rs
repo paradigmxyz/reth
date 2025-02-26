@@ -1,13 +1,13 @@
 //! The ECIES Stream implementation which wraps over [`AsyncRead`] and [`AsyncWrite`].
 
 use crate::{
-    codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue, IngressECIESValue,
+    ECIESError, EgressECIESValue, IngressECIESValue, codec::ECIESCodec, error::ECIESErrorImpl,
 };
 use alloy_primitives::{
-    bytes::{Bytes, BytesMut},
     B512 as PeerId,
+    bytes::{Bytes, BytesMut},
 };
-use futures::{ready, Sink, SinkExt};
+use futures::{Sink, SinkExt, ready};
 use secp256k1::SecretKey;
 use std::{
     fmt::Debug,

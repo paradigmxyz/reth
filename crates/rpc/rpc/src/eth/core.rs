@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::{eth::EthTxBuilder, EthApiBuilder};
+use crate::{EthApiBuilder, eth::EthTxBuilder};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
@@ -16,19 +16,19 @@ use reth_provider::{
     ProviderReceipt,
 };
 use reth_rpc_eth_api::{
+    EthApiTypes, RpcNodeCore,
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
-    EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
     PendingBlock,
 };
 use reth_tasks::{
-    pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
+    pool::{BlockingTaskGuard, BlockingTaskPool},
 };
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -501,7 +501,7 @@ mod tests {
     use crate::{EthApi, EthApiBuilder};
     use alloy_consensus::Header;
     use alloy_eips::BlockNumberOrTag;
-    use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
+    use alloy_primitives::{B256, PrimitiveSignature as Signature, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::{BaseFeeParams, ChainSpec};
@@ -509,12 +509,12 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
-        test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory,
+        test_utils::{MockEthProvider, NoopProvider},
     };
     use reth_rpc_eth_api::EthApiServer;
     use reth_testing_utils::{generators, generators::Rng};
-    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use reth_transaction_pool::test_utils::{TestPool, testing_pool};
 
     fn build_test_eth_api<
         P: BlockReaderIdExt<
@@ -555,11 +555,12 @@ mod tests {
         let mut parent_hash = B256::default();
 
         for i in (0..block_count).rev() {
-            let hash = rng.gen();
+            let hash = rng.r#gen();
             // Note: Generates saner values to avoid invalid overflows later
-            let gas_limit = rng.gen::<u32>() as u64;
-            let base_fee_per_gas: Option<u64> = rng.gen::<bool>().then(|| rng.gen::<u32>() as u64);
-            let gas_used = rng.gen::<u32>() as u64;
+            let gas_limit = rng.r#gen::<u32>() as u64;
+            let base_fee_per_gas: Option<u64> =
+                rng.r#gen::<bool>().then(|| rng.r#gen::<u32>() as u64);
+            let gas_used = rng.r#gen::<u32>() as u64;
 
             let header = Header {
                 number: newest_block - i,
@@ -575,7 +576,7 @@ mod tests {
             const TOTAL_TRANSACTIONS: usize = 100;
             let mut transactions = Vec::with_capacity(TOTAL_TRANSACTIONS);
             for _ in 0..TOTAL_TRANSACTIONS {
-                let random_fee: u128 = rng.gen();
+                let random_fee: u128 = rng.r#gen();
 
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
                     let transaction = TransactionSigned::new_unhashed(

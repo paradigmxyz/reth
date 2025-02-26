@@ -9,15 +9,15 @@ use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_primitives_traits::SignedTransaction;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_api::{
-    helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer, FromEthApiError, FromEvmError,
+    helpers::{Call, EthTransactions, LoadPendingBlock},
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
+use reth_rpc_eth_types::{EthApiError, RpcInvalidTransactionError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
 };
-use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm::{DatabaseCommit, DatabaseRef, context_interface::result::ResultAndState};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.

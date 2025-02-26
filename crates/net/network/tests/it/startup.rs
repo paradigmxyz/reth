@@ -6,8 +6,8 @@ use std::{
 use reth_chainspec::MAINNET;
 use reth_discv4::{Discv4Config, NatResolver};
 use reth_network::{
-    error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
+    error::{NetworkError, ServiceKind},
 };
 use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_storage_api::noop::NoopProvider;

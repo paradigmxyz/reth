@@ -19,10 +19,10 @@ use reth_rpc_eth_api::{
     TransactionCompat,
 };
 use reth_rpc_eth_types::{
-    logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
+    logs_utils::{self, ProviderOrBlock, append_matching_block_logs},
 };
-use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
+use reth_rpc_server_types::{ToRpcResult, result::rpc_error_with_code};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -34,7 +34,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    sync::{mpsc::Receiver, Mutex},
+    sync::{Mutex, mpsc::Receiver},
     time::MissedTickBehavior,
 };
 use tracing::{error, trace};
@@ -809,9 +809,9 @@ mod tests {
     fn test_block_range_iter() {
         let mut rng = generators::rng();
 
-        let start = rng.gen::<u32>() as u64;
-        let end = start.saturating_add(rng.gen::<u32>() as u64);
-        let step = rng.gen::<u16>() as u64;
+        let start = rng.r#gen::<u32>() as u64;
+        let end = start.saturating_add(rng.r#gen::<u32>() as u64);
+        let step = rng.r#gen::<u16>() as u64;
         let range = start..=end;
         let mut iter = BlockRangeInclusiveIter::new(range.clone(), step);
         let (from, mut end) = iter.next().unwrap();

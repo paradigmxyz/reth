@@ -1,25 +1,25 @@
 #![allow(missing_docs)]
 
 use crate::{
+    ECIESError,
     error::ECIESErrorImpl,
     mac::{HeaderBytes, MAC},
     util::{hmac_sha256, sha256},
-    ECIESError,
 };
-use aes::{cipher::StreamCipher, Aes128, Aes256};
+use aes::{Aes128, Aes256, cipher::StreamCipher};
 use alloy_primitives::{
-    bytes::{BufMut, Bytes, BytesMut},
     B128, B256, B512 as PeerId,
+    bytes::{BufMut, Bytes, BytesMut},
 };
 use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
-use digest::{crypto_common::KeyIvInit, Digest};
-use rand::{thread_rng, Rng};
+use digest::{Digest, crypto_common::KeyIvInit};
+use rand::{Rng, thread_rng};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
+    PublicKey, SECP256K1, SecretKey,
     ecdsa::{RecoverableSignature, RecoveryId},
-    PublicKey, SecretKey, SECP256K1,
 };
 use sha2::Sha256;
 use sha3::Keccak256;
@@ -313,7 +313,7 @@ impl ECIES {
     /// Create a new ECIES client with the given static secret key and remote peer ID.
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
         let mut rng = thread_rng();
-        let nonce = rng.gen();
+        let nonce = rng.r#gen();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_client(secret_key, remote_id, nonce, ephemeral_secret_key)
     }
@@ -355,7 +355,7 @@ impl ECIES {
     /// Create a new ECIES server with the given static secret key.
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
         let mut rng = thread_rng();
-        let nonce = rng.gen();
+        let nonce = rng.r#gen();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }
@@ -382,7 +382,7 @@ impl ECIES {
         let enc_key = B128::from_slice(&key[..16]);
         let mac_key = sha256(&key[16..32]);
 
-        let iv: B128 = rng.gen();
+        let iv: B128 = rng.r#gen();
         let mut encryptor = Ctr64BE::<Aes128>::new((&enc_key.0).into(), (&iv.0).into());
 
         let mut encrypted = data.to_vec();

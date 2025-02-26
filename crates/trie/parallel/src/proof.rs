@@ -1,20 +1,22 @@
 use crate::{
-    metrics::ParallelTrieMetrics, root::ParallelStateRootError, stats::ParallelTrieTracker,
-    StorageRootTargets,
+    StorageRootTargets, metrics::ParallelTrieMetrics, root::ParallelStateRootError,
+    stats::ParallelTrieTracker,
 };
 use alloy_primitives::{
-    map::{B256Map, HashMap},
     B256,
+    map::{B256Map, HashMap},
 };
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
-    StateCommitmentProvider,
+    BlockReader, DBProvider, DatabaseProviderFactory, ProviderError, StateCommitmentProvider,
+    providers::ConsistentDbView,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
+    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
@@ -22,8 +24,6 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
-    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -338,13 +338,12 @@ where
 mod tests {
     use super::*;
     use alloy_primitives::{
-        keccak256,
+        Address, U256, keccak256,
         map::{B256Set, DefaultHashBuilder},
-        Address, U256,
     };
     use rand::Rng;
     use reth_primitives::{Account, StorageEntry};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
+    use reth_provider::{HashingWriter, test_utils::create_test_provider_factory};
     use reth_trie::proof::Proof;
 
     #[test]
@@ -357,14 +356,14 @@ mod tests {
             .map(|_| {
                 let address = Address::random();
                 let account =
-                    Account { balance: U256::from(rng.gen::<u64>()), ..Default::default() };
+                    Account { balance: U256::from(rng.r#gen::<u64>()), ..Default::default() };
                 let mut storage = HashMap::<B256, U256, DefaultHashBuilder>::default();
                 let has_storage = rng.gen_bool(0.7);
                 if has_storage {
                     for _ in 0..100 {
                         storage.insert(
-                            B256::from(U256::from(rng.gen::<u64>())),
-                            U256::from(rng.gen::<u64>()),
+                            B256::from(U256::from(rng.r#gen::<u64>())),
+                            U256::from(rng.r#gen::<u64>()),
                         );
                     }
                 }

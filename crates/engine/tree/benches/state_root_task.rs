@@ -5,16 +5,16 @@
 
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{Address, B256};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
 use reth_engine_tree::tree::root::{StateRootConfig, StateRootTask};
 use reth_evm::system_calls::{OnStateHook, StateChangeSource};
 use reth_primitives_traits::{Account as RethAccount, StorageEntry};
 use reth_provider::{
-    providers::ConsistentDbView,
-    test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
     AccountReader, HashingWriter, ProviderFactory,
+    providers::ConsistentDbView,
+    test_utils::{MockNodeTypesWithDB, create_test_provider_factory},
 };
 use reth_trie::TrieInput;
 use revm_primitives::{HashMap, U256};
@@ -34,7 +34,7 @@ struct BenchParams {
 fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let mut runner = TestRunner::deterministic();
     let mut rng = runner.rng().clone();
-    let all_addresses: Vec<Address> = (0..params.num_accounts).map(|_| rng.gen()).collect();
+    let all_addresses: Vec<Address> = (0..params.num_accounts).map(|_| rng.r#gen()).collect();
     let mut updates = Vec::new();
 
     for _ in 0..params.updates_per_account {
@@ -57,18 +57,18 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
             } else {
                 RevmAccount {
                     info: AccountInfo {
-                        balance: U256::from(rng.gen::<u64>()),
-                        nonce: rng.gen::<u64>(),
+                        balance: U256::from(rng.r#gen::<u64>()),
+                        nonce: rng.r#gen::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
                     },
                     storage: (0..rng.gen_range(0..=params.storage_slots_per_account))
                         .map(|_| {
                             (
-                                U256::from(rng.gen::<u64>()),
+                                U256::from(rng.r#gen::<u64>()),
                                 EvmStorageSlot::new_changed(
                                     U256::ZERO,
-                                    U256::from(rng.gen::<u64>()),
+                                    U256::from(rng.r#gen::<u64>()),
                                 ),
                             )
                         })

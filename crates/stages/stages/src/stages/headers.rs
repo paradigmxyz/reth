@@ -1,23 +1,23 @@
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip1898::BlockWithParent, NumHash};
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use alloy_eips::{NumHash, eip1898::BlockWithParent};
+use alloy_primitives::{B256, BlockHash, BlockNumber, Bytes};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_consensus::HeaderValidator;
 use reth_db_api::{
+    DbTxUnwindExt, RawKey, RawTable, RawValue,
     cursor::{DbCursorRO, DbCursorRW},
     table::Value,
     tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt, RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
 use reth_primitives::{NodePrimitives, SealedHeader, StaticFileSegment};
-use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader};
+use reth_primitives_traits::{FullBlockHeader, serde_bincode_compat};
 use reth_provider::{
-    providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap,
-    HeaderSyncGapProvider, StaticFileProviderFactory,
+    BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    StaticFileProviderFactory, providers::StaticFileWriter,
 };
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
@@ -26,7 +26,7 @@ use reth_stages_api::{
 use reth_storage_errors::provider::ProviderError;
 use std::{
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::sync::watch;
 use tracing::*;
@@ -403,7 +403,7 @@ where
 mod tests {
     use super::*;
     use crate::test_utils::{
-        stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
+        ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner, stage_test_suite,
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
@@ -412,7 +412,7 @@ mod tests {
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
-    use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
+    use reth_trie::{HashedPostStateSorted, updates::TrieUpdates};
     use test_runner::HeadersTestRunner;
 
     mod test_runner {
@@ -423,7 +423,7 @@ mod tests {
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
         use reth_network_p2p::test_utils::{TestHeaderDownloader, TestHeadersClient};
-        use reth_provider::{test_utils::MockNodeTypesWithDB, BlockNumReader};
+        use reth_provider::{BlockNumReader, test_utils::MockNodeTypesWithDB};
         use tokio::sync::watch;
 
         pub(crate) struct HeadersTestRunner<D: HeaderDownloader> {

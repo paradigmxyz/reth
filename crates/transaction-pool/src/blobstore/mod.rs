@@ -8,8 +8,8 @@ pub use noop::NoopBlobStore;
 use std::{
     fmt,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
@@ -67,7 +67,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     ///
     /// Returns an error if any of the blobs are not found in the blob store.
     fn get_exact(&self, txs: Vec<B256>)
-        -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
+    -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
     fn get_by_versioned_hashes(

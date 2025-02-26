@@ -1,4 +1,4 @@
-use super::{error::DownloaderError, RemainingChunkRange};
+use super::{RemainingChunkRange, error::DownloaderError};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,

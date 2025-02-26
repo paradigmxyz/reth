@@ -1,7 +1,7 @@
 use super::txpool::PendingFees;
 use crate::{
-    identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
-    PoolTransaction, SubPoolLimit, ValidPoolTransaction,
+    PoolTransaction, SubPoolLimit, ValidPoolTransaction, identifier::TransactionId,
+    pool::size::SizeTracker, traits::BestTransactionsAttributes,
 };
 use std::{
     cmp::Ordering,

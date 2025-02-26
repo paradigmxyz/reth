@@ -1,10 +1,10 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
-use alloy_primitives::{map::HashSet, Bytes, B256, U256};
+use alloy_primitives::{B256, Bytes, U256, map::HashSet};
 use alloy_rpc_types_eth::{
+    BlockOverrides, Index,
     state::{EvmOverrides, StateOverride},
     transaction::TransactionRequest,
-    BlockOverrides, Index,
 };
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
@@ -21,14 +21,14 @@ use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
-use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
+use reth_rpc_eth_api::{FromEthApiError, RpcNodeCore, helpers::TraceExt};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
-    tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
+    tracing::{TracingInspector, TracingInspectorConfig, parity::populate_state_diff},
 };
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};

@@ -6,8 +6,8 @@ use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
-    ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,
+    BlockHashReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
+    StaticFileProviderFactory, providers::ProviderNodeTypes, writer::UnifiedStorageWriter,
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
