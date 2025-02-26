@@ -4,8 +4,6 @@ use alloc::{
 };
 use alloy_primitives::{Address, BlockNumber, B256};
 use core::ops::RangeInclusive;
-#[cfg(feature = "db-api")]
-use reth_db_api::models::BlockNumberAddress;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 
@@ -42,7 +40,7 @@ pub trait StorageChangeSetReader: Send + Sync {
     fn storage_changeset(
         &self,
         block_number: BlockNumber,
-    ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>>;
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
 }
 
 /// An enum that represents the storage location for a piece of data.
