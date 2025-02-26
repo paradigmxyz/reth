@@ -3,7 +3,7 @@
 use alloy_eips::eip7685::{Requests, RequestsOrHash};
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
+    CancunPayloadFields, ClientVersionV1,  ExecutionPayloadBodiesV1,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV3, ForkchoiceState,
     ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields,
 };
