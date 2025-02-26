@@ -1011,7 +1011,7 @@ mod tests {
             + Clone
             + 'static,
     {
-        let executor = WorkloadExecutor::new(2);
+        let executor = WorkloadExecutor::with_num_cpu_threads(2);
         let config = create_state_root_config(factory, TrieInput::default());
         let channel = channel();
 
@@ -1079,7 +1079,7 @@ mod tests {
             prefix_sets: Arc::new(input.prefix_sets),
         };
 
-        let executor = WorkloadExecutor::new(2);
+        let executor = WorkloadExecutor::with_num_cpu_threads(2);
 
         let task = StateRootTask2::new(config, executor);
         let mut state_hook = task.state_hook();

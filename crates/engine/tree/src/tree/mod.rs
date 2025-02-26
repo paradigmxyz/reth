@@ -90,7 +90,11 @@ mod persistence_state;
 pub mod root;
 mod trie_updates;
 
-use crate::tree::{config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError};
+use crate::tree::{
+    config::MIN_BLOCKS_FOR_PIPELINE_RUN,
+    error::AdvancePersistenceError,
+    payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
+};
 pub use block_buffer::BlockBuffer;
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
@@ -602,6 +606,9 @@ where
     invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
+    /// The type responsible for processing new payloads
+    payload_processor: PayloadProcessor<N, C>,
+
     /// The most recent cache used for execution.
     most_recent_cache: Option<SavedCache>,
     /// Thread pool used for the state root task and prewarming
@@ -682,6 +689,9 @@ where
                 .expect("Failed to create proof worker thread pool"),
         );
 
+        let payload_processor =
+            PayloadProcessor::new(WorkloadExecutor::new(), evm_config.clone(), &config);
+
         Self {
             provider,
             executor_provider,
@@ -701,6 +711,7 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
+            payload_processor,
             most_recent_cache: None,
             thread_pool,
         }
@@ -2649,6 +2660,317 @@ where
 
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
+    }
+
+    fn insert_block_inner2(
+        &mut self,
+        block: RecoveredBlock<N::Block>,
+    ) -> Result<InsertPayloadOk, InsertBlockErrorKind> {
+        let block_num_hash = block.num_hash();
+        debug!(target: "engine::tree", block=?block_num_hash, parent = ?block.parent_hash(), state_root = ?block.state_root(), "Inserting new block into tree");
+
+        if self.block_by_hash(block.hash())?.is_some() {
+            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
+        }
+
+        let start = Instant::now();
+
+        trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
+
+        // validate block consensus rules
+        self.validate_block(&block)?;
+
+        trace!(target: "engine::tree", block=?block_num_hash, parent=?block.parent_hash(), "Fetching block state provider");
+        let Some(state_provider) = self.state_provider(block.parent_hash())? else {
+            // we don't have the state required to execute this block, buffering it and find the
+            // missing parent block
+            let missing_ancestor = self
+                .state
+                .buffer
+                .lowest_ancestor(&block.parent_hash())
+                .map(|block| block.parent_num_hash())
+                .unwrap_or_else(|| block.parent_num_hash());
+
+            self.state.buffer.insert_block(block);
+
+            return Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected {
+                head: self.state.tree_state.current_canonical_head,
+                missing_ancestor,
+            }))
+        };
+
+        // now validate against the parent
+        let parent_block = self.sealed_header_by_hash(block.parent_hash())?.ok_or_else(|| {
+            InsertBlockErrorKind::Provider(ProviderError::HeaderNotFound(
+                block.parent_hash().into(),
+            ))
+        })?;
+        if let Err(e) =
+            self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
+        {
+            warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
+            return Err(e.into())
+        }
+
+        // We only run the parallel state root if we are currently persisting blocks that are all
+        // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
+        // trie updates being committed are a subset of the in-memory trie updates collected before
+        // fetching reverts. So any diff in reverts (pre vs post commit) is already covered by the
+        // in-memory trie updates we collect in `compute_state_root_parallel`.
+        //
+        // See https://github.com/paradigmxyz/reth/issues/12688 for more details
+        let is_descendant_of_persisting_blocks =
+            self.is_descendant_of_persisting_blocks(block.header());
+
+        todo!()
+        // // Atomic bool for letting the prewarm tasks know when to stop
+        // let cancel_execution = ManualCancel::default();
+        //
+        // let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
+        //     if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
+        //         let consistent_view =
+        // ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        //
+        //         // Compute trie input
+        //         let trie_input_start = Instant::now();
+        //         let trie_input = self
+        //             .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+        //             .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+        //
+        //         // Create state root config
+        //         let config_start = Instant::now();
+        //         let state_root_config =
+        //             StateRootConfig::new_from_input(consistent_view, trie_input);
+        //
+        //         let trie_input_elapsed = config_start - trie_input_start;
+        //         self.metrics
+        //             .block_validation
+        //             .trie_input_duration
+        //             .set(trie_input_elapsed.as_secs_f64());
+        //
+        //         let config_elapsed = config_start.elapsed();
+        //         self.metrics
+        //             .block_validation
+        //             .state_root_config_duration
+        //             .set(config_elapsed.as_secs_f64());
+        //
+        //         let state_root_task =
+        //             StateRootTask::new(state_root_config.clone(), self.thread_pool.clone());
+        //         let state_root_sender = state_root_task.state_root_message_sender();
+        //         let state_hook = Box::new(state_root_task.state_hook()) as Box<dyn OnStateHook>;
+        //         (
+        //             Some(state_root_task.spawn()),
+        //             Some(state_root_config),
+        //             Some(state_root_sender),
+        //             state_hook,
+        //         )
+        //     } else {
+        //         (None, None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
+        //     };
+        //
+        // let (caches, cache_metrics) = if let Some(cache) =
+        //     self.take_latest_cache(block.parent_hash())
+        // {
+        //     cache.split()
+        // } else {
+        //     (
+        //         ProviderCacheBuilder::default().build_caches(self.config.
+        // cross_block_cache_size()),         CachedStateMetrics::zeroed(),
+        //     )
+        // };
+        //
+        // // Use cached state provider before executing, used in execution after prewarming threads
+        // // complete
+        // let state_provider = CachedStateProvider::new_with_caches(
+        //     state_provider,
+        //     caches.clone(),
+        //     cache_metrics.clone(),
+        // );
+        //
+        // // This prevents caches from being saved without all prewarm execution tasks being
+        // completed let prewarm_task_lock = Arc::new(RwLock::new(()));
+        //
+        // if self.config.use_caching_and_prewarming() {
+        //     debug!(target: "engine::tree", "Spawning prewarm threads");
+        //     let prewarm_start = Instant::now();
+        //     let prewarm_metrics = self.metrics.prewarm.clone();
+        //
+        //     // Prewarm transactions
+        //     for (tx_idx, tx) in block.transactions_recovered().enumerate() {
+        //         let state_root_sender = state_root_sender.clone();
+        //
+        //         let start = Instant::now();
+        //         self.prewarm_transaction(
+        //             block.header().clone(),
+        //             tx.cloned(),
+        //             caches.clone(),
+        //             cache_metrics.clone(),
+        //             state_root_sender,
+        //             cancel_execution.clone(),
+        //             prewarm_task_lock.clone(),
+        //             prewarm_metrics.clone(),
+        //         )?;
+        //         let elapsed = start.elapsed();
+        //         debug!(target: "engine::tree", ?tx_idx, elapsed = ?elapsed, "Spawned transaction
+        // prewarm");     }
+        //
+        //     prewarm_metrics.transactions.set(block.transaction_count() as f64);
+        //     prewarm_metrics.transactions_histogram.record(block.transaction_count() as f64);
+        //
+        //     drop(state_root_sender);
+        //     let elapsed = prewarm_start.elapsed();
+        //     debug!(target: "engine::tree", ?elapsed, "Done spawning prewarm threads");
+        //
+        //     self.metrics.prewarm.spawn_duration.set(elapsed);
+        //     self.metrics.prewarm.spawn_duration_histogram.record(elapsed);
+        // }
+        // trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
+        //
+        // let executor =
+        // self.executor_provider.executor(StateProviderDatabase::new(&state_provider)); let
+        // execution_start = Instant::now(); let output =
+        // self.metrics.executor.execute_metered(executor, &block, state_hook)?;
+        // let execution_time = execution_start.elapsed();
+        // trace!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number,
+        // "Executed block");
+        //
+        // // Ensure that prewarm tasks don't send proof messages after state root sender is dropped
+        // cancel_execution.cancel();
+        //
+        // if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
+        //     // call post-block hook
+        //     self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+        //     return Err(err.into())
+        // }
+        //
+        // let hashed_state = self.provider.hashed_post_state(&output.state);
+        //
+        // if let Err(err) = self
+        //     .payload_validator
+        //     .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
+        // {
+        //     // call post-block hook
+        //     self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+        //     return Err(err.into())
+        // }
+        //
+        // trace!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
+        // let root_time = Instant::now();
+        //
+        // // We attempt to compute state root in parallel if we are currently not persisting
+        // // anything to database. This is safe, because the database state cannot
+        // // change until we finish parallel computation. It is important that nothing
+        // // is being persisted as we are computing in parallel, because we initialize
+        // // a different database transaction per thread and it might end up with a
+        // // different view of the database.
+        // let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks {
+        //     if self.config.use_state_root_task() {
+        //         let state_root_handle = state_root_handle
+        //             .expect("state root handle must exist if legacy_state_root is false");
+        //         let state_root_config = state_root_task_config.expect("task config is present");
+        //
+        //         // Handle state root result from task using handle
+        //         self.handle_state_root_result(
+        //             state_root_handle,
+        //             state_root_config,
+        //             block.sealed_block(),
+        //             &hashed_state,
+        //             &state_provider,
+        //             root_time,
+        //         )?
+        //     } else {
+        //         match self.compute_state_root_parallel(block.header().parent_hash(),
+        // &hashed_state)         {
+        //             Ok(result) => {
+        //                 info!(
+        //                     target: "engine::tree",
+        //                     block = ?block_num_hash,
+        //                     regular_state_root = ?result.0,
+        //                     "Regular root task finished"
+        //                 );
+        //                 (result.0, result.1, root_time.elapsed())
+        //             }
+        //             Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error)))
+        // => {                 debug!(target: "engine", %error, "Parallel state root
+        // computation failed consistency check, falling back");                 let (root,
+        // updates) =                     
+        // state_provider.state_root_with_updates(hashed_state.clone())?;                 
+        // (root, updates, root_time.elapsed())             }
+        //             Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
+        //         }
+        //     }
+        // } else {
+        //     debug!(target: "engine::tree", block=?block_num_hash,
+        // ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
+        //     let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
+        //     (root, updates, root_time.elapsed())
+        // };
+        //
+        // if state_root != block.header().state_root() {
+        //     // call post-block hook
+        //     self.invalid_block_hook.on_invalid_block(
+        //         &parent_block,
+        //         &block,
+        //         &output,
+        //         Some((&trie_output, state_root)),
+        //     );
+        //     return Err(ConsensusError::BodyStateRootDiff(
+        //         GotExpected { got: state_root, expected: block.header().state_root() }.into(),
+        //     )
+        //         .into())
+        // }
+        //
+        // self.metrics.block_validation.record_state_root(&trie_output,
+        // root_elapsed.as_secs_f64()); debug!(target: "engine::tree", ?root_elapsed,
+        // block=?block_num_hash, "Calculated state root");
+        //
+        // if self.config.use_caching_and_prewarming() {
+        //     let save_cache_start = Instant::now();
+        //     // this is the only place / thread a writer is acquired, so we would have already
+        //     // crashed if we had a poisoned rwlock
+        //     //
+        //     // we use a lock here and in prewarming, so we do not save the cache if a prewarm
+        // task     // is still running, since it would update the cache with stale data.
+        // It's unlikely that     // prewarm tasks are still running at this point however
+        //     drop(prewarm_task_lock.write().unwrap());
+        //     // apply state updates to cache and save it (if saving was successful)
+        //     self.most_recent_cache = state_provider.save_cache(block.hash(), &output.state).ok();
+        //     let elapsed = save_cache_start.elapsed();
+        //
+        //     // record how long it took to save caches
+        //     self.metrics.block_validation.cache_saving_duration.set(elapsed.as_secs_f64());
+        // }
+        //
+        // let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
+        //     block: ExecutedBlock {
+        //         recovered_block: Arc::new(block),
+        //         execution_output: Arc::new(ExecutionOutcome::from((output,
+        // block_num_hash.number))),         hashed_state: Arc::new(hashed_state),
+        //     },
+        //     trie: Arc::new(trie_output),
+        // };
+        //
+        // // if the parent is the canonical head, we can insert the block as the pending block
+        // if self.state.tree_state.canonical_block_hash() ==
+        // executed.recovered_block().parent_hash() {
+        //     debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+        //     self.canonical_in_memory_state.set_pending_block(executed.clone());
+        // }
+        //
+        // self.state.tree_state.insert_executed(executed.clone());
+        // self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
+        //
+        // // emit insert event
+        // let elapsed = start.elapsed();
+        // let engine_event = if self.is_fork(block_num_hash.hash)? {
+        //     BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
+        // } else {
+        //     BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed)
+        // };
+        // self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
+        //
+        // debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
+        // Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
 
     /// Compute state root for the given hashed post state in parallel.

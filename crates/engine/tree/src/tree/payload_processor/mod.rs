@@ -8,7 +8,7 @@ use crate::tree::{
         prewarm::{PrewarmContext, PrewarmTask, PrewarmTaskEvent},
         sparse_trie::SparseTrieTask,
     },
-    StateProviderBuilder,
+    StateProviderBuilder, TreeConfig,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_primitives::B256;
@@ -28,7 +28,7 @@ use std::sync::{
     Arc,
 };
 
-mod executor;
+pub(crate) mod executor;
 
 mod multiproof;
 mod prewarm;
@@ -48,6 +48,19 @@ pub(super) struct PayloadProcessor<N, Evm> {
     evm_config: Evm,
 
     _m: std::marker::PhantomData<N>,
+}
+
+impl<N, Evm> PayloadProcessor<N, Evm> {
+    pub(super) fn new(executor: WorkloadExecutor, evm_config: Evm, config: &TreeConfig) -> Self {
+        Self {
+            executor,
+            execution_cache: Default::default(),
+            trie_metrics: Default::default(),
+            cross_block_cache_size: config.cross_block_cache_size(),
+            evm_config,
+            _m: Default::default(),
+        }
+    }
 }
 
 impl<N, Evm> PayloadProcessor<N, Evm>
@@ -295,7 +308,7 @@ impl Drop for PrewarmTaskHandle {
 ///  - Update cache upon successful payload execution
 ///
 /// This process assumes that payloads are received sequentially.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct ExecutionCache {
     /// Guarded cloneable cache identified by a block hash.
     inner: Arc<RwLock<Option<SavedCache>>>,

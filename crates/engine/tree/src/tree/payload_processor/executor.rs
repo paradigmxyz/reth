@@ -4,12 +4,23 @@ use tokio::{runtime::Runtime, task::JoinHandle};
 
 /// An executor for mixed I/O and CPU workloads.
 #[derive(Debug, Clone)]
-pub(super) struct WorkloadExecutor {
+pub(crate) struct WorkloadExecutor {
     inner: WorkloadExecutorInner,
 }
 
 impl WorkloadExecutor {
-    pub(super) fn new(cpu_threads: usize) -> Self {
+    /// Creates a new instance with default settings.
+    pub(crate) fn new() -> Self {
+        // Create runtime for I/O operations
+        let runtime = Arc::new(Runtime::new().unwrap());
+        // Create Rayon thread pool for CPU work
+        let rayon_pool = Arc::new(rayon::ThreadPoolBuilder::new().build().unwrap());
+
+        Self { inner: WorkloadExecutorInner { runtime, rayon_pool } }
+    }
+
+    /// Creates a new executor with the given number of threads for cpu bound work (rayon).
+    pub(super) fn with_num_cpu_threads(cpu_threads: usize) -> Self {
         // Create runtime for I/O operations
         let runtime = Arc::new(Runtime::new().unwrap());
 
