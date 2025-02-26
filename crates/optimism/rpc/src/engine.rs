@@ -20,7 +20,7 @@ use reth_transaction_pool::TransactionPool;
 /// The list of all supported Engine capabilities available over the engine endpoint.
 ///
 /// Spec: <https://specs.optimism.io/protocol/exec-engine.html>
-pub const OPSTACK_CAPABILITIES: &[&str] = &[
+pub const OP_CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
     "engine_exchangeTransitionConfigurationV1",
