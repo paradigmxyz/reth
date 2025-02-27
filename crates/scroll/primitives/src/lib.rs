@@ -31,6 +31,7 @@ pub type ScrollBlockBody = <ScrollBlock as Block>::Body;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ScrollPrimitives;
 
+#[cfg(feature = "serde-bincode-compat")]
 impl reth_primitives_traits::NodePrimitives for ScrollPrimitives {
     type Block = ScrollBlock;
     type BlockHeader = alloy_consensus::Header;
