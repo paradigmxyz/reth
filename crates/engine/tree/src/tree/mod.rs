@@ -2353,10 +2353,11 @@ where
         &mut self,
         block: RecoveredBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
-        self.insert_block_inner(block.clone())
+        self.insert_block_inner2(block.clone())
             .map_err(|kind| InsertBlockError::new(block.into_sealed_block(), kind))
     }
 
+    #[allow(unused)]
     fn insert_block_inner(
         &mut self,
         block: RecoveredBlock<N::Block>,
