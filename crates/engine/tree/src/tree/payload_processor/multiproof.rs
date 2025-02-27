@@ -629,6 +629,7 @@ where
     ///      left to be revealed by checking the pending tasks.
     /// 6. This task exits after all pending proofs are processed.
     pub(crate) fn run(mut self) {
+        // TODO convert those into fields
         let mut prefetch_proofs_received = 0;
         let mut updates_received = 0;
         let mut proofs_processed = 0;
@@ -645,7 +646,7 @@ where
             match self.rx.recv() {
                 Ok(message) => match message {
                     MultiProofMessage::PrefetchProofs(targets) => {
-                        trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
+                        trace!(target: "engine::root", "processing MultiProofMessage::PrefetchProofs");
                         prefetch_proofs_received += 1;
                         debug!(
                             target: "engine::root",
@@ -659,7 +660,7 @@ where
                     }
                     MultiProofMessage::StateUpdate(source, update) => {
                         trace!(target: "engine::root", "processing
-        StateRootMessage::StateUpdate");
+        MultiProofMessage::StateUpdate");
                         if updates_received == 0 {
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
@@ -678,7 +679,7 @@ where
                         self.on_state_update(source, update, next_sequence);
                     }
                     MultiProofMessage::FinishedStateUpdates => {
-                        trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
+                        trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
                         updates_finished = true;
                         if self.is_done(
                             proofs_processed,
@@ -694,7 +695,7 @@ where
                         }
                     }
                     MultiProofMessage::EmptyProof { sequence_number, state } => {
-                        trace!(target: "engine::root", "processing StateRootMessage::EmptyProof");
+                        trace!(target: "engine::root", "processing MultiProofMessage::EmptyProof");
 
                         proofs_processed += 1;
 
@@ -720,7 +721,7 @@ where
                     }
                     MultiProofMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing
-        StateRootMessage::ProofCalculated");
+        MultiProofMessage::ProofCalculated");
 
                         // we increment proofs_processed for both state updates and prefetches,
                         // because both are used for the root termination condition.
@@ -769,10 +770,6 @@ where
                             ?err,
                             "proof calculation error"
                         );
-                        // TODO send error to sparse trie
-                        // return Err(ParallelStateRootError::Other(format!(
-                        //     "could not calculate multiproof: {e:?}"
-                        // )))
                         return
                     }
                 },
