@@ -6763,7 +6763,6 @@ dependencies = [
  "reth-fs-util",
  "reth-node-api",
  "reth-node-core",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-tracing",
  "serde",
