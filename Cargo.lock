@@ -7432,6 +7432,7 @@ dependencies = [
  "futures",
  "metrics",
  "mini-moka",
+ "parking_lot",
  "proptest",
  "rand 0.8.5",
  "rayon",
