@@ -435,7 +435,7 @@ mod tests {
         ScrollTransactionSigned::new_unhashed(transaction, signature)
     }
 
-    fn execute_transactions(
+    fn execute_transaction(
         tx_type: ScrollTxType,
         block_number: u64,
         expected_l1_fee: U256,
@@ -443,7 +443,7 @@ mod tests {
     ) -> eyre::Result<()> {
         // prepare transaction
         let transaction = transaction(tx_type, MIN_TRANSACTION_GAS);
-        let block = block(block_number, vec![transaction]);
+        let block = block(block_number, vec![transaction.clone()]);
 
         // init strategy
         let mut state = state();
@@ -485,16 +485,15 @@ mod tests {
         }
 
         // execute and verify output
-        for tx in block.body().transactions.clone() {
-            strategy.execute_transaction(tx.try_into_recovered().unwrap().as_recovered_ref())?;
-        }
+        let res = strategy
+            .execute_transaction(transaction.try_into_recovered().unwrap().as_recovered_ref());
 
         // check for error or execution outcome
-        let res = strategy.apply_post_execution_changes();
+        let output = strategy.apply_post_execution_changes()?;
         if let Some(error) = expected_error {
             assert_eq!(res.unwrap_err().to_string(), error);
         } else {
-            let BlockExecutionResult { receipts, .. } = res?;
+            let BlockExecutionResult { receipts, .. } = output;
             let inner = alloy_consensus::Receipt {
                 cumulative_gas_used: MIN_TRANSACTION_GAS,
                 status: true.into(),
@@ -603,7 +602,7 @@ mod tests {
     fn test_execute_transactions_l1_message() -> eyre::Result<()> {
         // Execute l1 message on curie block
         let expected_l1_fee = U256::ZERO;
-        execute_transactions(ScrollTxType::L1Message, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(ScrollTxType::L1Message, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -611,7 +610,7 @@ mod tests {
     fn test_execute_transactions_legacy_curie_fork() -> eyre::Result<()> {
         // Execute legacy transaction on curie block
         let expected_l1_fee = U256::from(10);
-        execute_transactions(ScrollTxType::Legacy, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(ScrollTxType::Legacy, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -619,7 +618,7 @@ mod tests {
     fn test_execute_transactions_legacy_not_curie_fork() -> eyre::Result<()> {
         // Execute legacy before curie block
         let expected_l1_fee = U256::from(2);
-        execute_transactions(ScrollTxType::Legacy, NOT_CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(ScrollTxType::Legacy, NOT_CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -627,14 +626,14 @@ mod tests {
     fn test_execute_transactions_eip2930_curie_fork() -> eyre::Result<()> {
         // Execute eip2930 transaction on curie block
         let expected_l1_fee = U256::from(10);
-        execute_transactions(ScrollTxType::Eip2930, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(ScrollTxType::Eip2930, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
     #[test]
     fn test_execute_transactions_eip2930_not_curie_fork() -> eyre::Result<()> {
         // Execute eip2930 transaction before curie block
-        execute_transactions(
+        execute_transaction(
             ScrollTxType::Eip2930,
             NOT_CURIE_BLOCK_NUMBER,
             U256::ZERO,
@@ -647,14 +646,14 @@ mod tests {
     fn test_execute_transactions_eip1559_curie_fork() -> eyre::Result<()> {
         // Execute eip1559 transaction on curie block
         let expected_l1_fee = U256::from(10);
-        execute_transactions(ScrollTxType::Eip1559, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transaction(ScrollTxType::Eip1559, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
     #[test]
     fn test_execute_transactions_eip_not_curie_fork() -> eyre::Result<()> {
         // Execute eip1559 transaction before curie block
-        execute_transactions(
+        execute_transaction(
             ScrollTxType::Eip1559,
             NOT_CURIE_BLOCK_NUMBER,
             U256::ZERO,
