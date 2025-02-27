@@ -455,7 +455,8 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider from the provider factory, historical block hash and optional overlayed blocks.
+    /// Creates a new state provider from the provider factory, historical block hash and optional
+    /// overlayed blocks.
     fn new(
         provider_factory: P,
         historical: B256,
@@ -3418,7 +3419,11 @@ where
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
             debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), historical, Some(blocks))))
+            return Ok(Some(StateProviderBuilder::new(
+                self.provider.clone(),
+                historical,
+                Some(blocks),
+            )))
         }
 
         // Check if the block is persisted
