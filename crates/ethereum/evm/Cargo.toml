@@ -15,7 +15,7 @@ workspace = true
 reth-execution-types.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
-reth-revm.workspace = true
+revm.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
 
@@ -29,7 +29,6 @@ alloy-consensus.workspace = true
 [dev-dependencies]
 reth-testing-utils.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
-reth-revm = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-primitives-traits.workspace = true
 reth-execution-types.workspace = true
@@ -41,7 +40,6 @@ alloy-genesis.workspace = true
 default = ["std"]
 std = [
     "reth-primitives/std",
-    "reth-revm/std",
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-genesis/std",
@@ -54,4 +52,6 @@ std = [
     "reth-execution-types/std",
     "reth-evm/std",
     "reth-primitives-traits/std",
+    "alloy-sol-types/std",
+    "revm/std",
 ]
