@@ -84,7 +84,7 @@ impl IpcTransportClientBuilder {
 pub struct IpcClientBuilder;
 
 impl IpcClientBuilder {
-    /// Connects to a IPC socket
+    /// Connects to an IPC socket
     ///
     /// ```
     /// use jsonrpsee::{core::client::ClientT, rpc_params};
