@@ -541,24 +541,14 @@ where
     pub const fn check_launch(self) -> Self {
         self
     }
-}
 
-impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
-where
-    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
-    T: NodeTypesWithEngine + NodeTypesForProvider,
-    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
-    AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-    EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
-{
     /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
         self,
-    ) -> eyre::Result<
-        <EngineNodeLauncher as LaunchNode<
-            NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
-        >>::Node,
-    > {
+    ) -> eyre::Result<<EngineNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Node>
+    where
+        EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
+    {
         let Self { builder, task_executor } = self;
 
         let engine_tree_config = TreeConfig::default()
