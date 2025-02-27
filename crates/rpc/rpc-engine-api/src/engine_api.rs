@@ -142,433 +142,6 @@ where
             .ok_or(EngineApiError::UnknownPayload)??)
     }
 
-    /// Sends a message to the beacon consensus engine to update the fork choice _without_
-    /// withdrawals.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceUpdatedV1>
-    ///
-    /// Caution: This should not accept the `withdrawals` field
-    pub async fn fork_choice_updated_v1(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<EngineT::PayloadAttributes>,
-    ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
-            .await
-    }
-
-    /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
-    /// but only _after_ shanghai.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
-    pub async fn fork_choice_updated_v2(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<EngineT::PayloadAttributes>,
-    ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V2, state, payload_attrs)
-            .await
-    }
-
-    /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
-    /// but only _after_ cancun.
-    ///
-    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
-    pub async fn fork_choice_updated_v3(
-        &self,
-        state: ForkchoiceState,
-        payload_attrs: Option<EngineT::PayloadAttributes>,
-    ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, state, payload_attrs)
-            .await
-    }
-
-    /// Returns the most recent version of the payload that is available in the corresponding
-    /// payload build process at the time of receiving this call.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_getPayloadV1>
-    ///
-    /// Caution: This should not return the `withdrawals` field
-    ///
-    /// Note:
-    /// > Provider software MAY stop the corresponding build process after serving this call.
-    pub async fn get_payload_v1(
-        &self,
-        payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
-        self.inner
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map_err(|_| EngineApiError::UnknownPayload)?
-            .try_into()
-            .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV1");
-                EngineApiError::UnknownPayload
-            })
-    }
-
-    /// Returns the most recent version of the payload that is available in the corresponding
-    /// payload build process at the time of receiving this call.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_getpayloadv2>
-    ///
-    /// Note:
-    /// > Provider software MAY stop the corresponding build process after serving this call.
-    pub async fn get_payload_v2(
-        &self,
-        payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV2> {
-        // First we fetch the payload attributes to check the timestamp
-        let attributes = self.get_payload_attributes(payload_id).await?;
-
-        // validate timestamp according to engine rules
-        validate_payload_timestamp(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V2,
-            attributes.timestamp(),
-        )?;
-
-        // Now resolve the payload
-        self.inner
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map_err(|_| EngineApiError::UnknownPayload)?
-            .try_into()
-            .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV2");
-                EngineApiError::UnknownPayload
-            })
-    }
-
-    /// Returns the most recent version of the payload that is available in the corresponding
-    /// payload build process at the time of receiving this call.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_getpayloadv3>
-    ///
-    /// Note:
-    /// > Provider software MAY stop the corresponding build process after serving this call.
-    pub async fn get_payload_v3(
-        &self,
-        payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV3> {
-        // First we fetch the payload attributes to check the timestamp
-        let attributes = self.get_payload_attributes(payload_id).await?;
-
-        // validate timestamp according to engine rules
-        validate_payload_timestamp(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V3,
-            attributes.timestamp(),
-        )?;
-
-        // Now resolve the payload
-        self.inner
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map_err(|_| EngineApiError::UnknownPayload)?
-            .try_into()
-            .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV3");
-                EngineApiError::UnknownPayload
-            })
-    }
-
-    /// Returns the most recent version of the payload that is available in the corresponding
-    /// payload build process at the time of receiving this call.
-    ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
-    ///
-    /// Note:
-    /// > Provider software MAY stop the corresponding build process after serving this call.
-    pub async fn get_payload_v4(
-        &self,
-        payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
-        // First we fetch the payload attributes to check the timestamp
-        let attributes = self.get_payload_attributes(payload_id).await?;
-
-        // validate timestamp according to engine rules
-        validate_payload_timestamp(
-            &self.inner.chain_spec,
-            EngineApiMessageVersion::V4,
-            attributes.timestamp(),
-        )?;
-
-        // Now resolve the payload
-        self.inner
-            .payload_store
-            .resolve(payload_id)
-            .await
-            .ok_or(EngineApiError::UnknownPayload)?
-            .map_err(|_| EngineApiError::UnknownPayload)?
-            .try_into()
-            .map_err(|_| {
-                warn!("could not transform built payload into ExecutionPayloadV3");
-                EngineApiError::UnknownPayload
-            })
-    }
-
-    /// Fetches all the blocks for the provided range starting at `start`, containing `count`
-    /// blocks and returns the mapped payload bodies.
-    async fn get_payload_bodies_by_range_with<F, R>(
-        &self,
-        start: BlockNumber,
-        count: u64,
-        f: F,
-    ) -> EngineApiResult<Vec<Option<R>>>
-    where
-        F: Fn(Provider::Block) -> R + Send + 'static,
-        R: Send + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-        let inner = self.inner.clone();
-
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            if count > MAX_PAYLOAD_BODIES_LIMIT {
-                tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
-                return;
-            }
-
-            if start == 0 || count == 0 {
-                tx.send(Err(EngineApiError::InvalidBodiesRange { start, count })).ok();
-                return;
-            }
-
-            let mut result = Vec::with_capacity(count as usize);
-
-            // -1 so range is inclusive
-            let mut end = start.saturating_add(count - 1);
-
-            // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
-            // truncate the end if it's greater than the last block
-            if let Ok(best_block) = inner.provider.best_block_number() {
-                if end > best_block {
-                    end = best_block;
-                }
-            }
-
-            for num in start..=end {
-                let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
-                match block_result {
-                    Ok(block) => {
-                        result.push(block.map(&f));
-                    }
-                    Err(err) => {
-                        tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
-                        return;
-                    }
-                };
-            }
-            tx.send(Ok(result)).ok();
-        }));
-
-        rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
-    }
-
-    /// Returns the execution payload bodies by the range starting at `start`, containing `count`
-    /// blocks.
-    ///
-    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
-    /// layer p2p specification, meaning the input should be treated as untrusted or potentially
-    /// adversarial.
-    ///
-    /// Implementers should take care when acting on the input to this method, specifically
-    /// ensuring that the range is limited properly, and that the range boundaries are computed
-    /// correctly and without panics.
-    pub async fn get_payload_bodies_by_range_v1(
-        &self,
-        start: BlockNumber,
-        count: u64,
-    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
-        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV1 {
-            transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-        })
-        .await
-    }
-
-    /// Called to retrieve execution payload bodies by hashes.
-    async fn get_payload_bodies_by_hash_with<F, R>(
-        &self,
-        hashes: Vec<BlockHash>,
-        f: F,
-    ) -> EngineApiResult<Vec<Option<R>>>
-    where
-        F: Fn(Provider::Block) -> R + Send + 'static,
-        R: Send + 'static,
-    {
-        let len = hashes.len() as u64;
-        if len > MAX_PAYLOAD_BODIES_LIMIT {
-            return Err(EngineApiError::PayloadRequestTooLarge { len });
-        }
-
-        let (tx, rx) = oneshot::channel();
-        let inner = self.inner.clone();
-
-        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let mut result = Vec::with_capacity(hashes.len());
-            for hash in hashes {
-                let block_result = inner.provider.block(BlockHashOrNumber::Hash(hash));
-                match block_result {
-                    Ok(block) => {
-                        result.push(block.map(&f));
-                    }
-                    Err(err) => {
-                        let _ = tx.send(Err(EngineApiError::Internal(Box::new(err))));
-                        return;
-                    }
-                }
-            }
-            tx.send(Ok(result)).ok();
-        }));
-
-        rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
-    }
-
-    /// Called to retrieve execution payload bodies by hashes.
-    pub async fn get_payload_bodies_by_hash_v1(
-        &self,
-        hashes: Vec<BlockHash>,
-    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
-        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV1 {
-            transactions: block.body().encoded_2718_transactions(),
-            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-        })
-        .await
-    }
-
-    /// Called to verify network configuration parameters and ensure that Consensus and Execution
-    /// layers are using the latest configuration.
-    pub fn exchange_transition_configuration(
-        &self,
-        config: TransitionConfiguration,
-    ) -> EngineApiResult<TransitionConfiguration> {
-        let TransitionConfiguration {
-            terminal_total_difficulty,
-            terminal_block_hash,
-            terminal_block_number,
-        } = config;
-
-        let merge_terminal_td = self
-            .inner
-            .chain_spec
-            .ethereum_fork_activation(EthereumHardfork::Paris)
-            .ttd()
-            .expect("the engine API should not be running for chains w/o paris");
-
-        // Compare total difficulty values
-        if merge_terminal_td != terminal_total_difficulty {
-            return Err(EngineApiError::TerminalTD {
-                execution: merge_terminal_td,
-                consensus: terminal_total_difficulty,
-            })
-        }
-
-        self.inner.beacon_consensus.transition_configuration_exchanged();
-
-        // Short circuit if communicated block hash is zero
-        if terminal_block_hash.is_zero() {
-            return Ok(TransitionConfiguration {
-                terminal_total_difficulty: merge_terminal_td,
-                ..Default::default()
-            })
-        }
-
-        // Attempt to look up terminal block hash
-        let local_hash = self
-            .inner
-            .provider
-            .block_hash(terminal_block_number)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-
-        // Transition configuration exchange is successful if block hashes match
-        match local_hash {
-            Some(hash) if hash == terminal_block_hash => Ok(TransitionConfiguration {
-                terminal_total_difficulty: merge_terminal_td,
-                terminal_block_hash,
-                terminal_block_number,
-            }),
-            _ => Err(EngineApiError::TerminalBlockHash {
-                execution: local_hash,
-                consensus: terminal_block_hash,
-            }),
-        }
-    }
-
-    /// Validates the `engine_forkchoiceUpdated` payload attributes and executes the forkchoice
-    /// update.
-    ///
-    /// The payload attributes will be validated according to the engine API rules for the given
-    /// message version:
-    /// * If the version is [`EngineApiMessageVersion::V1`], then the payload attributes will be
-    ///   validated according to the Paris rules.
-    /// * If the version is [`EngineApiMessageVersion::V2`], then the payload attributes will be
-    ///   validated according to the Shanghai rules, as well as the validity changes from cancun:
-    ///   <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/cancun.md#update-the-methods-of-previous-forks>
-    ///
-    /// * If the version above [`EngineApiMessageVersion::V3`], then the payload attributes will be
-    ///   validated according to the Cancun rules.
-    async fn validate_and_execute_forkchoice(
-        &self,
-        version: EngineApiMessageVersion,
-        state: ForkchoiceState,
-        payload_attrs: Option<EngineT::PayloadAttributes>,
-    ) -> EngineApiResult<ForkchoiceUpdated> {
-        self.inner.record_elapsed_time_on_fcu();
-
-        if let Some(ref attrs) = payload_attrs {
-            let attr_validation_res =
-                self.inner.validator.ensure_well_formed_attributes(version, attrs);
-
-            // From the engine API spec:
-            //
-            // Client software MUST ensure that payloadAttributes.timestamp is greater than
-            // timestamp of a block referenced by forkchoiceState.headBlockHash. If this condition
-            // isn't held client software MUST respond with -38003: Invalid payload attributes and
-            // MUST NOT begin a payload build process. In such an event, the forkchoiceState
-            // update MUST NOT be rolled back.
-            //
-            // NOTE: This will also apply to the validation result for the cancun or
-            // shanghai-specific fields provided in the payload attributes.
-            //
-            // To do this, we set the payload attrs to `None` if attribute validation failed, but
-            // we still apply the forkchoice update.
-            if let Err(err) = attr_validation_res {
-                let fcu_res =
-                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
-                // TODO: decide if we want this branch - the FCU INVALID response might be more
-                // useful than the payload attributes INVALID response
-                if fcu_res.is_invalid() {
-                    return Ok(fcu_res)
-                }
-                return Err(err.into())
-            }
-        }
-
-        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
-    }
-
-    /// Returns reference to supported capabilities.
-    pub fn capabilities(&self) -> &EngineCapabilities {
-        &self.inner.capabilities
-    }
-}
-
-impl<Provider, EngineT, Pool, Validator, ChainSpec>
-    EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
-where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes,
-    Pool: TransactionPool + 'static,
-    Validator: EngineValidator<EngineT>,
-    ChainSpec: EthereumHardforks + Send + Sync + 'static,
-{
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     pub async fn new_payload_v1(
@@ -718,6 +291,574 @@ where
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
+
+    /// Sends a message to the beacon consensus engine to update the fork choice _without_
+    /// withdrawals.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceUpdatedV1>
+    ///
+    /// Caution: This should not accept the `withdrawals` field
+    pub async fn fork_choice_updated_v1(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V1, state, payload_attrs)
+            .await
+    }
+
+    /// Metrics version of `fork_choice_updated_v1`
+    async fn fork_choice_updated_v1_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v1(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        res
+    }
+
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
+    /// but only _after_ shanghai.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_forkchoiceupdatedv2>
+    pub async fn fork_choice_updated_v2(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V2, state, payload_attrs)
+            .await
+    }
+
+    /// Metrics version of `fork_choice_updated_v2`
+    async fn fork_choice_updated_v2_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v2(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v2.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        res
+    }
+
+    /// Sends a message to the beacon consensus engine to update the fork choice _with_ withdrawals,
+    /// but only _after_ cancun.
+    ///
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
+    pub async fn fork_choice_updated_v3(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V3, state, payload_attrs)
+            .await
+    }
+
+    /// Metrics version of `fork_choice_updated_v3`
+    async fn fork_choice_updated_v3_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v3(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
+        self.inner.metrics.fcu_response.update_response_metrics(&res);
+        res
+    }
+
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_getPayloadV1>
+    ///
+    /// Caution: This should not return the `withdrawals` field
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    pub async fn get_payload_v1(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
+        self.inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV1");
+                EngineApiError::UnknownPayload
+            })
+    }
+
+    /// Metrics version of `get_payload_v1`
+    async fn get_payload_v1_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
+        let start = Instant::now();
+        let res = Self::get_payload_v1(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v1.record(start.elapsed());
+        res
+    }
+
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_getpayloadv2>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    pub async fn get_payload_v2(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV2> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self.get_payload_attributes(payload_id).await?;
+
+        // validate timestamp according to engine rules
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V2,
+            attributes.timestamp(),
+        )?;
+
+        // Now resolve the payload
+        self.inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV2");
+                EngineApiError::UnknownPayload
+            })
+    }
+
+    /// Metrics version of `get_payload_v2`
+    async fn get_payload_v2_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV2> {
+        let start = Instant::now();
+        let res = Self::get_payload_v2(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v2.record(start.elapsed());
+        res
+    }
+
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_getpayloadv3>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    pub async fn get_payload_v3(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV3> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self.get_payload_attributes(payload_id).await?;
+
+        // validate timestamp according to engine rules
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V3,
+            attributes.timestamp(),
+        )?;
+
+        // Now resolve the payload
+        self.inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV3");
+                EngineApiError::UnknownPayload
+            })
+    }
+
+    /// Metrics version of `get_payload_v3`
+    async fn get_payload_v3_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV3> {
+        let start = Instant::now();
+        let res = Self::get_payload_v3(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v3.record(start.elapsed());
+        res
+    }
+
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    pub async fn get_payload_v4(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
+        // First we fetch the payload attributes to check the timestamp
+        let attributes = self.get_payload_attributes(payload_id).await?;
+
+        // validate timestamp according to engine rules
+        validate_payload_timestamp(
+            &self.inner.chain_spec,
+            EngineApiMessageVersion::V4,
+            attributes.timestamp(),
+        )?;
+
+        // Now resolve the payload
+        self.inner
+            .payload_store
+            .resolve(payload_id)
+            .await
+            .ok_or(EngineApiError::UnknownPayload)?
+            .map_err(|_| EngineApiError::UnknownPayload)?
+            .try_into()
+            .map_err(|_| {
+                warn!("could not transform built payload into ExecutionPayloadV3");
+                EngineApiError::UnknownPayload
+            })
+    }
+
+    /// Metrics version of `get_payload_v4`
+    async fn get_payload_v4_metered(
+        &self,
+        payload_id: PayloadId,
+    ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
+        let start = Instant::now();
+        let res = Self::get_payload_v4(self, payload_id).await;
+        self.inner.metrics.latency.get_payload_v4.record(start.elapsed());
+        res
+    }
+
+    /// Fetches all the blocks for the provided range starting at `start`, containing `count`
+    /// blocks and returns the mapped payload bodies.
+    async fn get_payload_bodies_by_range_with<F, R>(
+        &self,
+        start: BlockNumber,
+        count: u64,
+        f: F,
+    ) -> EngineApiResult<Vec<Option<R>>>
+    where
+        F: Fn(Provider::Block) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let inner = self.inner.clone();
+
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+            if count > MAX_PAYLOAD_BODIES_LIMIT {
+                tx.send(Err(EngineApiError::PayloadRequestTooLarge { len: count })).ok();
+                return;
+            }
+
+            if start == 0 || count == 0 {
+                tx.send(Err(EngineApiError::InvalidBodiesRange { start, count })).ok();
+                return;
+            }
+
+            let mut result = Vec::with_capacity(count as usize);
+
+            // -1 so range is inclusive
+            let mut end = start.saturating_add(count - 1);
+
+            // > Client software MUST NOT return trailing null values if the request extends past the current latest known block.
+            // truncate the end if it's greater than the last block
+            if let Ok(best_block) = inner.provider.best_block_number() {
+                if end > best_block {
+                    end = best_block;
+                }
+            }
+
+            for num in start..=end {
+                let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
+                match block_result {
+                    Ok(block) => {
+                        result.push(block.map(&f));
+                    }
+                    Err(err) => {
+                        tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
+                        return;
+                    }
+                };
+            }
+            tx.send(Ok(result)).ok();
+        }));
+
+        rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
+    }
+
+    /// Returns the execution payload bodies by the range starting at `start`, containing `count`
+    /// blocks.
+    ///
+    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
+    /// layer p2p specification, meaning the input should be treated as untrusted or potentially
+    /// adversarial.
+    ///
+    /// Implementers should take care when acting on the input to this method, specifically
+    /// ensuring that the range is limited properly, and that the range boundaries are computed
+    /// correctly and without panics.
+    pub async fn get_payload_bodies_by_range_v1(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
+        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV1 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+        })
+        .await
+    }
+
+    /// Metrics version of `get_payload_bodies_by_range_v1`
+    async fn get_payload_bodies_by_range_v1_metered(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
+        let start_time = Instant::now();
+        let res = Self::get_payload_bodies_by_range_v1(self, start, count).await;
+        self.inner.metrics.latency.get_payload_bodies_by_range_v1.record(start_time.elapsed());
+        res
+    }
+
+    /// Called to retrieve execution payload bodies by hashes.
+    async fn get_payload_bodies_by_hash_with<F, R>(
+        &self,
+        hashes: Vec<BlockHash>,
+        f: F,
+    ) -> EngineApiResult<Vec<Option<R>>>
+    where
+        F: Fn(Provider::Block) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let len = hashes.len() as u64;
+        if len > MAX_PAYLOAD_BODIES_LIMIT {
+            return Err(EngineApiError::PayloadRequestTooLarge { len });
+        }
+
+        let (tx, rx) = oneshot::channel();
+        let inner = self.inner.clone();
+
+        self.inner.task_spawner.spawn_blocking(Box::pin(async move {
+            let mut result = Vec::with_capacity(hashes.len());
+            for hash in hashes {
+                let block_result = inner.provider.block(BlockHashOrNumber::Hash(hash));
+                match block_result {
+                    Ok(block) => {
+                        result.push(block.map(&f));
+                    }
+                    Err(err) => {
+                        let _ = tx.send(Err(EngineApiError::Internal(Box::new(err))));
+                        return;
+                    }
+                }
+            }
+            tx.send(Ok(result)).ok();
+        }));
+
+        rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
+    }
+
+    /// Called to retrieve execution payload bodies by hashes.
+    pub async fn get_payload_bodies_by_hash_v1(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
+        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV1 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+        })
+        .await
+    }
+
+    /// Metrics version of `get_payload_bodies_by_hash_v1`
+    async fn get_payload_bodies_by_hash_v1_metered(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
+        let start = Instant::now();
+        let res = Self::get_payload_bodies_by_hash_v1(self, hashes);
+        self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
+        res.await
+    }
+
+    /// Called to verify network configuration parameters and ensure that Consensus and Execution
+    /// layers are using the latest configuration.
+    pub fn exchange_transition_configuration(
+        &self,
+        config: TransitionConfiguration,
+    ) -> EngineApiResult<TransitionConfiguration> {
+        let TransitionConfiguration {
+            terminal_total_difficulty,
+            terminal_block_hash,
+            terminal_block_number,
+        } = config;
+
+        let merge_terminal_td = self
+            .inner
+            .chain_spec
+            .ethereum_fork_activation(EthereumHardfork::Paris)
+            .ttd()
+            .expect("the engine API should not be running for chains w/o paris");
+
+        // Compare total difficulty values
+        if merge_terminal_td != terminal_total_difficulty {
+            return Err(EngineApiError::TerminalTD {
+                execution: merge_terminal_td,
+                consensus: terminal_total_difficulty,
+            })
+        }
+
+        self.inner.beacon_consensus.transition_configuration_exchanged();
+
+        // Short circuit if communicated block hash is zero
+        if terminal_block_hash.is_zero() {
+            return Ok(TransitionConfiguration {
+                terminal_total_difficulty: merge_terminal_td,
+                ..Default::default()
+            })
+        }
+
+        // Attempt to look up terminal block hash
+        let local_hash = self
+            .inner
+            .provider
+            .block_hash(terminal_block_number)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
+
+        // Transition configuration exchange is successful if block hashes match
+        match local_hash {
+            Some(hash) if hash == terminal_block_hash => Ok(TransitionConfiguration {
+                terminal_total_difficulty: merge_terminal_td,
+                terminal_block_hash,
+                terminal_block_number,
+            }),
+            _ => Err(EngineApiError::TerminalBlockHash {
+                execution: local_hash,
+                consensus: terminal_block_hash,
+            }),
+        }
+    }
+
+    /// Metrics version of `exchange_transition_configuration`
+    fn exchange_transition_configuration_metered(
+        &self,
+        config: TransitionConfiguration,
+    ) -> EngineApiResult<TransitionConfiguration> {
+        let start = Instant::now();
+        let res = Self::exchange_transition_configuration(self, config);
+        self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
+        res
+    }
+
+    /// Validates the `engine_forkchoiceUpdated` payload attributes and executes the forkchoice
+    /// update.
+    ///
+    /// The payload attributes will be validated according to the engine API rules for the given
+    /// message version:
+    /// * If the version is [`EngineApiMessageVersion::V1`], then the payload attributes will be
+    ///   validated according to the Paris rules.
+    /// * If the version is [`EngineApiMessageVersion::V2`], then the payload attributes will be
+    ///   validated according to the Shanghai rules, as well as the validity changes from cancun:
+    ///   <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/cancun.md#update-the-methods-of-previous-forks>
+    ///
+    /// * If the version above [`EngineApiMessageVersion::V3`], then the payload attributes will be
+    ///   validated according to the Cancun rules.
+    async fn validate_and_execute_forkchoice(
+        &self,
+        version: EngineApiMessageVersion,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.inner.record_elapsed_time_on_fcu();
+
+        if let Some(ref attrs) = payload_attrs {
+            let attr_validation_res =
+                self.inner.validator.ensure_well_formed_attributes(version, attrs);
+
+            // From the engine API spec:
+            //
+            // Client software MUST ensure that payloadAttributes.timestamp is greater than
+            // timestamp of a block referenced by forkchoiceState.headBlockHash. If this condition
+            // isn't held client software MUST respond with -38003: Invalid payload attributes and
+            // MUST NOT begin a payload build process. In such an event, the forkchoiceState
+            // update MUST NOT be rolled back.
+            //
+            // NOTE: This will also apply to the validation result for the cancun or
+            // shanghai-specific fields provided in the payload attributes.
+            //
+            // To do this, we set the payload attrs to `None` if attribute validation failed, but
+            // we still apply the forkchoice update.
+            if let Err(err) = attr_validation_res {
+                let fcu_res =
+                    self.inner.beacon_consensus.fork_choice_updated(state, None, version).await?;
+                // TODO: decide if we want this branch - the FCU INVALID response might be more
+                // useful than the payload attributes INVALID response
+                if fcu_res.is_invalid() {
+                    return Ok(fcu_res)
+                }
+                return Err(err.into())
+            }
+        }
+
+        Ok(self.inner.beacon_consensus.fork_choice_updated(state, payload_attrs, version).await?)
+    }
+
+    /// Returns reference to supported capabilities.
+    pub fn capabilities(&self) -> &EngineCapabilities {
+        &self.inner.capabilities
+    }
+
+    fn get_blobs_v1(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
+        if versioned_hashes.len() > MAX_BLOB_LIMIT {
+            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
+        }
+
+        self.inner
+            .tx_pool
+            .get_blobs_for_versioned_hashes(&versioned_hashes)
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))
+    }
+
+    fn get_blobs_v1_metered(
+        &self,
+        versioned_hashes: Vec<B256>,
+    ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
+        let hashes_len = versioned_hashes.len();
+        let start = Instant::now();
+        let res = Self::get_blobs_v1(self, versioned_hashes);
+        self.inner.metrics.latency.get_blobs_v1.record(start.elapsed());
+
+        if let Ok(blobs) = &res {
+            let blobs_found = blobs.iter().flatten().count();
+            let blobs_missed = hashes_len - blobs_found;
+
+            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
+            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
+        }
+
+        res
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -824,11 +965,7 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV1");
-        let start = Instant::now();
-        let res = Self::fork_choice_updated_v1(self, fork_choice_state, payload_attributes).await;
-        self.inner.metrics.latency.fork_choice_updated_v1.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
-        Ok(res?)
+        Ok(self.fork_choice_updated_v1_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV2`
@@ -839,11 +976,7 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV2");
-        let start = Instant::now();
-        let res = Self::fork_choice_updated_v2(self, fork_choice_state, payload_attributes).await;
-        self.inner.metrics.latency.fork_choice_updated_v2.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
-        Ok(res?)
+        Ok(self.fork_choice_updated_v2_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_forkchoiceUpdatedV2`
@@ -855,11 +988,7 @@ where
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
-        let start = Instant::now();
-        let res = Self::fork_choice_updated_v3(self, fork_choice_state, payload_attributes).await;
-        self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
-        Ok(res?)
+        Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -878,10 +1007,7 @@ where
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
-        let start = Instant::now();
-        let res = Self::get_payload_v1(self, payload_id).await;
-        self.inner.metrics.latency.get_payload_v1.record(start.elapsed());
-        Ok(res?)
+        Ok(self.get_payload_v1_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadV2`
@@ -898,10 +1024,7 @@ where
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV2");
-        let start = Instant::now();
-        let res = Self::get_payload_v2(self, payload_id).await;
-        self.inner.metrics.latency.get_payload_v2.record(start.elapsed());
-        Ok(res?)
+        Ok(self.get_payload_v2_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadV3`
@@ -918,10 +1041,7 @@ where
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV3> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV3");
-        let start = Instant::now();
-        let res = Self::get_payload_v3(self, payload_id).await;
-        self.inner.metrics.latency.get_payload_v3.record(start.elapsed());
-        Ok(res?)
+        Ok(self.get_payload_v3_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadV4`
@@ -938,10 +1058,7 @@ where
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadV4");
-        let start = Instant::now();
-        let res = Self::get_payload_v4(self, payload_id).await;
-        self.inner.metrics.latency.get_payload_v4.record(start.elapsed());
-        Ok(res?)
+        Ok(self.get_payload_v4_metered(payload_id).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByHashV1`
@@ -951,10 +1068,7 @@ where
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
-        let start = Instant::now();
-        let res = Self::get_payload_bodies_by_hash_v1(self, block_hashes);
-        self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
-        Ok(res.await?)
+        Ok(self.get_payload_bodies_by_hash_v1_metered(block_hashes).await?)
     }
 
     /// Handler for `engine_getPayloadBodiesByRangeV1`
@@ -979,10 +1093,7 @@ where
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
-        let start_time = Instant::now();
-        let res = Self::get_payload_bodies_by_range_v1(self, start.to(), count.to()).await;
-        self.inner.metrics.latency.get_payload_bodies_by_range_v1.record(start_time.elapsed());
-        Ok(res?)
+        Ok(self.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
     }
 
     /// Handler for `engine_exchangeTransitionConfigurationV1`
@@ -992,10 +1103,7 @@ where
         config: TransitionConfiguration,
     ) -> RpcResult<TransitionConfiguration> {
         trace!(target: "rpc::engine", "Serving engine_exchangeTransitionConfigurationV1");
-        let start = Instant::now();
-        let res = Self::exchange_transition_configuration(self, config);
-        self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
-        Ok(res?)
+        Ok(self.exchange_transition_configuration_metered(config)?)
     }
 
     /// Handler for `engine_getClientVersionV1`
@@ -1022,30 +1130,7 @@ where
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
-        let start = Instant::now();
-
-        if versioned_hashes.len() > MAX_BLOB_LIMIT {
-            return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() }.into())
-        }
-
-        let res = self
-            .inner
-            .tx_pool
-            .get_blobs_for_versioned_hashes(&versioned_hashes)
-            .map_err(|err| EngineApiError::Internal(Box::new(err)).into());
-
-        let elapsed = start.elapsed();
-        self.inner.metrics.latency.get_blobs_v1.record(elapsed);
-
-        if let Ok(blobs) = &res {
-            let blobs_found = blobs.iter().flatten().count();
-            let blobs_missed = versioned_hashes.len() - blobs_found;
-
-            self.inner.metrics.blob_metrics.blob_count.increment(blobs_found as u64);
-            self.inner.metrics.blob_metrics.blob_misses.increment(blobs_missed as u64);
-        }
-
-        res
+        Ok(self.get_blobs_v1_metered(versioned_hashes)?)
     }
 }
 
