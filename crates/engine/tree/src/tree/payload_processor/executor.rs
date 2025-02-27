@@ -6,6 +6,10 @@ use tokio::{
 };
 
 /// An executor for mixed I/O and CPU workloads.
+///
+/// This type has access to its own rayon pool and uses tokio to spawn blocking tasks.
+///
+/// It will reuse an existing tokio runtime if available or create its own.
 #[derive(Debug, Clone)]
 pub(crate) struct WorkloadExecutor {
     inner: WorkloadExecutorInner,
