@@ -34,6 +34,37 @@ impl MultiProofTargets {
         Self(B256Map::with_capacity_and_hasher(capacity, Default::default()))
     }
 
+    /// Create `MultiProofTargets` with a single account as a target.
+    pub fn account(hashed_address: B256) -> Self {
+        Self::accounts([hashed_address])
+    }
+
+    /// Create `MultiProofTargets` with a single account and slots as targets.
+    pub fn account_with_slots<I: IntoIterator<Item = B256>>(
+        hashed_address: B256,
+        slots_iter: I,
+    ) -> Self {
+        Self(B256Map::from_iter([(hashed_address, slots_iter.into_iter().collect())]))
+    }
+
+    /// Create `MultiProofTargets` only from accounts.
+    pub fn accounts<I: IntoIterator<Item = B256>>(iter: I) -> Self {
+        Self(iter.into_iter().map(|hashed_address| (hashed_address, Default::default())).collect())
+    }
+
+    /// Retains the targets representing the difference,
+    /// i.e., the values that are in `self` but not in `other`.
+    pub fn retain_difference(&mut self, other: &Self) {
+        self.0.retain(|hashed_address, hashed_slots| {
+            if let Some(other_hashed_slots) = other.get(hashed_address) {
+                hashed_slots.retain(|hashed_slot| !other_hashed_slots.contains(hashed_slot));
+                !hashed_slots.is_empty()
+            } else {
+                true
+            }
+        });
+    }
+
     /// Extend multi proof targets with contents of other.
     pub fn extend(&mut self, other: Self) {
         self.extend_inner(Cow::Owned(other));
@@ -708,5 +739,113 @@ mod tests {
         assert_eq!(storage.root, root);
         assert!(storage.subtree.contains_key(&Nibbles::from_nibbles(vec![0])));
         assert!(storage.subtree.contains_key(&Nibbles::from_nibbles(vec![1])));
+    }
+
+    #[test]
+    fn test_multi_proof_retain_difference() {
+        let mut empty = MultiProofTargets::default();
+        empty.retain_difference(&Default::default());
+        assert!(empty.is_empty());
+
+        let targets = MultiProofTargets::accounts((0..10).map(B256::with_last_byte));
+
+        let mut diffed = targets.clone();
+        diffed.retain_difference(&MultiProofTargets::account(B256::with_last_byte(11)));
+        assert_eq!(diffed, targets);
+
+        diffed.retain_difference(&MultiProofTargets::accounts((0..5).map(B256::with_last_byte)));
+        assert_eq!(diffed, MultiProofTargets::accounts((5..10).map(B256::with_last_byte)));
+
+        diffed.retain_difference(&targets);
+        assert!(diffed.is_empty());
+
+        let mut targets = MultiProofTargets::default();
+        let (account1, account2, account3) =
+            (1..=3).map(B256::with_last_byte).collect_tuple().unwrap();
+        let account2_slots = (1..5).map(B256::with_last_byte).collect::<B256Set>();
+        targets.insert(account1, B256Set::from_iter([B256::with_last_byte(1)]));
+        targets.insert(account2, account2_slots.clone());
+        targets.insert(account3, B256Set::from_iter([B256::with_last_byte(1)]));
+
+        let mut diffed = targets.clone();
+        diffed.retain_difference(&MultiProofTargets::accounts((1..=3).map(B256::with_last_byte)));
+        assert_eq!(diffed, targets);
+
+        // remove last 3 slots for account 2
+        let mut account2_slots_expected_len = account2_slots.len();
+        for slot in account2_slots.iter().skip(1) {
+            diffed.retain_difference(&MultiProofTargets::account_with_slots(account2, [*slot]));
+            account2_slots_expected_len -= 1;
+            assert_eq!(
+                diffed.get(&account2).map(|slots| slots.len()),
+                Some(account2_slots_expected_len)
+            );
+        }
+
+        diffed.retain_difference(&targets);
+        assert!(diffed.is_empty());
+    }
+
+    #[test]
+    fn test_multi_proof_retain_difference_no_overlap() {
+        let mut targets = MultiProofTargets::default();
+
+        // populate some targets
+        let (addr1, addr2) = (B256::random(), B256::random());
+        let (slot1, slot2) = (B256::random(), B256::random());
+        targets.insert(addr1, vec![slot1].into_iter().collect());
+        targets.insert(addr2, vec![slot2].into_iter().collect());
+
+        let mut retained = targets.clone();
+        retained.retain_difference(&Default::default());
+        assert_eq!(retained, targets);
+
+        // add a different addr and slot to fetched proof targets
+        let mut other_targets = MultiProofTargets::default();
+        let addr3 = B256::random();
+        let slot3 = B256::random();
+        other_targets.insert(addr3, B256Set::from_iter([slot3]));
+
+        // check that the prefetch proof targets are the same because the fetched proof targets
+        // don't overlap with the prefetch targets
+        let mut retained = targets.clone();
+        retained.retain_difference(&other_targets);
+        assert_eq!(retained, targets);
+    }
+
+    #[test]
+    fn test_get_prefetch_proof_targets_remove_subset() {
+        // populate some targets
+        let mut targets = MultiProofTargets::default();
+        let (addr1, addr2) = (B256::random(), B256::random());
+        let (slot1, slot2) = (B256::random(), B256::random());
+        targets.insert(addr1, B256Set::from_iter([slot1]));
+        targets.insert(addr2, B256Set::from_iter([slot2]));
+
+        // add a subset of the first target to other proof targets
+        let other_targets = MultiProofTargets::account_with_slots(addr1, [slot1]);
+
+        let mut retained = targets.clone();
+        retained.retain_difference(&other_targets);
+
+        // check that the prefetch proof targets do not include the subset
+        assert_eq!(retained.len(), 1);
+        assert!(!retained.contains_key(&addr1));
+        assert!(retained.contains_key(&addr2));
+
+        // now add one more slot to the prefetch targets
+        let slot3 = B256::random();
+        targets.get_mut(&addr1).unwrap().insert(slot3);
+
+        let mut retained = targets.clone();
+        retained.retain_difference(&other_targets);
+
+        // check that the prefetch proof targets do not include the subset
+        // but include the new slot
+        assert_eq!(retained.len(), 2);
+        assert!(retained.contains_key(&addr1));
+        assert_eq!(retained.get(&addr1), Some(&B256Set::from_iter([slot3])));
+        assert!(retained.contains_key(&addr2));
+        assert_eq!(retained.get(&addr2), Some(&B256Set::from_iter([slot2])));
     }
 }
