@@ -223,7 +223,7 @@ where
             header,
             evm_config: self.evm_config.clone(),
             cache: cache.clone(),
-            cache_metrics,
+            cache_metrics: cache_metrics.clone(),
             provider: provider_builder,
         };
 
@@ -240,7 +240,7 @@ where
         self.executor.spawn_blocking(move || {
             prewarm_task.run();
         });
-        PrewarmTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task) }
+        PrewarmTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
     }
 
     /// Returns the cache for the given parent hash.
@@ -274,7 +274,7 @@ impl PayloadHandle {
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
-    pub fn state_hook(&self) -> impl OnStateHook {
+    pub(super) fn state_hook(&self) -> impl OnStateHook {
         // convert the channel into a `StateHookSender` that emits an event on drop
         let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
 
@@ -283,6 +283,15 @@ impl PayloadHandle {
                 let _ = sender.send(StateRootMessage::StateUpdate(source, state.clone()));
             }
         }
+    }
+
+    /// Returns a clone of the caches used by prewarming
+    pub(super) fn caches(&self) -> ProviderCaches {
+        self.prewarm_handle.cache.clone()
+    }
+
+    pub(super) fn cache_metrics(&self) -> CachedStateMetrics {
+        self.prewarm_handle.cache_metrics.clone()
     }
 
     /// Terminates the pre-warming transaction processing.
@@ -304,6 +313,8 @@ impl PayloadHandle {
 pub(crate) struct PrewarmTaskHandle {
     /// The shared cache the task operates with.
     cache: ProviderCaches,
+    /// Metrics for the caches
+    cache_metrics: CachedStateMetrics,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<Sender<PrewarmTaskEvent>>,
 }
