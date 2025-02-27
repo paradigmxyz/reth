@@ -33,7 +33,7 @@ pub trait SpawnBlocking: EthApiTypes + Clone + Send + Sync + 'static {
         self.tracing_task_guard().clone().acquire_owned()
     }
 
-    /// See also  [`Semaphore::acquire_many_owned`](`tokio::sync::Semaphore::acquire_many_owned`).
+    /// See also [`Semaphore::acquire_many_owned`](`tokio::sync::Semaphore::acquire_many_owned`).
     fn acquire_many_owned(
         &self,
         n: u32,
