@@ -2695,6 +2695,9 @@ where
                     // Remove those blocks that lower than or equal to the highest database block
                     // and have an associated database block with a matching hash.
                     if recovered_block.number() <= best_block_number &&
+                        // If the block is higher than the highest database block, we need to check its hash
+                        // to verify that it indeed belongs to the database chain. It may not always be the case,
+                        // if the block belongs to a fork that's going to reorg the database chain.
                         Some(recovered_block.hash()) ==
                             provider.block_hash(recovered_block.number())?
                     {
