@@ -1,6 +1,9 @@
 use rayon::ThreadPool as RayonPool;
-use std::sync::Arc;
-use tokio::{runtime::Runtime, task::JoinHandle};
+use std::sync::{Arc, OnceLock};
+use tokio::{
+    runtime::{Handle, Runtime},
+    task::JoinHandle,
+};
 
 /// An executor for mixed I/O and CPU workloads.
 #[derive(Debug, Clone)]
@@ -11,29 +14,17 @@ pub(crate) struct WorkloadExecutor {
 impl WorkloadExecutor {
     /// Creates a new instance with default settings.
     pub(crate) fn new() -> Self {
-        // Create runtime for I/O operations
-        let runtime = Arc::new(Runtime::new().unwrap());
-        // Create Rayon thread pool for CPU work
-        let rayon_pool = Arc::new(rayon::ThreadPoolBuilder::new().build().unwrap());
-
-        Self { inner: WorkloadExecutorInner { runtime, rayon_pool } }
+        Self { inner: WorkloadExecutorInner::new(rayon::ThreadPoolBuilder::new().build().unwrap()) }
     }
 
     /// Creates a new executor with the given number of threads for cpu bound work (rayon).
+    #[allow(unused)]
     pub(super) fn with_num_cpu_threads(cpu_threads: usize) -> Self {
-        // Create runtime for I/O operations
-        let runtime = Arc::new(Runtime::new().unwrap());
-
-        // Create Rayon thread pool for CPU work
-        let rayon_pool =
-            Arc::new(rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap());
-
-        Self { inner: WorkloadExecutorInner { runtime, rayon_pool } }
-    }
-
-    /// Returns access to the tokio runtime
-    pub(super) fn runtime(&self) -> &Arc<Runtime> {
-        &self.inner.runtime
+        Self {
+            inner: WorkloadExecutorInner::new(
+                rayon::ThreadPoolBuilder::new().num_threads(cpu_threads).build().unwrap(),
+            ),
+        }
     }
 
     /// Shorthand for [`Runtime::spawn_blocking`]
@@ -43,7 +34,7 @@ impl WorkloadExecutor {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.runtime().spawn_blocking(func)
+        self.inner.handle.spawn_blocking(func)
     }
 
     /// Returns access to the rayon pool
@@ -54,7 +45,24 @@ impl WorkloadExecutor {
 
 #[derive(Debug, Clone)]
 struct WorkloadExecutorInner {
-    // TODO: replace with main tokio handle instead or even task executor?
-    runtime: Arc<Runtime>,
+    handle: Handle,
     rayon_pool: Arc<RayonPool>,
+}
+
+impl WorkloadExecutorInner {
+    fn new(rayon_pool: rayon::ThreadPool) -> Self {
+        fn get_runtime_handle() -> Handle {
+            Handle::try_current().unwrap_or_else(|_| {
+                // Create a new runtime if now runtime is available
+                static RT: OnceLock<Runtime> = OnceLock::new();
+
+                let rt = RT.get_or_init(|| Runtime::new().unwrap());
+
+                rt.handle().clone()
+            })
+        }
+        let handle = get_runtime_handle();
+
+        Self { handle: get_runtime_handle(), rayon_pool: Arc::new(rayon_pool) }
+    }
 }

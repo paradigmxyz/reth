@@ -11,7 +11,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_provider::{BlockReader, DBProvider, DatabaseProviderFactory, StateCommitmentProvider};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
-    trie_cursor::InMemoryTrieCursorFactory, MultiProofTargets, Nibbles,
+    trie_cursor::InMemoryTrieCursorFactory, Nibbles,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;

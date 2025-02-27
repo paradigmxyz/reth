@@ -1,4 +1,5 @@
 //! Entrypoint for payload processing.
+#![allow(unused)]
 
 use crate::tree::{
     cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
@@ -24,6 +25,7 @@ use reth_provider::{
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
+use reth_trie_parallel::root::ParallelStateRootError;
 use std::{
     collections::VecDeque,
     sync::{
@@ -78,11 +80,6 @@ where
         + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
         + 'static,
 {
-    /// Executes the payload based on the configured settings.
-    pub(super) fn execute(&self) {
-        // TODO helpers for executing in sync?
-    }
-
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
     /// - Transaction prewarming task
@@ -267,8 +264,16 @@ pub(super) struct PayloadHandle {
 
 impl PayloadHandle {
     /// Awaits the state root
-    pub(super) fn state_root(&self) -> StateRootResult {
-        todo!()
+    ///
+    /// # Panics
+    ///
+    /// If payload processing was started without background tasks.
+    pub(super) fn state_root(&mut self) -> StateRootResult {
+        self.state_root
+            .take()
+            .expect("state_root is None")
+            .recv()
+            .map_err(|_| ParallelStateRootError::Other("sparse trie task dropped".to_string()))?
     }
 
     /// Returns a state hook to be used to send state updates to this task.
@@ -369,6 +374,7 @@ impl ExecutionCache {
     }
 
     /// Clears the tracked cashe
+    #[allow(unused)]
     pub(crate) fn clear(&self) {
         self.inner.write().take();
     }

@@ -2662,6 +2662,7 @@ where
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
 
+    #[allow(unused)]
     fn insert_block_inner2(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2731,7 +2732,8 @@ where
         // use prewarming background task
         let header = block.clone_sealed_header();
         let txs = block.clone_transactions_recovered().collect();
-        let handle = if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
+        let mut handle = if is_descendant_of_persisting_blocks && self.config.use_state_root_task()
+        {
             // use background tasks for state root calc
             let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
@@ -2794,22 +2796,27 @@ where
         trace!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
         let root_time = Instant::now();
-        let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks {
+
+        //  (state_root, trie_output, root_elapsed)
+        let mut maybe_state_root = None;
+
+        if is_descendant_of_persisting_blocks {
+            // if we new payload extends the current canonical change we attempt to use the
+            // background task or try to compute it in parallel
             if self.config.use_state_root_task() {
-                todo!()
-                // let state_root_handle = state_root_handle
-                //     .expect("state root handle must exist if legacy_state_root is false");
-                // let state_root_config = state_root_task_config.expect("task config is present");
-                //
-                // // Handle state root result from task using handle
-                // self.handle_state_root_result(
-                //     state_root_handle,
-                //     state_root_config,
-                //     block.sealed_block(),
-                //     &hashed_state,
-                //     &state_provider,
-                //     root_time,
-                // )?
+                match handle.state_root() {
+                    Ok(res) => {
+                        // we double check the state root here
+                        // TODO: clean this ups
+                        if res.state_root.0 == block.header().state_root() {
+                            maybe_state_root =
+                                Some((res.state_root.0, res.state_root.1, res.total_time))
+                        }
+                    }
+                    Err(err) => {
+                        // TODO error handling
+                    }
+                }
             } else {
                 match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
                 {
@@ -2820,25 +2827,47 @@ where
                             regular_state_root = ?result.0,
                             "Regular root task finished"
                         );
-                        (result.0, result.1, root_time.elapsed())
+                        maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                         debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
                         let (root, updates) =
                             state_provider.state_root_with_updates(hashed_state.clone())?;
-                        (root, updates, root_time.elapsed())
+                        maybe_state_root = Some((root, updates, root_time.elapsed()));
                     }
                     Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
                 }
             }
+        }
+
+        let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
+            maybe_state_root
+        {
+            maybe_state_root
         } else {
+            // fallback is to compute the state root regularily in sync
             debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
 
-        // TODO persist cache
+        // ensure state root matches
+        if state_root != block.header().state_root() {
+            // call post-block hook
+            self.invalid_block_hook.on_invalid_block(
+                &parent_block,
+                &block,
+                &output,
+                Some((&trie_output, state_root)),
+            );
+            return Err(ConsensusError::BodyStateRootDiff(
+                GotExpected { got: state_root, expected: block.header().state_root() }.into(),
+            )
+            .into())
+        }
 
+        // terminate prewarming task with good state output
+        handle.terminate_prewarming_execution(Some(output.state.clone()));
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
@@ -4450,8 +4479,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_tree_state_on_new_head_deep_fork() {
+    #[test]
+    fn test_tree_state_on_new_head_deep_fork() {
         reth_tracing::init_test_tracing();
 
         let chain_spec = MAINNET.clone();
