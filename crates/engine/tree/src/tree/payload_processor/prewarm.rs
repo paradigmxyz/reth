@@ -199,8 +199,7 @@ where
     fn prepare_multiproof_targets(self, tx: Recovered<N::SignedTx>) -> Option<MultiProofTargets> {
         let state = self.transact(tx)?;
 
-        let mut targets =
-            MultiProofTargets::with_capacity_and_hasher(state.len(), Default::default());
+        let mut targets = MultiProofTargets::with_capacity(state.len());
 
         for (addr, account) in state {
             // if the account was not touched, or if the account was selfdestructed, do not
