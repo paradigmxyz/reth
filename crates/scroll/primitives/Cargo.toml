@@ -118,4 +118,3 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "scroll-alloy-consensus/arbitrary",
 ]
-scroll = ["reth-primitives-traits/scroll"]

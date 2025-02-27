@@ -96,7 +96,6 @@ op = [
 ]
 scroll-alloy-traits = ["reth-db-api/scroll-alloy-traits"]
 disable-lock = []
-scroll = []
 
 [[bench]]
 name = "hash_keys"

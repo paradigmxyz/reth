@@ -22,7 +22,7 @@ jobs:
             features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: scroll
             args: --bin scroll-reth --workspace --lib --examples --tests --benches --locked
-            features: "scroll skip-state-root-validation asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+            features: "skip-state-root-validation asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: book
             args: --manifest-path book/sources/Cargo.toml --workspace --bins
             features: ""
@@ -109,7 +109,7 @@ jobs:
         with:
           cache-on-failure: true
       - run: cargo hack check --workspace
-      - run: cargo check -p scroll-reth --features "scroll"
+      - run: cargo check -p scroll-reth
 
   msrv:
     name: MSRV
@@ -177,16 +177,7 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@cargo-udeps
-        # due to the scroll and optimism feature flag, we need to exclude some crates that were annotated with
-        # #![cfg(not(feature = "scroll))] or #![cfg(not(feature = "optimism"))].
-      - run: |
-          cargo udeps --workspace --lib --examples --tests --benches --all-features --locked \
-            --exclude reth-optimism-cli --exclude reth-optimism-consensus --exclude reth-optimism-payload-builder \
-            --exclude reth-optimism-node --exclude reth-optimism-evm --exclude reth-optimism-node --exclude reth-optimism-rpc \
-            --exclude reth-optimism-txpool --exclude reth-op --exclude op-reth --exclude "example-*" --exclude reth  \
-            --exclude reth-exex-test-utils --exclude reth-node-ethereum --exclude reth-scroll-cli --exclude reth-scroll-evm \
-            --exclude reth-scroll-node --exclude scroll-reth --exclude reth-scroll-rpc  --exclude reth-scroll-trie \
-            --exclude reth-scroll-engine-primitives --exclude scroll-alloy-provider --exclude reth-scroll-payload
+      - run: cargo udeps --workspace --lib --examples --tests --benches --all-features --locked
   book:
     name: book
     runs-on: ubuntu-latest

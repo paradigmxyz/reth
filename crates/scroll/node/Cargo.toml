@@ -15,11 +15,10 @@ workspace = true
 # reth
 reth-db.workspace = true
 reth-chainspec.workspace = true
-reth-consensus.workspace = true
-reth-engine-local.workspace = true
+reth-engine-local = { workspace = true, features = ["scroll-alloy-traits"] }
 reth-rpc-eth-types.workspace = true
 reth-eth-wire-types.workspace = true
-reth-evm.workspace = true
+reth-evm = {workspace = true, features = ["scroll-alloy-traits"] }
 reth-network.workspace = true
 reth-node-api.workspace = true
 reth-node-types.workspace = true
@@ -62,25 +61,6 @@ tokio.workspace = true
 
 [features]
 default = ["reth-codec"]
-optimism = [
-    "reth-scroll-evm/optimism",
-    "reth-scroll-rpc/optimism",
-    "reth-scroll-engine-primitives/optimism",
-    "reth-scroll-payload/optimism",
-]
-scroll = [
-    "reth-db/scroll",
-    "reth-node-builder/scroll",
-    "reth-provider/scroll",
-    "reth-evm/scroll",
-    "reth-scroll-evm/scroll",
-    "reth-scroll-rpc/scroll",
-    "reth-scroll-primitives/scroll",
-    "reth-primitives-traits/scroll",
-    "reth-engine-local/scroll-alloy-traits",
-    "reth-scroll-engine-primitives/scroll",
-    "reth-scroll-payload/scroll",
-]
 reth-codec = [
     "reth-primitives/reth-codec",
     "reth-primitives-traits/reth-codec",

@@ -123,4 +123,3 @@ reth-codec = [
     "reth-primitives/reth-codec",
     "reth-optimism-primitives/reth-codec",
 ]
-scroll = []

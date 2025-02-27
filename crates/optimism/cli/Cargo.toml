@@ -99,4 +99,3 @@ serde = [
     "reth-provider/serde",
     "reth-optimism-primitives/serde",
 ]
-scroll = []

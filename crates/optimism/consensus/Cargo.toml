@@ -79,4 +79,3 @@ std = [
     "thiserror/std",
     "reth-execution-types/std",
 ]
-scroll = []

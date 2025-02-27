@@ -43,7 +43,7 @@ jobs:
             partition: 2
             total_partitions: 2
           - type: scroll
-            args: -p "reth-scroll-*" -p "scroll-alloy-*" --locked --features "scroll"
+            args: -p "reth-scroll-*" -p "scroll-alloy-*" --locked
             partition: 1
             total_partitions: 1
           - type: book

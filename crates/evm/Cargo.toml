@@ -87,8 +87,4 @@ op = [
     "alloy-evm/op",
     "reth-primitives-traits/op",
 ]
-scroll = [
-    "reth-primitives-traits/scroll",
-    "reth-execution-types/scroll",
-    "scroll-alloy-evm",
-]
+scroll-alloy-traits = ["scroll-alloy-evm"]

@@ -116,17 +116,6 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-prune-types/test-utils",
 ]
-scroll = [
-    "reth-testing-utils?/scroll",
-    "reth-trie/scroll",
-    "reth-provider/scroll",
-    "reth-evm/scroll",
-    "reth-execution-types/scroll",
-    "reth-trie-db/scroll",
-    "reth-db/scroll",
-    "reth-evm-ethereum/scroll",
-    "reth-exex/scroll",
-]
 skip-state-root-validation = []
 
 [[bench]]

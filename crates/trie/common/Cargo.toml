@@ -132,7 +132,6 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
 ]
 rayon = ["dep:rayon"]
-scroll = []
 
 [[bench]]
 name = "prefix_set"

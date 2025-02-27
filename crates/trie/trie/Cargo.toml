@@ -88,7 +88,6 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-primitives-traits/test-utils",
 ]
-scroll = []
 
 [[bench]]
 name = "hash_post_state"

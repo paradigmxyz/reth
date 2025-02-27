@@ -57,4 +57,3 @@ std = [
     "reth-execution-types/std",
     "reth-evm/std",
 ]
-scroll = ["reth-testing-utils/scroll"]

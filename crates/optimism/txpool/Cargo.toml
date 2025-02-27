@@ -48,6 +48,3 @@ parking_lot.workspace = true
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
-
-[features]
-scroll = []

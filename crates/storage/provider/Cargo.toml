@@ -126,12 +126,4 @@ test-utils = [
     "reth-stages-types/test-utils",
     "revm-state",
 ]
-scroll = [
-    "reth-testing-utils/scroll",
-    "reth-db/scroll",
-    "reth-trie-db/scroll",
-    "reth-trie/scroll",
-    "reth-execution-types/scroll",
-    "reth-evm/scroll",
-]
 skip-state-root-validation = []

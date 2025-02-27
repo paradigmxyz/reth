@@ -84,4 +84,3 @@ std = [
     "revm-optimism/std",
     "reth-evm/std",
 ]
-scroll = []

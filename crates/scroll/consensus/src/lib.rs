@@ -1,7 +1,5 @@
 //! Scroll consensus implementation.
 
-#![cfg(feature = "scroll")]
-
 extern crate alloc;
 
 mod curie;

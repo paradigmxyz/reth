@@ -35,8 +35,6 @@ tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
 asm-keccak = ["reth-optimism-cli/asm-keccak", "reth-optimism-node/asm-keccak"]
 
-scroll = []
-
 dev = [
     "reth-optimism-cli/dev",
     "reth-optimism-primitives/arbitrary",

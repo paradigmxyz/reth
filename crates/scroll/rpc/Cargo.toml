@@ -29,7 +29,6 @@ reth-chainspec.workspace = true
 
 # scroll
 reth-scroll-chainspec.workspace = true
-reth-scroll-evm.workspace = true
 reth-scroll-forks.workspace = true
 reth-scroll-primitives.workspace = true
 scroll-alloy-consensus.workspace = true
@@ -53,14 +52,3 @@ jsonrpsee-types.workspace = true
 
 # misc
 thiserror.workspace = true
-
-[features]
-scroll = [
-    "reth-provider/scroll",
-    "reth-scroll-evm/scroll",
-    "reth-evm/scroll",
-    "reth-scroll-primitives/scroll",
-]
-optimism = [
-    "reth-scroll-evm/optimism",
-]

@@ -62,4 +62,3 @@ serde = [
     "reth-primitives-traits/serde",
     "revm-inspector/serde",
 ]
-scroll = ["reth-trie?/scroll"]

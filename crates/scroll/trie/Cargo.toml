@@ -22,6 +22,3 @@ alloy-trie = { workspace = true, features = ["serde"] }
 # misc
 poseidon-bn254 = { workspace = true, features = ["bn254"] }
 tracing.workspace = true
-
-[features]
-scroll = ["reth-trie/scroll"]

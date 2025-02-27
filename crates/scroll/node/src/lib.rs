@@ -1,6 +1,4 @@
 //! Node specific implementations for Scroll.
-#![cfg(all(feature = "scroll", not(feature = "optimism")))]
-
 mod builder;
 pub use builder::{
     consensus::ScrollConsensusBuilder,

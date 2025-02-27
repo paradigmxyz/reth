@@ -31,11 +31,3 @@ reth-tokio-util.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 eyre.workspace = true
-
-[features]
-scroll = [
-    "reth-provider/scroll",
-    "reth-evm/scroll",
-    "reth-node-core/scroll",
-    "reth-engine-primitives/scroll",
-]

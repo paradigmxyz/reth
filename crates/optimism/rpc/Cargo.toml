@@ -81,4 +81,3 @@ client = [
     "jsonrpsee/async-client",
     "reth-rpc-eth-api/client",
 ]
-scroll = []

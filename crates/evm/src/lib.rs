@@ -269,7 +269,7 @@ impl<T: TransactionEnv> TransactionEnv for revm_optimism::OpTransaction<T> {
     }
 }
 
-#[cfg(feature = "scroll")]
+#[cfg(feature = "scroll-alloy-traits")]
 impl<T: TransactionEnv> TransactionEnv for scroll_alloy_evm::ScrollTransactionIntoTxEnv<T> {
     fn set_gas_limit(&mut self, gas_limit: u64) {
         self.base.set_gas_limit(gas_limit);

@@ -67,8 +67,3 @@ serde_json.workspace = true
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer"]
-scroll = [
-    "reth-execution-types/scroll",
-    "reth-revm/scroll",
-    "reth-trie/scroll",
-]

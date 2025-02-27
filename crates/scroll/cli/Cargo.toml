@@ -37,17 +37,6 @@ proptest = { workspace = true, optional = true }
 tracing.workspace = true
 
 [features]
-optimism = [
-    "reth-scroll-evm/optimism",
-    "reth-scroll-node/optimism",
-]
-scroll = [
-    "reth-db/scroll",
-    "reth-node-builder/scroll",
-    "reth-node-core/scroll",
-    "reth-scroll-evm/scroll",
-    "reth-scroll-node/scroll",
-]
 dev = [
     "dep:proptest",
     "dep:scroll-alloy-consensus",

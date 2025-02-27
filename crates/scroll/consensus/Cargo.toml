@@ -37,6 +37,3 @@ tracing.workspace = true
 
 [dev-dependencies]
 eyre.workspace = true
-
-[features]
-scroll = []

@@ -47,12 +47,3 @@ tracing.workspace = true
 
 [dev-dependencies]
 eyre.workspace = true
-
-[features]
-optimism = []
-scroll = [
-    "reth-evm/scroll",
-    "reth-revm/scroll",
-    "reth-scroll-consensus/scroll",
-    "reth-scroll-primitives/scroll",
-]

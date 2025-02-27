@@ -97,4 +97,3 @@ op = [
 ]
 bench = []
 scroll-alloy-traits = ["dep:reth-scroll-primitives"]
-scroll = []
