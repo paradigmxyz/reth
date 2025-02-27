@@ -1318,45 +1318,17 @@ where
     Ok(())
 }
 
-/// Inner storage of proof targets for [`ChunkedProofTargets`].
-///
-/// This is needed to use the same [`ChunkedProofTargets`] for both single and multiple chunk cases.
-enum ChunkedProofTargetsInner {
-    /// Proof targets that fit into one chunk.
-    OneChunk(MultiProofTargets),
-    /// Sorted proof targets that do not fit into one chunk.
-    ///
-    /// We keep this sorted, because multiproofs are more efficient when proof targets are located
-    /// close to each other.
-    MultipleChunks(VecDeque<(B256, B256Set)>),
-}
-
-impl ChunkedProofTargetsInner {
-    fn new(
-        proof_targets: MultiProofTargets,
-        accounts_chunk_size: usize,
-        storages_chunk_size: usize,
-    ) -> Self {
-        let is_one_chunk = proof_targets.len() <= accounts_chunk_size &&
-            proof_targets.values().all(|slots| slots.len() <= storages_chunk_size);
-        if is_one_chunk {
-            Self::OneChunk(proof_targets)
-        } else {
-            Self::MultipleChunks(
-                proof_targets.into_iter().sorted_by_key(|(address, _)| *address).collect(),
-            )
-        }
-    }
-}
-
 /// Iterator that chunks proof targets.
 ///
 /// This iterator will yield items of type [`Vec<MultiProofTargets>`], with each
 /// [`MultiProofTargets`] mapping having a maximum length of `accounts_chunk_size`, and each mapping
 /// value [`B256Set`] having a maximum length of `storages_chunk_size`.
 struct ChunkedProofTargets {
-    /// Proof targets.
-    proof_targets: ChunkedProofTargetsInner,
+    /// Sorted proof targets.
+    ///
+    /// We keep this sorted, because multiproofs are more efficient when proof targets are located
+    /// close to each other.
+    proof_targets: VecDeque<(B256, B256Set)>,
     /// Number of accounts per chunk.
     accounts_chunk_size: usize,
     /// Number of storage slots per account per chunk.
@@ -1370,11 +1342,10 @@ impl ChunkedProofTargets {
         storages_chunk_size: usize,
     ) -> Self {
         Self {
-            proof_targets: ChunkedProofTargetsInner::new(
-                proof_targets,
-                accounts_chunk_size,
-                storages_chunk_size,
-            ),
+            proof_targets: proof_targets
+                .into_iter()
+                .sorted_by_key(|(address, _)| *address)
+                .collect(),
             accounts_chunk_size,
             storages_chunk_size,
         }
@@ -1385,44 +1356,33 @@ impl Iterator for ChunkedProofTargets {
     type Item = Vec<MultiProofTargets>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.proof_targets {
-            ChunkedProofTargetsInner::OneChunk(targets) => {
-                let targets = std::mem::take(targets);
-                if targets.is_empty() {
-                    return None;
+        if self.proof_targets.is_empty() {
+            return None;
+        }
+
+        // Every address will be added to at least first chunk
+        let mut chunks = vec![MultiProofTargets::default(); 1];
+
+        let accounts_chunk =
+            self.proof_targets.drain(..self.accounts_chunk_size.min(self.proof_targets.len()));
+        for (address, storage_slots) in accounts_chunk {
+            let storage_chunks =
+                storage_slots.into_iter().sorted().chunks(self.storages_chunk_size);
+
+            // Initialize the chunk with an address with no storage slots. We need to do
+            // this, because the account may have no storage slots in
+            // the targets, but we still need to add it to the chunk.
+            chunks[0].entry(address).or_default();
+
+            for (i, chunk) in storage_chunks.into_iter().enumerate() {
+                if i >= chunks.len() {
+                    chunks.push(MultiProofTargets::default());
                 }
-
-                Some(vec![targets])
-            }
-            ChunkedProofTargetsInner::MultipleChunks(targets) => {
-                if targets.is_empty() {
-                    return None;
-                }
-
-                // Every address will be added to at least first chunk
-                let mut chunks = vec![MultiProofTargets::default(); 1];
-
-                let accounts_chunk = targets.drain(..self.accounts_chunk_size.min(targets.len()));
-                for (address, storage_slots) in accounts_chunk {
-                    let storage_chunks =
-                        storage_slots.into_iter().sorted().chunks(self.storages_chunk_size);
-
-                    // Initialize the chunk with an address with no storage slots. We need to do
-                    // this, because the account may have no storage slots in
-                    // the targets, but we still need to add it to the chunk.
-                    chunks[0].entry(address).or_default();
-
-                    for (i, chunk) in storage_chunks.into_iter().enumerate() {
-                        if i >= chunks.len() {
-                            chunks.push(MultiProofTargets::default());
-                        }
-                        chunks[i].entry(address).or_default().extend(chunk);
-                    }
-                }
-
-                Some(chunks)
+                chunks[i].entry(address).or_default().extend(chunk);
             }
         }
+
+        Some(chunks)
     }
 }
 
