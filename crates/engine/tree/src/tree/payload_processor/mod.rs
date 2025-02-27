@@ -36,10 +36,10 @@ use std::{
 };
 
 pub(crate) mod executor;
+pub(crate) mod sparse_trie;
 
 mod multiproof;
 mod prewarm;
-mod sparse_trie;
 
 /// Entrypoint for executing the payload.
 pub(super) struct PayloadProcessor<N, Evm> {
