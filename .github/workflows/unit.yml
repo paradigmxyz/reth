@@ -31,7 +31,7 @@ jobs:
             partition: 1
             total_partitions: 2
           - type: ethereum
-            args: --features "asm-keccak ethereum" --locked --workspace --exclude ef-tests
+            args: --features "asm-keccak ethereum" --locked
             partition: 2
             total_partitions: 2
           - type: optimism
@@ -47,7 +47,7 @@ jobs:
             partition: 1
             total_partitions: 1
           - type: book
-            args: --manifest-path book/sources/Cargo.toml --workspace --exclude ef-tests
+            args: --manifest-path book/sources/Cargo.toml
             partition: 1
             total_partitions: 1
     timeout-minutes: 30
@@ -68,9 +68,9 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            ${{ matrix.args }} \
-            --no-tests=warn \
-            --partition hash:${{ matrix.partition }}/${{ matrix.total_partitions }} \
+            ${{ matrix.args }} --workspace \
+            --exclude ef-tests --no-tests=warn \
+            --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"
 
   state:

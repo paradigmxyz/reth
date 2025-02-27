@@ -76,10 +76,12 @@ exclude_crates=(
   reth-scroll # tokio
   reth-scroll-state-commitment # tokio
   reth-scroll-chainspec # tokio
+  reth-scroll-consensus # c-kzg
   reth-scroll-evm # tokio
   reth-scroll-rpc #tokio
   reth-scroll-engine-primitives # proptest
   reth-scroll-payload # c-kzg
+  reth-scroll-primitives # c-kzg
 )
 
 # Array to hold the results
