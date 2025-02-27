@@ -14,7 +14,6 @@ fn main() {
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {
-        // TODO: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     }
 
