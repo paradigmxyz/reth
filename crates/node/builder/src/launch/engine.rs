@@ -3,7 +3,6 @@
 use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_chainspec::EthChainSpec;
-use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
@@ -294,36 +293,6 @@ where
 
         let RpcHandle { rpc_server_handles, rpc_registry, engine_events, beacon_engine_handle } =
             add_ons.launch_add_ons(add_ons_ctx).await?;
-
-        // TODO: migrate to devmode with https://github.com/paradigmxyz/reth/issues/10104
-        if let Some(maybe_custom_etherscan_url) = ctx.node_config().debug.etherscan.clone() {
-            info!(target: "reth::cli", "Using etherscan as consensus client");
-
-            let chain = ctx.node_config().chain.chain();
-            let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
-                // If URL isn't provided, use default Etherscan URL for the chain if it is known
-                chain
-                    .etherscan_urls()
-                    .map(|urls| urls.0.to_string())
-                    .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain: {chain}"))
-            })?;
-
-            let block_provider = EtherscanBlockProvider::new(
-                etherscan_url,
-                chain.etherscan_api_key().ok_or_else(|| {
-                    eyre::eyre!(
-                        "etherscan api key not found for rpc consensus client for chain: {chain}"
-                    )
-                })?,
-            );
-            let rpc_consensus_client = DebugConsensusClient::new(
-                rpc_server_handles.auth.clone(),
-                Arc::new(block_provider),
-            );
-            ctx.task_executor().spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run::<<Types as NodeTypesWithEngine>::Engine>().await
-            });
-        }
 
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;

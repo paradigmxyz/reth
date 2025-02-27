@@ -7,7 +7,7 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    BlockReaderFor, EngineNodeLauncher, LaunchNode, Node,
+    BlockReaderFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, LaunchNode, Node,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
@@ -573,6 +573,41 @@ where
 
         let launcher =
             EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
+        builder.launch_with(launcher).await
+    }
+
+    /// Launches the node with the [`DebugNodeLauncher`].
+    ///
+    /// This is equivalent to [`WithLaunchContext::launch`], but will enable the debugging features,
+    /// if they are configured.
+    pub async fn launch_with_debug_capabilities(
+        self,
+    ) -> eyre::Result<
+        <DebugNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
+        >>::Node,
+    >
+    where
+        T: DebugNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+        DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
+    {
+        let Self { builder, task_executor } = self;
+
+        let engine_tree_config = TreeConfig::default()
+            .with_persistence_threshold(builder.config.engine.persistence_threshold)
+            .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
+            .with_legacy_state_root(builder.config.engine.legacy_state_root_task_enabled)
+            .with_caching_and_prewarming(builder.config.engine.caching_and_prewarming_enabled)
+            .with_always_compare_trie_updates(builder.config.engine.state_root_task_compare_updates)
+            .with_cross_block_cache_size(
+                builder.config.engine.cross_block_cache_size * 1024 * 1024,
+            );
+
+        let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
+            task_executor,
+            builder.config.datadir(),
+            engine_tree_config,
+        ));
         builder.launch_with(launcher).await
     }
 }
