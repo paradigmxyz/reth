@@ -7689,6 +7689,7 @@ dependencies = [
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
+ "reth-payload-validator",
  "reth-primitives-traits",
  "reth-revm",
  "reth-storage-api",
@@ -8909,8 +8910,6 @@ version = "1.2.0"
 dependencies = [
  "alloy-consensus",
  "alloy-rpc-types-engine",
- "reth-chainspec",
- "reth-primitives",
  "reth-primitives-traits",
 ]
 
