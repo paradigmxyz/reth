@@ -71,6 +71,7 @@ mod payload_processor;
 mod persistence_state;
 pub mod root;
 // TODO(alexey): compare trie updates in `insert_block_inner`
+#[allow(unused)]
 mod trie_updates;
 
 use crate::tree::{
