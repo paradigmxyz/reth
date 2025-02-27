@@ -9,12 +9,15 @@ use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OpHardfork;
 use reth_primitives_traits::SealedHeader;
 
-use crate::{make_op_genesis_header, LazyLock, OpChainSpec};
+use crate::{
+    make_op_genesis_header, superchain_registry::read_superchain_genesis, LazyLock, OpChainSpec,
+};
 
 /// The Base Sepolia spec
 pub static BASE_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
-    let genesis = serde_json::from_str(include_str!("../res/genesis/sepolia_base.json"))
-        .expect("Can't deserialize Base Sepolia genesis json");
+    let genesis =
+        read_superchain_genesis("base", "sepolia").expect("Can't read Base Sepolia genesis");
+
     let hardforks = OpHardfork::base_sepolia();
     OpChainSpec {
         inner: ChainSpec {
