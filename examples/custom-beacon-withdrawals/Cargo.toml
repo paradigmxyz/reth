@@ -24,4 +24,4 @@ alloy-consensus.workspace = true
 eyre.workspace = true
 
 [features]
-scroll = ["revm/scroll"]
+scroll = []

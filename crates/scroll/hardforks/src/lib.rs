@@ -14,6 +14,7 @@ pub use hardfork::ScrollHardfork;
 use reth_ethereum_forks::{EthereumHardforks, ForkCondition};
 
 /// Extends [`EthereumHardforks`] with scroll helper methods.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ScrollHardforks: EthereumHardforks {
     /// Retrieves [`ForkCondition`] by an [`ScrollHardfork`]. If `fork` is not present, returns
     /// [`ForkCondition::Never`].

@@ -268,3 +268,22 @@ impl<T: TransactionEnv> TransactionEnv for revm_optimism::OpTransaction<T> {
         self.base.set_access_list(access_list);
     }
 }
+
+#[cfg(feature = "scroll")]
+impl<T: TransactionEnv> TransactionEnv for scroll_alloy_evm::ScrollTransactionIntoTxEnv<T> {
+    fn set_gas_limit(&mut self, gas_limit: u64) {
+        self.base.set_gas_limit(gas_limit);
+    }
+
+    fn nonce(&self) -> u64 {
+        TransactionEnv::nonce(&self.base)
+    }
+
+    fn set_nonce(&mut self, nonce: u64) {
+        self.base.set_nonce(nonce);
+    }
+
+    fn set_access_list(&mut self, access_list: AccessList) {
+        self.base.set_access_list(access_list);
+    }
+}

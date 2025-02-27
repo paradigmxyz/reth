@@ -13,7 +13,7 @@ use alloy_chains::Chain;
 use alloy_consensus::Header;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
-use derive_more::{Constructor, Deref, Display, From, Into};
+use derive_more::{Constructor, Deref, From, Into};
 use reth_chainspec::{
     BaseFeeParams, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec, EthereumHardforks,
     ForkFilter, ForkId, Hardforks, Head,
@@ -171,6 +171,23 @@ impl ScrollChainSpecBuilder {
     }
 }
 
+/// Returns the chain configuration.
+pub trait ChainConfig {
+    /// The configuration.
+    type Config;
+
+    /// Returns the chain configuration.
+    fn chain_config(&self) -> &Self::Config;
+}
+
+impl ChainConfig for ScrollChainSpec {
+    type Config = ScrollChainConfig;
+
+    fn chain_config(&self) -> &Self::Config {
+        &self.config
+    }
+}
+
 /// Scroll chain spec type.
 #[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
 pub struct ScrollChainSpec {
@@ -214,7 +231,7 @@ impl EthChainSpec for ScrollChainSpec {
         self.inner.prune_delete_limit()
     }
 
-    fn display_hardforks(&self) -> Box<dyn Display> {
+    fn display_hardforks(&self) -> Box<dyn alloc::fmt::Display> {
         Box::new(ChainSpec::display_hardforks(self))
     }
 

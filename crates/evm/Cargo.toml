@@ -31,6 +31,9 @@ alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
+# scroll
+scroll-alloy-evm = { workspace = true, optional = true }
+
 auto_impl.workspace = true
 derive_more.workspace = true
 futures-util.workspace = true
@@ -85,7 +88,7 @@ op = [
     "reth-primitives-traits/op",
 ]
 scroll = [
-    "revm/scroll",
     "reth-primitives-traits/scroll",
     "reth-execution-types/scroll",
+    "scroll-alloy-evm",
 ]

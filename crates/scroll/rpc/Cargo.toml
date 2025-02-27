@@ -32,9 +32,10 @@ reth-scroll-chainspec.workspace = true
 reth-scroll-evm.workspace = true
 reth-scroll-forks.workspace = true
 reth-scroll-primitives.workspace = true
-scroll-alloy-rpc-types.workspace = true
-scroll-alloy-network.workspace = true
 scroll-alloy-consensus.workspace = true
+scroll-alloy-evm.workspace = true
+scroll-alloy-network.workspace = true
+scroll-alloy-rpc-types.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -62,5 +63,4 @@ scroll = [
 ]
 optimism = [
     "reth-scroll-evm/optimism",
-    "revm/optimism",
 ]

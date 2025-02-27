@@ -358,7 +358,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{address, bytes, U256};
     use core::marker::PhantomData;

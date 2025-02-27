@@ -160,7 +160,7 @@ op = [
     "reth-codecs?/op",
 ]
 scroll-alloy-traits = ["scroll-alloy-consensus"]
-scroll = ["revm-primitives/scroll"]
+scroll = []
 rayon = [
     "dep:rayon",
 ]

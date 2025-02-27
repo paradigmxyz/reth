@@ -38,8 +38,6 @@ tracing.workspace = true
 
 [features]
 optimism = [
-    "reth-db/optimism",
-    "reth-node-core/optimism",
     "reth-scroll-evm/optimism",
     "reth-scroll-node/optimism",
 ]

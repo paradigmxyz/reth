@@ -12,11 +12,31 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
+# alloy
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+
+# reth
+reth-chainspec.workspace = true
+reth-consensus.workspace = true
+reth-consensus-common.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-execution-types.workspace = true
+reth-primitives-traits.workspace = true
+
+# scroll
+reth-scroll-forks.workspace = true
+reth-scroll-primitives.workspace = true
+
 # revm
 revm.workspace = true
+
+# misc
+thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 eyre.workspace = true
 
 [features]
-scroll = ["revm/scroll"]
+scroll = []

@@ -2,6 +2,8 @@
 
 #![cfg(feature = "scroll")]
 
+extern crate alloc;
+
 mod curie;
 pub use curie::{
     apply_curie_hard_fork, BLOB_SCALAR_SLOT, COMMIT_SCALAR_SLOT,
@@ -9,3 +11,8 @@ pub use curie::{
     L1_BASE_FEE_SLOT, L1_BLOB_BASE_FEE_SLOT, L1_GAS_PRICE_ORACLE_ADDRESS, OVER_HEAD_SLOT,
     SCALAR_SLOT,
 };
+mod error;
+pub use error::ScrollConsensusError;
+
+mod validation;
+pub use validation::ScrollBeaconConsensus;

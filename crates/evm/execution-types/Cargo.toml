@@ -71,4 +71,4 @@ std = [
     "reth-trie-common/std",
     "revm-database/std",
 ]
-scroll = ["revm/scroll"]
+scroll = []

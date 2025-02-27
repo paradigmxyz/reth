@@ -469,8 +469,6 @@ mod tests {
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
-            #[cfg(feature = "scroll")]
-            code_size: 2,
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -515,8 +513,6 @@ mod tests {
             nonce: 1,
             code_hash: B256::random(),
             code: None,
-            #[cfg(feature = "scroll")]
-            code_size: 10,
         };
 
         // Create hashed accounts with addresses.
