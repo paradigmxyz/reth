@@ -149,7 +149,7 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
     .await?;
 
     let _ = provider.send_transaction(TransactionRequest::default().to(Address::ZERO)).await?;
-    let (payload, attrs) = node.new_payload().await?;
+    let payload = node.new_payload().await?;
 
     let mut request = BuilderBlockValidationRequestV3 {
         request: SignedBidSubmissionV3 {
@@ -167,7 +167,7 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
             blobs_bundle: BlobsBundleV1::new([]),
             signature: Default::default(),
         },
-        parent_beacon_block_root: attrs.parent_beacon_block_root.unwrap(),
+        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
         registered_gas_limit: payload.block().gas_limit,
     };
 
@@ -225,7 +225,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
     .await?;
 
     let _ = provider.send_transaction(TransactionRequest::default().to(Address::ZERO)).await?;
-    let (payload, attrs) = node.new_payload().await?;
+    let payload = node.new_payload().await?;
 
     let mut request = BuilderBlockValidationRequestV4 {
         request: SignedBidSubmissionV4 {
@@ -244,7 +244,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             execution_requests: payload.requests().unwrap().try_into().unwrap(),
             signature: Default::default(),
         },
-        parent_beacon_block_root: attrs.parent_beacon_block_root.unwrap(),
+        parent_beacon_block_root: payload.block().parent_beacon_block_root.unwrap(),
         registered_gas_limit: payload.block().gas_limit,
     };
 

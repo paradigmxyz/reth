@@ -1,6 +1,6 @@
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    KeyHasher, Nibbles,
+    KeyHasher, MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
@@ -154,6 +154,20 @@ impl HashedPostState {
         }
 
         TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
+    }
+
+    /// Create multiproof targets for this state.
+    pub fn multi_proof_targets(&self) -> MultiProofTargets {
+        // Pre-allocate minimum capacity for the targets.
+        let mut targets =
+            MultiProofTargets::with_capacity_and_hasher(self.accounts.len(), Default::default());
+        for hashed_address in self.accounts.keys() {
+            targets.insert(*hashed_address, Default::default());
+        }
+        for (hashed_address, storage) in &self.storages {
+            targets.entry(*hashed_address).or_default().extend(storage.storage.keys().copied());
+        }
+        targets
     }
 
     /// Extend this hashed post state with contents of another.

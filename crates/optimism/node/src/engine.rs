@@ -61,6 +61,7 @@ where
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> OpExecutionData {
+        // todo: move to op-alloy
         let block_hash = block.hash();
         let block = block.into_block();
         let sidecar = OpExecutionPayloadSidecar::from_block(&block);

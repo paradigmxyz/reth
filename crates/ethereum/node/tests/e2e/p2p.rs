@@ -32,7 +32,7 @@ async fn can_sync() -> eyre::Result<()> {
     let tx_hash = first_node.rpc.inject_tx(raw_tx).await?;
 
     // make the node advance
-    let (payload, _) = first_node.advance_block().await?;
+    let payload = first_node.advance_block().await?;
 
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
@@ -41,7 +41,7 @@ async fn can_sync() -> eyre::Result<()> {
     first_node.assert_new_block(tx_hash, block_hash, block_number).await?;
 
     // only send forkchoice update to second node
-    second_node.engine_api.update_forkchoice(block_hash, block_hash).await?;
+    second_node.update_forkchoice(block_hash, block_hash).await?;
 
     // expect second node advanced via p2p gossip
     second_node.assert_new_block(tx_hash, block_hash, 1).await?;
