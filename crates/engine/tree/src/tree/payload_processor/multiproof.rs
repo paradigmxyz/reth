@@ -31,7 +31,7 @@ use tracing::{debug, error, trace};
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
-pub(super) struct SparseTrieUpdate {
+pub(crate) struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
     pub(crate) state: HashedPostState,
     /// The calculated multiproof
