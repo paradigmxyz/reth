@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-db-models.workspace = true
 reth-chainspec.workspace = true
-reth-db-api.workspace = true
+reth-db-api = { workspace = true, optional = true }
 reth-execution-types.workspace = true
 reth-primitives-traits.workspace = true
 reth-prune-types.workspace = true
@@ -49,4 +49,8 @@ std = [
     "reth-execution-types/std",
     "reth-prune-types/std",
     "reth-storage-errors/std",
+]
+
+db-api = [
+    "dep:reth-db-api",
 ]
