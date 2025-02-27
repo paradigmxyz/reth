@@ -450,18 +450,19 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
     provider_factory: P,
     /// The historical block hash to fetch state from.
     historical: B256,
-    /// The blocks that form the chain from historical to target.
-    blocks: Vec<ExecutedBlockWithTrieUpdates<N>>,
+    /// The blocks that form the chain from historical to target and are in memory.
+    overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
 }
 
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
-    /// Creates a new state provider from the provider factory, historical block hash and blocks.
+    /// Creates a new state provider from the provider factory, historical block hash and optional
+    /// overlayed blocks.
     fn new(
         provider_factory: P,
         historical: B256,
-        blocks: Vec<ExecutedBlockWithTrieUpdates<N>>,
+        overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
     ) -> Self {
-        Self { provider_factory, historical, blocks }
+        Self { provider_factory, historical, overlay }
     }
 }
 
@@ -471,8 +472,11 @@ where
 {
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
-        let historical = self.provider_factory.state_by_block_hash(self.historical)?;
-        Ok(Box::new(MemoryOverlayStateProvider::new(historical, self.blocks.clone())))
+        let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
+        if let Some(overlay) = self.overlay.clone() {
+            provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
+        }
+        Ok(provider)
     }
 }
 
@@ -2663,7 +2667,6 @@ where
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
 
-    #[allow(unused)]
     fn insert_block_inner2(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2683,7 +2686,7 @@ where
         self.validate_block(&block)?;
 
         trace!(target: "engine::tree", block=?block_num_hash, parent=?block.parent_hash(), "Fetching block state provider");
-        let Some(state_provider) = self.state_provider(block.parent_hash())? else {
+        let Some(provider_builder) = self.state_provider_builder(block.parent_hash())? else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
             let missing_ancestor = self
@@ -2714,6 +2717,7 @@ where
             return Err(e.into())
         }
 
+        let state_provider = provider_builder.build()?;
         // We only run the parallel state root if we are currently persisting blocks that are all
         // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
         // trie updates being committed are a subset of the in-memory trie updates collected before
@@ -2723,12 +2727,6 @@ where
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
         let is_descendant_of_persisting_blocks =
             self.is_descendant_of_persisting_blocks(block.header());
-
-        let Some(provider_builder) = self.state_provider_builder(block.parent_hash())? else {
-            // TODO(mattsse): this is the same logic as the `state_provider` call above and should
-            // be unified
-            unreachable!()
-        };
 
         // use prewarming background task
         let header = block.clone_sealed_header();
@@ -2848,6 +2846,9 @@ where
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
+
+        self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
+        debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
         // ensure state root matches
         if state_root != block.header().state_root() {
@@ -3418,7 +3419,11 @@ where
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
             debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), historical, blocks)))
+            return Ok(Some(StateProviderBuilder::new(
+                self.provider.clone(),
+                historical,
+                Some(blocks),
+            )))
         }
 
         // Check if the block is persisted
@@ -3426,7 +3431,7 @@ where
             debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
             // For persisted blocks, we create a builder that will fetch state directly from the
             // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, vec![])))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
         }
 
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
