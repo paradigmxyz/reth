@@ -159,8 +159,7 @@ impl HashedPostState {
     /// Create multiproof targets for this state.
     pub fn multi_proof_targets(&self) -> MultiProofTargets {
         // Pre-allocate minimum capacity for the targets.
-        let mut targets =
-            MultiProofTargets::with_capacity_and_hasher(self.accounts.len(), Default::default());
+        let mut targets = MultiProofTargets::with_capacity(self.accounts.len());
         for hashed_address in self.accounts.keys() {
             targets.insert(*hashed_address, Default::default());
         }
