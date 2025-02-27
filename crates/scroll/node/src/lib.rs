@@ -10,7 +10,7 @@ pub use builder::{
 };
 
 mod addons;
-pub use addons::ScrollAddOns;
+pub use addons::{ScrollAddOns, ScrollAddOnsBuilder};
 
 mod node;
 pub use node::ScrollNode;

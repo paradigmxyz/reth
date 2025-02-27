@@ -27,7 +27,7 @@ jobs:
       matrix:
         include:
           - type: ethereum
-            args: --features "asm-keccak ethereum" --locked --workspace --exclude ef-tests
+            args: --features "asm-keccak ethereum" --locked
             partition: 1
             total_partitions: 2
           - type: ethereum

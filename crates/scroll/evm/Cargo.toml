@@ -17,7 +17,7 @@ reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-evm.workspace = true
 reth-execution-types.workspace = true
-reth-primitives = { workspace = true, features = ["serde-bincode-compat", "reth-codec"] }
+reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits.workspace = true
 reth-revm.workspace = true
 
@@ -30,7 +30,7 @@ revm-scroll.workspace = true
 reth-scroll-chainspec.workspace = true
 reth-scroll-consensus.workspace = true
 reth-scroll-forks.workspace = true
-reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
+reth-scroll-primitives = { workspace = true, features = ["serde", "reth-codec"] }
 
 # alloy
 alloy-consensus.workspace = true

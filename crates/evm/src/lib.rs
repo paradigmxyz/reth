@@ -15,6 +15,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use scroll_alloy_evm as _;
+
 extern crate alloc;
 
 use alloy_eips::eip2930::AccessList;

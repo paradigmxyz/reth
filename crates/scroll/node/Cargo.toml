@@ -43,7 +43,7 @@ reth-scroll-engine-primitives.workspace = true
 reth-scroll-evm.workspace = true
 reth-scroll-forks.workspace = true
 reth-scroll-payload.workspace = true
-reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 reth-scroll-rpc.workspace = true
 scroll-alloy-consensus.workspace = true
 scroll-alloy-evm.workspace = true
