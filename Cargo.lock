@@ -8912,6 +8912,7 @@ dependencies = [
  "reth-chainspec",
  "reth-primitives",
  "reth-primitives-traits",
+ "tracing",
 ]
 
 [[package]]

@@ -16,6 +16,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
+tracing.workspace = true
 
 # alloy
 alloy-rpc-types-engine.workspace = true

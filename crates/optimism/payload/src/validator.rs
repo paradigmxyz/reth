@@ -53,7 +53,15 @@ where
         let expected_hash = payload.block_hash();
 
         // First parse the block
+        tracing::trace!(
+            target: "engine",
+            ?expected_hash,
+            ?sidecar,
+            ?payload,
+            "Parsing payload",
+        );
         let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();
+        tracing::trace!(target: "engine", ?sealed_block, "Parsed payload");
 
         // Ensure the hash included in the payload matches the block hash
         if expected_hash != sealed_block.hash() {
