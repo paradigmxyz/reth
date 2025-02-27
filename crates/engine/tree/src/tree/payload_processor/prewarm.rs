@@ -129,6 +129,7 @@ where
 
     /// Save the state to the shared cache for the given block.
     fn save_cache(&self, state: BundleState) {
+        let start = Instant::now();
         let cache = SavedCache::new(
             self.ctx.header.hash(),
             self.ctx.cache.clone(),
@@ -144,6 +145,7 @@ where
 
         // update the cache for the executed block
         self.execution_cache.save_cache(cache);
+        self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
     }
 
     /// Executes the task.
@@ -335,4 +337,6 @@ pub(crate) struct PrewarmMetrics {
     pub(crate) execution_duration: Histogram,
     /// A histogram for prefetch targets per transaction prewarming
     pub(crate) prefetch_storage_targets: Histogram,
+    /// A histogram of duration for cache saving
+    pub(crate) cache_saving_duration: Gauge,
 }
