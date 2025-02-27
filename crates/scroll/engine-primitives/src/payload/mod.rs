@@ -6,7 +6,7 @@ pub use attributes::ScrollPayloadBuilderAttributes;
 mod built;
 pub use built::ScrollBuiltPayload;
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use core::marker::PhantomData;
 
 use alloy_consensus::{proofs, EMPTY_OMMER_ROOT_HASH};

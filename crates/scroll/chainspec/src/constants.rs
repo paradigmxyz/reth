@@ -1,5 +1,5 @@
 use crate::genesis::L1Config;
-use alloy_primitives::{address, Address};
+use alloy_primitives::{address, b256, Address, B256};
 
 /// The transaction fee recipient on the L2.
 pub const SCROLL_FEE_VAULT_ADDRESS: Address = address!("5300000000000000000000000000000000000005");
@@ -24,6 +24,10 @@ pub const SCROLL_MAINNET_L1_CONFIG: L1Config = L1Config {
     scroll_chain_address: SCROLL_MAINNET_L1_PROXY_ADDRESS,
     num_l1_messages_per_block: SCROLL_MAINNET_MAX_L1_MESSAGES,
 };
+
+/// The Scroll Mainnet genesis hash
+pub const SCROLL_MAINNET_GENESIS_HASH: B256 =
+    b256!("bbc05efd412b7cd47a2ed0e5ddfcf87af251e414ea4c801d78b6784513180a80");
 
 /// The L1 message queue address for Scroll sepolia.
 /// <https://sepolia.etherscan.io/address/0xF0B2293F5D834eAe920c6974D50957A1732de763>.
@@ -64,3 +68,7 @@ pub const SCROLL_DEV_L1_CONFIG: L1Config = L1Config {
     scroll_chain_address: SCROLL_DEV_L1_PROXY_ADDRESS,
     num_l1_messages_per_block: SCROLL_DEV_MAX_L1_MESSAGES,
 };
+
+/// The Scroll Sepolia genesis hash
+pub const SCROLL_SEPOLIA_GENESIS_HASH: B256 =
+    b256!("aa62d1a8b2bffa9e5d2368b63aae0d98d54928bd713125e3fd9e5c896c68592c");

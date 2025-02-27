@@ -1,10 +1,11 @@
 //! Chain specification for the Scroll Sepolia testnet network.
 
-use crate::{make_genesis_header, LazyLock, ScrollChainConfig, ScrollChainSpec};
+use crate::{
+    make_genesis_header, LazyLock, ScrollChainConfig, ScrollChainSpec, SCROLL_SEPOLIA_GENESIS_HASH,
+};
 use alloc::sync::Arc;
 
 use alloy_chains::{Chain, NamedChain};
-use alloy_primitives::b256;
 use reth_chainspec::ChainSpec;
 use reth_primitives_traits::SealedHeader;
 use reth_scroll_forks::ScrollHardfork;
@@ -19,7 +20,7 @@ pub static SCROLL_SEPOLIA: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
             chain: Chain::from_named(NamedChain::ScrollSepolia),
             genesis_header: SealedHeader::new(
                 make_genesis_header(&genesis),
-                b256!("aa62d1a8b2bffa9e5d2368b63aae0d98d54928bd713125e3fd9e5c896c68592c"),
+                SCROLL_SEPOLIA_GENESIS_HASH,
             ),
             genesis,
             hardforks: ScrollHardfork::scroll_sepolia(),

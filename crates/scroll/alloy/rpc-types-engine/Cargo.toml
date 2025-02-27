@@ -19,11 +19,18 @@ alloy-rpc-types-engine.workspace = true
 # misc
 serde = { workspace = true, optional = true }
 
+# test-utils
+arbitrary = { workspace = true, optional = true }
+
 [dev-dependencies]
 serde_json.workspace = true
 
 [features]
 default = ["std"]
+arbitrary = [
+    "dep:arbitrary",
+    "alloy-primitives/arbitrary",
+]
 std = [
     "alloy-primitives/std",
     "alloy-rpc-types-engine/std",

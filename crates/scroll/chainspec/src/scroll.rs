@@ -1,10 +1,11 @@
 //! Chain specification for the Scroll Mainnet network.
 
-use crate::{make_genesis_header, LazyLock, ScrollChainConfig, ScrollChainSpec};
+use crate::{
+    make_genesis_header, LazyLock, ScrollChainConfig, ScrollChainSpec, SCROLL_MAINNET_GENESIS_HASH,
+};
 use alloc::sync::Arc;
 
 use alloy_chains::{Chain, NamedChain};
-use alloy_primitives::b256;
 use reth_chainspec::ChainSpec;
 use reth_primitives_traits::SealedHeader;
 use reth_scroll_forks::ScrollHardfork;
@@ -19,7 +20,7 @@ pub static SCROLL_MAINNET: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
             chain: Chain::from_named(NamedChain::Scroll),
             genesis_header: SealedHeader::new(
                 make_genesis_header(&genesis),
-                b256!("bbc05efd412b7cd47a2ed0e5ddfcf87af251e414ea4c801d78b6784513180a80"),
+                SCROLL_MAINNET_GENESIS_HASH,
             ),
             genesis,
             hardforks: ScrollHardfork::scroll_mainnet(),

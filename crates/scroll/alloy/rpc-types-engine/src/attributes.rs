@@ -17,6 +17,23 @@ pub struct ScrollPayloadAttributes {
     pub no_tx_pool: bool,
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for ScrollPayloadAttributes {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        Ok(Self {
+            payload_attributes: PayloadAttributes {
+                timestamp: u64::arbitrary(u)?,
+                prev_randao: alloy_primitives::B256::arbitrary(u)?,
+                suggested_fee_recipient: alloy_primitives::Address::arbitrary(u)?,
+                withdrawals: None,
+                parent_beacon_block_root: Some(alloy_primitives::B256::arbitrary(u)?),
+            },
+            transactions: Some(Vec::arbitrary(u)?),
+            no_tx_pool: bool::arbitrary(u)?,
+        })
+    }
+}
+
 #[cfg(all(test, feature = "serde"))]
 mod test {
     use super::*;
