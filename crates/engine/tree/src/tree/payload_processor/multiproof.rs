@@ -106,6 +106,9 @@ pub(super) enum StateRootMessage {
     /// Error during proof calculation
     ProofCalculationError(ProviderError),
     /// Signals state update stream end.
+    ///
+    /// This is triggerred by block execution, indicating that no additional state updates are
+    /// expected.
     FinishedStateUpdates,
 }
 
@@ -126,7 +129,7 @@ pub(super) struct ProofCalculated {
 
 /// Handle to track proof calculation ordering
 #[derive(Debug, Default)]
-pub(crate) struct ProofSequencer {
+struct ProofSequencer {
     /// The next proof sequence number to be produced.
     next_sequence: u64,
     /// The next sequence number expected to be delivered.
@@ -136,13 +139,8 @@ pub(crate) struct ProofSequencer {
 }
 
 impl ProofSequencer {
-    /// Creates a new proof sequencer
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     /// Gets the next sequence number and increments the counter
-    pub(crate) fn next_sequence(&mut self) -> u64 {
+    fn next_sequence(&mut self) -> u64 {
         let seq = self.next_sequence;
         self.next_sequence += 1;
         seq
@@ -150,11 +148,7 @@ impl ProofSequencer {
 
     /// Adds a proof with the corresponding state update and returns all sequential proofs and state
     /// updates if we have a continuous sequence
-    pub(crate) fn add_proof(
-        &mut self,
-        sequence: u64,
-        update: SparseTrieUpdate,
-    ) -> Vec<SparseTrieUpdate> {
+    fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
         if sequence >= self.next_to_deliver {
             self.pending_proofs.insert(sequence, update);
         }
@@ -451,7 +445,7 @@ where
             tx,
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
-            proof_sequencer: ProofSequencer::new(),
+            proof_sequencer: ProofSequencer::default(),
             // TODO settings
             multiproof_manager: MultiproofManager::new(executor, 4),
             metrics: StateRootTaskMetrics::default(),
@@ -596,21 +590,14 @@ where
     ///      state updates arrived (i.e. transaction order), such sequence is returned.
     /// 4. Once there's a sequence of contiguous multiproofs along with the proof targets and state
     ///    updates associated with them, a [`SparseTrieUpdate`] is generated and sent to the sparse
-    ///    trie task that's running in [`run_sparse_trie`].
-    ///    * Sparse trie task reveals the multiproof, updates the sparse trie, computes storage trie
-    ///      roots, and calculates RLP nodes of the state trie below
-    ///      [`SPARSE_TRIE_INCREMENTAL_LEVEL`].
+    ///    trie task.
     /// 5. Steps above are repeated until this task receives a
     ///    [`StateRootMessage::FinishedStateUpdates`].
     ///    * Once this message is received, on every [`StateRootMessage::EmptyProof`] and
     ///      [`StateRootMessage::ProofCalculated`] message, we check if there are any proofs are
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
     ///      left to be revealed using [`check_end_condition`].
-    ///    * If there are none left, we drop the sparse trie task sender channel, and it signals
-    ///      [`run_sparse_trie`] to calculate the state root of the full state trie, and send it
-    ///      back to this task via [`StateRootMessage::RootCalculated`] message.
-    /// 6. On [`StateRootMessage::RootCalculated`] message, the loop exits and the the state root is
-    ///    returned.
+    /// 6. This task exits after all pending proofs are processed.
     pub(crate) fn run(mut self) {
         let mut prefetch_proofs_received = 0;
         let mut updates_received = 0;
