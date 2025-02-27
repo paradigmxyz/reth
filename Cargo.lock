@@ -3088,7 +3088,6 @@ dependencies = [
 name = "example-custom-beacon-withdrawals"
 version = "0.0.0"
 dependencies = [
- "alloy-consensus",
  "alloy-eips",
  "alloy-sol-macro",
  "alloy-sol-types",
@@ -3312,7 +3311,6 @@ name = "example-polygon-p2p"
 version = "0.0.0"
 dependencies = [
  "alloy-genesis",
- "alloy-primitives",
  "reth-chainspec",
  "reth-discv4",
  "reth-network",

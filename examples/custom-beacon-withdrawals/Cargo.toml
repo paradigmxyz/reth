@@ -16,6 +16,5 @@ reth-primitives.workspace = true
 alloy-sol-macro.workspace = true
 alloy-sol-types.workspace = true
 alloy-eips.workspace = true
-alloy-consensus.workspace = true
 
 eyre.workspace = true
