@@ -1,9 +1,7 @@
 //! Merkle trie proofs.
 
-use std::borrow::Cow;
-
 use crate::{Nibbles, TrieAccount};
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
