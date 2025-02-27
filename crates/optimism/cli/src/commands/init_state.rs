@@ -51,9 +51,9 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
 
         // OP-Mainnet may want to bootstrap a chain without OVM historical data
         if provider_factory.chain_spec().is_optimism_mainnet() && self.without_ovm {
-            let last_block_number = provider_rw.last_block_number()?;
+            let highest_known_block_number = provider_rw.highest_known_block_number()?;
 
-            if last_block_number == 0 {
+            if highest_known_block_number == 0 {
                 reth_cli_commands::init_state::without_evm::setup_without_evm(
                     &provider_rw,
                     SealedHeader::new(BEDROCK_HEADER, BEDROCK_HEADER_HASH),
@@ -66,7 +66,9 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
                 // Necessary to commit, so the BEDROCK_HEADER is accessible to provider_rw and
                 // init_state_dump
                 static_file_provider.commit()?;
-            } else if last_block_number > 0 && last_block_number < BEDROCK_HEADER.number {
+            } else if highest_known_block_number > 0 &&
+                highest_known_block_number < BEDROCK_HEADER.number
+            {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-ovm."
                 ))

@@ -263,7 +263,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 return Ok(None);
             }
 
-            let Ok(high) = self.provider().best_block_number() else {
+            let Ok(high) = self.provider().highest_persisted_block_number() else {
                 return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
             };
 

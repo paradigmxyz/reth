@@ -254,12 +254,12 @@ impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider<N> {
         Ok(self.canonical_in_memory_state.chain_info())
     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_persisted_block_number(&self) -> ProviderResult<BlockNumber> {
         Ok(self.canonical_in_memory_state.get_canonical_block_number())
     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.database.last_block_number()
+    fn highest_known_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.database.highest_known_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1497,8 +1497,11 @@ mod tests {
             BlockRangeParams::default(),
         )?;
 
-        assert_eq!(provider.best_block_number()?, in_memory_blocks.last().unwrap().number);
-        assert_eq!(provider.last_block_number()?, database_blocks.last().unwrap().number);
+        assert_eq!(
+            provider.highest_persisted_block_number()?,
+            in_memory_blocks.last().unwrap().number
+        );
+        assert_eq!(provider.highest_known_block_number()?, database_blocks.last().unwrap().number);
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.first().unwrap().clone();

@@ -68,7 +68,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
         let mut total_filtered_out_dup_txns = 0;
 
         let mut sealed_header = provider_factory
-            .sealed_header(provider_factory.last_block_number()?)?
+            .sealed_header(provider_factory.highest_known_block_number()?)?
             .expect("should have genesis");
 
         while let Some(mut file_client) =
@@ -123,7 +123,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
             }
 
             sealed_header = provider_factory
-                .sealed_header(provider_factory.last_block_number()?)?
+                .sealed_header(provider_factory.highest_known_block_number()?)?
                 .expect("should have genesis");
         }
 

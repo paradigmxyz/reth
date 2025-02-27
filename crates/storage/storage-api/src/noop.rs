@@ -94,11 +94,11 @@ impl<ChainSpec: Send + Sync, N: Send + Sync> BlockNumReader for NoopProvider<Cha
         Ok(ChainInfo::default())
     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_persisted_block_number(&self) -> ProviderResult<BlockNumber> {
         Ok(0)
     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_known_block_number(&self) -> ProviderResult<BlockNumber> {
         Ok(0)
     }
 

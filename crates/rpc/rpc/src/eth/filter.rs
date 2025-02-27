@@ -460,7 +460,8 @@ where
         &self,
         kind: FilterKind<RpcTransaction<Eth::NetworkTypes>>,
     ) -> RpcResult<FilterId> {
-        let last_poll_block_number = self.provider().best_block_number().to_rpc_result()?;
+        let last_poll_block_number =
+            self.provider().highest_persisted_block_number().to_rpc_result()?;
         let id = FilterId::from(self.id_provider.next_id());
         let mut filters = self.active_filters.inner.lock().await;
         filters.insert(

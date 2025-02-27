@@ -348,12 +348,12 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
         self.provider()?.chain_info()
     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.provider()?.best_block_number()
+    fn highest_persisted_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.provider()?.highest_persisted_block_number()
     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.provider()?.last_block_number()
+    fn highest_known_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.provider()?.highest_known_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {

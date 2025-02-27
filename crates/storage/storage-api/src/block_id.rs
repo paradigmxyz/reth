@@ -13,11 +13,13 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
     /// Returns the current info for the chain.
     fn chain_info(&self) -> ProviderResult<ChainInfo>;
 
-    /// Returns the best block number in the chain.
-    fn best_block_number(&self) -> ProviderResult<BlockNumber>;
+    /// Returns the block number associated with the highest fully committed block present in both
+    /// the database and static files.
+    fn highest_persisted_block_number(&self) -> ProviderResult<BlockNumber>;
 
-    /// Returns the last block number associated with the last canonical header in the database.
-    fn last_block_number(&self) -> ProviderResult<BlockNumber>;
+    /// Returns the block number associated with the canonical header present in either the database
+    /// or static files.
+    fn highest_known_block_number(&self) -> ProviderResult<BlockNumber>;
 
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>>;
@@ -55,7 +57,7 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     /// Converts the `BlockNumberOrTag` variants to a block number.
     fn convert_block_number(&self, num: BlockNumberOrTag) -> ProviderResult<Option<BlockNumber>> {
         let num = match num {
-            BlockNumberOrTag::Latest => self.best_block_number()?,
+            BlockNumberOrTag::Latest => self.highest_persisted_block_number()?,
             BlockNumberOrTag::Earliest => 0,
             BlockNumberOrTag::Pending => {
                 return self

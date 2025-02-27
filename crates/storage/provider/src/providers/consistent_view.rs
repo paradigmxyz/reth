@@ -44,7 +44,7 @@ where
     /// Creates new consistent database view with latest tip.
     pub fn new_with_latest_tip(provider: Factory) -> ProviderResult<Self> {
         let provider_ro = provider.database_provider_ro()?;
-        let last_num = provider_ro.last_block_number()?;
+        let last_num = provider_ro.highest_known_block_number()?;
         let tip = provider_ro.sealed_header(last_num)?.map(|h| (h.hash(), last_num));
         Ok(Self::new(provider, tip))
     }
@@ -55,11 +55,12 @@ where
         let block_number = provider
             .block_number(block_hash)?
             .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        let best_block_number = provider.best_block_number()?;
+        let highest_persisted_block_number = provider.highest_persisted_block_number()?;
 
-        // We do not check against the `last_block_number` here because
-        // `HashedPostState::from_reverts` only uses the database tables, and not static files.
-        if block_number == best_block_number {
+        // We do not check against the `provider.highest_known_block_number()` here because
+        // `HashedPostState::from_reverts` uses the database tables to generate reverts, and we need
+        // to have them fully committed.
+        if block_number == highest_persisted_block_number {
             debug!(target: "providers::consistent_view", ?block_hash, block_number, "Returning empty revert state");
             Ok(HashedPostState::default())
         } else {
@@ -70,7 +71,7 @@ where
                 target: "providers::consistent_view",
                 ?block_hash,
                 block_number,
-                best_block_number,
+                highest_persisted_block_number,
                 accounts = revert_state.accounts.len(),
                 storages = revert_state.storages.len(),
                 "Returning non-empty revert state"
@@ -94,9 +95,9 @@ where
         // fetch the block by hash while we're persisting, the following situation may occur:
         //
         // 1. Persistence appends the latest block to static files.
-        // 2. We initialize the consistent view provider, which fetches based on `last_block_number`
-        //    and `sealed_header`, which both check static files, setting the tip to the newly
-        //    committed block.
+        // 2. We initialize the consistent view provider, which fetches based on
+        //    `highest_known_block_number` and `sealed_header`, which both check static files,
+        //    setting the tip to the newly committed block.
         // 3. We attempt to fetch a header by hash, using for example the `header` method. This
         //    checks the database first, to fetch the number corresponding to the hash. Because the
         //    database has not been committed yet, this fails, and we return

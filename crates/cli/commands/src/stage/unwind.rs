@@ -179,7 +179,7 @@ impl Subcommands {
         factory: ProviderFactory<N>,
     ) -> eyre::Result<u64> {
         let provider = factory.provider()?;
-        let last = provider.last_block_number()?;
+        let last = provider.highest_known_block_number()?;
         let target = match self {
             Self::ToBlock { target } => match target {
                 BlockHashOrNumber::Hash(hash) => provider

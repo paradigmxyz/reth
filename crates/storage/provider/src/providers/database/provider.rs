@@ -168,8 +168,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
         let mut block_number =
             self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        if block_number == self.best_block_number().unwrap_or_default() &&
-            block_number == self.last_block_number().unwrap_or_default()
+        if block_number == self.highest_persisted_block_number().unwrap_or_default() &&
+            block_number == self.highest_known_block_number().unwrap_or_default()
         {
             return Ok(Box::new(LatestStateProviderRef::new(self)))
         }
@@ -373,8 +373,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        if block_number == self.best_block_number().unwrap_or_default() &&
-            block_number == self.last_block_number().unwrap_or_default()
+        if block_number == self.highest_persisted_block_number().unwrap_or_default() &&
+            block_number == self.highest_known_block_number().unwrap_or_default()
         {
             return Ok(Box::new(LatestStateProvider::new(self)))
         }
@@ -1117,19 +1117,19 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, 
 
 impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
-        let best_number = self.best_block_number()?;
+        let best_number = self.highest_persisted_block_number()?;
         let best_hash = self.block_hash(best_number)?.unwrap_or_default();
         Ok(ChainInfo { best_hash, best_number })
     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_persisted_block_number(&self) -> ProviderResult<BlockNumber> {
         Ok(self
             .get_stage_checkpoint(StageId::Finish)?
             .map(|checkpoint| checkpoint.block_number)
             .unwrap_or_default())
     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_known_block_number(&self) -> ProviderResult<BlockNumber> {
         Ok(self
             .tx
             .cursor_read::<tables::CanonicalHeaders>()?
@@ -1785,7 +1785,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let last_block = execution_outcome.last_block();
         let block_range = first_block..=last_block;
 
-        let tip = self.last_block_number()?.max(last_block);
+        let tip = self.highest_known_block_number()?.max(last_block);
 
         let (plain_state, reverts) =
             execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
@@ -2082,7 +2082,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         block: BlockNumber,
         remove_receipts_from: StorageLocation,
     ) -> ProviderResult<()> {
-        let range = block + 1..=self.last_block_number()?;
+        let range = block + 1..=self.highest_known_block_number()?;
 
         if range.is_empty() {
             return Ok(());
@@ -2177,7 +2177,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         block: BlockNumber,
         remove_receipts_from: StorageLocation,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
-        let range = block + 1..=self.last_block_number()?;
+        let range = block + 1..=self.highest_known_block_number()?;
 
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
@@ -2748,7 +2748,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
         block: BlockNumber,
         remove_from: StorageLocation,
     ) -> ProviderResult<Chain<Self::Primitives>> {
-        let range = block + 1..=self.last_block_number()?;
+        let range = block + 1..=self.highest_known_block_number()?;
 
         self.unwind_trie_state_range(range.clone())?;
 
@@ -2772,7 +2772,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
         block: BlockNumber,
         remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        let range = block + 1..=self.last_block_number()?;
+        let range = block + 1..=self.highest_known_block_number()?;
 
         self.unwind_trie_state_range(range)?;
 

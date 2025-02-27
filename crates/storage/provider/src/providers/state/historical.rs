@@ -113,7 +113,7 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
 
     /// Checks and returns `true` if distance to historical block exceeds the provided limit.
     fn check_distance_against_limit(&self, limit: u64) -> ProviderResult<bool> {
-        let tip = self.provider.last_block_number()?;
+        let tip = self.provider.highest_known_block_number()?;
 
         Ok(tip.saturating_sub(self.block_number) > limit)
     }

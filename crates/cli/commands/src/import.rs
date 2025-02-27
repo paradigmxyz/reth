@@ -87,7 +87,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         let mut total_decoded_txns = 0;
 
         let mut sealed_header = provider_factory
-            .sealed_header(provider_factory.last_block_number()?)?
+            .sealed_header(provider_factory.highest_known_block_number()?)?
             .expect("should have genesis");
 
         while let Some(file_client) =
@@ -132,7 +132,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
             }
 
             sealed_header = provider_factory
-                .sealed_header(provider_factory.last_block_number()?)?
+                .sealed_header(provider_factory.highest_known_block_number()?)?
                 .expect("should have genesis");
         }
 
@@ -186,10 +186,10 @@ where
     }
 
     // Retrieve latest header found in the database.
-    let last_block_number = provider_factory.last_block_number()?;
+    let highest_known_block_number = provider_factory.highest_known_block_number()?;
     let local_head = provider_factory
-        .sealed_header(last_block_number)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(last_block_number.into()))?;
+        .sealed_header(highest_known_block_number)?
+        .ok_or_else(|| ProviderError::HeaderNotFound(highest_known_block_number.into()))?;
 
     let mut header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
         .build(file_client.clone(), consensus.clone())

@@ -518,17 +518,17 @@ impl<T: Transaction, ChainSpec: EthChainSpec> BlockHashReader for MockEthProvide
 
 impl<T: Transaction, ChainSpec: EthChainSpec> BlockNumReader for MockEthProvider<T, ChainSpec> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
-        let best_block_number = self.best_block_number()?;
+        let highest_persisted_block_number = self.highest_persisted_block_number()?;
         let lock = self.headers.lock();
 
         Ok(lock
             .iter()
-            .find(|(_, header)| header.number == best_block_number)
+            .find(|(_, header)| header.number == highest_persisted_block_number)
             .map(|(hash, header)| ChainInfo { best_hash: *hash, best_number: header.number })
             .unwrap_or_default())
     }
 
-    fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+    fn highest_persisted_block_number(&self) -> ProviderResult<BlockNumber> {
         let lock = self.headers.lock();
         lock.iter()
             .max_by_key(|h| h.1.number)
@@ -536,8 +536,8 @@ impl<T: Transaction, ChainSpec: EthChainSpec> BlockNumReader for MockEthProvider
             .ok_or(ProviderError::BestBlockNotFound)
     }
 
-    fn last_block_number(&self) -> ProviderResult<BlockNumber> {
-        self.best_block_number()
+    fn highest_known_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.highest_persisted_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
