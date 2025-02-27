@@ -572,14 +572,10 @@ where
     /// if they are configured.
     pub async fn launch_with_debug_capabilities(
         self,
-    ) -> eyre::Result<
-        <DebugNodeLauncher as LaunchNode<
-            NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
-        >>::Node,
-    >
+    ) -> eyre::Result<<DebugNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Node>
     where
-        T: DebugNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-        DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
+        T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
+        DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
         let Self { builder, task_executor } = self;
 
