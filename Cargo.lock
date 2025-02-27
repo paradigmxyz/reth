@@ -9607,8 +9607,6 @@ dependencies = [
  "alloy-rpc-types-engine",
  "eyre",
  "reth-chainspec",
- "reth-db",
- "reth-engine-local",
  "reth-eth-wire-types",
  "reth-evm",
  "reth-network",
@@ -10357,6 +10355,7 @@ dependencies = [
 [[package]]
 name = "revm-scroll"
 version = "0.1.0"
+source = "git+https://github.com/scroll-tech/scroll-revm?branch=feat/update-sdk#259023401a6cc803a807b3e7266b6cbe490fd805"
 dependencies = [
  "auto_impl",
  "enumn",

@@ -13,9 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-db.workspace = true
 reth-chainspec.workspace = true
-reth-engine-local = { workspace = true, features = ["scroll-alloy-traits"] }
 reth-rpc-eth-types.workspace = true
 reth-eth-wire-types.workspace = true
 reth-evm = {workspace = true, features = ["scroll-alloy-traits"] }

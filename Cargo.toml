@@ -458,7 +458,7 @@ revm-context-interface = { version = "1.0.0-alpha.1", default-features = false }
 revm-database-interface = { version = "1.0.0-alpha.1", default-features = false }
 revm-specification = { version = "1.0.0-alpha.1", default-features = false }
 revm-optimism = { version = "1.0.0-alpha.1", default-features = false }
-revm-scroll = { path = "../scroll-revm" }
+revm-scroll = { git = "https://github.com/scroll-tech/scroll-revm", branch = "feat/update-sdk" }
 revm-inspectors = "0.15"
 
 # eth
