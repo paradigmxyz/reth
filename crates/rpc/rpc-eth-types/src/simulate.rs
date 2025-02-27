@@ -7,7 +7,9 @@ use alloy_rpc_types_eth::{
     Block, BlockTransactionsKind, Header,
 };
 use jsonrpsee_types::ErrorObject;
-use reth_primitives::{Recovered, RecoveredBlock};
+use reth_evm::{execute::BlockExecutionStrategy, Evm};
+use reth_execution_types::BlockExecutionResult;
+use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock};
 use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
@@ -46,6 +48,60 @@ impl ToRpcError for EthSimulateError {
     fn to_rpc_error(&self) -> ErrorObject<'static> {
         rpc_err(self.error_code(), self.to_string(), None)
     }
+}
+
+/// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
+/// given [`BlockExecutionStrategy`].
+///
+/// Returns all executed transactions and the result of the execution.
+#[expect(clippy::type_complexity)]
+pub fn execute_transactions<N, S, T>(
+    mut strategy: S,
+    calls: Vec<TransactionRequest>,
+    validation: bool,
+    default_gas_limit: u64,
+    chain_id: u64,
+    tx_resp_builder: &T,
+) -> Result<
+    (
+        Vec<Recovered<N::SignedTx>>,
+        BlockExecutionResult<N::Receipt>,
+        Vec<ExecutionResult<<S::Evm as Evm>::HaltReason>>,
+    ),
+    EthApiError,
+>
+where
+    N: NodePrimitives,
+    S: BlockExecutionStrategy<Primitives = N>,
+    EthApiError: From<S::Error> + From<<<S::Evm as Evm>::DB as Database>::Error>,
+    S::Evm: Evm<DB: Database<Error: Into<EthApiError>>>,
+    T: TransactionCompat<N::SignedTx>,
+{
+    strategy.apply_pre_execution_changes()?;
+
+    let mut transactions = Vec::with_capacity(calls.len());
+    let mut results = Vec::with_capacity(calls.len());
+    for call in calls {
+        // Resolve transaction, populate missing fields and enforce calls
+        // correctness.
+        let tx = resolve_transaction(
+            call,
+            validation,
+            default_gas_limit,
+            chain_id,
+            strategy.evm_mut().db_mut(),
+            tx_resp_builder,
+        )?;
+
+        strategy.execute_transaction_with_result_closure(tx.as_recovered_ref(), |result| {
+            results.push(result.clone())
+        })?;
+        transactions.push(tx);
+    }
+
+    let result = strategy.apply_post_execution_changes()?;
+
+    Ok((transactions, result, results))
 }
 
 /// Goes over the list of [`TransactionRequest`]s and populates missing fields trying to resolve

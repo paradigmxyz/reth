@@ -31,6 +31,7 @@ use reth_trie_sparse::{
 use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
+    ops::DerefMut,
     sync::{
         mpsc::{self, channel, Receiver, Sender},
         Arc,
@@ -707,7 +708,7 @@ where
     /// Handles request for proof prefetch.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
         let proof_targets = self.get_prefetch_proof_targets(targets);
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+        self.fetched_proof_targets.extend_ref(&proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiProofInput {
             config: self.config.clone(),
@@ -745,7 +746,7 @@ where
         });
 
         // For all non-subset remaining targets, we have to calculate the difference
-        for (hashed_address, target_storage) in &mut targets {
+        for (hashed_address, target_storage) in targets.deref_mut() {
             let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
                 // this means the account has not been fetched yet, so we must fetch everything
                 // associated with this account
@@ -780,7 +781,7 @@ where
     ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+        self.fetched_proof_targets.extend_ref(&proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiProofInput {
             config: self.config.clone(),
@@ -1280,12 +1281,6 @@ where
     let elapsed = started_at.elapsed();
 
     Ok(elapsed)
-}
-
-fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
-    for (address, slots) in other {
-        targets.entry(*address).or_default().extend(slots);
-    }
 }
 
 #[cfg(test)]
