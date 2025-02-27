@@ -70,6 +70,25 @@ impl Account {
             code_hash: bytecode_hash.unwrap_or(KECCAK_EMPTY),
         }
     }
+
+    /// Extracts the account information from a [`revm_state::Account`]
+    pub fn from_revm_account(revm_account: &revm_state::Account) -> Self {
+        Self {
+            balance: revm_account.info.balance,
+            nonce: revm_account.info.nonce,
+            bytecode_hash: if revm_account.info.code_hash == revm_primitives::KECCAK_EMPTY {
+                None
+            } else {
+                Some(revm_account.info.code_hash)
+            },
+        }
+    }
+}
+
+impl From<revm_state::Account> for Account {
+    fn from(value: revm_state::Account) -> Self {
+        Self::from_revm_account(&value)
+    }
 }
 
 /// Bytecode for an account.
