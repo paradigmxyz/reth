@@ -2,16 +2,14 @@
 
 use crate::tree::payload_processor::{
     executor::WorkloadExecutor,
-    multiproof::{
-        SparseTrieUpdate, StateRootComputeOutcome, StateRootConfig, StateRootResult,
-        StateRootTaskMetrics,
-    },
+    multiproof::{SparseTrieUpdate, StateRootConfig, StateRootTaskMetrics},
 };
+use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_provider::{BlockReader, DBProvider, DatabaseProviderFactory, StateCommitmentProvider};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
-    trie_cursor::InMemoryTrieCursorFactory, Nibbles,
+    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, Nibbles,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -33,14 +31,13 @@ const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<F> {
     /// Executor used to spawn subtasks.
+    #[allow(unused)] // TODO use this for spawning trie tasks
     pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
     pub(super) updates: mpsc::Receiver<SparseTrieEvent>,
     // TODO: ideally we need a way to create multiple readers on demand.
     pub(super) config: StateRootConfig<F>,
     pub(super) metrics: StateRootTaskMetrics,
-    /// How many sparse trie jobs should be executed in parallel
-    pub(super) max_concurrency: usize,
 }
 
 impl<F> SparseTrieTask<F>
@@ -52,7 +49,7 @@ where
     /// This waits for new incoming [`SparseTrieUpdate`].
     ///
     /// This concludes once the last trie update has been received.
-    pub(super) fn run(self) -> StateRootResult {
+    pub(super) fn run(self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
         let provider_ro = self.config.consistent_view.provider_ro()?;
         let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
@@ -100,16 +97,24 @@ where
         let (state_root, trie_updates) = trie.root_with_updates().map_err(|e| {
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
-        let elapsed = start.elapsed();
 
-        self.metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
+        self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
 
         Ok(StateRootComputeOutcome {
             state_root: (state_root, trie_updates),
             total_time: now.elapsed(),
-            time_from_last_update: elapsed,
         })
     }
+}
+
+/// Outcome of the state root computation, including the state root itself with
+/// the trie updates and the total time spent.
+#[derive(Debug)]
+pub(crate) struct StateRootComputeOutcome {
+    /// The computed state root and trie updates
+    pub state_root: (B256, TrieUpdates),
+    /// The total time spent calculating the state root
+    pub total_time: Duration,
 }
 
 /// Aliased for now to not introduce too many changes at once.

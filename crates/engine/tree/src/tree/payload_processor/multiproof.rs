@@ -12,12 +12,10 @@ use reth_provider::{
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut,
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
-    TrieInput,
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
+    HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
 };
-use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
+use reth_trie_parallel::proof::ParallelProof;
 use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -28,18 +26,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, error, trace};
-
-/// Outcome of the state root computation, including the state root itself with
-/// the trie updates and the total time spent.
-#[derive(Debug)]
-pub(crate) struct StateRootComputeOutcome {
-    /// The computed state root and trie updates
-    pub state_root: (B256, TrieUpdates),
-    /// The total time spent calculating the state root
-    pub total_time: Duration,
-    /// The time spent calculating the state root since the last state update
-    pub time_from_last_update: Duration,
-}
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -58,6 +44,7 @@ impl SparseTrieUpdate {
     }
 
     /// Construct update from multiproof.
+    #[cfg(test)]
     pub(super) fn from_multiproof(multiproof: MultiProof) -> Self {
         Self { multiproof, ..Default::default() }
     }
@@ -68,9 +55,6 @@ impl SparseTrieUpdate {
         self.multiproof.extend(other.multiproof);
     }
 }
-
-/// Result of the state root calculation
-pub(crate) type StateRootResult = Result<StateRootComputeOutcome, ParallelStateRootError>;
 
 /// Common configuration for state root tasks
 #[derive(Debug, Clone)]
@@ -138,15 +122,6 @@ pub(super) struct ProofCalculated {
     storage_targets: usize,
     /// The time taken to calculate the proof.
     elapsed: Duration,
-}
-
-/// Whether or not a proof was fetched due to a state update, or due to a prefetch command.
-#[derive(Debug)]
-pub(super) enum ProofFetchSource {
-    /// The proof was fetched due to a prefetch command.
-    Prefetch,
-    /// The proof was fetched due to a state update.
-    StateUpdate,
 }
 
 /// Handle to track proof calculation ordering
@@ -452,8 +427,6 @@ pub(super) struct StateRootTask2<Factory> {
     fetched_proof_targets: MultiProofTargets,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
-    /// Reference to the executor used to spawn workloads.
-    executor: WorkloadExecutor,
     /// Manages calculation of multiproofs.
     multiproof_manager: MultiproofManager<Factory>,
     /// State root task metrics
@@ -479,7 +452,6 @@ where
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
-            executor: executor.clone(),
             // TODO settings
             multiproof_manager: MultiproofManager::new(executor, 4),
             metrics: StateRootTaskMetrics::default(),
@@ -779,8 +751,13 @@ where
                             break
                         };
                     }
-                    StateRootMessage::ProofCalculationError(_) => {
-                        // TODO send error
+                    StateRootMessage::ProofCalculationError(err) => {
+                        error!(
+                            target: "engine::root",
+                            ?err,
+                            "proof calculation error"
+                        );
+                        // TODO send error to sparse trie
                         // return Err(ParallelStateRootError::Other(format!(
                         //     "could not calculate multiproof: {e:?}"
                         // )))
@@ -903,13 +880,12 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
-    use reth_evm::system_calls::StateChangeSource;
     use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
     use reth_testing_utils::generators::{self, Rng};
-    use reth_trie::{test_utils::state_root, TrieInput};
+    use reth_trie::TrieInput;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{
         Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot,

@@ -1,12 +1,11 @@
 //! Entrypoint for payload processing.
-#![allow(unused)]
 
 use crate::tree::{
     cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
     payload_processor::{
         executor::WorkloadExecutor,
         prewarm::{PrewarmContext, PrewarmTask, PrewarmTaskEvent},
-        sparse_trie::SparseTrieTask,
+        sparse_trie::{SparseTrieTask, StateRootComputeOutcome},
     },
     StateProviderBuilder, TreeConfig,
 };
@@ -155,9 +154,6 @@ where
             updates: sparse_trie_rx,
             config: state_root_config,
             metrics: self.trie_metrics.clone(),
-
-            // TODO settings
-            max_concurrency: 4,
         };
 
         // wire the sparse trie to the state root response receiver
@@ -259,7 +255,7 @@ pub(super) struct PayloadHandle {
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: PrewarmTaskHandle,
     /// Receiver for the state root
-    state_root: Option<mpsc::Receiver<StateRootResult>>,
+    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
 }
 
 impl PayloadHandle {
@@ -268,7 +264,7 @@ impl PayloadHandle {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
-    pub(super) fn state_root(&mut self) -> StateRootResult {
+    pub(super) fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()
             .expect("state_root is None")

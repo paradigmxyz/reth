@@ -65,7 +65,6 @@ impl WorkloadExecutorInner {
                 rt.handle().clone()
             })
         }
-        let handle = get_runtime_handle();
 
         Self { handle: get_runtime_handle(), rayon_pool: Arc::new(rayon_pool) }
     }
