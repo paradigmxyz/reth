@@ -1,7 +1,7 @@
 //! Merkle trie proofs.
 
 use crate::{Nibbles, TrieAccount};
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
@@ -14,11 +14,44 @@ use alloy_trie::{
     proof::{verify_proof, DecodedProofNodes, ProofNodes, ProofVerificationError},
     TrieMask, EMPTY_ROOT_HASH,
 };
+use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 /// Proof targets map.
-pub type MultiProofTargets = B256Map<B256Set>;
+#[derive(Deref, DerefMut, IntoIterator, Clone, PartialEq, Eq, Default, Debug)]
+pub struct MultiProofTargets(B256Map<B256Set>);
+
+impl FromIterator<(B256, B256Set)> for MultiProofTargets {
+    fn from_iter<T: IntoIterator<Item = (B256, B256Set)>>(iter: T) -> Self {
+        Self(B256Map::from_iter(iter))
+    }
+}
+
+impl MultiProofTargets {
+    /// Creates an empty `MultiProofTargets` with at least the specified capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(B256Map::with_capacity_and_hasher(capacity, Default::default()))
+    }
+
+    /// Extend multi proof targets with contents of other.
+    pub fn extend(&mut self, other: Self) {
+        self.extend_inner(Cow::Owned(other));
+    }
+
+    /// Extend multi proof targets with contents of other.
+    ///
+    /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.extend_inner(Cow::Borrowed(other));
+    }
+
+    fn extend_inner(&mut self, other: Cow<'_, Self>) {
+        for (hashed_address, hashed_slots) in other.iter() {
+            self.entry(*hashed_address).or_default().extend(hashed_slots);
+        }
+    }
+}
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
