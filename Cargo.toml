@@ -449,7 +449,7 @@ alloy-eip2124 = { version = "0.1.0", default-features = false }
 alloy-evm = { version = "0.1", default-features = false }
 alloy-primitives = { version = "0.8.20", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
-alloy-sol-types = "0.8.20"
+alloy-sol-types = { version = "0.8.20", default-features = false }
 alloy-trie = { version = "0.7", default-features = false }
 
 alloy-consensus = { version = "0.11.1", default-features = false }

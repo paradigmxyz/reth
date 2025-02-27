@@ -19,6 +19,7 @@ crates_to_check=(
     reth-evm
 
     ## ethereum
+    reth-evm-ethereum
     reth-ethereum-forks
     reth-ethereum-primitives
 
