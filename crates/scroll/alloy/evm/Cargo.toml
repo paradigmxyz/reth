@@ -23,7 +23,7 @@ revm.workspace = true
 revm-scroll.workspace = true
 
 # scroll
-reth-scroll-primitives = { workspace = true, features = ["serde-bincode-compat", "reth-codec"] }
+reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 
 # misc
 serde = { workspace = true, default-features = false, features = ["derive"], optional = true }
