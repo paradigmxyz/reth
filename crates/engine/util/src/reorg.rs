@@ -1,39 +1,36 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::{Header, Transaction};
-use alloy_eips::{
-    eip6110::DEPOSIT_REQUEST_TYPE,
-    eip7685::{Requests, RequestsOrHash},
-};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, PraguePayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState,
+    CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState,
     PayloadStatus,
 };
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, OnForkChoiceUpdated,
 };
-use reth_errors::{BlockExecutionError, RethError, RethResult};
+use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
-    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm, Evm, EvmError,
+    execute::BlockExecutionStrategy, state_change::post_block_withdrawals_balance_increments, ConfigureEvm
 };
-use reth_evm_ethereum::eip6110::accumulate_deposits_from_receipts;
+use reth_evm_ethereum::execute::{EthBlockExecutionInput, EthExecutionStrategy};
 use reth_payload_primitives::EngineApiMessageVersion;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt};
-use reth_primitives_traits::{block::Block as _, proofs, SignedTransaction};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody};
+use reth_primitives_traits::{block::Block as _, proofs};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{states::bundle_state::BundleRetention, State},
-    DatabaseCommit,
 };
 use std::{
-    collections::VecDeque, future::Future, pin::Pin, task::{ready, Context, Poll}
+    collections::VecDeque,
+    future::Future,
+    pin::Pin,
+    task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
 use tracing::*;
@@ -292,18 +289,35 @@ where
         .build();
 
     // Configure EVM
-    let mut evm = evm_config.evm_for_block(&mut state, &reorg_target.header);
+    let evm = evm_config.evm_for_block(&mut state, &reorg_target.header);
 
-    // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(chain_spec.clone());
+    let chain_spec_ref = ChainSpec::builder()
+        .chain(chain_spec.as_ref().chain())
+        .genesis(chain_spec.as_ref().genesis().clone())
+        .cancun_activated()
+        .build();
 
-    system_caller
-        .apply_pre_execution_changes(&reorg_target.header, &mut evm)?;
+    let mut strategy = EthExecutionStrategy::new(
+        evm,
+        EthBlockExecutionInput {
+            number: reorg_target.number,
+            timestamp: reorg_target.timestamp,
+            parent_hash: reorg_target.parent_hash,
+            gas_limit: reorg_target.gas_limit,
+            parent_beacon_block_root: reorg_target.parent_beacon_block_root,
+            beneficiary: reorg_target.beneficiary,
+            ommers: &[],
+            withdrawals: None,
+        },
+        &chain_spec_ref,
+        evm_config,
+    );
+
+    strategy.apply_pre_execution_changes()?;
 
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
     let mut transactions = Vec::new();
-    let mut receipts = Vec::new();
     let mut versioned_hashes = Vec::new();
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
@@ -314,54 +328,32 @@ where
         // Configure the environment for the block.
         let tx_recovered =
             tx.try_clone_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
-        let tx_env = evm_config.tx_env(tx_recovered);
-        let exec_result = match evm.transact(tx_env) {
+        let gas_used = match strategy.execute_transaction(tx_recovered.as_recovered_ref()) {
             Ok(result) => result,
-            Err(err) if err.is_invalid_tx_err() => {
-                trace!(target: "engine::stream::reorg", hash = %tx.tx_hash(), ?err, "Error executing transaction from next block");
-                continue
+            Err(err) => match err {
+                BlockExecutionError::Validation(BlockValidationError::InvalidTx { hash, error }) => {
+                    trace!(target: "engine::stream::reorg", hash = %hash, ?error, "Error executing transaction from next block");
+                    continue
+                },
+                _ => {
+                    // Treat error as fatal
+                    return Err(RethError::Execution(BlockExecutionError::other(err)));
+                }
             }
-            // Treat error as fatal
-            Err(error) => return Err(RethError::Execution(BlockExecutionError::other(error))),
         };
-        evm.db_mut().commit(exec_result.state);
+
+        cumulative_gas_used += gas_used;
 
         if let Some(blob_tx) = tx.as_eip4844() {
             sum_blob_gas_used += blob_tx.blob_gas();
             versioned_hashes.extend(blob_tx.blob_versioned_hashes.clone());
         }
 
-        cumulative_gas_used += exec_result.result.gas_used();
-        receipts.push(Receipt {
-            tx_type: tx.tx_type(),
-            success: exec_result.result.is_success(),
-            cumulative_gas_used,
-            logs: exec_result.result.into_logs().into_iter().collect(),
-        });
-
         // append transaction to the list of executed transactions
         transactions.push(tx);
     }
 
-    // Collect all EIP-7685 requests
-    let deposit_address = alloy_eips::eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS;
-    let mut requests = Requests::default();
-    let mut out = Vec::new();
-
-    accumulate_deposits_from_receipts(
-        deposit_address,
-        &receipts,
-        &mut out,
-    ).map_err(|err| RethError::Execution(BlockExecutionError::other(err)))?;
-    
-    if !out.is_empty() {
-        requests.push_request_with_type(DEPOSIT_REQUEST_TYPE, out);
-    }
-
-    requests.extend(system_caller
-        .apply_post_execution_changes(&mut evm)?);
-
-    drop(evm);
+    let result = strategy.apply_post_execution_changes()?;
 
     if let Some(withdrawals) = &reorg_target.body.withdrawals {
         state.increment_balances(post_block_withdrawals_balance_increments(
@@ -377,7 +369,7 @@ where
 
     let outcome: ExecutionOutcome = ExecutionOutcome::new(
         state.take_bundle(),
-        vec![receipts],
+        vec![result.receipts],
         reorg_target.number,
         Default::default(),
     );
@@ -389,8 +381,6 @@ where
         } else {
             (None, None)
         };
-
-    let requests_hash = Some(&requests).map(|requests| requests.requests_hash());
 
     let reorg_block = Block {
         header: Header {
@@ -417,7 +407,7 @@ where
             blob_gas_used,
             excess_blob_gas,
             state_root: state_provider.state_root(hashed_state)?,
-            requests_hash,
+            requests_hash: Some(&result.requests).map(|requests| requests.requests_hash()),
         },
         body: BlockBody {
             transactions,
@@ -433,18 +423,15 @@ where
             &reorg_block.into_block(),
         )
         .0,
+        // todo(onbjerg): how do we support execution requests?
         sidecar: reorg_target
             .header
             .parent_beacon_block_root
             .map(|root| {
-                ExecutionPayloadSidecar::v4(CancunPayloadFields {
+                ExecutionPayloadSidecar::v3(CancunPayloadFields {
                     parent_beacon_block_root: root,
                     versioned_hashes,
-                },
-                PraguePayloadFields {
-                    requests : RequestsOrHash::Requests(requests),
-                },
-            )
+                })
             })
             .unwrap_or_else(ExecutionPayloadSidecar::none),
     })
