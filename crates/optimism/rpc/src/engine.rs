@@ -14,7 +14,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, EngineValidator};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
-use reth_rpc_engine_api::{EngineApi, EngineApiServer};
+use reth_rpc_engine_api::EngineApi;
 use reth_transaction_pool::TransactionPool;
 use tracing::trace;
 
@@ -271,8 +271,7 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        EngineApiServer::fork_choice_updated_v2(&self.inner, fork_choice_state, payload_attributes)
-            .await
+        Ok(self.inner.fork_choice_updated_v2_metered(fork_choice_state, payload_attributes).await?)
     }
 
     async fn fork_choice_updated_v3(
@@ -280,36 +279,35 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        EngineApiServer::fork_choice_updated_v3(&self.inner, fork_choice_state, payload_attributes)
-            .await
+        Ok(self.inner.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
     }
 
     async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
-        EngineApiServer::get_payload_v2(&self.inner, payload_id).await
+        Ok(self.inner.get_payload_v2_metered(payload_id).await?)
     }
 
     async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV3> {
-        EngineApiServer::get_payload_v3(&self.inner, payload_id).await
+        Ok(self.inner.get_payload_v3_metered(payload_id).await?)
     }
 
     async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
-        EngineApiServer::get_payload_v4(&self.inner, payload_id).await
+        Ok(self.inner.get_payload_v4_metered(payload_id).await?)
     }
 
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
-        EngineApiServer::get_payload_bodies_by_hash_v1(&self.inner, block_hashes).await
+        Ok(self.inner.get_payload_bodies_by_hash_v1_metered(block_hashes).await?)
     }
 
     async fn get_payload_bodies_by_range_v1(
@@ -317,14 +315,14 @@ where
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
-        EngineApiServer::get_payload_bodies_by_range_v1(&self.inner, start, count).await
+        Ok(self.inner.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
     }
 
     async fn get_client_version_v1(
         &self,
         client: ClientVersionV1,
     ) -> RpcResult<Vec<ClientVersionV1>> {
-        EngineApiServer::get_client_version_v1(&self.inner, client).await
+        Ok(self.inner.get_client_version_v1(client)?)
     }
 
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
