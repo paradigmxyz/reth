@@ -10,7 +10,7 @@ use reth_evm::ConfigureEvmFor;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{FullNodeTypes, NodeTypesWithEngine, PrimitivesTy, TxTy};
 use reth_node_builder::{
-    components::PayloadServiceBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,
+    components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -23,7 +23,7 @@ impl EthereumPayloadBuilder {
     /// A helper method initializing [`reth_ethereum_payload_builder::EthereumPayloadBuilder`] with
     /// the given EVM config.
     pub fn build<Types, Node, Evm, Pool>(
-        &self,
+        self,
         evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
@@ -53,7 +53,7 @@ impl EthereumPayloadBuilder {
     }
 }
 
-impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
+impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for EthereumPayloadBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
@@ -70,7 +70,7 @@ where
         reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, EthEvmConfig>;
 
     async fn build_payload_builder(
-        &self,
+        self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {

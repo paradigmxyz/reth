@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use alloy_eips::eip2930::AccessList;
+use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
 pub use alloy_evm::evm::EvmFactory;
 use alloy_evm::{FromRecoveredTx, IntoTxEnv};
 use alloy_primitives::{Address, B256};
@@ -25,7 +25,6 @@ use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{context::TxEnv, inspector::Inspector};
 
-pub mod batch;
 pub mod either;
 /// EVM environment configuration.
 pub mod execute;
@@ -178,7 +177,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
+        attributes: NextBlockEnvAttributes<'_>,
     ) -> Result<EvmEnv<Self::Spec>, Self::Error>;
 }
 
@@ -187,7 +186,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
 /// [`ConfigureEvmEnv::next_evm_env`] and contains fields that can't be derived from the
 /// parent header alone (attributes that are determined by the CL.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NextBlockEnvAttributes {
+pub struct NextBlockEnvAttributes<'a> {
     /// The timestamp of the next block.
     pub timestamp: u64,
     /// The suggested fee recipient for the next block.
@@ -196,6 +195,10 @@ pub struct NextBlockEnvAttributes {
     pub prev_randao: B256,
     /// Block gas limit.
     pub gas_limit: u64,
+    /// The parent beacon block root.
+    pub parent_beacon_block_root: Option<B256>,
+    /// Withdrawals
+    pub withdrawals: Option<&'a Withdrawals>,
 }
 
 /// Abstraction over transaction environment.

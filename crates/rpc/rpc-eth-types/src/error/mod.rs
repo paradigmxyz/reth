@@ -8,7 +8,7 @@ use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError
 use alloy_sol_types::{ContractError, RevertReason};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
-use reth_errors::RethError;
+use reth_errors::{BlockExecutionError, RethError};
 use reth_primitives_traits::transaction::signed::RecoveryError;
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
@@ -252,6 +252,12 @@ impl From<RethError> for EthApiError {
             RethError::Provider(err) => err.into(),
             err => Self::Internal(err),
         }
+    }
+}
+
+impl From<BlockExecutionError> for EthApiError {
+    fn from(error: BlockExecutionError) -> Self {
+        Self::Internal(error.into())
     }
 }
 

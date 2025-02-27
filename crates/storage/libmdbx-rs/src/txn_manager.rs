@@ -232,7 +232,7 @@ mod read_transactions {
                                 // important because we store the pointer in the `active` list
                                 // and assume that it is unique.
                                 //
-                                // See https://erthink.github.io/libmdbx/group__c__transactions.html#gae9f34737fe60b0ba538d5a09b6a25c8d for more info.
+                                // See https://libmdbx.dqdkfa.ru/group__c__transactions.html#gae9f34737fe60b0ba538d5a09b6a25c8d for more info.
                                 let result = mdbx_result(unsafe { ffi::mdbx_txn_reset(txn_ptr) });
                                 if result.is_ok() {
                                     tx.set_timed_out();

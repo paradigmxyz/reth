@@ -112,7 +112,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let executor_provider = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Initialize the fetch client
-        info!(target: "reth::cli", target_block_number=self.to, "Downloading tip of block range");
+        info!(target: "reth::cli", target_block_number = self.to, "Downloading tip of block range");
         let fetch_client = network.fetch_client().await?;
 
         // fetch the header at `self.to`
