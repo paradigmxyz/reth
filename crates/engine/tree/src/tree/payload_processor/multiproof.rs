@@ -31,7 +31,7 @@ use tracing::{debug, error, trace};
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
-pub(super) struct SparseTrieUpdate {
+pub(crate) struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
     pub(crate) state: HashedPostState,
     /// The calculated multiproof
@@ -401,6 +401,8 @@ pub(crate) struct MultiProofTaskMetrics {
     pub sparse_trie_update_duration_histogram: Histogram,
     /// Histogram of sparse trie final update durations.
     pub sparse_trie_final_update_duration_histogram: Histogram,
+    /// Histogram of sparse trie total durations.
+    pub sparse_trie_total_duration_histogram: Histogram,
 
     /// Histogram of state updates received.
     pub state_updates_received_histogram: Histogram,

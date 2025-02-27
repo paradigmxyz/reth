@@ -99,22 +99,18 @@ where
         })?;
 
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
+        self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        Ok(StateRootComputeOutcome {
-            state_root: (state_root, trie_updates),
-            total_time: now.elapsed(),
-        })
+        Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 }
 
 /// Outcome of the state root computation, including the state root itself with
-/// the trie updates and the total time spent.
+/// the trie updates.
 #[derive(Debug)]
 pub(crate) struct StateRootComputeOutcome {
-    /// The computed state root and trie updates
-    pub state_root: (B256, TrieUpdates),
-    /// The total time spent calculating the state root
-    pub total_time: Duration,
+    pub state_root: B256,
+    pub trie_updates: TrieUpdates,
 }
 
 /// Aliased for now to not introduce too many changes at once.

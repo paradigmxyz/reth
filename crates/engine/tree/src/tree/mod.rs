@@ -15,6 +15,7 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
+use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
@@ -2386,7 +2387,8 @@ where
             &block,
             Box::new(handle.state_hook()),
         )?;
-        let execution_time = execution_start.elapsed();
+        let execution_finish = Instant::now();
+        let execution_time = execution_finish.duration_since(execution_start);
         trace!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
 
         // after executing the block we can stop executing transactions
@@ -2421,12 +2423,12 @@ where
             // background task or try to compute it in parallel
             if self.config.use_state_root_task() {
                 match handle.state_root() {
-                    Ok(res) => {
+                    Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         // we double check the state root here for good measure
                         // TODO: clean this ups
-                        if res.state_root.0 == block.header().state_root() {
+                        if state_root == block.header().state_root() {
                             maybe_state_root =
-                                Some((res.state_root.0, res.state_root.1, res.total_time))
+                                Some((state_root, trie_updates, execution_finish.elapsed()))
                         }
                     }
                     Err(error) => {
