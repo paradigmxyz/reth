@@ -61,25 +61,7 @@ where
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> OpExecutionData {
-        // todo: move to op-alloy
-        let block_hash = block.hash();
-        let block = block.into_block();
-        let sidecar = OpExecutionPayloadSidecar::from_block(&block);
-        let payload = match ExecutionPayload::from_block_unchecked(block_hash, &block).0 {
-            ExecutionPayload::V1(payload) => OpExecutionPayload::V1(payload),
-            ExecutionPayload::V2(payload) => OpExecutionPayload::V2(payload),
-            ExecutionPayload::V3(payload) if sidecar.isthmus().is_none() => {
-                OpExecutionPayload::V3(payload)
-            }
-            ExecutionPayload::V3(payload_inner) => OpExecutionPayload::V4(OpExecutionPayloadV4 {
-                payload_inner,
-                withdrawals_root: block
-                    .withdrawals_root()
-                    .expect("withdrawals present since payload V2"),
-            }),
-        };
-
-        OpExecutionData { payload, sidecar }
+        OpExecutionData::from_block_unchecked(&block)
     }
 }
 
