@@ -273,7 +273,7 @@ where
 
     /// Sends forkchoice update to the engine api with a zero finalized hash
     pub async fn update_optimistic_forkchoice(&self, hash: B256) -> eyre::Result<()> {
-        self.update_forkchoice(hash, B256::ZERO).await
+        self.update_forkchoice(B256::ZERO, hash).await
     }
 
     /// Submits a payload to the engine.
