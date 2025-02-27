@@ -2841,7 +2841,7 @@ where
         {
             maybe_state_root
         } else {
-            // fallback is to compute the state root regularily in sync
+            // fallback is to compute the state root regularly in sync
             debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())

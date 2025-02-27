@@ -13,6 +13,7 @@ use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_primitives::B256;
 use multiproof::*;
 use parking_lot::RwLock;
+use prewarm::PrewarmMetrics;
 use reth_evm::{
     system_calls::{OnStateHook, StateChangeSource},
     ConfigureEvm, ConfigureEvmEnvFor,
@@ -213,6 +214,7 @@ where
             cache: cache.clone(),
             cache_metrics: cache_metrics.clone(),
             provider: provider_builder,
+            metrics: PrewarmMetrics::default(),
         };
 
         let prewarm_task = PrewarmCacheTask::new(
@@ -364,7 +366,7 @@ impl ExecutionCache {
             .and_then(|cache| (cache.executed_block_hash() == parent_hash).then(|| cache.clone()))
     }
 
-    /// Clears the tracked cashe
+    /// Clears the tracked cache
     #[allow(unused)]
     pub(crate) fn clear(&self) {
         self.inner.write().take();

@@ -7,7 +7,9 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{keccak256, map::B256Set, B256};
+use metrics::{Gauge, Histogram};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnvFor, Evm};
+use reth_metrics::Metrics;
 use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, SignedTransaction};
 use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
@@ -15,6 +17,7 @@ use reth_trie::MultiProofTargets;
 use std::{
     collections::VecDeque,
     sync::mpsc::{channel, Receiver, Sender},
+    time::Instant,
 };
 use tracing::{debug, trace};
 
@@ -52,7 +55,7 @@ where
         + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
         + 'static,
 {
-    /// Intializes the task with the given transactions pending execution
+    /// Initializes the task with the given transactions pending execution
     pub(super) fn new(
         executor: WorkloadExecutor,
         execution_cache: ExecutionCache,
@@ -94,9 +97,11 @@ where
     /// Spawns the given transaction as a blocking task.
     fn spawn_transaction(&self, tx: Recovered<N::SignedTx>) {
         let ctx = self.ctx.clone();
+        let metrics = self.ctx.metrics.clone();
         let actions_tx = self.actions_tx.clone();
         let prepare_proof_targets = self.should_prepare_multi_proof_targets();
         self.executor.spawn_blocking(move || {
+            let start = Instant::now();
             // depending on whether this task needs he proof targets we either just transact or
             // transact and prepare the targets
             let proof_targets = if prepare_proof_targets {
@@ -106,6 +111,7 @@ where
                 None
             };
             let _ = actions_tx.send(PrewarmTaskEvent::Outcome { proof_targets });
+            metrics.total_runtime.record(start.elapsed());
         });
     }
 
@@ -123,6 +129,7 @@ where
 
     /// Save the state to the shared cache for the given block.
     fn save_cache(&self, state: BundleState) {
+        let start = Instant::now();
         let cache = SavedCache::new(
             self.ctx.header.hash(),
             self.ctx.cache.clone(),
@@ -138,6 +145,7 @@ where
 
         // update the cache for the executed block
         self.execution_cache.save_cache(cache);
+        self.ctx.metrics.cache_saving_duration.set(start.elapsed().as_secs_f64());
     }
 
     /// Executes the task.
@@ -145,6 +153,9 @@ where
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
     pub(super) fn run(mut self) {
+        self.ctx.metrics.transactions.set(self.pending.len() as f64);
+        self.ctx.metrics.transactions_histogram.record(self.pending.len() as f64);
+
         // spawn execution tasks.
         self.spawn_next();
 
@@ -184,6 +195,7 @@ pub(super) struct PrewarmContext<N: NodePrimitives, P, Evm> {
     pub(super) cache_metrics: CachedStateMetrics,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
+    pub(super) metrics: PrewarmMetrics,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -197,9 +209,11 @@ where
 {
     /// Transacts the the transactions and transform the state into [`MultiProofTargets`].
     fn prepare_multiproof_targets(self, tx: Recovered<N::SignedTx>) -> Option<MultiProofTargets> {
+        let metrics = self.metrics.clone();
         let state = self.transact(tx)?;
 
         let mut targets = MultiProofTargets::with_capacity(state.len());
+        let mut storage_targets = 0;
 
         for (addr, account) in state {
             // if the account was not touched, or if the account was selfdestructed, do not
@@ -224,8 +238,11 @@ where
                 storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
             }
 
+            storage_targets += storage_set.len();
             targets.insert(keccak256(addr), storage_set);
         }
+
+        metrics.prefetch_storage_targets.record(storage_targets as f64);
 
         Some(targets)
     }
@@ -238,7 +255,7 @@ where
     /// Note: Since here are no ordering guarantees this won't the state the tx produces when
     /// executed sequentially.
     fn transact(self, tx: Recovered<N::SignedTx>) -> Option<EvmState> {
-        let Self { header, evm_config, cache: caches, cache_metrics, provider } = self;
+        let Self { header, evm_config, cache: caches, cache_metrics, provider, metrics } = self;
         // Create the state provider inside the thread
         let state_provider = match provider.build() {
             Ok(provider) => provider,
@@ -269,6 +286,7 @@ where
 
         // create the tx env and reset nonce
         let tx_env = evm_config.tx_env(&tx);
+        let start = Instant::now();
         let res = match evm.transact(tx_env) {
             Ok(res) => res,
             Err(err) => {
@@ -282,6 +300,7 @@ where
                 return None
             }
         };
+        metrics.execution_duration.record(start.elapsed());
 
         Some(res.state)
     }
@@ -302,4 +321,22 @@ pub(super) enum PrewarmTaskEvent {
         /// The prepared proof targets based on the evm state outcome
         proof_targets: Option<MultiProofTargets>,
     },
+}
+
+/// Metrics for transactions prewarming.
+#[derive(Metrics, Clone)]
+#[metrics(scope = "sync.prewarm")]
+pub(crate) struct PrewarmMetrics {
+    /// The number of transactions to prewarm
+    pub(crate) transactions: Gauge,
+    /// A histogram of the number of transactions to prewarm
+    pub(crate) transactions_histogram: Histogram,
+    /// A histogram of duration per transaction prewarming
+    pub(crate) total_runtime: Histogram,
+    /// A histogram of EVM execution duration per transaction prewarming
+    pub(crate) execution_duration: Histogram,
+    /// A histogram for prefetch targets per transaction prewarming
+    pub(crate) prefetch_storage_targets: Histogram,
+    /// A histogram of duration for cache saving
+    pub(crate) cache_saving_duration: Gauge,
 }
