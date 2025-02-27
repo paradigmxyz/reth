@@ -25,7 +25,7 @@ use std::{
 use tracing::{debug, trace, trace_span};
 
 /// The level below which the sparse trie hashes are calculated in
-/// [`crate::tree::payload_processor::multiproof::update_sparse_trie`].
+/// [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// A task responsible for populating the sparse trie.

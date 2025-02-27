@@ -2751,7 +2751,7 @@ where
 
             self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
         } else {
-            self.payload_processor.spawn_prewarming(header, txs, provider_builder)
+            self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
         };
 
         // Use cached state provider before executing, used in execution after prewarming threads
@@ -2865,7 +2865,7 @@ where
         }
 
         // terminate prewarming task with good state output
-        handle.terminate_prewarming_execution(Some(output.state.clone()));
+        handle.terminate_caching(Some(output.state.clone()));
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {

@@ -4,7 +4,7 @@ use crate::tree::{
     cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
     payload_processor::{
         executor::WorkloadExecutor,
-        prewarm::{PrewarmContext, PrewarmTask, PrewarmTaskEvent},
+        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
         sparse_trie::{SparseTrieTask, StateRootComputeOutcome},
     },
     StateProviderBuilder, TreeConfig,
@@ -51,7 +51,7 @@ pub(super) struct PayloadProcessor<N, Evm> {
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
     /// Whether transactions should be executed on prewarming task.
-    use_prewarming: bool,
+    use_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
     _marker: std::marker::PhantomData<N>,
@@ -64,7 +64,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             execution_cache: Default::default(),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
-            use_prewarming: config.use_caching_and_prewarming(),
+            use_transaction_prewarming: config.use_caching_and_prewarming(),
             evm_config,
             _marker: Default::default(),
         }
@@ -137,12 +137,8 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let prewarm_handle = self.spawn_prewarming_with(
-            header,
-            transactions,
-            provider_builder,
-            to_multi_proof.clone(),
-        );
+        let prewarm_handle =
+            self.spawn_caching_with(header, transactions, provider_builder, to_multi_proof.clone());
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -166,10 +162,10 @@ where
         PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }
     }
 
-    /// Spawn prewarming exclusively.
+    /// Spawn cache prewarming exclusively.
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
-    pub(super) fn spawn_prewarming<P>(
+    pub(super) fn spawn_cache_exclusive<P>(
         &self,
         header: SealedHeaderFor<N>,
         transactions: VecDeque<Recovered<N::SignedTx>>,
@@ -183,19 +179,18 @@ where
             + Clone
             + 'static,
     {
-        let prewarm_handle =
-            self.spawn_prewarming_with(header, transactions, provider_builder, None);
+        let prewarm_handle = self.spawn_caching_with(header, transactions, provider_builder, None);
         PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None }
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
-    fn spawn_prewarming_with<P>(
+    fn spawn_caching_with<P>(
         &self,
         header: SealedHeaderFor<N>,
         mut transactions: VecDeque<Recovered<N::SignedTx>>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
-    ) -> PrewarmTaskHandle
+    ) -> CacheTaskHandle
     where
         P: BlockReader
             + StateProviderFactory
@@ -204,7 +199,7 @@ where
             + Clone
             + 'static,
     {
-        if !self.use_prewarming {
+        if !self.use_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
             // caching updates
             transactions.clear();
@@ -220,7 +215,7 @@ where
             provider: provider_builder,
         };
 
-        let prewarm_task = PrewarmTask::new(
+        let prewarm_task = PrewarmCacheTask::new(
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
@@ -233,7 +228,7 @@ where
         self.executor.spawn_blocking(move || {
             prewarm_task.run();
         });
-        PrewarmTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
+        CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
     }
 
     /// Returns the cache for the given parent hash.
@@ -253,7 +248,7 @@ pub(super) struct PayloadHandle {
     /// Channel for evm state updates
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
-    prewarm_handle: PrewarmTaskHandle,
+    prewarm_handle: CacheTaskHandle,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
 }
@@ -302,16 +297,16 @@ impl PayloadHandle {
         self.prewarm_handle.stop_prewarming_execution()
     }
 
-    /// Terminates the entire pre-warming task.
+    /// Terminates the entire caching task.
     ///
     /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_prewarming_execution(&mut self, block_output: Option<BundleState>) {
-        self.prewarm_handle.terminate_prewarming_execution(block_output)
+    pub(super) fn terminate_caching(&mut self, block_output: Option<BundleState>) {
+        self.prewarm_handle.terminate_caching(block_output)
     }
 }
 
-/// Access to the spawned [`PrewarmTask`].
-pub(crate) struct PrewarmTaskHandle {
+/// Access to the spawned [`PrewarmCacheTask`].
+pub(crate) struct CacheTaskHandle {
     /// The shared cache the task operates with.
     cache: ProviderCaches,
     /// Metrics for the caches
@@ -320,7 +315,7 @@ pub(crate) struct PrewarmTaskHandle {
     to_prewarm_task: Option<Sender<PrewarmTaskEvent>>,
 }
 
-impl PrewarmTaskHandle {
+impl CacheTaskHandle {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -333,17 +328,17 @@ impl PrewarmTaskHandle {
     /// Terminates the entire pre-warming task.
     ///
     /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_prewarming_execution(&mut self, block_output: Option<BundleState>) {
+    pub(super) fn terminate_caching(&mut self, block_output: Option<BundleState>) {
         self.to_prewarm_task
             .take()
             .map(|tx| tx.send(PrewarmTaskEvent::Terminate { block_output }).ok());
     }
 }
 
-impl Drop for PrewarmTaskHandle {
+impl Drop for CacheTaskHandle {
     fn drop(&mut self) {
         // Ensure we always terminate on drop
-        self.terminate_prewarming_execution(None);
+        self.terminate_caching(None);
     }
 }
 

@@ -18,10 +18,11 @@ use std::{
 };
 use tracing::{debug, trace};
 
-/// A task that executes transactions individually in parallel.
+/// A task that is responsible for caching and prewarming the cache by executing transactions
+/// individually in parallel.
 ///
 /// Note: This task runs until cancelled externally.
-pub(super) struct PrewarmTask<N: NodePrimitives, P, Evm> {
+pub(super) struct PrewarmCacheTask<N: NodePrimitives, P, Evm> {
     /// The executor used to spawn execution tasks.
     executor: WorkloadExecutor,
     /// Shared execution cache.
@@ -42,7 +43,7 @@ pub(super) struct PrewarmTask<N: NodePrimitives, P, Evm> {
     actions_tx: Sender<PrewarmTaskEvent>,
 }
 
-impl<N, P, Evm> PrewarmTask<N, P, Evm>
+impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
