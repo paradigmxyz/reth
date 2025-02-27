@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use alloy_primitives::{map::HashMap, B256};
 use reth_db::DatabaseError;
 use reth_trie::{

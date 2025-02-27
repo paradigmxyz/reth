@@ -70,6 +70,7 @@ mod metrics;
 mod payload_processor;
 mod persistence_state;
 pub mod root;
+// TODO(alexey): compare trie updates in `insert_block_inner`
 mod trie_updates;
 
 use crate::tree::{
@@ -82,7 +83,6 @@ pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use persistence_state::PersistenceState;
-use trie_updates::compare_trie_updates;
 
 /// Keeps track of the state of the tree.
 ///
