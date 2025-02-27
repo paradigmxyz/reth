@@ -637,8 +637,7 @@ impl ChainSpec {
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         use NamedChain as C;
 
-        let chain: C = self.chain.try_into().ok()?;
-        match chain.try_into().ok()? {
+        match self.chain.try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
@@ -649,8 +648,8 @@ impl ChainSpec {
             }
 
             // fallback for optimism chains
-            _ if chain.is_optimism() && chain.is_testnet() => Some(op_testnet_nodes()),
-            _ if chain.is_optimism() => Some(op_nodes()),
+            chain if chain.is_optimism() && chain.is_testnet() => Some(op_testnet_nodes()),
+            chain if chain.is_optimism() => Some(op_nodes()),
             _ => None,
         }
     }
