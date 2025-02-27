@@ -8,7 +8,8 @@ use std::{
 
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
 use alloy_primitives::map::HashSet;
-use alloy_rpc_types::engine::{ClientVersionV1, ExecutionData};
+use alloy_rpc_types::engine::ClientVersionV1;
+use alloy_rpc_types_engine::ExecutionData;
 use futures::TryFutureExt;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
@@ -702,7 +703,7 @@ where
         let engine_validator = engine_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
-            name: NAME_CLIENT.to_string(),
+            name: OP_NAME_CLIENT.to_string(),
             version: CARGO_PKG_VERSION.to_string(),
             commit: VERGEN_GIT_SHA.to_string(),
         };

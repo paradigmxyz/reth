@@ -122,7 +122,7 @@ where
     }
 
     /// Fetches the client version.
-    fn get_client_version_v1(
+    pub fn get_client_version_v1(
         &self,
         _client: ClientVersionV1,
     ) -> EngineApiResult<Vec<ClientVersionV1>> {
@@ -239,8 +239,8 @@ where
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
 
-    // Metrics version of `new_payload_v3`
-    async fn new_payload_v3_metered(
+    /// Metrics version of `new_payload_v3`
+    pub async fn new_payload_v3_metered(
         &self,
         payload: EngineT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
@@ -277,7 +277,7 @@ where
     }
 
     /// Metrics version of `new_payload_v4`
-    async fn new_payload_v4_metered(
+    pub async fn new_payload_v4_metered(
         &self,
         payload: EngineT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
@@ -334,7 +334,7 @@ where
     }
 
     /// Metrics version of `fork_choice_updated_v2`
-    async fn fork_choice_updated_v2_metered(
+    pub async fn fork_choice_updated_v2_metered(
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
@@ -360,7 +360,7 @@ where
     }
 
     /// Metrics version of `fork_choice_updated_v3`
-    async fn fork_choice_updated_v3_metered(
+    pub async fn fork_choice_updated_v3_metered(
         &self,
         state: ForkchoiceState,
         payload_attrs: Option<EngineT::PayloadAttributes>,
@@ -399,7 +399,7 @@ where
     }
 
     /// Metrics version of `get_payload_v1`
-    async fn get_payload_v1_metered(
+    pub async fn get_payload_v1_metered(
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV1> {
@@ -445,7 +445,7 @@ where
     }
 
     /// Metrics version of `get_payload_v2`
-    async fn get_payload_v2_metered(
+    pub async fn get_payload_v2_metered(
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV2> {
@@ -491,7 +491,7 @@ where
     }
 
     /// Metrics version of `get_payload_v3`
-    async fn get_payload_v3_metered(
+    pub async fn get_payload_v3_metered(
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV3> {
@@ -537,7 +537,7 @@ where
     }
 
     /// Metrics version of `get_payload_v4`
-    async fn get_payload_v4_metered(
+    pub async fn get_payload_v4_metered(
         &self,
         payload_id: PayloadId,
     ) -> EngineApiResult<EngineT::ExecutionPayloadEnvelopeV4> {
@@ -549,7 +549,7 @@ where
 
     /// Fetches all the blocks for the provided range starting at `start`, containing `count`
     /// blocks and returns the mapped payload bodies.
-    async fn get_payload_bodies_by_range_with<F, R>(
+    pub async fn get_payload_bodies_by_range_with<F, R>(
         &self,
         start: BlockNumber,
         count: u64,
@@ -627,7 +627,7 @@ where
     }
 
     /// Metrics version of `get_payload_bodies_by_range_v1`
-    async fn get_payload_bodies_by_range_v1_metered(
+    pub async fn get_payload_bodies_by_range_v1_metered(
         &self,
         start: BlockNumber,
         count: u64,
@@ -639,7 +639,7 @@ where
     }
 
     /// Called to retrieve execution payload bodies by hashes.
-    async fn get_payload_bodies_by_hash_with<F, R>(
+    pub async fn get_payload_bodies_by_hash_with<F, R>(
         &self,
         hashes: Vec<BlockHash>,
         f: F,
@@ -689,7 +689,7 @@ where
     }
 
     /// Metrics version of `get_payload_bodies_by_hash_v1`
-    async fn get_payload_bodies_by_hash_v1_metered(
+    pub async fn get_payload_bodies_by_hash_v1_metered(
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
@@ -1114,9 +1114,7 @@ where
         client: ClientVersionV1,
     ) -> RpcResult<Vec<ClientVersionV1>> {
         trace!(target: "rpc::engine", "Serving engine_getClientVersionV1");
-        let res = Self::get_client_version_v1(self, client);
-
-        Ok(res?)
+        Ok(Self::get_client_version_v1(self, client)?)
     }
 
     /// Handler for `engine_exchangeCapabilitiesV1`
