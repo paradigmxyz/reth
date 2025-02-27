@@ -74,6 +74,7 @@ std = [
     "secp256k1?/std",
     "revm-scroll/std",
     "revm-context/std",
+    "alloy-evm/std",
 ]
 reth-codec = [
     "dep:reth-codecs",

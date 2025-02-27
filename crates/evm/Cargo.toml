@@ -68,6 +68,7 @@ std = [
     "reth-storage-errors/std",
     "futures-util/std",
     "derive_more/std",
+    "scroll-alloy-evm/std",
 ]
 metrics = [
     "std",

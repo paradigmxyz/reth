@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-cli-util.workspace = true
+reth-engine-local = { workspace = true, features = ["scroll-alloy-traits"] }
 reth-provider.workspace = true
 
 # scroll

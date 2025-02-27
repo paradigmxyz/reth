@@ -16,7 +16,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-eth-wire-types.workspace = true
-reth-evm = {workspace = true, features = ["scroll-alloy-traits"] }
+reth-evm = { workspace = true, features = ["scroll-alloy-traits"] }
 reth-network.workspace = true
 reth-node-api.workspace = true
 reth-node-types.workspace = true

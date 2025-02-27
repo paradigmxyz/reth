@@ -28,7 +28,7 @@ pub struct ScrollBeaconConsensus<ChainSpec> {
 }
 
 impl<ChainSpec> ScrollBeaconConsensus<ChainSpec> {
-    /// Create a new instance of [`OpBeaconConsensus`]
+    /// Create a new instance of [`ScrollBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
