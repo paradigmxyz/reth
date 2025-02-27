@@ -1,9 +1,8 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 use op_alloy_rpc_types_engine::{
-    OpExecutionData, OpExecutionPayload, OpExecutionPayloadEnvelopeV3,
-    OpExecutionPayloadEnvelopeV4, OpExecutionPayloadSidecar, OpExecutionPayloadV4,
+    OpExecutionData, OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4,
     OpPayloadAttributes,
 };
 use reth_chainspec::ChainSpec;
