@@ -2722,6 +2722,78 @@ where
         let is_descendant_of_persisting_blocks =
             self.is_descendant_of_persisting_blocks(block.header());
 
+        let Some(provider_builder) = self.state_provider_builder(block.parent_hash())? else {
+            // TODO(mattsse): this is the same logic as the `state_provider` call above and should
+            // be unified
+            unreachable!()
+        };
+
+        // use prewarming background task
+        let header = block.clone_sealed_header();
+        let txs = block.clone_transactions_recovered().collect();
+        let handle = if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
+            // use background tasks for state root calc
+            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+
+            // Compute trie input
+            let trie_input_start = Instant::now();
+            let trie_input = self
+                .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+                .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+
+            self.metrics
+                .block_validation
+                .trie_input_duration
+                .set(trie_input_start.elapsed().as_secs_f64());
+
+            self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
+        } else {
+            self.payload_processor.spawn_prewarming(header, txs, provider_builder)
+        };
+
+        trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
+
+        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+        let execution_start = Instant::now();
+        let output = self.metrics.executor.execute_metered(
+            executor,
+            &block,
+            Box::new(handle.state_hook()),
+        )?;
+        let execution_time = execution_start.elapsed();
+        trace!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
+
+        // after executing the block we can stop executing transactions
+        handle.stop_prewarming_execution();
+
+        if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
+            // call post-block hook
+            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            return Err(err.into())
+        }
+
+        let hashed_state = self.provider.hashed_post_state(&output.state);
+
+        if let Err(err) = self
+            .payload_validator
+            .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
+        {
+            // call post-block hook
+            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            return Err(err.into())
+        }
+
+        trace!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
+
+        let root_time = Instant::now();
+
+        // We attempt to compute state root in parallel if we are currently not persisting
+        // anything to database. This is safe, because the database state cannot
+        // change until we finish parallel computation. It is important that nothing
+        // is being persisted as we are computing in parallel, because we initialize
+        // a different database transaction per thread and it might end up with a
+        // different view of the database.
+
         todo!()
         // // Atomic bool for letting the prewarm tasks know when to stop
         // let cancel_execution = ManualCancel::default();
@@ -2893,8 +2965,8 @@ where
         //             Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error)))
         // => {                 debug!(target: "engine", %error, "Parallel state root
         // computation failed consistency check, falling back");                 let (root,
-        // updates) =                     
-        // state_provider.state_root_with_updates(hashed_state.clone())?;                 
+        // updates) =
+        // state_provider.state_root_with_updates(hashed_state.clone())?;
         // (root, updates, root_time.elapsed())             }
         //             Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
         //         }

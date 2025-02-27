@@ -1,5 +1,4 @@
 //! Entrypoint for payload processing.
-#![allow(dead_code)] // TODO remove
 
 use crate::tree::{
     cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
@@ -14,18 +13,24 @@ use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_primitives::B256;
 use multiproof::*;
 use parking_lot::RwLock;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnvFor};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use reth_evm::{
+    system_calls::{OnStateHook, StateChangeSource},
+    ConfigureEvm, ConfigureEvmEnvFor,
+};
+use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
     StateProviderFactory, StateReader,
 };
-use reth_revm::db::BundleState;
+use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
-use std::sync::{
-    mpsc,
-    mpsc::{channel, Sender},
-    Arc,
+use std::{
+    collections::VecDeque,
+    sync::{
+        mpsc,
+        mpsc::{channel, Sender},
+        Arc,
+    },
 };
 
 pub(crate) mod executor;
@@ -44,10 +49,11 @@ pub(super) struct PayloadProcessor<N, Evm> {
     trie_metrics: StateRootTaskMetrics,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
+    /// Whether transactions should be executed on prewarming task.
+    use_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
-
-    _m: std::marker::PhantomData<N>,
+    _marker: std::marker::PhantomData<N>,
 }
 
 impl<N, Evm> PayloadProcessor<N, Evm> {
@@ -57,8 +63,9 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             execution_cache: Default::default(),
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
+            use_prewarming: config.use_caching_and_prewarming(),
             evm_config,
-            _m: Default::default(),
+            _marker: Default::default(),
         }
     }
 }
@@ -110,10 +117,11 @@ where
     /// canceling)
     pub(super) fn spawn<P>(
         &self,
-        block: RecoveredBlock<N::Block>,
+        header: SealedHeaderFor<N>,
+        transactions: VecDeque<Recovered<N::SignedTx>>,
+        provider_builder: StateProviderBuilder<N, P>,
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
-        provider_builder: StateProviderBuilder<N, P>,
     ) -> PayloadHandle
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
@@ -133,8 +141,12 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let prewarm_handle =
-            self.spawn_prewarming_with(block, provider_builder, to_multi_proof.clone());
+        let prewarm_handle = self.spawn_prewarming_with(
+            header,
+            transactions,
+            provider_builder,
+            to_multi_proof.clone(),
+        );
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -161,12 +173,15 @@ where
         PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }
     }
 
-    /// Spawn prewarming exclusively
+    /// Spawn prewarming exclusively.
+    ///
+    /// Returns a [`PayloadHandle`] to communicate with the task.
     pub(super) fn spawn_prewarming<P>(
         &self,
-        block: RecoveredBlock<N::Block>,
+        header: SealedHeaderFor<N>,
+        transactions: VecDeque<Recovered<N::SignedTx>>,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PrewarmTaskHandle
+    ) -> PayloadHandle
     where
         P: BlockReader
             + StateProviderFactory
@@ -175,13 +190,16 @@ where
             + Clone
             + 'static,
     {
-        self.spawn_prewarming_with(block, provider_builder, None)
+        let prewarm_handle =
+            self.spawn_prewarming_with(header, transactions, provider_builder, None);
+        PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None }
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
     fn spawn_prewarming_with<P>(
         &self,
-        block: RecoveredBlock<N::Block>,
+        header: SealedHeaderFor<N>,
+        mut transactions: VecDeque<Recovered<N::SignedTx>>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<StateRootMessage>>,
     ) -> PrewarmTaskHandle
@@ -193,23 +211,28 @@ where
             + Clone
             + 'static,
     {
-        let (cache, cache_metrics) = self.cache_for(block.header().parent_hash()).split();
+        if !self.use_prewarming {
+            // if no transactions should be executed we clear them but still spawn the task for
+            // caching updates
+            transactions.clear();
+        }
+
+        let (cache, cache_metrics) = self.cache_for(header.parent_hash()).split();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
-            header: block.clone_sealed_header(),
+            header,
             evm_config: self.evm_config.clone(),
             cache: cache.clone(),
             cache_metrics,
             provider: provider_builder,
         };
 
-        let txs = block.transactions_recovered().map(Recovered::cloned).collect();
         let prewarm_task = PrewarmTask::new(
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
-            txs,
+            transactions,
         );
         let to_prewarm_task = prewarm_task.actions_tx();
 
@@ -248,8 +271,19 @@ impl PayloadHandle {
         todo!()
     }
 
-    // TODO add state hook
-    // pub fn state_hook(&self) -> impl OnStateHook {
+    /// Returns a state hook to be used to send state updates to this task.
+    ///
+    /// If a multiproof task is spawned the hook will notify it about new states.
+    pub fn state_hook(&self) -> impl OnStateHook {
+        // convert the channel into a `StateHookSender` that emits an event on drop
+        let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
+
+        move |source: StateChangeSource, state: &EvmState| {
+            if let Some(sender) = &to_multi_proof {
+                let _ = sender.send(StateRootMessage::StateUpdate(source, state.clone()));
+            }
+        }
+    }
 
     /// Terminates the pre-warming transaction processing.
     ///

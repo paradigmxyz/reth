@@ -191,9 +191,3 @@ where
 
     Ok(elapsed)
 }
-
-fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
-    for (address, slots) in other {
-        targets.entry(*address).or_default().extend(slots);
-    }
-}

@@ -491,24 +491,6 @@ where
         self.tx.clone()
     }
 
-    /// Returns a [`StateHookSender`] that can be used to send state updates to this task.
-    pub(super) fn state_hook_sender(&self) -> StateHookSender {
-        StateHookSender::new(self.tx.clone())
-    }
-
-    /// Returns a state hook to be used to send state updates to this task.
-    pub(super) fn state_hook(&self) -> impl OnStateHook {
-        let state_hook = self.state_hook_sender();
-
-        move |source: StateChangeSource, state: &EvmState| {
-            if let Err(error) =
-                state_hook.send(StateRootMessage::StateUpdate(source, state.clone()))
-            {
-                error!(target: "engine::root", ?error, "Failed to send state update");
-            }
-        }
-    }
-
     /// Handles request for proof prefetch.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
         let proof_targets = self.get_prefetch_proof_targets(targets);
