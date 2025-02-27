@@ -2,7 +2,7 @@
 
 use crate::tree::payload_processor::{
     executor::WorkloadExecutor,
-    multiproof::{SparseTrieUpdate, StateRootConfig, StateRootTaskMetrics},
+    multiproof::{MultiProofConfig, MultiProofTaskMetrics, SparseTrieUpdate},
 };
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
@@ -36,8 +36,8 @@ pub(super) struct SparseTrieTask<F> {
     /// Receives updates from the state root task.
     pub(super) updates: mpsc::Receiver<SparseTrieEvent>,
     // TODO: ideally we need a way to create multiple readers on demand.
-    pub(super) config: StateRootConfig<F>,
-    pub(super) metrics: StateRootTaskMetrics,
+    pub(super) config: MultiProofConfig<F>,
+    pub(super) metrics: MultiProofTaskMetrics,
 }
 
 impl<F> SparseTrieTask<F>

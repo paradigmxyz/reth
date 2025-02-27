@@ -47,7 +47,7 @@ pub(super) struct PayloadProcessor<N, Evm> {
     /// The most recent cache used for execution.
     execution_cache: ExecutionCache,
     /// Metrics for trie operations
-    trie_metrics: StateRootTaskMetrics,
+    trie_metrics: MultiProofTaskMetrics,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
     /// Whether transactions should be executed on prewarming task.
@@ -130,9 +130,9 @@ where
     {
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task
-        let state_root_config = StateRootConfig::new_from_input(consistent_view, trie_input);
+        let state_root_config = MultiProofConfig::new_from_input(consistent_view, trie_input);
         let multi_proof_task =
-            StateRootTask2::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie);
+            MultiProofTask::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie);
 
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
@@ -194,7 +194,7 @@ where
         header: SealedHeaderFor<N>,
         mut transactions: VecDeque<Recovered<N::SignedTx>>,
         provider_builder: StateProviderBuilder<N, P>,
-        to_multi_proof: Option<Sender<StateRootMessage>>,
+        to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> PrewarmTaskHandle
     where
         P: BlockReader
@@ -251,7 +251,7 @@ where
 /// Handle to all the spawned tasks.
 pub(super) struct PayloadHandle {
     /// Channel for evm state updates
-    to_multi_proof: Option<Sender<StateRootMessage>>,
+    to_multi_proof: Option<Sender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: PrewarmTaskHandle,
     /// Receiver for the state root
@@ -281,7 +281,7 @@ impl PayloadHandle {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(StateRootMessage::StateUpdate(source, state.clone()));
+                let _ = sender.send(MultiProofMessage::StateUpdate(source, state.clone()));
             }
         }
     }

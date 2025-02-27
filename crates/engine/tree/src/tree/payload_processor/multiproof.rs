@@ -1,4 +1,4 @@
-//! State root task related functionality.
+//! multi proof task related functionality.
 
 use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::SparseTrieEvent};
 use alloy_primitives::map::HashSet;
@@ -56,9 +56,9 @@ impl SparseTrieUpdate {
     }
 }
 
-/// Common configuration for state root tasks
+/// Common configuration for multi proof tasks
 #[derive(Debug, Clone)]
-pub(super) struct StateRootConfig<Factory> {
+pub(super) struct MultiProofConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
     /// The sorted collection of cached in-memory intermediate trie nodes that
@@ -72,7 +72,7 @@ pub(super) struct StateRootConfig<Factory> {
     pub prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
-impl<Factory> StateRootConfig<Factory> {
+impl<Factory> MultiProofConfig<Factory> {
     /// Creates a new state root config from the consistent view and the trie input.
     pub(super) fn new_from_input(
         consistent_view: ConsistentDbView<Factory>,
@@ -87,9 +87,9 @@ impl<Factory> StateRootConfig<Factory> {
     }
 }
 
-/// Messages used internally by the state root task
+/// Messages used internally by the multi proof task.
 #[derive(Debug)]
-pub(super) enum StateRootMessage {
+pub(super) enum MultiProofMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution with its source
@@ -189,10 +189,10 @@ impl ProofSequencer {
 /// This should trigger once the block has been executed (after) the last state upddate has been
 /// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
-pub(super) struct StateHookSender(Sender<StateRootMessage>);
+pub(super) struct StateHookSender(Sender<MultiProofMessage>);
 
 impl StateHookSender {
-    pub(crate) const fn new(inner: Sender<StateRootMessage>) -> Self {
+    pub(crate) const fn new(inner: Sender<MultiProofMessage>) -> Self {
         Self(inner)
     }
 }
@@ -200,7 +200,7 @@ impl StateHookSender {
 impl Drop for StateHookSender {
     fn drop(&mut self) {
         // Send completion signal when the sender is dropped
-        let _ = self.0.send(StateRootMessage::FinishedStateUpdates);
+        let _ = self.0.send(MultiProofMessage::FinishedStateUpdates);
     }
 }
 
@@ -239,12 +239,12 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 /// Input parameters for spawning a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput<Factory> {
-    config: StateRootConfig<Factory>,
+    config: MultiProofConfig<Factory>,
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
-    state_root_message_sender: Sender<StateRootMessage>,
+    state_root_message_sender: Sender<MultiProofMessage>,
 }
 
 /// Manages concurrent multiproof calculations.
@@ -288,7 +288,7 @@ where
                 sequence_number = input.proof_sequence_number,
                 "No proof targets, sending empty multiproof back immediately"
             );
-            let _ = input.state_root_message_sender.send(StateRootMessage::EmptyProof {
+            let _ = input.state_root_message_sender.send(MultiProofMessage::EmptyProof {
                 sequence_number: input.proof_sequence_number,
                 state: input.hashed_state_update,
             });
@@ -362,7 +362,7 @@ where
 
             match result {
                 Ok(proof) => {
-                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
+                    let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
                             sequence_number: proof_sequence_number,
                             update: SparseTrieUpdate {
@@ -377,7 +377,7 @@ where
                 }
                 Err(error) => {
                     let _ = state_root_message_sender
-                        .send(StateRootMessage::ProofCalculationError(error.into()));
+                        .send(MultiProofMessage::ProofCalculationError(error.into()));
                 }
             }
         });
@@ -388,7 +388,7 @@ where
 
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
-pub(crate) struct StateRootTaskMetrics {
+pub(crate) struct MultiProofTaskMetrics {
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
     /// Histogram of proof calculation account targets.
@@ -405,8 +405,6 @@ pub(crate) struct StateRootTaskMetrics {
     pub state_updates_received_histogram: Histogram,
     /// Histogram of proofs processed.
     pub proofs_processed_histogram: Histogram,
-    /// Histogram of state root update iterations.
-    pub state_root_iterations_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -418,15 +416,14 @@ pub(crate) struct StateRootTaskMetrics {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 /// This feeds updates to the sparse trie task.
-// TODO(mattsse): rename to MultiProofTask
 #[derive(Debug)]
-pub(super) struct StateRootTask2<Factory> {
+pub(super) struct MultiProofTask<Factory> {
     /// Task configuration.
-    config: StateRootConfig<Factory>,
+    config: MultiProofConfig<Factory>,
     /// Receiver for state root related messages.
-    rx: Receiver<StateRootMessage>,
+    rx: Receiver<MultiProofMessage>,
     /// Sender for state root related messages.
-    tx: Sender<StateRootMessage>,
+    tx: Sender<MultiProofMessage>,
     /// Sender for state updates emitted by this type.
     to_sparse_trie: Sender<SparseTrieEvent>,
     /// Proof targets that have been already fetched.
@@ -435,18 +432,18 @@ pub(super) struct StateRootTask2<Factory> {
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
     multiproof_manager: MultiproofManager<Factory>,
-    /// State root task metrics
-    metrics: StateRootTaskMetrics,
+    /// multi proof task metrics
+    metrics: MultiProofTaskMetrics,
 }
 
-impl<Factory> StateRootTask2<Factory>
+impl<Factory> MultiProofTask<Factory>
 where
     Factory:
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
-    /// Creates a new state root task with the unified message channel
+    /// Creates a new multi proof task with the unified message channel
     pub(super) fn new(
-        config: StateRootConfig<Factory>,
+        config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
         to_sparse_trie: Sender<SparseTrieEvent>,
     ) -> Self {
@@ -459,12 +456,12 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(executor),
-            metrics: StateRootTaskMetrics::default(),
+            metrics: MultiProofTaskMetrics::default(),
         }
     }
 
-    /// Returns a [`Sender`] that can be used to send arbitrary [`StateRootMessage`]s to this task.
-    pub(super) fn state_root_message_sender(&self) -> Sender<StateRootMessage> {
+    /// Returns a [`Sender`] that can be used to send arbitrary [`MultiProofMessage`]s to this task.
+    pub(super) fn state_root_message_sender(&self) -> Sender<MultiProofMessage> {
         self.tx.clone()
     }
 
@@ -601,9 +598,9 @@ where
     /// sparse trie, updates the sparse trie, and eventually returns the state root.
     ///
     /// The lifecycle is the following:
-    /// 1. Either [`StateRootMessage::PrefetchProofs`] or [`StateRootMessage::StateUpdate`] is
+    /// 1. Either [`MultiProofMessage::PrefetchProofs`] or [`MultiProofMessage::StateUpdate`] is
     ///    received from the engine.
-    ///    * For [`StateRootMessage::StateUpdate`], the state update is hashed with
+    ///    * For [`MultiProofMessage::StateUpdate`], the state update is hashed with
     ///      [`evm_state_to_hashed_post_state`], and then (proof targets)[`MultiProofTargets`] are
     ///      extracted with [`get_proof_targets`].
     ///    * For both messages, proof targets are deduplicated according to `fetched_proof_targets`,
@@ -611,12 +608,12 @@ where
     ///      requested again.
     /// 2. Using the proof targets, a new multiproof is calculated using
     ///    [`MultiproofManager::spawn_or_queue`].
-    ///    * If the list of proof targets is empty, the [`StateRootMessage::EmptyProof`] message is
+    ///    * If the list of proof targets is empty, the [`MultiProofMessage::EmptyProof`] message is
     ///      sent back to this task along with the original state update.
-    ///    * Otherwise, the multiproof is calculated and the [`StateRootMessage::ProofCalculated`]
+    ///    * Otherwise, the multiproof is calculated and the [`MultiProofMessage::ProofCalculated`]
     ///      message is sent back to this task along with the resulting multiproof, proof targets
     ///      and original state update.
-    /// 3. Either [`StateRootMessage::EmptyProof`] or [`StateRootMessage::ProofCalculated`] is
+    /// 3. Either [`MultiProofMessage::EmptyProof`] or [`MultiProofMessage::ProofCalculated`] is
     ///    received.
     ///    * The multiproof is added to the (proof sequencer)[`ProofSequencer`].
     ///    * If the proof sequencer has a contiguous sequence of multiproofs in the same order as
@@ -625,9 +622,9 @@ where
     ///    updates associated with them, a [`SparseTrieUpdate`] is generated and sent to the sparse
     ///    trie task.
     /// 5. Steps above are repeated until this task receives a
-    ///    [`StateRootMessage::FinishedStateUpdates`].
-    ///    * Once this message is received, on every [`StateRootMessage::EmptyProof`] and
-    ///      [`StateRootMessage::ProofCalculated`] message, we check if there are any proofs are
+    ///    [`MultiProofMessage::FinishedStateUpdates`].
+    ///    * Once this message is received, on every [`MultiProofMessage::EmptyProof`] and
+    ///      [`MultiProofMessage::ProofCalculated`] message, we check if there are any proofs are
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
     ///      left to be revealed by checking the pending tasks.
     /// 6. This task exits after all pending proofs are processed.
@@ -639,15 +636,15 @@ where
         let mut updates_finished = false;
 
         // Timestamp when the first state update was received
-        let mut _first_update_time = None;
+        let mut first_update_time = None;
         // Timestamp when the last state update was received
-        let mut _last_update_time = None;
+        let mut last_update_time = None;
 
         loop {
             trace!(target: "engine::root", "entering main channel receiving loop");
             match self.rx.recv() {
                 Ok(message) => match message {
-                    StateRootMessage::PrefetchProofs(targets) => {
+                    MultiProofMessage::PrefetchProofs(targets) => {
                         trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
                         prefetch_proofs_received += 1;
                         debug!(
@@ -660,14 +657,14 @@ where
                         );
                         self.on_prefetch_proof(targets);
                     }
-                    StateRootMessage::StateUpdate(source, update) => {
+                    MultiProofMessage::StateUpdate(source, update) => {
                         trace!(target: "engine::root", "processing
         StateRootMessage::StateUpdate");
                         if updates_received == 0 {
-                            _first_update_time = Some(Instant::now());
+                            first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
-                        _last_update_time = Some(Instant::now());
+                        last_update_time = Some(Instant::now());
 
                         updates_received += 1;
                         debug!(
@@ -680,7 +677,7 @@ where
                         let next_sequence = self.proof_sequencer.next_sequence();
                         self.on_state_update(source, update, next_sequence);
                     }
-                    StateRootMessage::FinishedStateUpdates => {
+                    MultiProofMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
                         if self.is_done(
@@ -696,7 +693,7 @@ where
                             break
                         }
                     }
-                    StateRootMessage::EmptyProof { sequence_number, state } => {
+                    MultiProofMessage::EmptyProof { sequence_number, state } => {
                         trace!(target: "engine::root", "processing StateRootMessage::EmptyProof");
 
                         proofs_processed += 1;
@@ -721,7 +718,7 @@ where
                             break
                         }
                     }
-                    StateRootMessage::ProofCalculated(proof_calculated) => {
+                    MultiProofMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing
         StateRootMessage::ProofCalculated");
 
@@ -766,7 +763,7 @@ where
                             break
                         }
                     }
-                    StateRootMessage::ProofCalculationError(err) => {
+                    MultiProofMessage::ProofCalculationError(err) => {
                         error!(
                             target: "engine::root",
                             ?err,
@@ -789,6 +786,19 @@ where
                 }
             }
         }
+
+        debug!(
+            target: "engine::root",
+            total_updates = updates_received,
+            total_proofs = proofs_processed,
+            total_time =? first_update_time.map(|t|t.elapsed()),
+            time_from_last_update =?last_update_time.map(|t|t.elapsed()),
+            "All proofs processed, ending calculation"
+        );
+
+        // update total metrics on finish
+        self.metrics.state_updates_received_histogram.record(updates_received as f64);
+        self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
     }
 }
 
@@ -902,7 +912,7 @@ mod tests {
         updates
     }
 
-    fn create_state_root_config<F>(factory: F, input: TrieInput) -> StateRootConfig<F>
+    fn create_state_root_config<F>(factory: F, input: TrieInput) -> MultiProofConfig<F>
     where
         F: DatabaseProviderFactory<Provider: BlockReader>
             + StateCommitmentProvider
@@ -914,10 +924,10 @@ mod tests {
         let state_sorted = Arc::new(input.state.clone().into_sorted());
         let prefix_sets = Arc::new(input.prefix_sets);
 
-        StateRootConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
+        MultiProofConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
     }
 
-    fn create_test_state_root_task<F>(factory: F) -> StateRootTask2<F>
+    fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<F>
     where
         F: DatabaseProviderFactory<Provider: BlockReader>
             + StateCommitmentProvider
@@ -928,7 +938,7 @@ mod tests {
         let config = create_state_root_config(factory, TrieInput::default());
         let channel = channel();
 
-        StateRootTask2::new(config, executor, channel.0)
+        MultiProofTask::new(config, executor, channel.0)
     }
 
     #[test]
@@ -985,7 +995,7 @@ mod tests {
         let input = TrieInput::from_state(hashed_state);
         let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
         let state_sorted = Arc::new(input.state.clone().into_sorted());
-        let _config = StateRootConfig {
+        let _config = MultiProofConfig {
             consistent_view: ConsistentDbView::new(factory, None),
             nodes_sorted,
             state_sorted,

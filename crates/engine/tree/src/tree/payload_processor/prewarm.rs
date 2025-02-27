@@ -1,6 +1,8 @@
 use crate::tree::{
     cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
-    payload_processor::{executor::WorkloadExecutor, multiproof::StateRootMessage, ExecutionCache},
+    payload_processor::{
+        executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
+    },
     StateProviderBuilder,
 };
 use alloy_consensus::transaction::Recovered;
@@ -33,7 +35,7 @@ pub(super) struct PrewarmTask<N: NodePrimitives, P, Evm> {
     /// How many transactions should be executed in parallel
     max_concurrency: usize,
     /// Sender to emit evm state outcome messages, if any.
-    to_multi_proof: Option<Sender<StateRootMessage>>,
+    to_multi_proof: Option<Sender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
     /// Sender the transactions use to send their result back
@@ -54,7 +56,7 @@ where
         executor: WorkloadExecutor,
         execution_cache: ExecutionCache,
         ctx: PrewarmContext<N, P, Evm>,
-        to_multi_proof: Option<Sender<StateRootMessage>>,
+        to_multi_proof: Option<Sender<MultiProofMessage>>,
         pending: VecDeque<Recovered<N::SignedTx>>,
     ) -> Self {
         let (actions_tx, actions_rx) = channel();
@@ -114,7 +116,7 @@ where
     /// If configured and the tx returned proof targets, emit the targets the transaction produced
     fn send_multi_proof_targets(&self, targets: Option<MultiProofTargets>) {
         if let Some((proof_targets, to_multi_proof)) = targets.zip(self.to_multi_proof.as_ref()) {
-            let _ = to_multi_proof.send(StateRootMessage::PrefetchProofs(proof_targets));
+            let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(proof_targets));
         }
     }
 
