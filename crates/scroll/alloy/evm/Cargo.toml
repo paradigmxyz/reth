@@ -1,0 +1,33 @@
+[package]
+name = "scroll-alloy-evm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# alloy
+alloy-evm.workspace = true
+alloy-primitives.workspace = true
+
+# revm
+revm.workspace = true
+
+# scroll
+revm-scroll.workspace = true
+
+# scroll
+reth-scroll-primitives.workspace = true
+
+# misc
+serde = { workspace = true, default-features = false, features = ["derive"], optional = true }
+
+[features]
+std = ["alloy-evm/std", "alloy-primitives/std", "revm-scroll/std", "revm/std"]
+serde = ["dep:serde", "alloy-primitives/serde", "revm-scroll/serde", "revm/serde"]
