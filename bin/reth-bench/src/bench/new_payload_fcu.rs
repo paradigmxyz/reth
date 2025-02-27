@@ -11,17 +11,22 @@ use crate::{
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
+use alloy_consensus::{Block, BlockBody, Transaction};
 use alloy_primitives::B256;
-use alloy_provider::{network::AnyRpcBlock, Provider};
+use alloy_provider::{
+    network::{AnyHeader, AnyRpcBlock},
+    Provider,
+};
+use alloy_rpc_types::{BlockTransactions, Header as RpcHeader};
 use alloy_rpc_types_engine::{ExecutionPayload, ForkchoiceState};
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::SealedHeader;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
+
+use super::rpc_transaction::RpcTransaction;
 
 /// `reth benchmark new-payload-fcu` command
 #[derive(Debug, Parser)]
@@ -46,13 +51,13 @@ impl Command {
                 let block_res =
                     block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
-                let block = from_any_rpc_block(block);
-                let head_block_hash = block.hash();
+                let (header, versioned_hashes, payload) = from_any_rpc_block(block).unwrap();
+                let head_block_hash = header.hash;
                 let safe_block_hash = block_provider
-                    .get_block_by_number(block.number.saturating_sub(32).into(), false.into());
+                    .get_block_by_number(header.number.saturating_sub(32).into(), false.into());
 
                 let finalized_block_hash = block_provider
-                    .get_block_by_number(block.number.saturating_sub(64).into(), false.into());
+                    .get_block_by_number(header.number.saturating_sub(64).into(), false.into());
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
@@ -62,7 +67,14 @@ impl Command {
 
                 next_block += 1;
                 sender
-                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
+                    .send((
+                        header,
+                        versioned_hashes,
+                        payload,
+                        head_block_hash,
+                        safe_block_hash,
+                        finalized_block_hash,
+                    ))
                     .await
                     .unwrap();
             }
@@ -73,21 +85,15 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((block, head, safe, finalized)) = {
+        while let Some((header, versioned_hashes, payload, head, safe, finalized)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
             result
         } {
             // just put gas used here
-            let gas_used = block.gas_used;
-            let block_number = block.number;
-
-            let versioned_hashes: Vec<B256> =
-                block.body().blob_versioned_hashes_iter().copied().collect();
-            let parent_beacon_block_root = block.parent_beacon_block_root;
-            let (payload, _) =
-                ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+            let gas_used = header.gas_used;
+            let block_number = header.number;
 
             debug!(target: "reth-bench", ?block_number, "Sending payload",);
 
@@ -102,7 +108,7 @@ impl Command {
             let message_version = call_new_payload(
                 &auth_provider,
                 payload,
-                parent_beacon_block_root,
+                header.parent_beacon_block_root,
                 versioned_hashes,
             )
             .await?;
@@ -171,17 +177,41 @@ impl Command {
 }
 
 // TODO(mattsse): integrate in alloy
-pub(crate) fn from_any_rpc_block(block: AnyRpcBlock) -> SealedBlock {
-    let block = block.inner;
-    let block_hash = block.header.hash;
-    let block = block.try_map_transactions(|tx| tx.try_into()).unwrap();
+pub(crate) fn from_any_rpc_block(
+    block: AnyRpcBlock,
+) -> eyre::Result<(RpcHeader<AnyHeader>, Vec<B256>, ExecutionPayload)> {
+    let block = block.inner.try_map_transactions(|tx| {
+        // TODO: convert without json roundtrip
+        serde_json::to_value(tx).and_then(serde_json::from_value::<RpcTransaction>)
+    })?;
 
-    SealedBlock::from_sealed_parts(
-        SealedHeader::new(block.header.inner.into_header_with_defaults(), block_hash),
-        reth_primitives::BlockBody {
-            transactions: block.transactions.into_transactions().collect(),
-            ommers: Default::default(),
-            withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
-        },
+    let header = block.header.clone();
+
+    // Extract transactions
+    let transactions = match block.transactions {
+        BlockTransactions::Hashes(_) => {
+            return Err(eyre::eyre!("Block must include full transaction data. Send the eth_getBlockByHash request with full: `true`"));
+        }
+        BlockTransactions::Full(txs) => txs,
+        BlockTransactions::Uncle => {
+            return Err(eyre::eyre!("Cannot process uncle blocks"));
+        }
+    };
+
+    // Extract blob versioned hashes
+    let blob_versioned_hashes = transactions
+        .iter()
+        .filter_map(|tx| tx.blob_versioned_hashes().map(|v| v.to_vec()))
+        .flatten()
+        .collect::<Vec<_>>();
+    let execution_payload = ExecutionPayload::from_block_unchecked(
+        block.header.hash,
+        &Block::new(
+            block.header,
+            BlockBody { transactions, ommers: vec![], withdrawals: block.withdrawals },
+        ),
     )
+    .0;
+
+    Ok((header, blob_versioned_hashes, execution_payload))
 }

@@ -9,7 +9,7 @@ use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::B256;
 use derive_more::Constructor;
 use reth_evm::EvmEnv;
-use reth_primitives::{Receipt, RecoveredBlock};
+use reth_primitives::{Receipt, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::Block;
 
 /// Configured [`EvmEnv`] for a pending block.
@@ -32,7 +32,7 @@ pub enum PendingBlockEnvOrigin<B: Block = reth_primitives::Block, R = Receipt> {
     ///  - the timestamp
     ///  - the block number
     ///  - fees
-    DerivedFromLatest(B256),
+    DerivedFromLatest(SealedHeader<B::Header>),
 }
 
 impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
@@ -56,7 +56,7 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     pub fn state_block_id(&self) -> BlockId {
         match self {
             Self::ActualPending(_, _) => BlockNumberOrTag::Pending.into(),
-            Self::DerivedFromLatest(hash) => BlockId::Hash((*hash).into()),
+            Self::DerivedFromLatest(latest) => BlockId::Hash(latest.hash().into()),
         }
     }
 
@@ -68,7 +68,7 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     pub fn build_target_hash(&self) -> B256 {
         match self {
             Self::ActualPending(block, _) => block.header().parent_hash(),
-            Self::DerivedFromLatest(hash) => *hash,
+            Self::DerivedFromLatest(latest) => latest.hash(),
         }
     }
 }

@@ -303,7 +303,6 @@ mod tests {
     fn parse_env_filter_directives() {
         let temp_dir = tempfile::tempdir().unwrap();
 
-        // TODO: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("RUST_LOG", "info,evm=debug") };
         let reth = Cli::try_parse_args_from([
             "reth",

@@ -2,19 +2,14 @@ use alloy_consensus::{
     Block as PrimitiveBlock, BlockBody, Header as PrimitiveHeader,
     Transaction as PrimitiveTransaction,
 };
-use alloy_eips::{eip7702::SignedAuthorization, Encodable2718, Typed2718};
-use alloy_primitives::{bytes::BufMut, Bytes, ChainId, TxKind, B256, U256};
-use alloy_rpc_types::{
-    AccessList, Block as RpcBlock, BlockTransactions, Transaction as EthRpcTransaction,
-};
+use alloy_rpc_types::{Block as RpcBlock, BlockTransactions};
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
-use delegate::delegate;
 use eyre::{OptionExt, Result};
-use op_alloy_rpc_types::Transaction as OpRpcTransaction;
 use reth_cli_runner::CliContext;
-use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
+
+use super::rpc_transaction::RpcTransaction;
 
 /// Command for generating and sending an `engine_newPayload` request constructed from an RPC
 /// block.
@@ -58,63 +53,6 @@ enum Mode {
     Cast,
     /// Print the JSON payload. Can be piped into `cast` command if the block is small enough.
     Json,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum RpcTransaction {
-    Ethereum(EthRpcTransaction),
-    Optimism(OpRpcTransaction),
-}
-
-impl Typed2718 for RpcTransaction {
-    delegate! {
-        to match self {
-            Self::Ethereum(tx) => tx,
-            Self::Optimism(tx) => tx,
-        } {
-            fn ty(&self) -> u8;
-        }
-    }
-}
-
-impl PrimitiveTransaction for RpcTransaction {
-    delegate! {
-        to match self {
-            Self::Ethereum(tx) => tx,
-            Self::Optimism(tx) => tx,
-        } {
-            fn chain_id(&self) -> Option<ChainId>;
-            fn nonce(&self) -> u64;
-            fn gas_limit(&self) -> u64;
-            fn gas_price(&self) -> Option<u128>;
-            fn max_fee_per_gas(&self) -> u128;
-            fn max_priority_fee_per_gas(&self) -> Option<u128>;
-            fn max_fee_per_blob_gas(&self) -> Option<u128>;
-            fn priority_fee_or_price(&self) -> u128;
-            fn effective_gas_price(&self, base_fee: Option<u64>) -> u128;
-            fn is_dynamic_fee(&self) -> bool;
-            fn kind(&self) -> TxKind;
-            fn is_create(&self) -> bool;
-            fn value(&self) -> U256;
-            fn input(&self) -> &Bytes;
-            fn access_list(&self) -> Option<&AccessList>;
-            fn blob_versioned_hashes(&self) -> Option<&[B256]>;
-            fn authorization_list(&self) -> Option<&[SignedAuthorization]>;
-        }
-    }
-}
-
-impl Encodable2718 for RpcTransaction {
-    delegate! {
-        to match self {
-            Self::Ethereum(tx) => tx.inner,
-            Self::Optimism(tx) => tx.inner.inner,
-        } {
-            fn encode_2718_len(&self) -> usize;
-            fn encode_2718(&self, out: &mut dyn BufMut);
-        }
-    }
 }
 
 impl Command {

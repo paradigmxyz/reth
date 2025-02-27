@@ -19,7 +19,6 @@ reth-cli-util.workspace = true
 reth-fs-util.workspace = true
 reth-node-api.workspace = true
 reth-node-core.workspace = true
-reth-primitives = { workspace = true, features = ["alloy-compat"] }
 reth-primitives-traits.workspace = true
 reth-tracing.workspace = true
 
@@ -59,12 +58,12 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
-delegate = "0.13"
+delegate.workspace = true
 eyre.workspace = true
 thiserror.workspace = true
 
 # for writing data
-csv = "1.3.0"
+csv.workspace = true
 
 [dev-dependencies]
 reth-tracing.workspace = true
@@ -73,7 +72,6 @@ reth-tracing.workspace = true
 default = ["jemalloc"]
 
 asm-keccak = [
-    "reth-primitives/asm-keccak",
     "reth-node-core/asm-keccak",
     "alloy-primitives/asm-keccak",
 ]
