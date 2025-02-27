@@ -75,7 +75,7 @@ impl TxState {
 #[repr(u8)]
 pub enum SubPool {
     /// The queued sub-pool contains transactions that are not ready to be included in the next
-    /// block because they have missing or queued ancestors or the sender the lacks funds to
+    /// block because they have missing or queued ancestors or the sender lacks the funds to
     /// execute this transaction.
     Queued = 0,
     /// The base-fee sub-pool contains transactions that are not ready to be included in the next

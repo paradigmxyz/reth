@@ -79,30 +79,35 @@
 //! Listen for new transactions and print them:
 //!
 //! ```
-//! use reth_chainspec::MAINNET;
+//! use reth_chainspec::{ChainSpecProvider, EthereumHardforks, MAINNET};
 //! use reth_storage_api::StateProviderFactory;
 //! use reth_tasks::TokioTaskExecutor;
-//! use reth_chainspec::ChainSpecProvider;
-//! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
-//! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//! use reth_chainspec::EthereumHardforks;
-//! async fn t<C>(client: C)  where C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static{
+//! use reth_transaction_pool::{
+//!     blobstore::InMemoryBlobStore, Pool, TransactionPool, TransactionValidationTaskExecutor,
+//! };
+//! async fn t<C>(client: C)
+//! where
+//!     C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static,
+//! {
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
-//!         TransactionValidationTaskExecutor::eth(client, blob_store.clone(), TokioTaskExecutor::default()),
+//!         TransactionValidationTaskExecutor::eth(
+//!             client,
+//!             blob_store.clone(),
+//!             TokioTaskExecutor::default(),
+//!         ),
 //!         blob_store,
 //!         Default::default(),
 //!     );
-//!   let mut transactions = pool.pending_transactions_listener();
-//!   tokio::task::spawn( async move {
-//!      while let Some(tx) = transactions.recv().await {
-//!          println!("New transaction: {:?}", tx);
-//!      }
-//!   });
+//!     let mut transactions = pool.pending_transactions_listener();
+//!     tokio::task::spawn(async move {
+//!         while let Some(tx) = transactions.recv().await {
+//!             println!("New transaction: {:?}", tx);
+//!         }
+//!     });
 //!
-//!   // do something useful with the pool, like RPC integration
-//!
-//! # }
+//!     // do something useful with the pool, like RPC integration
+//! }
 //! ```
 //!
 //! Spawn maintenance task to keep the pool updated
@@ -136,7 +141,7 @@
 //!   // spawn a task that listens for new blocks and updates the pool's transactions, mined transactions etc..
 //!   tokio::task::spawn(maintain_transaction_pool_future(client, pool, stream, executor.clone(), Default::default()));
 //!
-//! # }
+//! }
 //! ```
 //!
 //! ## Feature Flags
@@ -298,26 +303,27 @@ where
     /// # Example
     ///
     /// ```
-    /// use reth_chainspec::MAINNET;
+    /// use reth_chainspec::{ChainSpecProvider, EthereumHardforks, MAINNET};
     /// use reth_storage_api::StateProviderFactory;
     /// use reth_tasks::TokioTaskExecutor;
-    /// use reth_chainspec::ChainSpecProvider;
     /// use reth_transaction_pool::{
     ///     blobstore::InMemoryBlobStore, Pool, TransactionValidationTaskExecutor,
     /// };
-    /// use reth_chainspec::EthereumHardforks;
-    /// # fn t<C>(client: C)  where C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static {
-    /// let blob_store = InMemoryBlobStore::default();
-    /// let pool = Pool::eth_pool(
-    ///     TransactionValidationTaskExecutor::eth(
-    ///         client,
-    ///         blob_store.clone(),
-    ///         TokioTaskExecutor::default(),
-    ///     ),
-    ///     blob_store,
-    ///     Default::default(),
-    /// );
-    /// # }
+    /// fn t<C>(client: C)
+    /// where
+    ///     C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static,
+    /// {
+    ///     let blob_store = InMemoryBlobStore::default();
+    ///     let pool = Pool::eth_pool(
+    ///         TransactionValidationTaskExecutor::eth(
+    ///             client,
+    ///             blob_store.clone(),
+    ///             TokioTaskExecutor::default(),
+    ///         ),
+    ///         blob_store,
+    ///         Default::default(),
+    ///     );
+    /// }
     /// ```
     pub fn eth_pool(
         validator: TransactionValidationTaskExecutor<
