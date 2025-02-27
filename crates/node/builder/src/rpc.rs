@@ -10,6 +10,7 @@ use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuild
 use alloy_primitives::map::HashSet;
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
+use jsonrpsee::RpcModule;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, NodeAddOns,
@@ -432,7 +433,7 @@ where
         + Unpin
         + 'static,
     EV: EngineValidatorBuilder<N>,
-    EB: EngineApiBuilder<N>,
+    EB: EngineApiBuilderExt<N>,
 {
     /// Launches the RPC servers with the given context and an additional hook for extending
     /// modules.
@@ -446,7 +447,7 @@ where
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
-        let engine_api = engine_api_builder.build_engine_api(&ctx).await?;
+        let engine_api = engine_api_builder.build_engine_api_as_rpc_module(&ctx).await?;
         let AddOnsContext { node, config, beacon_engine_handle, jwt_secret, engine_events } = ctx;
 
         info!(target: "reth::cli", "Engine API handler initialized");
@@ -542,7 +543,7 @@ where
         + Unpin
         + 'static,
     EV: EngineValidatorBuilder<N>,
-    EB: EngineApiBuilder<N>,
+    EB: EngineApiBuilderExt<N>,
 {
     type Handle = RpcHandle<N, EthApi>;
 
@@ -607,7 +608,7 @@ where
     N: FullNodeComponents,
     EthApi: EthApiTypes,
     EV: EngineValidatorBuilder<N>,
-    EB: EngineApiBuilder<N>,
+    EB: EngineApiBuilderExt<N>,
 {
     type Validator = EV::Validator;
 
@@ -652,13 +653,37 @@ where
 /// Builder for engine API RPC module.
 pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
     /// The engine API RPC module. Only required to be convertible to an [`jsonrpsee`] module.
-    type EngineApi: IntoEngineApiRpcModule + Send + Sync;
+    type EngineApi: Send + Sync;
 
     /// Builds the engine API.
     fn build_engine_api(
         self,
         ctx: &AddOnsContext<'_, Node>,
     ) -> impl Future<Output = eyre::Result<Self::EngineApi>> + Send;
+}
+
+/// Extends builder for engine API RPC module.
+pub trait EngineApiBuilderExt<Node: FullNodeComponents>: Send + Sync {
+    /// Builds the engine API and converts it into an [`RpcModule`].
+    ///
+    /// See also [`EngineApiBuilder::build_engine_api`].
+    fn build_engine_api_as_rpc_module(
+        self,
+        ctx: &AddOnsContext<'_, Node>,
+    ) -> impl Future<Output = eyre::Result<RpcModule<()>>> + Send;
+}
+
+impl<Node, T> EngineApiBuilderExt<Node> for T
+where
+    Node: FullNodeComponents,
+    T: EngineApiBuilder<Node, EngineApi: IntoEngineApiRpcModule>,
+{
+    async fn build_engine_api_as_rpc_module(
+        self,
+        ctx: &AddOnsContext<'_, Node>,
+    ) -> eyre::Result<RpcModule<()>> {
+        Ok(self.build_engine_api(ctx).await?.into_rpc_module())
+    }
 }
 
 /// Builder for basic [`EngineApi`] implementation.
