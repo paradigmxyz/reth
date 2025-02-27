@@ -2,13 +2,13 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run --release -p txpool-tracing -- node --http --ws --recipients 0x....,0x....
 //! ```
 //!
 //! If no recipients are specified, all transactions will be traced.
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use alloy_primitives::Address;
 use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
