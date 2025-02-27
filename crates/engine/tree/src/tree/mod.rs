@@ -3,24 +3,18 @@ use crate::{
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
-    tree::{
-        cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCacheBuilder},
-        metrics::EngineApiMetrics,
-    },
+    tree::{cached_state::CachedStateProvider, metrics::EngineApiMetrics},
 };
-use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
-    keccak256,
-    map::{B256Set, HashMap, HashSet},
+    map::{HashMap, HashSet},
     BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
-use cached_state::{ProviderCaches, SavedCache};
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
-use metrics::PrewarmThreadMetrics;
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
@@ -34,33 +28,21 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{
-    execute::BlockExecutorProvider,
-    system_calls::{NoopHook, OnStateHook},
-    ConfigureEvm, Evm,
-};
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_primitives_traits::{
     Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-    SignedTransaction,
 };
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
+    HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
-use reth_revm::{cancelled::ManualCancel, database::StateProviderDatabase};
+use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie::{
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState,
-    MultiProofTargets, TrieInput,
-};
-use reth_trie_db::DatabaseTrieCursorFactory;
+use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use root::{
-    StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
-};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -68,9 +50,9 @@ use std::{
     ops::Bound,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
-        Arc, RwLock,
+        Arc,
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -608,11 +590,6 @@ where
     engine_kind: EngineApiKind,
     /// The type responsible for processing new payloads
     payload_processor: PayloadProcessor<N, C>,
-
-    /// The most recent cache used for execution.
-    most_recent_cache: Option<SavedCache>,
-    /// Thread pool used for the state root task and prewarming
-    thread_pool: Arc<rayon::ThreadPool>,
 }
 
 impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
@@ -679,16 +656,6 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        let num_threads = root::rayon_thread_pool_size();
-
-        let thread_pool = Arc::new(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .thread_name(|i| format!("srt-worker-{}", i))
-                .build()
-                .expect("Failed to create proof worker thread pool"),
-        );
-
         let payload_processor =
             PayloadProcessor::new(WorkloadExecutor::new(), evm_config.clone(), &config);
 
@@ -712,8 +679,6 @@ where
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
             payload_processor,
-            most_recent_cache: None,
-            thread_pool,
         }
     }
 
@@ -2336,19 +2301,6 @@ where
         Ok(None)
     }
 
-    /// This fetches the most recent saved cache, using the hash of the block we are trying to
-    /// execute on top of.
-    ///
-    /// If the hash does not match the saved cache's hash, then the only saved cache doesn't contain
-    /// state useful for this block's execution, and we return `None`.
-    ///
-    /// If there is no cache saved, this returns `None`.
-    ///
-    /// This `take`s the cache, to avoid cloning the entire cache.
-    fn take_latest_cache(&mut self, parent_hash: B256) -> Option<SavedCache> {
-        self.most_recent_cache.take_if(|cache| cache.executed_block_hash() == parent_hash)
-    }
-
     fn insert_block(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2537,7 +2489,7 @@ where
         {
             maybe_state_root
         } else {
-            // fallback is to compute the state root regularily in sync
+            // fallback is to compute the state root regularly in sync
             debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
@@ -2643,144 +2595,6 @@ where
         Ok(input)
     }
 
-    /// Runs execution for a single transaction, spawning it in the prewarm threadpool.
-    #[allow(clippy::too_many_arguments)]
-    fn prewarm_transaction(
-        &self,
-        block: N::BlockHeader,
-        tx: Recovered<N::SignedTx>,
-        caches: ProviderCaches,
-        cache_metrics: CachedStateMetrics,
-        state_root_sender: Option<Sender<StateRootMessage>>,
-        cancel_execution: ManualCancel,
-        task_finished: Arc<RwLock<()>>,
-        metrics: PrewarmThreadMetrics,
-    ) -> Result<(), InsertBlockErrorKind> {
-        // Get the builder once, outside the thread
-        let Some(state_provider_builder) = self.state_provider_builder(block.parent_hash())? else {
-            trace!(
-                target: "engine::tree",
-                parent=%block.parent_hash(),
-                "Could not get state provider builder for prewarm",
-            );
-            return Ok(())
-        };
-
-        // clone and copy info required for execution
-        let evm_config = self.evm_config.clone();
-
-        // spawn task executing the individual tx
-        self.thread_pool.spawn(move || {
-            let thread_start = Instant::now();
-            let in_progress = task_finished.read().unwrap();
-
-            // Create the state provider inside the thread
-            let state_provider = match state_provider_builder.build() {
-                Ok(provider) => provider,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree",
-                        %err,
-                        "Failed to build state provider in prewarm thread"
-                    );
-                    return
-                }
-            };
-
-            // Use the caches to create a new provider with caching
-            let state_provider =
-                CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
-
-            let state_provider = StateProviderDatabase::new(&state_provider);
-
-            let mut evm_env = evm_config.evm_env(&block);
-
-            evm_env.cfg_env.disable_nonce_check = true;
-
-            // create a new executor and disable nonce checks in the env
-            let mut evm = evm_config.evm_with_env(state_provider, evm_env);
-
-            // create the tx env and reset nonce
-            let tx_env = evm_config.tx_env(&tx);
-
-            // exit early if execution is done
-            if cancel_execution.is_cancelled() {
-                return
-            }
-
-            let execution_start = Instant::now();
-            let res = match evm.transact(tx_env) {
-                Ok(res) => res,
-                Err(err) => {
-                    trace!(
-                        target: "engine::tree",
-                        %err,
-                        tx_hash=%tx.tx_hash(),
-                        sender=%tx.signer(),
-                        "Error when executing prewarm transaction",
-                    );
-                    return
-                }
-            };
-            metrics.execution_duration.record(execution_start.elapsed());
-
-            // execution no longer in progress, so we can drop the lock
-            drop(in_progress);
-
-            // if execution is finished there is no point to sending proof targets
-            if cancel_execution.is_cancelled() {
-                return
-            }
-
-            let Some(state_root_sender) = state_root_sender else { return };
-
-            let mut targets = MultiProofTargets::with_capacity(res.state.len());
-            let mut storage_targets = 0;
-            for (addr, account) in res.state {
-                // if the account was not touched, or if the account was selfdestructed, do not
-                // fetch proofs for it
-                //
-                // Since selfdestruct can only happen in the same transaction, we can skip
-                // prefetching proofs for selfdestructed accounts
-                //
-                // See: https://eips.ethereum.org/EIPS/eip-6780
-                if !account.is_touched() || account.is_selfdestructed() {
-                    continue
-                }
-
-                let mut storage_set =
-                    B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
-                for (key, slot) in account.storage {
-                    // do nothing if unchanged
-                    if !slot.is_changed() {
-                        continue
-                    }
-
-                    storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
-                }
-
-                storage_targets += storage_set.len();
-                targets.insert(keccak256(addr), storage_set);
-            }
-
-            debug!(
-                target: "engine::tree",
-                tx_hash = ?tx.tx_hash(),
-                targets = targets.len(),
-                storage_targets,
-                "Prefetching proofs for a transaction"
-            );
-            metrics.prefetch_storage_targets.record(storage_targets as f64);
-
-            let _ = state_root_sender.send(StateRootMessage::PrefetchProofs(targets));
-
-            // record final metrics
-            metrics.total_runtime.record(thread_start.elapsed());
-        });
-
-        Ok(())
-    }
-
     /// Handles an error that occurred while inserting a block.
     ///
     /// If this is a validation error this will mark the block as invalid.
@@ -2817,75 +2631,6 @@ where
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
         ))
-    }
-
-    /// Waits for the result on the input [`StateRootHandle`], and handles it, falling back to
-    /// the hash builder-based state root calculation if it fails.
-    fn handle_state_root_result(
-        &self,
-        state_root_handle: StateRootHandle,
-        state_root_task_config: StateRootConfig<P>,
-        sealed_block: &SealedBlock<N::Block>,
-        hashed_state: &HashedPostState,
-        state_provider: impl StateRootProvider,
-        root_time: Instant,
-    ) -> Result<(B256, TrieUpdates, Duration), InsertBlockErrorKind> {
-        match state_root_handle.wait_for_result() {
-            Ok(StateRootComputeOutcome {
-                state_root: (task_state_root, task_trie_updates),
-                time_from_last_update,
-                ..
-            }) => {
-                info!(
-                    target: "engine::tree",
-                    block = ?sealed_block.num_hash(),
-                    ?task_state_root,
-                    task_elapsed = ?time_from_last_update,
-                    "State root task finished"
-                );
-
-                if task_state_root != sealed_block.header().state_root() ||
-                    self.config.always_compare_trie_updates()
-                {
-                    if task_state_root != sealed_block.header().state_root() {
-                        debug!(target: "engine::tree", "Task state root does not match block state root");
-                    }
-
-                    let (regular_root, regular_updates) =
-                        state_provider.state_root_with_updates(hashed_state.clone())?;
-
-                    if regular_root == sealed_block.header().state_root() {
-                        let provider_ro = state_root_task_config.consistent_view.provider_ro()?;
-                        let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
-                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                            &state_root_task_config.nodes_sorted,
-                        );
-                        compare_trie_updates(
-                            in_memory_trie_cursor,
-                            task_trie_updates.clone(),
-                            regular_updates.clone(),
-                        )
-                        .map_err(ProviderError::from)?;
-                        if task_state_root != sealed_block.header().state_root() {
-                            return Ok((regular_root, regular_updates, time_from_last_update));
-                        }
-                    } else {
-                        debug!(target: "engine::tree",
-                            "Regular state root does not match block state root"
-                        );
-                    }
-                }
-
-                Ok((task_state_root, task_trie_updates, time_from_last_update))
-            }
-            Err(error) => {
-                info!(target: "engine::tree", ?error, "Failed to wait for state root task result");
-                // Fall back to sequential calculation
-                let (root, updates) =
-                    state_provider.state_root_with_updates(hashed_state.clone())?;
-                Ok((root, updates, root_time.elapsed()))
-            }
-        }
     }
 
     /// Attempts to find the header for the given block hash if it is canonical.
