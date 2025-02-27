@@ -2791,8 +2791,7 @@ where
 
             let Some(state_root_sender) = state_root_sender else { return };
 
-            let mut targets =
-                MultiProofTargets::with_capacity_and_hasher(res.state.len(), Default::default());
+            let mut targets = MultiProofTargets::with_capacity(res.state.len());
             let mut storage_targets = 0;
             for (addr, account) in res.state {
                 // if the account was not touched, or if the account was selfdestructed, do not
