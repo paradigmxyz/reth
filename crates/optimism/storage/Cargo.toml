@@ -12,12 +12,17 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 reth-trie-common.workspace = true
 reth-storage-api.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
+alloy-consensus.workspace = true
 revm.workspace = true
 
 [dev-dependencies]
@@ -36,4 +41,9 @@ std = [
     "revm/std",
     "reth-prune-types/std",
     "reth-stages-types/std",
+    "alloy-consensus/std",
+    "reth-chainspec/std",
+    "reth-optimism-forks/std",
+    "reth-optimism-primitives/std",
+    "reth-primitives-traits/std",
 ]
