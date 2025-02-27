@@ -108,7 +108,7 @@ pub(super) enum MultiProofMessage {
     ProofCalculationError(ProviderError),
     /// Signals state update stream end.
     ///
-    /// This is triggerred by block execution, indicating that no additional state updates are
+    /// This is triggered by block execution, indicating that no additional state updates are
     /// expected.
     FinishedStateUpdates,
 }
@@ -187,7 +187,7 @@ impl ProofSequencer {
 /// A wrapper for the sender that signals completion when dropped.
 ///
 /// This type is intended to be used in combination with the evm executor statehook.
-/// This should trigger once the block has been executed (after) the last state upddate has been
+/// This should trigger once the block has been executed (after) the last state update has been
 /// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
 pub(super) struct StateHookSender(Sender<MultiProofMessage>);
