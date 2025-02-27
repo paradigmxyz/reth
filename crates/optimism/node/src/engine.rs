@@ -1,9 +1,8 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 use op_alloy_rpc_types_engine::{
-    OpExecutionData, OpExecutionPayload, OpExecutionPayloadEnvelopeV3,
-    OpExecutionPayloadEnvelopeV4, OpExecutionPayloadSidecar, OpExecutionPayloadV4,
+    OpExecutionData, OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4,
     OpPayloadAttributes,
 };
 use reth_chainspec::ChainSpec;
@@ -61,25 +60,7 @@ where
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> OpExecutionData {
-        // todo: move to op-alloy
-        let block_hash = block.hash();
-        let block = block.into_block();
-        let sidecar = OpExecutionPayloadSidecar::from_block(&block);
-        let payload = match ExecutionPayload::from_block_unchecked(block_hash, &block).0 {
-            ExecutionPayload::V1(payload) => OpExecutionPayload::V1(payload),
-            ExecutionPayload::V2(payload) => OpExecutionPayload::V2(payload),
-            ExecutionPayload::V3(payload) if sidecar.isthmus().is_none() => {
-                OpExecutionPayload::V3(payload)
-            }
-            ExecutionPayload::V3(payload_inner) => OpExecutionPayload::V4(OpExecutionPayloadV4 {
-                payload_inner,
-                withdrawals_root: block
-                    .withdrawals_root()
-                    .expect("withdrawals present since payload V2"),
-            }),
-        };
-
-        OpExecutionData { payload, sidecar }
+        OpExecutionData::from_block_unchecked(&block)
     }
 }
 

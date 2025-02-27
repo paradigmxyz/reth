@@ -14,8 +14,9 @@ use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, EngineValidator};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
-use reth_rpc_engine_api::EngineApi;
+use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 use reth_transaction_pool::TransactionPool;
+use std::collections::HashSet;
 use tracing::trace;
 
 /// The list of all supported Engine capabilities available over the engine endpoint.
@@ -35,6 +36,13 @@ pub const OP_CAPABILITIES: &[&str] = &[
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByRangeV1",
 ];
+
+/// Returns [`EngineCapabilities`] supported by OP stack.
+pub fn op_capabilities() -> EngineCapabilities {
+    EngineCapabilities::new(
+        OP_CAPABILITIES.iter().map(|cap| cap.to_string()).collect::<HashSet<_>>(),
+    )
+}
 
 /// Extension trait that gives access to Optimism engine API RPC methods.
 ///

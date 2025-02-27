@@ -592,7 +592,7 @@ where
     pub fn build_with_auth_server<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
-        engine: RpcModule<()>,
+        engine: impl IntoEngineApiRpcModule,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
     ) -> (
         TransportRpcModules,
@@ -1205,7 +1205,9 @@ where
     ///   * `api_` namespace
     ///
     /// Note: This does _not_ register the `engine_` in this registry.
-    pub fn create_auth_module(&self, mut module: RpcModule<()>) -> AuthRpcModule {
+    pub fn create_auth_module(&self, engine_api: impl IntoEngineApiRpcModule) -> AuthRpcModule {
+        let mut module = engine_api.into_rpc_module();
+
         // also merge a subset of `eth_` handlers
         let eth_handlers = self.eth_handlers();
         let engine_eth = EngineEthApi::new(eth_handlers.api.clone(), eth_handlers.filter.clone());
