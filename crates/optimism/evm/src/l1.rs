@@ -28,6 +28,9 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 /// The function selector of the "setL1BlockValuesIsthmus" function in the `L1Block` contract.
 const L1_BLOCK_ISTHMUS_SELECTOR: [u8; 4] = hex!("098999be");
 
+/// The function selector of the "setL1BlockValuesInterop" function in the `L1Block` contract.
+const L1_BLOCK_INTEROP_SELECTOR: [u8; 4] = hex!("760ee04d");
+
 /// Extracts the [`L1BlockInfo`] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
 ///
@@ -68,7 +71,9 @@ pub fn parse_l1_info(input: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError>
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
     // calldata as an Ecotone hardfork L1BlockInfo transaction. Otherwise, we parse it as a
     // Bedrock hardfork L1BlockInfo transaction.
-    if input[0..4] == L1_BLOCK_ISTHMUS_SELECTOR {
+    if input[0..4] == L1_BLOCK_INTEROP_SELECTOR {
+        parse_l1_info_tx_ecotone(input[4..].as_ref())
+    } else if input[0..4] == L1_BLOCK_ISTHMUS_SELECTOR {
         parse_l1_info_tx_isthmus(input[4..].as_ref())
     } else if input[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
         parse_l1_info_tx_ecotone(input[4..].as_ref())
@@ -323,8 +328,8 @@ where
     // If the canyon hardfork is active at the current timestamp, and it was not active at the
     // previous block timestamp (heuristically, block time is not perfectly constant at 2s), and the
     // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
-    if chain_spec.is_canyon_active_at_timestamp(timestamp) &&
-        !chain_spec.is_canyon_active_at_timestamp(timestamp.saturating_sub(2))
+    if chain_spec.is_canyon_active_at_timestamp(timestamp)
+        && !chain_spec.is_canyon_active_at_timestamp(timestamp.saturating_sub(2))
     {
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 
@@ -342,7 +347,7 @@ where
 
         // Commit the create2 deployer account to the database.
         db.commit(HashMap::from_iter([(CREATE_2_DEPLOYER_ADDR, revm_acc)]));
-        return Ok(())
+        return Ok(());
     }
 
     Ok(())
