@@ -2807,15 +2807,15 @@ where
             if self.config.use_state_root_task() {
                 match handle.state_root() {
                     Ok(res) => {
-                        // we double check the state root here
+                        // we double check the state root here for good measure
                         // TODO: clean this ups
                         if res.state_root.0 == block.header().state_root() {
                             maybe_state_root =
                                 Some((res.state_root.0, res.state_root.1, res.total_time))
                         }
                     }
-                    Err(err) => {
-                        // TODO error handling
+                    Err(error) => {
+                        debug!(target: "engine", %error, "Background parallel state root computation failed");
                     }
                 }
             } else {
@@ -2832,9 +2832,6 @@ where
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                         debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                        let (root, updates) =
-                            state_provider.state_root_with_updates(hashed_state.clone())?;
-                        maybe_state_root = Some((root, updates, root_time.elapsed()));
                     }
                     Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
                 }
