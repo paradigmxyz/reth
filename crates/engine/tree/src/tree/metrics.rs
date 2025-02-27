@@ -69,10 +69,6 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_duration: Gauge,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Gauge,
-    /// Cache saving duration
-    pub(crate) cache_saving_duration: Gauge,
-    /// State root config creation duration
-    pub(crate) state_root_config_duration: Gauge,
 }
 
 impl BlockValidationMetrics {
