@@ -72,7 +72,7 @@ where
     }
 }
 
-/// Input for block execution.
+/// Context for OP block execution.
 #[derive(Debug, Clone, Copy)]
 pub struct OpBlockExecutionCtx {
     /// Parent block hash.
@@ -89,7 +89,7 @@ pub struct OpExecutionStrategy<'a, E: Evm, N: NodePrimitives, ChainSpec> {
     /// Receipt builder.
     receipt_builder: &'a dyn OpReceiptBuilder<N::SignedTx, E::HaltReason, Receipt = N::Receipt>,
 
-    /// Input for block execution.
+    /// Context for block execution.
     ctx: OpBlockExecutionCtx,
     /// The EVM used by strategy.
     evm: E,

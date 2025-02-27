@@ -173,6 +173,16 @@ pub struct ExecuteOutput<R = Receipt> {
 }
 
 /// Defines the strategy for executing a single block.
+///
+/// The current abstraction assumes that block execution consists of the following steps:
+/// 1. Apply pre-execution changes. Those might include system calls, irregular state transitions
+///    (DAO fork), etc.
+/// 2. Apply block transactions to the state.
+/// 3. Apply post-execution changes and finalize the state. This might include other system calls,
+///    block rewards, etc.
+///
+/// The output of [`BlockExecutionStrategy::apply_post_execution_changes`] is a
+/// [`BlockExecutionResult`] which contains all relevant information about the block execution.
 pub trait BlockExecutionStrategy {
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
@@ -216,7 +226,20 @@ pub trait BlockExecutionStrategy {
     fn evm_mut(&mut self) -> &mut Self::Evm;
 }
 
-/// A strategy factory that can create block execution strategies.
+/// A factory that can create block execution strategies.
+///
+/// This trait extends [`crate::ConfigureEvm`] and provides a way to construct a
+/// [`BlockExecutionStrategy`]. Strategy is expected to derive most of the context for block
+/// execution from the EVM (which includes [`revm::context::BlockEnv`]), and any additional context
+/// should be contained in configured [`ExecutionCtx`].
+///
+/// Strategy is required to provide a way to obtain [`ExecutionCtx`] from either a complete
+/// [`SealedBlock`] (in case of execution of an externally obtained block), or from a parent header
+/// along with [`NextBlockEnvAttributes`] (in the case of block building).
+///
+/// For more context on the strategy design, see the documentation for [`BlockExecutionStrategy`].
+///
+/// [`ExecutionCtx`]: BlockExecutionStrategyFactory::ExecutionCtx
 pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'static {
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;

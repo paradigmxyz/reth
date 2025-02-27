@@ -78,7 +78,7 @@ where
     }
 }
 
-/// Input for block execution.
+/// Context for Ethereum block execution.
 #[derive(Debug, Clone, Copy)]
 pub struct EthBlockExecutionCtx<'a> {
     /// Parent block hash.
@@ -97,7 +97,7 @@ pub struct EthExecutionStrategy<'a, Evm> {
     /// Reference to the [`ChainSpec`].
     chain_spec: &'a ChainSpec,
 
-    /// Input for block execution.
+    /// Context for block execution.
     ctx: EthBlockExecutionCtx<'a>,
     /// The EVM used by strategy.
     evm: Evm,
