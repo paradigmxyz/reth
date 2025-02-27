@@ -695,17 +695,14 @@ impl OpNetworkBuilder {
                     builder = builder.disable_discv4_discovery();
                 }
                 if !args.discovery.disable_discovery {
-                    let mut bootnodes = ctx.config().network.resolved_bootnodes()
-                    .or_else(|| ctx.chain_spec().bootnodes())
-                    .unwrap_or_default();
-                    
-                    if bootnodes.is_empty() {
-                    bootnodes = get_all_op_bootnodes(ctx);
-                    }
                     builder = builder.discovery_v5(
                         args.discovery.discovery_v5_builder(
                             rlpx_socket,
-                            bootnodes,
+                            ctx.config()
+                                .network
+                                .resolved_bootnodes()
+                                .or_else(|| ctx.chain_spec().bootnodes())
+                                .unwrap_or_default(),
                         ),
                     );
                 }
@@ -722,13 +719,6 @@ impl OpNetworkBuilder {
 
         Ok(network_config)
     }
-}
-
-pub fn get_all_op_bootnodes<Node>(ctx: &BuilderContext<Node>) -> Vec<Bootnode>
-where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
-{
-    ctx.config().chain.bootnodes().unwrap_or_default()
 }
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder

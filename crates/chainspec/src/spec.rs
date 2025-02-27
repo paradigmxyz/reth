@@ -636,17 +636,21 @@ impl ChainSpec {
     /// Returns the known bootnode records for the given chain.
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         use NamedChain as C;
-        use crate::spec::NamedChainExt;
 
-        let chain:C = self.chain.try_into().ok()?;
+        let chain: C = self.chain.try_into().ok()?;
         match chain.try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
-            C::Base => Some(base_nodes()),
-            C::Optimism => Some(op_nodes()),
-            _ if chain.is_optimism() => Some(op_testnet_nodes()),
-            _ if chain.is_testnet() => Some(base_testnet_nodes()),
+            // opstack uses the same bootnodes for all chains: <https://github.com/paradigmxyz/reth/issues/14603>
+            C::Base | C::Optimism | C::Unichain | C::World => Some(op_nodes()),
+            C::OptimismSepolia | C::BaseSepolia | C::UnichainSepolia | C::WorldSepolia => {
+                Some(op_testnet_nodes())
+            }
+
+            // fallback for optimism chains
+            _ if chain.is_optimism() && chain.is_testnet() => Some(op_testnet_nodes()),
+            _ if chain.is_optimism() => Some(op_nodes()),
             _ => None,
         }
     }
@@ -801,42 +805,6 @@ pub trait ChainSpecProvider: Send + Sync {
 
     /// Get an [`Arc`] to the chainspec.
     fn chain_spec(&self) -> Arc<Self::ChainSpec>;
-    fn named_chain(&self) -> Option<NamedChain> {
-        self.chain_spec()
-            .chain()
-            .try_into()
-            .ok()
-    }
-}
-
-pub trait NamedChainExt {
-    fn is_optimism(&self) -> bool;
-    fn is_testnet(&self) -> bool;
-}
-
-impl NamedChainExt for NamedChain {
-    fn is_optimism(&self) -> bool {
-        matches!(
-            self,
-            NamedChain::Optimism 
-            | NamedChain::OptimismSepolia 
-            | NamedChain::OptimismGoerli 
-            | NamedChain::OptimismKovan
-        )
-    }
-
-    fn is_testnet(&self) -> bool {
-        matches!(
-            self,
-            NamedChain::Sepolia 
-            | NamedChain::Holesky 
-            | NamedChain::BaseGoerli 
-            | NamedChain::BaseSepolia 
-            | NamedChain::OptimismSepolia 
-            | NamedChain::OptimismGoerli 
-            | NamedChain::OptimismKovan
-        )
-    }
 }
 
 /// A helper to build custom chain specs
