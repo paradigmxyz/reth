@@ -9,7 +9,6 @@ use reth_node_api::{
 };
 use reth_node_builder::rpc::{BasicEngineApiBuilder, EngineApiBuilder, EngineValidatorBuilder};
 use reth_optimism_rpc::engine::OP_CAPABILITIES;
-pub use reth_optimism_rpc::OpEngineApi;
 
 /// Builder for basic [`OpEngineApi`] implementation.
 #[derive(Debug, Default)]
