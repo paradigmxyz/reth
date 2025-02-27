@@ -1296,7 +1296,7 @@ mod tests {
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
-        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.gen()).collect();
+        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.r#gen()).collect();
         let mut updates = Vec::new();
 
         for _ in 0..updates_per_account {
@@ -1309,18 +1309,18 @@ mod tests {
                 let mut storage = HashMap::default();
                 if rng.gen_bool(0.7) {
                     for _ in 0..rng.gen_range(1..10) {
-                        let slot = U256::from(rng.gen::<u64>());
+                        let slot = U256::from(rng.r#gen::<u64>());
                         storage.insert(
                             slot,
-                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.gen::<u64>())),
+                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.r#gen::<u64>())),
                         );
                     }
                 }
 
                 let account = RevmAccount {
                     info: AccountInfo {
-                        balance: U256::from(rng.gen::<u64>()),
-                        nonce: rng.gen::<u64>(),
+                        balance: U256::from(rng.r#gen::<u64>()),
+                        nonce: rng.r#gen::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
                     },

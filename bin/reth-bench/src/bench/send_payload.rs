@@ -158,7 +158,9 @@ impl Command {
         // Extract transactions
         let transactions = match block.transactions {
             BlockTransactions::Hashes(_) => {
-                return Err(eyre::eyre!("Block must include full transaction data. Send the eth_getBlockByHash request with full: `true`"));
+                return Err(eyre::eyre!(
+                    "Block must include full transaction data. Send the eth_getBlockByHash request with full: `true`"
+                ));
             }
             BlockTransactions::Full(txs) => txs,
             BlockTransactions::Uncle => {

@@ -362,8 +362,8 @@ mod tests {
     #[test]
     fn test_generate_transaction() {
         let rng = thread_rng();
-        let mut gen = TransactionGenerator::new(rng);
-        let _tx = gen.transaction().into_legacy();
-        let _tx = gen.transaction().into_eip1559();
+        let mut tx_gen = TransactionGenerator::new(rng);
+        let _tx = tx_gen.transaction().into_legacy();
+        let _tx = tx_gen.transaction().into_eip1559();
     }
 }

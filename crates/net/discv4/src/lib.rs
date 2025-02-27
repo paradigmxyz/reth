@@ -2546,11 +2546,11 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: service.ping_expiration(),
-            enr_sq: Some(rng.gen()),
+            enr_sq: Some(rng.r#gen()),
         };
 
         let id = PeerId::random_with(&mut rng);
-        service.on_ping(ping, addr, id, rng.gen());
+        service.on_ping(ping, addr, id, rng.r#gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {
@@ -2578,11 +2578,11 @@ mod tests {
             from: rng_endpoint(&mut rng),
             to: rng_endpoint(&mut rng),
             expire: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 1,
-            enr_sq: Some(rng.gen()),
+            enr_sq: Some(rng.r#gen()),
         };
 
         let id = PeerId::random_with(&mut rng);
-        service.on_ping(ping, addr, id, rng.gen());
+        service.on_ping(ping, addr, id, rng.r#gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {

@@ -53,7 +53,7 @@ async fn can_sync() -> eyre::Result<()> {
 async fn e2e_test_send_transactions() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::thread_rng().r#gen();
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {:?}", seed);
 
@@ -90,7 +90,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
 async fn test_long_reorg() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::thread_rng().r#gen();
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {:?}", seed);
 
@@ -140,7 +140,7 @@ async fn test_long_reorg() -> eyre::Result<()> {
 async fn test_reorg_through_backfill() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
-    let seed: [u8; 32] = rand::thread_rng().gen();
+    let seed: [u8; 32] = rand::thread_rng().r#gen();
     let mut rng = StdRng::from_seed(seed);
     println!("Seed: {:?}", seed);
 

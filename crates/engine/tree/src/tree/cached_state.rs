@@ -615,7 +615,7 @@ mod tests {
         let mut rng = rand::thread_rng();
 
         let key = StorageKey::random();
-        let value = StorageValue::from(rng.gen::<u128>());
+        let value = StorageValue::from(rng.r#gen::<u128>());
         let (first_slot, _) = measure_allocation(|| {
             cache.insert_storage(key, Some(value));
         });
@@ -625,7 +625,7 @@ mod tests {
         let (test_slots, _) = measure_allocation(|| {
             for _ in 0..TOTAL_SLOTS {
                 let key = StorageKey::random();
-                let value = StorageValue::from(rng.gen::<u128>());
+                let value = StorageValue::from(rng.r#gen::<u128>());
                 cache.insert_storage(key, Some(value));
             }
         });

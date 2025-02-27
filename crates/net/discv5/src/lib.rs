@@ -608,7 +608,7 @@ pub fn get_lookup_target(
         // Clear.
         target[byte] &= !bits_to_randomize;
         // Randomize.
-        target[byte] |= rng.gen::<u8>() & bits_to_randomize;
+        target[byte] |= rng.r#gen::<u8>() & bits_to_randomize;
     }
     // Randomize remaining bytes.
     rng.fill_bytes(&mut target[byte + 1..]);
