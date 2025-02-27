@@ -26,7 +26,7 @@ reth-primitives-traits.workspace = true
 
 # scroll
 reth-scroll-forks.workspace = true
-reth-scroll-primitives = { workspace = true, features = ["serde"] }
+reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
 
 # revm
 revm.workspace = true

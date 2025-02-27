@@ -88,4 +88,4 @@ op = [
     "alloy-evm/op",
     "reth-primitives-traits/op",
 ]
-scroll-alloy-traits = ["scroll-alloy-evm"]
+scroll-alloy-traits = ["dep:scroll-alloy-evm", "reth-primitives-traits/scroll-alloy-traits"]

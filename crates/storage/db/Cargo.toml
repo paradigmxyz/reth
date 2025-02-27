@@ -94,7 +94,7 @@ op = [
     "reth-db-api/op",
     "reth-primitives-traits/op",
 ]
-scroll-alloy-traits = ["reth-db-api/scroll-alloy-traits"]
+scroll-alloy-traits = ["reth-db-api/scroll-alloy-traits", "reth-primitives-traits/scroll-alloy-traits"]
 disable-lock = []
 
 [[bench]]
