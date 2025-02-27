@@ -1,7 +1,7 @@
 //! Example for how to modify a block post-execution step. It credits beacon withdrawals with a
 //! custom mechanism instead of minting native tokens
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_sol_macro::sol;

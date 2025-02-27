@@ -1,3 +1,5 @@
+#![warn(unused_crate_dependencies)]
+
 use alloy_primitives::{Address, B256};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,

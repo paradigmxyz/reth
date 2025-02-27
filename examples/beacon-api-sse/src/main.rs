@@ -4,7 +4,7 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p beacon-api-sse -- node
 //! ```
 //!
@@ -15,7 +15,7 @@
 //!
 //! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api-bn.html#beacon-node-api>
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use alloy_rpc_types_beacon::events::PayloadAttributesEvent;
 use clap::Parser;
