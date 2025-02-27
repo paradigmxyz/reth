@@ -8,7 +8,7 @@ use reth_engine_tree::{
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
+    tree::{root::BasicStateRootTaskFactory, EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -105,8 +105,10 @@ where
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
+        let state_root_task_factory = BasicStateRootTaskFactory::new();
+
         let (to_tree_tx, from_tree) =
-            EngineApiTreeHandler::<N::Primitives, _, _, _, _, _>::spawn_new(
+            EngineApiTreeHandler::<N::Primitives, _, _, _, _, _, _>::spawn_new(
                 blockchain_db,
                 executor_factory,
                 consensus,
@@ -118,6 +120,7 @@ where
                 invalid_block_hook,
                 engine_kind,
                 evm_config,
+                state_root_task_factory,
             );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
