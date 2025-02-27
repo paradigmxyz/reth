@@ -60,8 +60,8 @@ futures.workspace = true
 tokio.workspace = true
 
 # misc
-ahash = "0.8"
-human_bytes = "0.4.1"
+ahash.workspace = true
+human_bytes.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 serde.workspace = true
@@ -75,9 +75,9 @@ fdlimit.workspace = true
 toml = { workspace = true, features = ["display"] }
 
 # tui
-comfy-table = "7.0"
-crossterm = "0.28.0"
-ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+comfy-table.workspace = true
+crossterm.workspace = true
+ratatui = { workspace = true, features = ["crossterm"] }
 
 # reth test-vectors
 proptest = { workspace = true, optional = true }

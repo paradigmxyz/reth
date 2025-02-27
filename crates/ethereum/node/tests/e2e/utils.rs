@@ -116,11 +116,9 @@ where
             pending.push(provider.send_tx_envelope(tx).await?);
         }
 
-        let (payload, _) = node.build_and_submit_payload().await?;
+        let payload = node.build_and_submit_payload().await?;
         if finalize {
-            node.engine_api
-                .update_forkchoice(payload.block().hash(), payload.block().hash())
-                .await?;
+            node.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
         } else {
             let last_safe = provider
                 .get_block_by_number(BlockNumberOrTag::Safe, false.into())
@@ -128,7 +126,7 @@ where
                 .unwrap()
                 .header
                 .hash;
-            node.engine_api.update_forkchoice(last_safe, payload.block().hash()).await?;
+            node.update_forkchoice(last_safe, payload.block().hash()).await?;
         }
 
         for pending in pending {

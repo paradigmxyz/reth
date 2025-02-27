@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-codecs-derive = { path = "./derive", default-features = false }
+reth-codecs-derive.workspace = true
 
 # eth
 alloy-consensus = { workspace = true, optional = true }
@@ -27,7 +27,7 @@ op-alloy-consensus = { workspace = true, optional = true }
 # misc
 bytes.workspace = true
 modular-bitfield.workspace = true
-visibility = { version = "0.1.1", optional = true }
+visibility = { workspace = true, optional = true }
 serde.workspace = true
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 

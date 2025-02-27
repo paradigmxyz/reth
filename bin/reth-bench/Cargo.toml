@@ -58,12 +58,12 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
-delegate = "0.13"
+delegate.workspace = true
 eyre.workspace = true
 thiserror.workspace = true
 
 # for writing data
-csv = "1.3.0"
+csv.workspace = true
 
 [dev-dependencies]
 reth-tracing.workspace = true
