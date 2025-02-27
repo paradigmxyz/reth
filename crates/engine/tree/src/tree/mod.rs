@@ -460,9 +460,9 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     fn new(
         provider_factory: P,
         historical: B256,
-        blocks: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
+        overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
     ) -> Self {
-        Self { provider_factory, historical, overlay: blocks }
+        Self { provider_factory, historical, overlay }
     }
 }
 
