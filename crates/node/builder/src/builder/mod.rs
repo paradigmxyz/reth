@@ -580,7 +580,7 @@ where
     ///
     /// This is equivalent to [`WithLaunchContext::launch`], but will enable the debugging features,
     /// if they are configured.
-    pub async fn launch_debug(
+    pub async fn launch_with_debug_capabilities(
         self,
     ) -> eyre::Result<
         <DebugNodeLauncher as LaunchNode<
