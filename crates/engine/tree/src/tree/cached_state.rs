@@ -67,15 +67,11 @@ impl<S> CachedStateProvider<S> {
 
         caches.insert_state(state_updates)?;
 
-        // set metrics
-        metrics.storage_cache_size.set(caches.total_storage_slots() as f64);
-        metrics.account_cache_size.set(caches.account_cache.entry_count() as f64);
-        metrics.code_cache_size.set(caches.code_cache.entry_count() as f64);
-
-        debug!(target: "engine::caching", update_latency=?start.elapsed(), "Updated state caches");
-
         // create a saved cache with the executed block hash, same metrics, and updated caches
         let saved_cache = SavedCache { hash: executed_block_hash, caches, metrics };
+        saved_cache.update_metrics();
+
+        debug!(target: "engine::caching", update_latency=?start.elapsed(), "Updated state caches");
 
         Ok(saved_cache)
     }
@@ -483,7 +479,7 @@ impl Default for ProviderCacheBuilder {
 
 /// A saved cache that has been used for executing a specific block, which has been updated for its
 /// execution.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct SavedCache {
     /// The hash of the block these caches were used to execute.
     hash: B256,
@@ -496,6 +492,15 @@ pub(crate) struct SavedCache {
 }
 
 impl SavedCache {
+    /// Creates a new instance with the internals
+    pub(super) const fn new(
+        hash: B256,
+        caches: ProviderCaches,
+        metrics: CachedStateMetrics,
+    ) -> Self {
+        Self { hash, caches, metrics }
+    }
+
     /// Returns the hash for this cache
     pub(crate) const fn executed_block_hash(&self) -> B256 {
         self.hash
@@ -504,6 +509,18 @@ impl SavedCache {
     /// Splits the cache into its caches and metrics, consuming it.
     pub(crate) fn split(self) -> (ProviderCaches, CachedStateMetrics) {
         (self.caches, self.metrics)
+    }
+
+    /// Returns the [`ProviderCaches`] belonging to the tracked hash.
+    pub(crate) fn cache(&self) -> &ProviderCaches {
+        &self.caches
+    }
+
+    /// Updates the metrics for the [`ProviderCaches`].
+    pub(crate) fn update_metrics(&self) {
+        self.metrics.storage_cache_size.set(self.caches.total_storage_slots() as f64);
+        self.metrics.account_cache_size.set(self.caches.account_cache.entry_count() as f64);
+        self.metrics.code_cache_size.set(self.caches.code_cache.entry_count() as f64);
     }
 }
 
