@@ -67,15 +67,11 @@ impl<S> CachedStateProvider<S> {
 
         caches.insert_state(state_updates)?;
 
-        // set metrics
-        metrics.storage_cache_size.set(caches.total_storage_slots() as f64);
-        metrics.account_cache_size.set(caches.account_cache.entry_count() as f64);
-        metrics.code_cache_size.set(caches.code_cache.entry_count() as f64);
-
-        debug!(target: "engine::caching", update_latency=?start.elapsed(), "Updated state caches");
-
         // create a saved cache with the executed block hash, same metrics, and updated caches
         let saved_cache = SavedCache { hash: executed_block_hash, caches, metrics };
+        saved_cache.update_metrics();
+
+        debug!(target: "engine::caching", update_latency=?start.elapsed(), "Updated state caches");
 
         Ok(saved_cache)
     }
@@ -518,6 +514,13 @@ impl SavedCache {
     /// Returns the [`ProviderCaches`] belonging to the tracked hash.
     pub(crate) fn cache(&self) -> &ProviderCaches {
         &self.caches
+    }
+
+    /// Updates the metrics for the [`ProviderCaches`].
+    pub(crate) fn update_metrics(&self) {
+        self.metrics.storage_cache_size.set(self.caches.total_storage_slots() as f64);
+        self.metrics.account_cache_size.set(self.caches.account_cache.entry_count() as f64);
+        self.metrics.code_cache_size.set(self.caches.code_cache.entry_count() as f64);
     }
 }
 

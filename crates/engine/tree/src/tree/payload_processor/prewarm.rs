@@ -14,7 +14,7 @@ use std::{
     collections::VecDeque,
     sync::mpsc::{channel, Receiver, Sender},
 };
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// A task that executes transactions individually in parallel.
 ///
@@ -72,6 +72,7 @@ where
         }
     }
 
+    /// Returns the sender that can communicate with this task.
     pub(super) fn actions_tx(&self) -> Sender<PrewarmTaskEvent> {
         self.actions_tx.clone()
     }
@@ -128,7 +129,9 @@ where
             return
         }
 
-        // TODO: update metrics
+        cache.update_metrics();
+
+        debug!(target: "engine::caching", "Updated state caches");
 
         // update the cache for the executed block
         self.execution_cache.save_cache(cache);
