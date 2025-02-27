@@ -14,7 +14,8 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
-    execute::BlockExecutionStrategy, state_change::post_block_withdrawals_balance_increments, ConfigureEvm
+    execute::BlockExecutionStrategy, state_change::post_block_withdrawals_balance_increments,
+    ConfigureEvm,
 };
 use reth_evm_ethereum::execute::{EthBlockExecutionInput, EthExecutionStrategy};
 use reth_payload_primitives::EngineApiMessageVersion;
@@ -331,15 +332,18 @@ where
         let gas_used = match strategy.execute_transaction(tx_recovered.as_recovered_ref()) {
             Ok(result) => result,
             Err(err) => match err {
-                BlockExecutionError::Validation(BlockValidationError::InvalidTx { hash, error }) => {
+                BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                    hash,
+                    error,
+                }) => {
                     trace!(target: "engine::stream::reorg", hash = %hash, ?error, "Error executing transaction from next block");
                     continue
-                },
+                }
                 _ => {
                     // Treat error as fatal
                     return Err(RethError::Execution(BlockExecutionError::other(err)));
                 }
-            }
+            },
         };
 
         cumulative_gas_used += gas_used;
