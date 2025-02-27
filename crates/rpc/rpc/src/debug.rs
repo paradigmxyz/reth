@@ -649,7 +649,7 @@ where
                 let state = state_provider
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
-                Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
+                Ok(ExecutionWitness { state, codes, keys })
             })
             .await
     }
