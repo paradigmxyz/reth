@@ -9,17 +9,18 @@ use alloy_primitives::B256;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_errors::RethError;
+use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
-    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm, ConfigureEvmEnv, Evm, EvmEnv, EvmError, HaltReasonFor, InvalidTxError,
-    NextBlockEnvAttributes,
+    execute::{BlockExecutionStrategy, BlockExecutionStrategyFactory},
+    ConfigureEvmEnv, Evm, NextBlockEnvAttributes,
 };
-use reth_primitives::{InvalidTransactionError, RecoveredBlock};
+use reth_node_api::NodePrimitives;
+use reth_primitives::{InvalidTransactionError, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::Receipt;
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
-    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
+    BlockExecutionResult, BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock,
+    ProviderError, ProviderHeader, ProviderReceipt, ProviderTx, ReceiptProvider,
+    StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -30,13 +31,7 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
     TransactionPool,
 };
-use revm::{
-    context::BlockEnv,
-    context_interface::{
-        result::{ExecutionResult, ResultAndState},
-        Block,
-    },
-};
+use revm::{context::BlockEnv, context_interface::Block};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::debug;
@@ -55,9 +50,12 @@ pub trait LoadPendingBlock:
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-        Evm: ConfigureEvm<
-            Header = ProviderHeader<Self::Provider>,
-            Transaction = ProviderTx<Self::Provider>,
+        Evm: BlockExecutionStrategyFactory<
+            Primitives: NodePrimitives<
+                BlockHeader = ProviderHeader<Self::Provider>,
+                SignedTx = ProviderTx<Self::Provider>,
+                Receipt = ProviderReceipt<Self::Provider>,
+            >,
         >,
     >
 {
@@ -69,7 +67,7 @@ pub trait LoadPendingBlock:
         &self,
     ) -> &Mutex<Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>>;
 
-    /// Configures the [`EvmEnv`] for the pending block
+    /// Configures the [`PendingBlockEnv`] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     #[expect(clippy::type_complexity)]
@@ -113,19 +111,26 @@ pub trait LoadPendingBlock:
 
         let evm_env = self
             .evm_config()
-            .next_evm_env(
-                &latest,
-                NextBlockEnvAttributes {
-                    timestamp: latest.timestamp().saturating_add(12),
-                    suggested_fee_recipient: latest.beneficiary(),
-                    prev_randao: B256::random(),
-                    gas_limit: latest.gas_limit(),
-                },
-            )
+            .next_evm_env(&latest, self.next_env_attributes(&latest)?)
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
-        Ok(PendingBlockEnv::new(evm_env, PendingBlockEnvOrigin::DerivedFromLatest(latest.hash())))
+        Ok(PendingBlockEnv::new(evm_env, PendingBlockEnvOrigin::DerivedFromLatest(latest)))
+    }
+
+    /// Returns [`NextBlockEnvAttributes`] for building a local pending block.
+    fn next_env_attributes(
+        &self,
+        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+    ) -> Result<NextBlockEnvAttributes<'_>, Self::Error> {
+        Ok(NextBlockEnvAttributes {
+            timestamp: parent.timestamp().saturating_add(12),
+            suggested_fee_recipient: parent.beneficiary(),
+            prev_randao: B256::random(),
+            gas_limit: parent.gas_limit(),
+            parent_beacon_block_root: parent.parent_beacon_block_root(),
+            withdrawals: None,
+        })
     }
 
     /// Returns the locally built pending block
@@ -146,11 +151,11 @@ pub trait LoadPendingBlock:
     {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
-            let parent_hash = match pending.origin {
+            let parent = match pending.origin {
                 PendingBlockEnvOrigin::ActualPending(block, receipts) => {
                     return Ok(Some((block, receipts)));
                 }
-                PendingBlockEnvOrigin::DerivedFromLatest(parent_hash) => parent_hash,
+                PendingBlockEnvOrigin::DerivedFromLatest(parent) => parent,
             };
 
             // we couldn't find the real pending block, so we need to build it ourselves
@@ -162,7 +167,7 @@ pub trait LoadPendingBlock:
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
                 if pending.evm_env.block_env.number == pending_block.block.number() &&
-                    parent_hash == pending_block.block.parent_hash() &&
+                    parent.hash() == pending_block.block.parent_hash() &&
                     now <= pending_block.expires_at
                 {
                     return Ok(Some((pending_block.block.clone(), pending_block.receipts.clone())));
@@ -173,7 +178,7 @@ pub trait LoadPendingBlock:
             let (sealed_block, receipts) = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
-                    this.build_block(pending.evm_env, parent_hash)
+                    this.build_block(&parent)
                 })
                 .await
             {
@@ -195,46 +200,15 @@ pub trait LoadPendingBlock:
         }
     }
 
-    /// Assembles a receipt for a transaction, based on its [`ExecutionResult`].
-    fn assemble_receipt(
-        &self,
-        tx: &ProviderTx<Self::Provider>,
-        result: ExecutionResult<HaltReasonFor<Self::Evm>>,
-        cumulative_gas_used: u64,
-    ) -> ProviderReceipt<Self::Provider>;
-
     /// Assembles a pending block.
     fn assemble_block(
         &self,
         block_env: &BlockEnv,
-        parent_hash: B256,
+        result: &BlockExecutionResult<ProviderReceipt<Self::Provider>>,
+        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
         state_root: B256,
         transactions: Vec<Recovered<ProviderTx<Self::Provider>>>,
-        receipts: &[ProviderReceipt<Self::Provider>],
     ) -> ProviderBlock<Self::Provider>;
-
-    /// Helper to invoke both [`Self::assemble_block`] and [`Self::assemble_receipt`].
-    fn assemble_block_and_receipts(
-        &self,
-        block_env: &BlockEnv,
-        parent_hash: B256,
-        state_root: B256,
-        transactions: Vec<Recovered<ProviderTx<Self::Provider>>>,
-        results: Vec<ExecutionResult<HaltReasonFor<Self::Evm>>>,
-    ) -> (ProviderBlock<Self::Provider>, Vec<ProviderReceipt<Self::Provider>>) {
-        let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(results.len());
-
-        for (tx, outcome) in transactions.iter().zip(results) {
-            cumulative_gas_used += outcome.gas_used();
-            receipts.push(self.assemble_receipt(tx, outcome, cumulative_gas_used));
-        }
-
-        let block =
-            self.assemble_block(block_env, parent_hash, state_root, transactions, &receipts);
-
-        (block, receipts)
-    }
 
     /// Builds a pending block using the configured provider and pool.
     ///
@@ -245,8 +219,7 @@ pub trait LoadPendingBlock:
     #[expect(clippy::type_complexity)]
     fn build_block(
         &self,
-        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
-        parent_hash: B256,
+        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
     ) -> Result<
         (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
         Self::Error,
@@ -256,33 +229,31 @@ pub trait LoadPendingBlock:
     {
         let state_provider = self
             .provider()
-            .history_by_block_hash(parent_hash)
+            .history_by_block_hash(parent.hash())
             .map_err(Self::Error::from_eth_err)?;
         let state = StateProviderDatabase::new(state_provider);
         let mut db = State::builder().with_database(state).with_bundle_update().build();
 
+        let mut strategy = self
+            .evm_config()
+            .strategy_for_next_block(&mut db, parent, self.next_env_attributes(parent)?)
+            .map_err(RethError::other)
+            .map_err(Self::Error::from_eth_err)?;
+
+        strategy.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
+
+        let block_env = strategy.evm_mut().block().clone();
+
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = evm_env.block_env.gas_limit;
-        let base_fee = evm_env.block_env.basefee;
+        let block_gas_limit: u64 = block_env.gas_limit;
 
         let mut executed_txs = Vec::new();
         let mut best_txs =
             self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
-                base_fee,
-                evm_env.block_env.blob_gasprice().map(|gasprice| gasprice as u64),
+                block_env.basefee,
+                block_env.blob_gasprice().map(|gasprice| gasprice as u64),
             ));
-
-        let chain_spec = self.provider().chain_spec();
-
-        let mut system_caller = SystemCaller::new(chain_spec.clone());
-        let mut evm = self.evm_config().evm_with_env(&mut db, evm_env.clone());
-
-        system_caller
-            .apply_blockhashes_contract_call(parent_hash, &mut evm)
-            .map_err(|err| EthApiError::Internal(err.into()))?;
-
-        let mut results = Vec::new();
 
         while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
@@ -335,29 +306,28 @@ pub trait LoadPendingBlock:
                 }
             }
 
-            let tx_env = self.evm_config().tx_env(&tx);
-
-            let ResultAndState { result, state: _ } = match evm.transact_commit(tx_env) {
-                Ok(res) => res,
-                Err(err) => {
-                    if let Some(err) = err.as_invalid_tx_err() {
-                        if err.is_nonce_too_low() {
-                            // if the nonce is too low, we can skip this transaction
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            best_txs.mark_invalid(
-                                &pool_tx,
-                                InvalidPoolTransactionError::Consensus(
-                                    InvalidTransactionError::TxTypeNotSupported,
-                                ),
-                            );
-                        }
-                        continue
+            let gas_used = match strategy.execute_transaction(tx.as_recovered_ref()) {
+                Ok(gas_used) => gas_used,
+                Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                    error,
+                    ..
+                })) => {
+                    if error.is_nonce_too_low() {
+                        // if the nonce is too low, we can skip this transaction
+                    } else {
+                        // if the transaction is invalid, we can skip it and all of its
+                        // descendants
+                        best_txs.mark_invalid(
+                            &pool_tx,
+                            InvalidPoolTransactionError::Consensus(
+                                InvalidTransactionError::TxTypeNotSupported,
+                            ),
+                        );
                     }
-                    // this is an error that we should treat as fatal for this attempt
-                    return Err(Self::Error::from_evm_err(err));
+                    continue
                 }
+                // this is an error that we should treat as fatal for this attempt
+                Err(err) => return Err(Self::Error::from_eth_err(err)),
             };
 
             // add to the total blob gas used if the transaction successfully executed
@@ -370,28 +340,14 @@ pub trait LoadPendingBlock:
                 }
             }
 
-            let gas_used = result.gas_used();
-
             // add gas used by the transaction to cumulative gas used, before creating the receipt
             cumulative_gas_used += gas_used;
 
             // append transaction to the list of executed transactions
             executed_txs.push(tx);
-            results.push(result);
         }
 
-        // executes the withdrawals and commits them to the Database and BundleState.
-        let balance_increments = post_block_withdrawals_balance_increments(
-            chain_spec.as_ref(),
-            evm_env.block_env.timestamp,
-            &[],
-        );
-
-        // release db
-        drop(evm);
-
-        // increment account balances for withdrawals
-        db.increment_balances(balance_increments).map_err(Self::Error::from_eth_err)?;
+        let result = strategy.apply_post_execution_changes().map_err(Self::Error::from_eth_err)?;
 
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
@@ -404,14 +360,8 @@ pub trait LoadPendingBlock:
 
         let senders = executed_txs.iter().map(|tx| tx.signer()).collect();
 
-        let (block, receipts) = self.assemble_block_and_receipts(
-            &evm_env.block_env,
-            parent_hash,
-            state_root,
-            executed_txs,
-            results,
-        );
+        let block = self.assemble_block(&block_env, &result, parent, state_root, executed_txs);
 
-        Ok((RecoveredBlock::new_unhashed(block, senders), receipts))
+        Ok((RecoveredBlock::new_unhashed(block, senders), result.receipts))
     }
 }

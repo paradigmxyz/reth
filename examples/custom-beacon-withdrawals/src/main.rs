@@ -3,8 +3,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_consensus::BlockHeader;
-use alloy_eips::eip4895::Withdrawal;
+use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth::{
@@ -13,6 +12,7 @@ use reth::{
     cli::Cli,
     providers::BlockExecutionResult,
     revm::{
+        context::result::ExecutionResult,
         db::State,
         primitives::{address, Address},
         DatabaseCommit,
@@ -24,11 +24,13 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory,
         InternalBlockExecutionError,
     },
-    ConfigureEvmEnv, Database, Evm, EvmEnv, NextBlockEnvAttributes,
+    ConfigureEvmEnv, Database, Evm, EvmEnv, EvmFor, InspectorFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{Block, EthPrimitives, Receipt, Recovered, SealedBlock, TransactionSigned};
+use reth_primitives::{
+    EthPrimitives, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
+};
 use std::fmt::Display;
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -111,19 +113,42 @@ impl ConfigureEvm for CustomEvmConfig {
     }
 }
 
+pub struct CustomExecutionCtx<'a> {
+    withdrawals: Option<&'a Withdrawals>,
+}
+
 impl BlockExecutionStrategyFactory for CustomEvmConfig {
     type Primitives = EthPrimitives;
+    type ExecutionCtx<'a> = CustomExecutionCtx<'a>;
+    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
+        CustomExecutorStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
 
-    fn create_strategy<'a, DB>(
+    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> Self::ExecutionCtx<'a> {
+        CustomExecutionCtx { withdrawals: block.body().withdrawals.as_ref() }
+    }
+
+    fn context_for_next_block<'a>(
+        &self,
+        _parent: &SealedHeader,
+        attributes: NextBlockEnvAttributes<'a>,
+    ) -> Self::ExecutionCtx<'a> {
+        CustomExecutionCtx { withdrawals: attributes.withdrawals }
+    }
+
+    fn create_strategy<'a, DB, I>(
         &'a self,
-        db: &'a mut State<DB>,
-        block: &'a SealedBlock<Block>,
-    ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
+        evm: EvmFor<Self, &'a mut State<DB>, I>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Strategy<'a, DB, I>
     where
         DB: Database,
+        I: InspectorFor<&'a mut State<DB>, Self> + 'a,
     {
-        let evm = self.evm_for_block(db, block.header());
-        CustomExecutorStrategy { evm, chain_spec: self.inner.chain_spec(), block }
+        CustomExecutorStrategy {
+            evm,
+            chain_spec: self.inner.chain_spec(),
+            withdrawals: ctx.withdrawals,
+        }
     }
 }
 
@@ -132,8 +157,8 @@ pub struct CustomExecutorStrategy<'a, Evm> {
     chain_spec: &'a ChainSpec,
     /// EVM used for execution.
     evm: Evm,
-    /// Block being executed.
-    block: &'a SealedBlock,
+    /// Block withdrawals.
+    withdrawals: Option<&'a Withdrawals>,
 }
 
 impl<'db, DB, E> BlockExecutionStrategy for CustomExecutorStrategy<'_, E>
@@ -143,19 +168,21 @@ where
 {
     type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
+    type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            self.chain_spec.is_spurious_dragon_active_at_block(self.block.number());
+            self.chain_spec.is_spurious_dragon_active_at_block(self.evm.block().number);
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
 
         Ok(())
     }
 
-    fn execute_transaction(
+    fn execute_transaction_with_result_closure(
         &mut self,
         _tx: Recovered<&TransactionSigned>,
+        _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, Self::Error> {
         Ok(0)
     }
@@ -163,7 +190,7 @@ where
     fn apply_post_execution_changes(
         mut self,
     ) -> Result<BlockExecutionResult<Receipt>, Self::Error> {
-        if let Some(withdrawals) = self.block.body().withdrawals.as_ref() {
+        if let Some(withdrawals) = self.withdrawals {
             apply_withdrawals_contract_call(withdrawals, &mut self.evm)?;
         }
 
@@ -171,6 +198,10 @@ where
     }
 
     fn with_state_hook(&mut self, _hook: Option<Box<dyn reth_evm::system_calls::OnStateHook>>) {}
+
+    fn evm_mut(&mut self) -> &mut Self::Evm {
+        &mut self.evm
+    }
 }
 
 sol!(

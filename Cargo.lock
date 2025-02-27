@@ -7781,8 +7781,8 @@ dependencies = [
  "reth-execution-types",
  "reth-primitives",
  "reth-primitives-traits",
- "reth-revm",
  "reth-testing-utils",
+ "revm",
  "secp256k1 0.30.0",
  "serde_json",
 ]
