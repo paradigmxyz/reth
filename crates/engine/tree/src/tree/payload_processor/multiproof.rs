@@ -248,8 +248,8 @@ struct MultiproofInput<Factory> {
 }
 
 /// Manages concurrent multiproof calculations.
-/// Takes care of not having more calculations in flight than a given thread
-/// pool size, further calculation requests are queued and spawn later, after
+/// Takes care of not having more calculations in flight than a given maximum
+/// concurrency, further calculation requests are queued and spawn later, after
 /// availability has been signaled.
 #[derive(Debug)]
 struct MultiproofManager<Factory> {
