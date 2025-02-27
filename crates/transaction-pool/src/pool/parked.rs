@@ -1,5 +1,6 @@
 use crate::{
     identifier::{SenderId, TransactionId},
+    metrics::ParkedEvictionMetrics,
     pool::size::SizeTracker,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
 };
@@ -45,6 +46,8 @@ pub struct ParkedPool<T: ParkedOrd> {
     ///
     /// See also [`reth_primitives_traits::InMemorySize::size`].
     size_of: SizeTracker,
+    /// Eviction metrics
+    eviction_metrics: ParkedEvictionMetrics,
 }
 
 // === impl ParkedPool ===
@@ -188,6 +191,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let start = std::time::Instant::now();
         if !self.exceeds(&limit) {
             // if we are below the limits, we don't need to drop anything
             return Vec::new()
@@ -212,6 +216,9 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 }
             }
         }
+
+        self.eviction_metrics.parked_eviction_duration_seconds.record(start.elapsed());
+        self.eviction_metrics.parked_transactions_evicted.increment(removed.len() as u64);
 
         removed
     }
@@ -333,6 +340,7 @@ impl<T: ParkedOrd> Default for ParkedPool<T> {
             last_sender_submission: Default::default(),
             sender_transaction_count: Default::default(),
             size_of: Default::default(),
+            eviction_metrics: Default::default(),
         }
     }
 }
