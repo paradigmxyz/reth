@@ -4,7 +4,7 @@ use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::Sp
 use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use metrics::Histogram;
-use reth_errors::{ProviderError, ProviderResult};
+use reth_errors::ProviderError;
 use reth_evm::system_calls::StateChangeSource;
 use reth_metrics::Metrics;
 use reth_provider::{
@@ -127,7 +127,7 @@ pub(super) struct ProofCalculated {
     elapsed: Duration,
 }
 
-/// Handle to track proof calculation ordering
+/// Handle to track proof calculation ordering.
 #[derive(Debug, Default)]
 struct ProofSequencer {
     /// The next proof sequence number to be produced.
@@ -183,7 +183,11 @@ impl ProofSequencer {
     }
 }
 
-/// A wrapper for the sender that signals completion when dropped
+/// A wrapper for the sender that signals completion when dropped.
+///
+/// This type is intended to be used in combination with the evm executor statehook.
+/// This should trigger once the block has been executed (after) the last state upddate has been
+/// sent. This triggers the exit condition of the multi proof task.
 #[derive(Deref, Debug)]
 pub(super) struct StateHookSender(Sender<StateRootMessage>);
 
@@ -265,13 +269,13 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(executor: WorkloadExecutor, max_concurrent: usize) -> Self {
-        debug_assert!(max_concurrent != 0);
+    fn new(executor: WorkloadExecutor) -> Self {
+        let max_concurrent = executor.rayon_pool().current_num_threads();
         Self {
-            executor,
-            max_concurrent,
-            inflight: 0,
             pending: VecDeque::with_capacity(max_concurrent),
+            max_concurrent,
+            executor,
+            inflight: 0,
         }
     }
 
@@ -336,7 +340,15 @@ where
                 "Starting multiproof calculation",
             );
             let start = Instant::now();
-            let result = calculate_multiproof(executor, config, proof_targets);
+            let result = ParallelProof::new(
+                config.consistent_view,
+                config.nodes_sorted,
+                config.state_sorted,
+                config.prefix_sets,
+                executor.rayon_pool().clone(),
+            )
+            .with_branch_node_masks(true)
+            .multiproof(proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -365,7 +377,7 @@ where
                 }
                 Err(error) => {
                     let _ = state_root_message_sender
-                        .send(StateRootMessage::ProofCalculationError(error));
+                        .send(StateRootMessage::ProofCalculationError(error.into()));
                 }
             }
         });
@@ -446,8 +458,7 @@ where
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::default(),
-            // TODO settings
-            multiproof_manager: MultiproofManager::new(executor, 4),
+            multiproof_manager: MultiproofManager::new(executor),
             metrics: StateRootTaskMetrics::default(),
         }
     }
@@ -470,6 +481,28 @@ where
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
         });
+    }
+
+    // Returns true if all state updates finished and all proofs processed.
+    fn is_done(
+        &self,
+        proofs_processed: u64,
+        updates_received: u64,
+        prefetch_proofs_received: u64,
+        updates_finished: bool,
+    ) -> bool {
+        let all_proofs_received = proofs_processed >= updates_received + prefetch_proofs_received;
+        let no_pending = !self.proof_sequencer.has_pending();
+        debug!(
+            target: "engine::root",
+            proofs_processed,
+            updates_received,
+            prefetch_proofs_received,
+            no_pending,
+            updates_finished,
+            "Checking end condition"
+        );
+        all_proofs_received && no_pending && updates_finished
     }
 
     /// Calls `get_proof_targets` with existing proof targets for prefetching.
@@ -596,7 +629,7 @@ where
     ///    * Once this message is received, on every [`StateRootMessage::EmptyProof`] and
     ///      [`StateRootMessage::ProofCalculated`] message, we check if there are any proofs are
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
-    ///      left to be revealed using [`check_end_condition`].
+    ///      left to be revealed by checking the pending tasks.
     /// 6. This task exits after all pending proofs are processed.
     pub(crate) fn run(mut self) {
         let mut prefetch_proofs_received = 0;
@@ -650,20 +683,18 @@ where
                     StateRootMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
-
-                        if check_end_condition(CheckEndConditionParams {
+                        if self.is_done(
                             proofs_processed,
                             updates_received,
                             prefetch_proofs_received,
                             updates_finished,
-                            proof_sequencer: &self.proof_sequencer,
-                        }) {
+                        ) {
                             debug!(
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
-                        };
-                        break
+                            break
+                        }
                     }
                     StateRootMessage::EmptyProof { sequence_number, state } => {
                         trace!(target: "engine::root", "processing StateRootMessage::EmptyProof");
@@ -677,20 +708,18 @@ where
                             let _ = self.to_sparse_trie.send(combined_update);
                         }
 
-                        if check_end_condition(CheckEndConditionParams {
+                        if self.is_done(
                             proofs_processed,
                             updates_received,
                             prefetch_proofs_received,
                             updates_finished,
-                            proof_sequencer: &self.proof_sequencer,
-                        }) {
+                        ) {
                             debug!(
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
-
                             break
-                        };
+                        }
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing
@@ -725,18 +754,17 @@ where
                             let _ = self.to_sparse_trie.send(combined_update);
                         }
 
-                        if check_end_condition(CheckEndConditionParams {
+                        if self.is_done(
                             proofs_processed,
                             updates_received,
                             prefetch_proofs_received,
                             updates_finished,
-                            proof_sequencer: &self.proof_sequencer,
-                        }) {
+                        ) {
                             debug!(
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation");
                             break
-                        };
+                        }
                     }
                     StateRootMessage::ProofCalculationError(err) => {
                         error!(
@@ -758,48 +786,10 @@ where
                         target: "engine::root",
                         "Internal message channel closed unexpectedly"
                     );
-                    // TODO send error
-
-                    // return Err(ParallelStateRootError::Other(
-                    //     "Internal message channel closed unexpectedly".into(),
-                    // ));
                 }
             }
         }
     }
-}
-
-/// Convenience params struct to pass to [`check_end_condition`].
-struct CheckEndConditionParams<'a> {
-    proofs_processed: u64,
-    updates_received: u64,
-    prefetch_proofs_received: u64,
-    updates_finished: bool,
-    proof_sequencer: &'a ProofSequencer,
-}
-
-// Returns true if all state updates finished and all profs processed.
-fn check_end_condition(
-    CheckEndConditionParams {
-        proofs_processed,
-        updates_received,
-        prefetch_proofs_received,
-        updates_finished,
-        proof_sequencer,
-    }: CheckEndConditionParams<'_>,
-) -> bool {
-    let all_proofs_received = proofs_processed >= updates_received + prefetch_proofs_received;
-    let no_pending = !proof_sequencer.has_pending();
-    debug!(
-        target: "engine::root",
-        proofs_processed,
-        updates_received,
-        prefetch_proofs_received,
-        no_pending,
-        updates_finished,
-        "Checking end condition"
-    );
-    all_proofs_received && no_pending && updates_finished
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
@@ -833,28 +823,6 @@ fn get_proof_targets(
     }
 
     targets
-}
-
-/// Calculate multiproof for the targets.
-#[inline]
-fn calculate_multiproof<Factory>(
-    executor: WorkloadExecutor,
-    config: StateRootConfig<Factory>,
-    proof_targets: MultiProofTargets,
-) -> ProviderResult<MultiProof>
-where
-    Factory:
-        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
-{
-    Ok(ParallelProof::new(
-        config.consistent_view,
-        config.nodes_sorted,
-        config.state_sorted,
-        config.prefix_sets,
-        executor.rayon_pool().clone(),
-    )
-    .with_branch_node_masks(true)
-    .multiproof(proof_targets)?)
 }
 
 fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
@@ -1017,14 +985,14 @@ mod tests {
         let input = TrieInput::from_state(hashed_state);
         let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
         let state_sorted = Arc::new(input.state.clone().into_sorted());
-        let config = StateRootConfig {
+        let _config = StateRootConfig {
             consistent_view: ConsistentDbView::new(factory, None),
             nodes_sorted,
             state_sorted,
             prefix_sets: Arc::new(input.prefix_sets),
         };
 
-        let executor = WorkloadExecutor::with_num_cpu_threads(2);
+        let _executor = WorkloadExecutor::with_num_cpu_threads(2);
 
         // let task = StateRootTask2::new(config, executor);
         // let mut state_hook = task.state_hook();
@@ -1046,7 +1014,7 @@ mod tests {
 
     #[test]
     fn test_add_proof_in_sequence() {
-        let mut sequencer = ProofSequencer::new();
+        let mut sequencer = ProofSequencer::default();
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
         sequencer.next_sequence = 2;
@@ -1062,7 +1030,7 @@ mod tests {
 
     #[test]
     fn test_add_proof_out_of_order() {
-        let mut sequencer = ProofSequencer::new();
+        let mut sequencer = ProofSequencer::default();
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
         let proof3 = MultiProof::default();
@@ -1083,7 +1051,7 @@ mod tests {
 
     #[test]
     fn test_add_proof_with_gaps() {
-        let mut sequencer = ProofSequencer::new();
+        let mut sequencer = ProofSequencer::default();
         let proof1 = MultiProof::default();
         let proof3 = MultiProof::default();
         sequencer.next_sequence = 3;
@@ -1098,7 +1066,7 @@ mod tests {
 
     #[test]
     fn test_add_proof_duplicate_sequence() {
-        let mut sequencer = ProofSequencer::new();
+        let mut sequencer = ProofSequencer::default();
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
 
@@ -1112,7 +1080,7 @@ mod tests {
 
     #[test]
     fn test_add_proof_batch_processing() {
-        let mut sequencer = ProofSequencer::new();
+        let mut sequencer = ProofSequencer::default();
         let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
         sequencer.next_sequence = 5;
 
