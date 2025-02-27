@@ -15,8 +15,8 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::map::DefaultHashBuilder;
-use std::time::{Duration, Instant};
-use tracing::{debug, trace};
+use std::time::Duration;
+use tracing::trace;
 
 pub(crate) type Cache<K, V> =
     mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
@@ -45,35 +45,6 @@ where
         metrics: CachedStateMetrics,
     ) -> Self {
         Self { state_provider, caches, metrics }
-    }
-}
-
-impl<S> CachedStateProvider<S> {
-    /// Creates a new [`SavedCache`] from the given state updates and executed block hash.
-    ///
-    /// This does not update the code cache, because no changes are required to the code cache on
-    /// state change.
-    ///
-    /// NOTE: Consumers should ensure that these caches are not in use by a state provider for a
-    /// previous block - otherwise, this update will cause that state provider to contain future
-    /// state, which would be incorrect.
-    pub(crate) fn save_cache(
-        self,
-        executed_block_hash: B256,
-        state_updates: &BundleState,
-    ) -> Result<SavedCache, ()> {
-        let Self { caches, metrics, state_provider: _ } = self;
-        let start = Instant::now();
-
-        caches.insert_state(state_updates)?;
-
-        // create a saved cache with the executed block hash, same metrics, and updated caches
-        let saved_cache = SavedCache { hash: executed_block_hash, caches, metrics };
-        saved_cache.update_metrics();
-
-        debug!(target: "engine::caching", update_latency=?start.elapsed(), "Updated state caches");
-
-        Ok(saved_cache)
     }
 }
 
