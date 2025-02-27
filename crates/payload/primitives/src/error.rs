@@ -130,8 +130,8 @@ pub enum NewPayloadError {
 impl NewPayloadError {
     /// Creates instance of variant [`NewPayloadError::Other`].
     #[inline]
-    pub const fn other(err: Box<dyn error::Error + Send + Sync>) -> Self {
-        Self::Other(err)
+    pub fn other(err: impl error::Error + Send + Sync + 'static) -> Self {
+        Self::Other(Box::new(err))
     }
 }
 
