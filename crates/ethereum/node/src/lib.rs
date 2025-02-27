@@ -21,6 +21,6 @@ pub use evm::{BasicBlockExecutorProvider, EthEvmConfig, EthExecutorProvider};
 
 pub use reth_ethereum_consensus as consensus;
 pub mod node;
-pub use node::EthereumNode;
+pub use node::{EthereumEthApiBuilder, EthereumNode};
 
 pub mod payload;

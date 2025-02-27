@@ -1,6 +1,6 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
-use reth_node_api::{FullNodeComponents, NodeTypesWithEngine};
+use reth_node_api::{FullNodeComponents, NodeTypesWithEngine, PrimitivesTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::{BlockReader, ProviderBlock, ProviderReceipt};
 use reth_rpc_eth_types::EthStateCache;
@@ -12,6 +12,8 @@ use reth_rpc_eth_types::EthStateCache;
 /// that are used in RPC, but with more flexibility since they have no trait bounds (asides auto
 /// traits).
 pub trait RpcNodeCore: Clone + Send + Sync {
+    /// Blockchain data primitives.
+    type Primitives: Send + Sync + Clone + Unpin;
     /// The provider type used to interact with the node.
     type Provider: Send + Sync + Clone + Unpin;
     /// The transaction pool of the node.
@@ -44,10 +46,11 @@ impl<T> RpcNodeCore for T
 where
     T: FullNodeComponents,
 {
+    type Primitives = PrimitivesTy<T::Types>;
     type Provider = T::Provider;
     type Pool = T::Pool;
-    type Evm = <T as FullNodeComponents>::Evm;
-    type Network = <T as FullNodeComponents>::Network;
+    type Evm = T::Evm;
+    type Network = T::Network;
     type PayloadBuilder = PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine>;
 
     #[inline]

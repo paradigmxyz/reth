@@ -15,6 +15,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
@@ -31,8 +32,8 @@ use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, DBProvider, DatabaseProviderFactory, HashedPostStateProvider,
-    OmmersProvider, StageCheckpointReader, StateCommitmentProvider, StateProofProvider,
-    StorageRootProvider,
+    NodePrimitivesProvider, OmmersProvider, StageCheckpointReader, StateCommitmentProvider,
+    StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -45,6 +46,7 @@ use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
+use tokio::sync::broadcast;
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug)]
@@ -903,4 +905,18 @@ impl<T: Transaction, ChainSpec: EthChainSpec> StateReader for MockEthProvider<T,
     fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         Ok(None)
     }
+}
+
+impl<T: Transaction, ChainSpec: EthChainSpec> CanonStateSubscriptions
+    for MockEthProvider<T, ChainSpec>
+{
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<EthPrimitives> {
+        broadcast::channel(1).1
+    }
+}
+
+impl<T: Transaction, ChainSpec: EthChainSpec> NodePrimitivesProvider
+    for MockEthProvider<T, ChainSpec>
+{
+    type Primitives = EthPrimitives;
 }
