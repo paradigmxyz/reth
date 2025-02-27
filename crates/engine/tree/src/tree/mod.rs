@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
-use alloy_eips::BlockNumHash;
+use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{
     keccak256,
     map::{B256Set, HashMap, HashSet},
@@ -46,9 +46,10 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
-    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    providers::ConsistentDbView, BlockHashReader, BlockNumReader, BlockReader, DBProvider,
+    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
+    StateCommitmentProvider, StateProviderBox, StateProviderFactory, StateReader,
+    StateRootProvider, TransactionVariant,
 };
 use reth_revm::{cancelled::ManualCancel, database::StateProviderDatabase};
 use reth_stages_api::ControlFlow;
@@ -56,7 +57,7 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState,
     MultiProofTargets, TrieInput,
 };
-use reth_trie_db::DatabaseTrieCursorFactory;
+use reth_trie_db::{DatabaseHashedPostState, DatabaseTrieCursorFactory, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use root::{
     StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
@@ -2930,10 +2931,45 @@ where
     ) -> Result<TrieInput, ParallelStateRootError> {
         let mut input = TrieInput::default();
 
-        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
+        let provider = consistent_view.provider_ro()?;
+        let best_block_number = provider.best_block_number()?;
+
+        let in_memory_blocks = self
+            .state
+            .tree_state
+            .blocks_by_hash(parent_hash)
+            .map(|(_, mut blocks)| {
+                // Iterate over the blocks from oldest to newest.
+                while let Some(block) = blocks.last() {
+                    let recovered_block = block.recovered_block();
+                    // Remove those blocks that lower than or equal to the highest database block
+                    // and have an associated database block with a matching hash.
+                    if recovered_block.number() <= best_block_number &&
+                        // If the block is higher than the highest database block, we need to check its hash
+                        // to verify that it indeed belongs to the database chain. It may not always be the case,
+                        // if the block belongs to a fork that's going to reorg the database chain.
+                        Some(recovered_block.hash()) ==
+                            provider.block_hash(recovered_block.number())?
+                    {
+                        blocks.pop();
+                    } else {
+                        // If the block is higher than the best block number or does not have an
+                        // associated database block, return current block's parent, as it's the
+                        // first block that's not in the database.
+                        return Ok(Some(((recovered_block.number() - 1), blocks)))
+                    }
+                }
+
+                // We did not find any blocks that are not in the database.
+                ProviderResult::Ok(None)
+            })
+            .transpose()?
+            .flatten();
+
+        if let Some((historical, blocks)) = in_memory_blocks {
             debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
             // Retrieve revert state for historical block.
-            let revert_state = consistent_view.revert_state(historical)?;
+            let revert_state = self.revert_state(provider, best_block_number, historical.into())?;
             input.append(revert_state);
 
             // Extend with contents of parent in-memory blocks.
@@ -2943,11 +2979,48 @@ where
         } else {
             // The block attaches to canonical persisted parent.
             debug!(target: "engine::tree", %parent_hash, "Parent found on disk");
-            let revert_state = consistent_view.revert_state(parent_hash)?;
+            let revert_state =
+                self.revert_state(provider, best_block_number, parent_hash.into())?;
             input.append(revert_state);
         }
 
         Ok(input)
+    }
+
+    /// Retrieve revert hashed state down to the given block hash or number.
+    fn revert_state(
+        &self,
+        provider: P::Provider,
+        best_block_number: BlockNumber,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<HashedPostState> {
+        let block_number = match block {
+            BlockHashOrNumber::Hash(block_hash) => provider
+                .block_number(block_hash)?
+                .ok_or(ProviderError::BlockHashNotFound(block_hash))?,
+            BlockHashOrNumber::Number(block_number) => block_number,
+        };
+
+        // We do not check against the `last_block_number` here because
+        // `HashedPostState::from_reverts` only uses the database tables, and not static files.
+        if block_number == best_block_number {
+            debug!(target: "engine::tree", ?block, block_number, "Returning empty revert state");
+            Ok(HashedPostState::default())
+        } else {
+            let revert_state = HashedPostState::from_reverts::<
+                <P::StateCommitment as StateCommitment>::KeyHasher,
+            >(provider.tx_ref(), block_number + 1)?;
+            debug!(
+                target: "engine::tree",
+                ?block,
+                block_number,
+                best_block_number,
+                accounts = revert_state.accounts.len(),
+                storages = revert_state.storages.len(),
+                "Returning non-empty revert state"
+            );
+            Ok(revert_state)
+        }
     }
 
     /// Runs execution for a single transaction, spawning it in the prewarm threadpool.

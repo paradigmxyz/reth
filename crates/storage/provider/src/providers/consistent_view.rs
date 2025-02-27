@@ -1,14 +1,8 @@
 use crate::{BlockNumReader, DatabaseProviderFactory, HeaderProvider};
 use alloy_primitives::B256;
-use reth_errors::ProviderError;
-use reth_storage_api::{DBProvider, StateCommitmentProvider};
-use reth_storage_errors::provider::ProviderResult;
-
-use reth_trie::HashedPostState;
-use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
-
+use reth_storage_api::StateCommitmentProvider;
 pub use reth_storage_errors::provider::ConsistentViewError;
-use tracing::debug;
+use reth_storage_errors::provider::ProviderResult;
 
 /// A consistent view over state in the database.
 ///
@@ -49,36 +43,6 @@ where
         Ok(Self::new(provider, tip))
     }
 
-    /// Retrieve revert hashed state down to the given block hash.
-    pub fn revert_state(&self, block_hash: B256) -> ProviderResult<HashedPostState> {
-        let provider = self.provider_ro()?;
-        let block_number = provider
-            .block_number(block_hash)?
-            .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        let best_block_number = provider.best_block_number()?;
-
-        // We do not check against the `last_block_number` here because
-        // `HashedPostState::from_reverts` only uses the database tables, and not static files.
-        if block_number == best_block_number {
-            debug!(target: "providers::consistent_view", ?block_hash, block_number, "Returning empty revert state");
-            Ok(HashedPostState::default())
-        } else {
-            let revert_state = HashedPostState::from_reverts::<
-                <Factory::StateCommitment as StateCommitment>::KeyHasher,
-            >(provider.tx_ref(), block_number + 1)?;
-            debug!(
-                target: "providers::consistent_view",
-                ?block_hash,
-                block_number,
-                best_block_number,
-                accounts = revert_state.accounts.len(),
-                storages = revert_state.storages.len(),
-                "Returning non-empty revert state"
-            );
-            Ok(revert_state)
-        }
-    }
-
     /// Creates new read-only provider and performs consistency checks on the current tip.
     pub fn provider_ro(&self) -> ProviderResult<Factory::Provider> {
         // Create a new provider.
@@ -117,6 +81,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use reth_errors::ProviderError;
     use std::str::FromStr;
 
     use super::*;

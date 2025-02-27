@@ -118,7 +118,7 @@ async fn test_long_reorg() -> eyre::Result<()> {
     let head = first_provider.get_block_by_number(20.into(), false.into()).await?.unwrap();
     second_node.sync_to(head.header.hash).await?;
 
-    // Produce a fork chain with blocks 21.60
+    // Produce a fork chain with blocks 21..60
     second_node.payload.timestamp = head.header.timestamp;
     advance_with_random_transactions(&mut second_node, 40, &mut rng, true).await?;
 
