@@ -662,7 +662,7 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
 }
 
 /// Builder for basic [`EngineApi`] implementation.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct BasicEngineApiBuilder<EV> {
     engine_validator_builder: EV,
 }
