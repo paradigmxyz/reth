@@ -1120,28 +1120,23 @@ where
         &self,
         block: &N::BlockHeader,
     ) -> DescendantOfPersistingBlocks {
-        match self.persistence_state.current_action() {
-            None => DescendantOfPersistingBlocks::NotPersisting,
-            Some(action) => match action {
-                CurrentPersistenceAction::SavingBlocks { highest } => {
-                    // The block being validated can't be a descendant if its number is lower than
-                    // the highest block being persisted. In that case, it's likely a fork of a
-                    // lower block.
-                    if block.number() <= highest.number {
-                        return DescendantOfPersistingBlocks::NotDescendant
-                    }
+        // Check that we're currently persisting.
+        let Some(action) = self.persistence_state.current_action() else {
+            return DescendantOfPersistingBlocks::NotPersisting
+        };
+        // Check that the persistince action is saving blocks, not removing them.
+        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
+            return DescendantOfPersistingBlocks::NotDescendant
+        };
 
-                    if self.state.tree_state.is_descendant(*highest, block) {
-                        DescendantOfPersistingBlocks::Descendant
-                    } else {
-                        DescendantOfPersistingBlocks::NotDescendant
-                    }
-                }
-                CurrentPersistenceAction::RemovingBlocks { new_tip_num: _ } => {
-                    DescendantOfPersistingBlocks::NotDescendant
-                }
-            },
+        // The block being validated can only be a descendant if its number is higher than
+        // the highest block being persisted. Otherwise, it's likely a fork of a lower block.
+        if block.number() > highest.number && self.state.tree_state.is_descendant(*highest, block) {
+            return DescendantOfPersistingBlocks::Descendant
         }
+
+        // In all other cases, the block is not a descendant.
+        DescendantOfPersistingBlocks::NotDescendant
     }
 
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
