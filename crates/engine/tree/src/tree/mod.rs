@@ -2367,8 +2367,6 @@ where
 
         let state_provider = provider_builder.build()?;
 
-        let descendant_of_persisting_blocks =
-            self.is_descendant_of_persisting_blocks(block.header());
         // We only run the parallel state root if we are currently persisting blocks that are all
         // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
         // trie updates being committed are a subset of the in-memory trie updates collected before
@@ -2376,6 +2374,8 @@ where
         // in-memory trie updates we collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
+        let descendant_of_persisting_blocks =
+            self.is_descendant_of_persisting_blocks(block.header());
         let run_parallel_state_root = descendant_of_persisting_blocks.is_not_persisting() ||
             descendant_of_persisting_blocks.is_descendant();
 
