@@ -2,17 +2,14 @@ use crate::{BlockExecutionOutput, BlockExecutionResult};
 use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
-use reth_primitives_traits::{
-    serde_bincode_compat::SerdeBincodeCompat, Account, Bytecode, Receipt, StorageEntry,
-};
+use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::state::AccountInfo;
 use revm_database::{states::BundleState, BundleAccount};
-use std::borrow::Cow;
 
 /// Type used to initialize revms bundle state.
 pub type BundleStateInit =
-HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
+    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
 
 /// Types used inside `RevertsInit` to initialize revms reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
@@ -60,48 +57,6 @@ pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
     pub requests: Vec<Requests>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ExecutionOutcomeBincode<'a, T: SerdeBincodeCompat + std::fmt::Debug> {
-    pub bundle: Cow<'a, BundleState>,
-    pub receipts: Vec<Vec<T::BincodeRepr<'a>>>,
-    pub first_block: BlockNumber,
-    pub requests: Cow<'a, Vec<Requests>>,
-}
-
-impl<T: SerdeBincodeCompat + std::fmt::Debug> SerdeBincodeCompat for ExecutionOutcome<T> {
-    type BincodeRepr<'a>
-        = ExecutionOutcomeBincode<'a, T>
-    where
-        Self: 'a;
-
-    fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        ExecutionOutcomeBincode {
-            bundle: Cow::Borrowed(&self.bundle),
-            receipts: self
-                .receipts
-                .iter()
-                .map(|vec| vec.iter().map(|receipt| T::as_repr(receipt)).collect())
-                .collect(),
-            first_block: self.first_block,
-            requests: Cow::Borrowed(&self.requests),
-        }
-    }
-
-    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        ExecutionOutcome {
-            bundle: repr.bundle.into_owned(),
-            receipts: repr
-                .receipts
-                .into_iter()
-                .map(|vec| vec.into_iter().map(|receipt| T::from_repr(receipt)).collect())
-                .collect(),
-            first_block: repr.first_block,
-            requests: repr.requests.into_owned(),
-        }
-    }
 }
 
 impl<T> Default for ExecutionOutcome<T> {
@@ -449,12 +404,9 @@ pub(super) mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::BlockNumber;
-    use reth_primitives_traits::{
-        serde_bincode_compat::SerdeBincodeCompat,
-        Block, NodePrimitives,
-    };
+    use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
     use revm_database::BundleState;
-    use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::ExecutionOutcome`] serde implementation.
@@ -462,99 +414,73 @@ pub(super) mod serde_bincode_compat {
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
     /// use reth_execution_types::{serde_bincode_compat, ExecutionOutcome};
-    /// use serde::{Deserialize, Serialize};
-    /// use serde_with::serde_as;    ///
+    /// ///
     /// use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
     ///
     /// #[serde_as]
     /// #[derive(Serialize, Deserialize)]
-    /// struct Data<T: SerdeBincodeCompat> {
+    /// struct Data<T: SerdeBincodeCompat + core::fmt::Debug> {
     ///     #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_, T>")]
     ///     chain: ExecutionOutcome<T>,
     /// }
     /// ```
-
     #[derive(Debug, Serialize, Deserialize)]
     pub struct ExecutionOutcome<'a, T>
     where
-        T: SerdeBincodeCompat,
+        T: SerdeBincodeCompat + core::fmt::Debug,
     {
-        pub bundle: Cow<'a, BundleState>,
-        pub receipts: Vec<Vec<T::BincodeRepr<'a>>>,
-        pub first_block: BlockNumber,
-        pub requests: Cow<'a, Vec<Requests>>,
-    }
-
-
-    impl<B> Serialize for ExecutionOutcome<'_, B>
-    where
-        B: SerdeBincodeCompat,
-    {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            todo!()
-
-        }
-    }
-
-    impl<'de, T> Deserialize<'de> for ExecutionOutcome<'_, T>
-    where
-        T: SerdeBincodeCompat,
-    {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-           todo!()
-        }
+        bundle: Cow<'a, BundleState>,
+        receipts: Vec<Vec<T::BincodeRepr<'a>>>,
+        first_block: BlockNumber,
+        requests: Cow<'a, Vec<Requests>>,
     }
 
     impl<'a, T> From<&'a super::ExecutionOutcome<T>> for ExecutionOutcome<'a, T>
     where
-        T: SerdeBincodeCompat,
+        T: SerdeBincodeCompat + core::fmt::Debug,
     {
         fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
-           todo!()
+            ExecutionOutcome {
+                bundle: Cow::Borrowed(&value.bundle),
+                receipts: value
+                    .receipts
+                    .iter()
+                    .map(|vec| vec.iter().map(|receipt| T::as_repr(receipt)).collect())
+                    .collect(),
+                first_block: value.first_block,
+                requests: Cow::Borrowed(&value.requests),
+            }
         }
     }
 
     impl<'a, T> From<ExecutionOutcome<'a, T>> for super::ExecutionOutcome<T>
     where
-        T: SerdeBincodeCompat,
+        T: SerdeBincodeCompat + core::fmt::Debug,
     {
         fn from(value: ExecutionOutcome<'a, T>) -> Self {
-            todo!()
-            // let converted_execution_outcome = {
-            //     let original = value.execution_outcome.into_owned();
-            //     let converted_receipts = original
-            //         .receipts
-            //         .into_iter()
-            //         .map(|vec| vec.into_iter().map(T::Receipt::from_repr).collect::<Vec<_>>())
-            //         .collect::<Vec<_>>();
-            //
-            //     ExecutionOutcome {
-            //         bundle: original.bundle.into_owned(),
-            //         receipts: converted_receipts,
-            //         requests: original.requests.into_owned(),
-            //         first_block: original.first_block,
-            //     }
-            // };
-            //
-            // Self {
-            //     blocks: value.blocks.0.into_owned(),
-            //     execution_outcome: converted_execution_outcome,
-            //     trie_updates: value.trie_updates.map(Into::into),
-            // }
+            Self {
+                bundle: value.bundle.into_owned(),
+                receipts: value
+                    .receipts
+                    .into_iter()
+                    .map(|vec| vec.into_iter().map(|receipt| T::from_repr(receipt)).collect())
+                    .collect(),
+                first_block: value.first_block,
+                requests: value.requests.into_owned(),
+            }
         }
     }
 
     impl<T> SerializeAs<super::ExecutionOutcome<T>> for ExecutionOutcome<'_, T>
     where
-        T: SerdeBincodeCompat,
+        T: SerdeBincodeCompat + core::fmt::Debug,
     {
-        fn serialize_as<S>(source: &super::ExecutionOutcome<T>, serializer: S) -> Result<S::Ok, S::Error>
+        fn serialize_as<S>(
+            source: &super::ExecutionOutcome<T>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
@@ -564,7 +490,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'de, T> DeserializeAs<'de, super::ExecutionOutcome<T>> for ExecutionOutcome<'de, T>
     where
-        T: SerdeBincodeCompat,
+        T: SerdeBincodeCompat + core::fmt::Debug,
     {
         fn deserialize_as<D>(deserializer: D) -> Result<super::ExecutionOutcome<T>, D::Error>
         where
@@ -574,10 +500,24 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
+    impl<T: SerdeBincodeCompat + core::fmt::Debug> SerdeBincodeCompat for super::ExecutionOutcome<T> {
+        type BincodeRepr<'a> = ExecutionOutcome<'a, T>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, ExecutionOutcome};
         use rand::Rng;
+        use reth_ethereum_primitives::Receipt;
+        use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
@@ -585,9 +525,9 @@ pub(super) mod serde_bincode_compat {
         fn test_chain_bincode_roundtrip() {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-            struct Data {
-                #[serde_as(as = "serde_bincode_compat::ExecutionOutcome")]
-                data: ExecutionOutcome,
+            struct Data<T: SerdeBincodeCompat + core::fmt::Debug> {
+                #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_, T>")]
+                data: ExecutionOutcome<T>,
             }
 
             let mut bytes = [0u8; 1024];
@@ -598,16 +538,15 @@ pub(super) mod serde_bincode_compat {
                     receipts: vec![],
                     first_block: 0,
                     requests: vec![],
-                }
+                },
             };
 
             let encoded = bincode::serialize(&data).unwrap();
-            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
             assert_eq!(decoded, data);
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
