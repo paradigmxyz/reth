@@ -32,8 +32,8 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 use derive_more::{Constructor, Deref, From, Into};
 use reth_chainspec::{
-    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
-    DepositContract, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
+    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
@@ -369,7 +369,7 @@ impl From<Genesis> for OpChainSpec {
         Self {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
-                genesis_header: SealedHeader::new_unhashed(make_genesis_header(
+                genesis_header: SealedHeader::new_unhashed(make_op_genesis_header(
                     &genesis, &hardforks,
                 )),
                 genesis,

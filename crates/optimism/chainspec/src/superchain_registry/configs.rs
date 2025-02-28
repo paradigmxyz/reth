@@ -36,30 +36,23 @@ pub(crate) fn read_superchain_genesis(
     network: &str,
     environment: &str,
 ) -> Result<Genesis, SuperchainConfigError> {
-    // Read the genesis file from the tar.
+    // Open the archive.
     let archive = TarArchiveRef::new(SUPER_CHAIN_CONFIGS_TAR_BYTES)
         .map_err(SuperchainConfigError::CorruptDataError)?;
-    let genesis_file =
+    // Read and decompress the genesis file.
+    let compressed_genesis_file =
         read_file(&archive, &format!("genesis/{}/{}.json.deflate", environment, network))?;
-    let file = decompress_to_vec_zlib_with_limit(&genesis_file, MAX_SIZE)
+    let genesis_file = decompress_to_vec_zlib_with_limit(&compressed_genesis_file, MAX_SIZE)
         .map_err(|e| SuperchainConfigError::DecompressError(format!("{}", e)))?;
 
-    // TODO: Workaround because Genesis does not allow optional config
-    // Some genesis files missing the config and have "config": null.
-    // This is a workaround to patch the genesis file to allow the parsing.
-    // See: https://github.com/ethereum-optimism/superchain-registry/issues/901
-    let mut config_content = String::from_utf8(file)?;
-    config_content = config_content.replace("\"config\":null,", "");
+    // Load the genesis file.
+    let mut genesis: Genesis = serde_json::from_slice(&genesis_file)?;
 
-    // Update config from network config.
-    let mut genesis: Genesis = serde_json::from_str(&config_content)?;
-
-    // TODO: Remove this as well.
-    // ChainConfig defaults to chain_id=1. So we know that the config is missing.
-    if genesis.config.chain_id == 1 {
-        let chain_config = read_superchain_metadata(network, environment, &archive)?;
-        genesis.config = to_genesis_chain_config(&chain_config);
-    }
+    // The "config" field is stripped (see fetch_superchain_config.sh) from the genesis file
+    // because it is not always populated. For that reason, we read the config from the chain
+    // metadata file. See: https://github.com/ethereum-optimism/superchain-registry/issues/901
+    genesis.config =
+        to_genesis_chain_config(&read_superchain_metadata(network, environment, &archive)?);
 
     Ok(genesis)
 }

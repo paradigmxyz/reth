@@ -1,44 +1,14 @@
 //! Chain specification for the Base Sepolia testnet network.
 
-use alloc::{sync::Arc, vec};
+use alloc::sync::Arc;
 
-use alloy_chains::Chain;
-use alloy_primitives::{b256, U256};
-use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
-use reth_ethereum_forks::EthereumHardfork;
-use reth_optimism_forks::OpHardfork;
-use reth_primitives_traits::SealedHeader;
-
-use crate::{
-    make_op_genesis_header, superchain_registry::read_superchain_genesis, LazyLock, OpChainSpec,
-};
+use crate::{superchain_registry::read_superchain_genesis, LazyLock, OpChainSpec};
 
 /// The Base Sepolia spec
 pub static BASE_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
-    let genesis =
-        read_superchain_genesis("base", "sepolia").expect("Can't read Base Sepolia genesis");
-
-    let hardforks = OpHardfork::base_sepolia();
-    OpChainSpec {
-        inner: ChainSpec {
-            chain: Chain::base_sepolia(),
-            genesis_header: SealedHeader::new(
-                make_op_genesis_header(&genesis, &hardforks),
-                b256!("0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"),
-            ),
-            genesis,
-            paris_block_and_final_difficulty: Some((0, U256::from(0))),
-            hardforks,
-            base_fee_params: BaseFeeParamsKind::Variable(
-                vec![
-                    (EthereumHardfork::London.boxed(), BaseFeeParams::base_sepolia()),
-                    (OpHardfork::Canyon.boxed(), BaseFeeParams::base_sepolia_canyon()),
-                ]
-                .into(),
-            ),
-            prune_delete_limit: 10000,
-            ..Default::default()
-        },
-    }
-    .into()
+    let mut op_chain_spec = OpChainSpec::from(
+        read_superchain_genesis("base", "sepolia").expect("Can't read Base Sepolia genesis"),
+    );
+    op_chain_spec.inner.prune_delete_limit = 10000;
+    op_chain_spec.into()
 });

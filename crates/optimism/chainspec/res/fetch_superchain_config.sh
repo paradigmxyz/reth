@@ -58,6 +58,12 @@ find "$GENESIS_SRC_DIR" -type f -name "*.json.zst" | while read -r file; do
     # Extract the file
     zstd -q -d -D="$DICT_FILE" "$file" -o "$DEST_PATH"
 
+    # Remove "config" field from genesis files, because it is not consistent populated.
+    # We will add it back in from the chain config file during runtime.
+    # See: https://github.com/ethereum-optimism/superchain-registry/issues/901
+    jq 'del(.config)' "$DEST_PATH" > "$DEST_PATH.tmp"
+    mv "$DEST_PATH.tmp" "$DEST_PATH"
+
     # Compress with zlib-flate and remove the original file
     zlib-flate -compress < "$DEST_PATH" > "$DEST_PATH.deflate"
     rm "$DEST_PATH"
