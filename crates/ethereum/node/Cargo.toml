@@ -91,4 +91,5 @@ test-utils = [
     "reth-trie-db/test-utils",
     "revm/test-utils",
     "reth-evm/test-utils",
+    "reth-primitives/test-utils",
 ]
