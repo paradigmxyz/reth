@@ -377,3 +377,169 @@ impl ExecutionCache {
         self.inner.write().replace(cache);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::tree::{
+        payload_processor::{
+            evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
+        },
+        StateProviderBuilder, TreeConfig,
+    };
+    use reth_chainspec::ChainSpec;
+    use reth_db_common::init::init_genesis;
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_evm::system_calls::{OnStateHook, StateChangeSource};
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_primitives_traits::{Account as RethAccount, StorageEntry};
+    use reth_provider::{
+        providers::{BlockchainProvider, ConsistentDbView},
+        test_utils::create_test_provider_factory_with_chain_spec,
+        ChainSpecProvider, HashingWriter,
+    };
+    use reth_testing_utils::generators::{self, Rng};
+    use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
+    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
+    use revm_state::{
+        Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot,
+    };
+
+    fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> RethAccount {
+        RethAccount {
+            balance: revm_account.info.balance,
+            nonce: revm_account.info.nonce,
+            bytecode_hash: if revm_account.info.code_hash == KECCAK_EMPTY {
+                None
+            } else {
+                Some(revm_account.info.code_hash)
+            },
+        }
+    }
+
+    fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
+        let mut rng = generators::rng();
+        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.gen()).collect();
+        let mut updates = Vec::new();
+
+        for _ in 0..updates_per_account {
+            let num_accounts_in_update = rng.gen_range(1..=num_accounts);
+            let mut state_update = EvmState::default();
+
+            let selected_addresses = &all_addresses[0..num_accounts_in_update];
+
+            for &address in selected_addresses {
+                let mut storage = HashMap::default();
+                if rng.gen_bool(0.7) {
+                    for _ in 0..rng.gen_range(1..10) {
+                        let slot = U256::from(rng.gen::<u64>());
+                        storage.insert(
+                            slot,
+                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.gen::<u64>())),
+                        );
+                    }
+                }
+
+                let account = RevmAccount {
+                    info: AccountInfo {
+                        balance: U256::from(rng.gen::<u64>()),
+                        nonce: rng.gen::<u64>(),
+                        code_hash: KECCAK_EMPTY,
+                        code: Some(Default::default()),
+                    },
+                    storage,
+                    status: AccountStatus::Touched,
+                };
+
+                state_update.insert(address, account);
+            }
+
+            updates.push(state_update);
+        }
+
+        updates
+    }
+
+    #[test]
+    fn test_state_root() {
+        reth_tracing::init_test_tracing();
+
+        let factory = create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
+        let genesis_hash = init_genesis(&factory).unwrap();
+
+        let state_updates = create_mock_state_updates(10, 10);
+        let mut hashed_state = HashedPostState::default();
+        let mut accumulated_state: HashMap<Address, (RethAccount, HashMap<B256, U256>)> =
+            HashMap::default();
+
+        {
+            let provider_rw = factory.provider_rw().expect("failed to get provider");
+
+            for update in &state_updates {
+                let account_updates = update.iter().map(|(address, account)| {
+                    (*address, Some(convert_revm_to_reth_account(account)))
+                });
+                provider_rw
+                    .insert_account_for_hashing(account_updates)
+                    .expect("failed to insert accounts");
+
+                let storage_updates = update.iter().map(|(address, account)| {
+                    let storage_entries = account.storage.iter().map(|(slot, value)| {
+                        StorageEntry { key: B256::from(*slot), value: value.present_value }
+                    });
+                    (*address, storage_entries)
+                });
+                provider_rw
+                    .insert_storage_for_hashing(storage_updates)
+                    .expect("failed to insert storage");
+            }
+            provider_rw.commit().expect("failed to commit changes");
+        }
+
+        for update in &state_updates {
+            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
+
+            for (address, account) in update {
+                let storage: HashMap<B256, U256> = account
+                    .storage
+                    .iter()
+                    .map(|(k, v)| (B256::from(*k), v.present_value))
+                    .collect();
+
+                let entry = accumulated_state.entry(*address).or_default();
+                entry.0 = convert_revm_to_reth_account(account);
+                entry.1.extend(storage);
+            }
+        }
+
+        let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
+            WorkloadExecutor::new(),
+            EthEvmConfig::new(factory.chain_spec()),
+            &TreeConfig::default(),
+        );
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let mut handle = payload_processor.spawn(
+            Default::default(),
+            Default::default(),
+            StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+            ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+            TrieInput::from_state(hashed_state),
+        );
+
+        let mut state_hook = handle.state_hook();
+
+        for (i, update) in state_updates.into_iter().enumerate() {
+            state_hook.on_state(StateChangeSource::Transaction(i), &update);
+        }
+        drop(state_hook);
+
+        let root_from_task = handle.state_root().expect("task failed").state_root.0;
+        let root_from_regular = state_root(accumulated_state);
+
+        assert_eq!(
+            root_from_task, root_from_regular,
+            "State root mismatch: task={root_from_task:?}, base={root_from_regular:?}"
+        );
+    }
+}

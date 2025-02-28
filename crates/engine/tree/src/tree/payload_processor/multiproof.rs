@@ -205,7 +205,7 @@ impl Drop for StateHookSender {
     }
 }
 
-fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
