@@ -3070,18 +3070,28 @@ dependencies = [
 name = "example-bsc-p2p"
 version = "0.0.0"
 dependencies = [
- "alloy-genesis",
+ "alloy-primitives",
+ "alloy-rlp",
+ "bytes",
+ "derive_more 2.0.1",
+ "futures",
  "reth-chainspec",
  "reth-discv4",
+ "reth-eth-wire",
+ "reth-eth-wire-types",
+ "reth-ethereum-forks",
  "reth-network",
  "reth-network-api",
  "reth-network-peers",
  "reth-primitives",
+ "reth-provider",
  "reth-tracing",
  "secp256k1 0.30.0",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
