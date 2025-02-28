@@ -30,10 +30,12 @@ serde_with = { workspace = true, optional = true }
 derive_more.workspace = true
 
 [dev-dependencies]
+reth-primitives-traits = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-ethereum-primitives = { workspace = true, features = ["arbitrary"] }
+alloy-primitives = { workspace = true, features = ["rand", "arbitrary"] }
 arbitrary.workspace = true
 bincode.workspace = true
 rand.workspace = true
-reth-ethereum-primitives.workspace = true
 
 [features]
 default = ["std"]
