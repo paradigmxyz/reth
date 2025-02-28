@@ -12,13 +12,35 @@ use eyre::Result;
 /// The action name indicates what it does (e.g., `AssertMineBlock` would both
 /// mine a block and assert it worked).
 pub trait Action<I>: Send + 'static {
-    /// Executes the action
-    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>>;
+    /// Executes the action, consuming self
+    fn execute(self, env: &Environment<I>) -> BoxFuture<'_, Result<()>>;
+}
+
+/// Inner action trait that uses mutable reference.
+/// This trait is used for internal trait object handling.
+pub trait ActionImpl<I>: Send + 'static {
+    /// Executes the action implementation, borrowing self mutably
+    fn execute_impl<'a>(&mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>>;
+}
+
+// Implement the inner trait for all actions
+impl<T, I> ActionImpl<I> for T
+where
+    T: Action<I>,
+{
+    fn execute_impl<'a>(&mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+        let dummy = unsafe { std::ptr::read(self) };
+        let result = dummy.execute(env);
+
+        // we've moved out the value behind the &mut reference.
+        // this is safe because we never access the original again.
+        result
+    }
 }
 
 /// Simplified action container for storage in tests
 #[allow(missing_debug_implementations)]
-pub struct ActionBox<I>(Box<dyn Action<I>>);
+pub struct ActionBox<I>(Box<dyn ActionImpl<I>>);
 
 impl<I: 'static> ActionBox<I> {
     /// Constructor for [`ActionBox`].
@@ -28,7 +50,7 @@ impl<I: 'static> ActionBox<I> {
 
     /// Executes an [`ActionBox`] with the given [`Environment`] reference.
     pub async fn execute(mut self, env: &Environment<I>) -> Result<()> {
-        self.0.execute(env).await
+        self.0.execute_impl(env).await
     }
 }
 
@@ -45,7 +67,7 @@ impl<I> Action<I> for MineBlock
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
             // 1. Create a new payload with the given transactions
             // 2. Execute forkchoiceUpdated with the new payload
@@ -72,7 +94,7 @@ impl<I> Action<I> for AssertMineBlock
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
             // 1. Create a new payload with the given transactions
             // 2. Execute forkchoiceUpdated with the new payload
@@ -111,7 +133,7 @@ impl<I> Action<I> for SubmitTransaction
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -129,7 +151,7 @@ impl<I> Action<I> for CreatePayload
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -149,7 +171,7 @@ impl<I> Action<I> for ForkchoiceUpdated
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -167,7 +189,7 @@ impl<I> Action<I> for NewPayload
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -187,7 +209,7 @@ impl<I> Action<I> for GetBlock
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -207,7 +229,7 @@ impl<I> Action<I> for GetTransactionCount
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -229,7 +251,7 @@ impl<I> Action<I> for GetStorageAt
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -249,7 +271,7 @@ impl<I> Action<I> for Call
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -267,7 +289,7 @@ impl<I> Action<I> for WaitForBlocks
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -287,7 +309,7 @@ impl<I> Action<I> for ChainReorg
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, _env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
             // 1. Reorg the chain to the specified depth
             // 2. Add the new blocks
@@ -301,12 +323,12 @@ where
 #[allow(missing_debug_implementations)]
 pub struct Sequence<I> {
     /// Actions to execute in sequence
-    pub actions: Vec<Box<dyn Action<I>>>,
+    pub actions: Vec<ActionBox<I>>,
 }
 
 impl<I> Sequence<I> {
     /// Create a new sequence of actions
-    pub fn new(actions: Vec<Box<dyn Action<I>>>) -> Self {
+    pub fn new(actions: Vec<ActionBox<I>>) -> Self {
         Self { actions }
     }
 }
@@ -315,10 +337,12 @@ impl<I> Action<I> for Sequence<I>
 where
     I: Send + Sync + 'static,
 {
-    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute(self, env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
+        let actions = self.actions;
+
         Box::pin(async move {
             // Execute each action in sequence
-            for action in &mut self.actions {
+            for action in actions {
                 action.execute(env).await?;
             }
 

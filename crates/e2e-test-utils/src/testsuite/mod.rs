@@ -28,12 +28,12 @@ impl<I: 'static> Runner<I> {
     }
 
     /// Execute an action
-    pub async fn execute(&mut self, action: ActionBox<I>) -> Result<()> {
+    pub async fn execute(&self, action: ActionBox<I>) -> Result<()> {
         action.execute(&self.env).await
     }
 
     /// Execute a sequence of actions
-    pub async fn run_actions(&mut self, actions: Vec<ActionBox<I>>) -> Result<()> {
+    pub async fn run_actions(&self, actions: Vec<ActionBox<I>>) -> Result<()> {
         for action in actions {
             self.execute(action).await?;
         }
