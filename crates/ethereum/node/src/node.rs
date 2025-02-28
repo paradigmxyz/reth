@@ -11,16 +11,16 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
-use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PoolBuilder,
+        BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
+        NetworkBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
-    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
+    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
@@ -47,7 +47,7 @@ impl EthereumNode {
     pub fn components<Node>() -> ComponentsBuilder<
         Node,
         EthereumPoolBuilder,
-        EthereumPayloadBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
@@ -63,7 +63,7 @@ impl EthereumNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(EthereumPoolBuilder::default())
-            .payload(EthereumPayloadBuilder::default())
+            .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
@@ -211,7 +211,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         EthereumPoolBuilder,
-        EthereumPayloadBuilder,
+        BasicPayloadServiceBuilder<EthereumPayloadBuilder>,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
@@ -230,6 +230,22 @@ where
     }
 }
 
+impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
+    type RpcBlock = alloy_rpc_types_eth::Block;
+
+    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
+        let alloy_rpc_types_eth::Block { header, transactions, withdrawals, .. } = rpc_block;
+        reth_ethereum_primitives::Block {
+            header: header.inner,
+            body: reth_ethereum_primitives::BlockBody {
+                transactions: transactions.into_transactions().map(|tx| tx.inner.into()).collect(),
+                ommers: Default::default(),
+                withdrawals,
+            },
+        }
+    }
+}
+
 /// A regular ethereum evm and executor builder.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -241,16 +257,14 @@ where
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory>;
+    type Executor = BasicBlockExecutorProvider<EthEvmConfig>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let chain_spec = ctx.chain_spec();
         let evm_config = EthEvmConfig::new(ctx.chain_spec());
-        let strategy_factory = EthExecutionStrategyFactory::new(chain_spec, evm_config.clone());
-        let executor = BasicBlockExecutorProvider::new(strategy_factory);
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
     }

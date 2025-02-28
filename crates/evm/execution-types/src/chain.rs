@@ -8,8 +8,8 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives_traits::{
-    transaction::signed::{SignedTransaction, SignedTransactionIntoRecoveredExt},
-    Block, BlockBody, NodePrimitives, RecoveredBlock, SealedHeader,
+    transaction::signed::SignedTransaction, Block, BlockBody, NodePrimitives, RecoveredBlock,
+    SealedHeader,
 };
 use reth_trie_common::updates::TrieUpdates;
 use revm_database::BundleState;

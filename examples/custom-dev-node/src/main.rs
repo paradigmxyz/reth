@@ -1,7 +1,7 @@
 //! This example shows how to run a custom dev node programmatically and submit a transaction
 //! through rpc.
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use std::sync::Arc;
 

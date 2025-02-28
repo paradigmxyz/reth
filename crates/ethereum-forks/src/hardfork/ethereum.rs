@@ -380,7 +380,7 @@ impl EthereumHardfork {
             (
                 Self::Paris,
                 ForkCondition::TTD {
-                    activation_block_number: 1735371,
+                    activation_block_number: 1450409,
                     fork_block: Some(1735371),
                     total_difficulty: uint!(17_000_000_000_000_000_U256),
                 },

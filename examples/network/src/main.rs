@@ -2,9 +2,11 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run --release -p network
 //! ```
+
+#![warn(unused_crate_dependencies)]
 
 use futures::StreamExt;
 use reth_network::{

@@ -13,20 +13,20 @@ use reth_evm::{
 };
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+    AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
-        PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
+        BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
+        NetworkBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
-    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder,
+    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{BasicOpReceiptBuilder, OpEvmConfig, OpExecutionStrategyFactory};
+use reth_optimism_evm::{BasicOpReceiptBuilder, OpEvmConfig};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -89,7 +89,7 @@ impl OpNode {
     ) -> ComponentsBuilder<
         Node,
         OpPoolBuilder,
-        OpPayloadBuilder,
+        BasicPayloadServiceBuilder<OpPayloadBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -111,9 +111,9 @@ impl OpNode {
                 OpPoolBuilder::default()
                     .with_enable_tx_conditional(self.args.enable_tx_conditional),
             )
-            .payload(
+            .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
-            )
+            ))
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -171,7 +171,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         OpPoolBuilder,
-        OpPayloadBuilder,
+        BasicPayloadServiceBuilder<OpPayloadBuilder>,
         OpNetworkBuilder,
         OpExecutorBuilder,
         OpConsensusBuilder,
@@ -190,6 +190,24 @@ where
             .with_da_config(self.da_config.clone())
             .with_enable_tx_conditional(self.args.enable_tx_conditional)
             .build()
+    }
+}
+
+impl<N> DebugNode<N> for OpNode
+where
+    N: FullNodeComponents<Types = Self>,
+{
+    type RpcBlock = alloy_rpc_types_eth::Block<op_alloy_consensus::OpTxEnvelope>;
+
+    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_node_api::BlockTy<Self> {
+        let alloy_rpc_types_eth::Block { header, transactions, .. } = rpc_block;
+        reth_optimism_primitives::OpBlock {
+            header: header.inner,
+            body: reth_optimism_primitives::OpBlockBody {
+                transactions: transactions.into_transactions().map(Into::into).collect(),
+                ..Default::default()
+            },
+        }
     }
 }
 
@@ -340,7 +358,7 @@ where
         >,
     >,
 {
-    type Validator = OpEngineValidator;
+    type Validator = OpEngineValidator<N::Provider>;
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         OpEngineValidatorBuilder::default().build(ctx).await
@@ -414,15 +432,14 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 {
     type EVM = OpEvmConfig;
-    type Executor = BasicBlockExecutorProvider<OpExecutionStrategyFactory<OpPrimitives>>;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = OpEvmConfig::new(ctx.chain_spec());
-        let strategy_factory = OpExecutionStrategyFactory::optimism(ctx.chain_spec());
-        let executor = BasicBlockExecutorProvider::new(strategy_factory);
+        let evm_config = OpEvmConfig::optimism(ctx.chain_spec());
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
     }
@@ -453,8 +470,18 @@ impl<T> Default for OpPoolBuilder<T> {
 }
 
 impl<T> OpPoolBuilder<T> {
-    fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
+    /// Sets the `enable_tx_conditional` flag on the pool builder.
+    pub fn with_enable_tx_conditional(mut self, enable_tx_conditional: bool) -> Self {
         self.enable_tx_conditional = enable_tx_conditional;
+        self
+    }
+
+    /// Sets the [`PoolBuilderConfigOverrides`] on the pool builder.
+    pub fn with_pool_config_overrides(
+        mut self,
+        pool_config_overrides: PoolBuilderConfigOverrides,
+    ) -> Self {
+        self.pool_config_overrides = pool_config_overrides;
         self
     }
 }
@@ -593,7 +620,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
     /// given EVM config.
     #[expect(clippy::type_complexity)]
     pub fn build<Node, Evm, Pool>(
-        &self,
+        self,
         evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
@@ -633,7 +660,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
     }
 }
 
-impl<Node, Pool, Txs> PayloadServiceBuilder<Node, Pool> for OpPayloadBuilder<Txs>
+impl<Node, Pool, Txs> PayloadBuilderBuilder<Node, Pool> for OpPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<
@@ -656,11 +683,11 @@ where
     >;
 
     async fn build_payload_builder(
-        &self,
+        self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        self.build(OpEvmConfig::new(ctx.chain_spec()), ctx, pool)
+        self.build(OpEvmConfig::optimism(ctx.chain_spec()), ctx, pool)
     }
 }
 
@@ -783,10 +810,13 @@ where
     >,
     Node: FullNodeComponents<Types = Types>,
 {
-    type Validator = OpEngineValidator;
+    type Validator = OpEngineValidator<Node::Provider>;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(OpEngineValidator::new(ctx.config.chain.clone()))
+        Ok(OpEngineValidator::new::<KeyHasherTy<Types>>(
+            ctx.config.chain.clone(),
+            ctx.node.provider().clone(),
+        ))
     }
 }
 

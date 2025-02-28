@@ -37,7 +37,7 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
 
-walkdir = "2.3.3"
+walkdir.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
