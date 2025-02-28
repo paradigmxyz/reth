@@ -1,13 +1,14 @@
 //! Example tests using the test suite framework.
 
 use crate::testsuite::{
-    actions::{AdvanceBlock, Call, ForkchoiceUpdated, GetTransactionCount, SubmitTransaction},
-    assertions::{BlockExists, TransactionExists, ValueEquals},
+    actions::{
+        AssertMineBlock, Call, ForkchoiceUpdated, GetTransactionCount, MineBlock, SubmitTransaction,
+    },
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{B256, U256};
+use alloy_primitives::B256;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use std::sync::Arc;
@@ -23,18 +24,12 @@ async fn test_testsuite_submit_transaction_and_advance_block() -> Result<()> {
 
     let test = TestBuilder::new(())
         .with_setup(setup)
-        .with_action(SubmitTransaction {
-            node_idx: 0,
-            raw_tx: vec![],
-            result_id: "tx1".to_string(),
-        })
-        .with_action(AdvanceBlock {
+        .with_action(SubmitTransaction { node_idx: 0, raw_tx: vec![] })
+        .with_action(AssertMineBlock {
             node_idx: 0,
             transactions: vec![],
-            result_id: "block1".to_string(),
-        })
-        .with_assertion(TransactionExists { tx_hash: B256::ZERO })
-        .with_assertion(BlockExists { block_hash: B256::ZERO });
+            expected_hash: Some(B256::ZERO),
+        });
 
     test.run().await
 }
@@ -50,11 +45,7 @@ async fn test_testsuite_chain_reorg() -> Result<()> {
 
     let test = TestBuilder::new(())
         .with_setup(setup)
-        .with_action(AdvanceBlock {
-            node_idx: 0,
-            transactions: vec![],
-            result_id: "block1".to_string(),
-        })
+        .with_action(MineBlock { node_idx: 0, transactions: vec![] })
         .with_action(ForkchoiceUpdated {
             node_idx: 1,
             state: (
@@ -63,15 +54,12 @@ async fn test_testsuite_chain_reorg() -> Result<()> {
                 B256::ZERO, // finalized block hash
             ),
             attributes: None,
-            result_id: "fcu1".to_string(),
         })
         .with_action(GetTransactionCount {
             node_idx: 1,
             address: B256::ZERO,
             block_id: BlockId::Number(BlockNumberOrTag::Latest),
-            result_id: "count1".to_string(),
-        })
-        .with_assertion(ValueEquals { value_id: "count1".to_string(), expected: U256::from(0) });
+        });
 
     test.run().await
 }
@@ -87,24 +75,13 @@ async fn test_testsuite_complex_scenario() -> Result<()> {
 
     let test = TestBuilder::new(())
         .with_setup(setup)
-        .with_action(SubmitTransaction {
-            node_idx: 0,
-            raw_tx: vec![],
-            result_id: "tx1".to_string(),
-        })
-        .with_action(AdvanceBlock {
-            node_idx: 0,
-            transactions: vec![],
-            result_id: "block1".to_string(),
-        })
+        .with_action(SubmitTransaction { node_idx: 0, raw_tx: vec![] })
+        .with_action(MineBlock { node_idx: 0, transactions: vec![] })
         .with_action(Call {
             node_idx: 1,
             request: Default::default(),
             block_id: BlockId::Number(BlockNumberOrTag::Latest),
-            result_id: "call1".to_string(),
-        })
-        .with_assertion(TransactionExists { tx_hash: B256::ZERO })
-        .with_assertion(BlockExists { block_hash: B256::ZERO });
+        });
 
     test.run().await
 }
