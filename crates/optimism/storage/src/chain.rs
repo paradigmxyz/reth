@@ -59,17 +59,16 @@ where
 
         let mut bodies = Vec::with_capacity(inputs.len());
 
+        let mut withdrawals: Option<Withdrawals> = Some(vec![].into());
         for (header, transactions) in inputs {
-            // If we are past shanghai, then all blocks should have a withdrawal list,
-            // even if empty
-            let withdrawals: Option<Withdrawals> = chain_spec
-                .is_shanghai_active_at_timestamp(header.timestamp())
-                .then(|| vec![].into());
+            if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
+                withdrawals = None;
+            };
 
             bodies.push(alloy_consensus::BlockBody::<T, H> {
-                transactions,
+                transactions: transactions.clone(),
                 ommers: vec![],
-                withdrawals,
+                withdrawals: withdrawals.clone(),
             });
         }
 
