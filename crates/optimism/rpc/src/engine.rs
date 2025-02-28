@@ -36,13 +36,6 @@ pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
     "engine_getPayloadBodiesByRangeV1",
 ];
 
-/// Returns [`EngineCapabilities`] supported by OP stack.
-pub fn op_capabilities() -> EngineCapabilities {
-    EngineCapabilities::new(
-        OP_CAPABILITIES.iter().map(|cap| cap.to_string()).collect::<HashSet<_>>(),
-    )
-}
-
 /// Extension trait that gives access to Optimism engine API RPC methods.
 ///
 /// Note:
