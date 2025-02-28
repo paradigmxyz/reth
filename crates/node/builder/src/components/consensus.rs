@@ -20,20 +20,20 @@ pub trait ConsensusBuilder<Node: FullNodeTypes>: Send {
     ) -> impl Future<Output = eyre::Result<Self::Consensus>> + Send;
 }
 
-impl<Node, F, Fut, Consensus> ConsensusBuilder<Node> for F
+impl<Node, F, Consensus> ConsensusBuilder<Node> for F
 where
     Node: FullNodeTypes,
     Consensus:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
-    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<Consensus>> + Send,
+    F: AsyncFnOnce(&BuilderContext<Node>) -> eyre::Result<Consensus> + Send,
+    for<'a> <F as AsyncFnOnce<(&'a BuilderContext<Node>,)>>::CallOnceFuture: Send,
 {
     type Consensus = Consensus;
 
     fn build_consensus(
         self,
         ctx: &BuilderContext<Node>,
-    ) -> impl Future<Output = eyre::Result<Self::Consensus>> {
+    ) -> impl Future<Output = eyre::Result<Self::Consensus>> + Send {
         self(ctx)
     }
 }

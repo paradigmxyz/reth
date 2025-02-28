@@ -10,6 +10,8 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![feature(async_fn_traits)]
+#![feature(unboxed_closures)]
 
 /// Node event hooks.
 pub mod hooks;
