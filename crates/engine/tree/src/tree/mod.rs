@@ -546,30 +546,6 @@ pub enum TreeAction {
     },
 }
 
-/// Whether or not the blocks are currently being persisted and the input block is a descendant.
-#[derive(Debug, Clone, Copy)]
-pub enum DescendantOfPersistingBlocks {
-    /// The blocks are not currently being persisted.
-    NotPersisting,
-    /// The blocks are currently being persisted but the input block is not a descendant.
-    NotDescendant,
-    /// The blocks are currently being persisted and the input block is a descendant.
-    Descendant,
-}
-
-impl DescendantOfPersistingBlocks {
-    /// Returns true if the blocks are not currently being persisted.
-    pub fn is_not_persisting(&self) -> bool {
-        matches!(self, Self::NotPersisting)
-    }
-
-    /// Returns true if the blocks are currently being persisted and the input block is a
-    /// descendant.
-    pub fn is_descendant(&self) -> bool {
-        matches!(self, Self::Descendant)
-    }
-}
-
 /// The engine API tree handler implementation.
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
@@ -1099,7 +1075,7 @@ where
         Ok(true)
     }
 
-    /// Returns whether or not the input block is a descendant of the blocks being persisted.
+    /// Returns whether or not the input block is a descendant of the blocks persisting.
     fn is_descendant_of_persisting_blocks(
         &self,
         block: &N::BlockHeader,
@@ -1114,7 +1090,7 @@ where
         };
 
         // The block being validated can only be a descendant if its number is higher than
-        // the highest block being persisted. Otherwise, it's likely a fork of a lower block.
+        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
         if block.number() > highest.number && self.state.tree_state.is_descendant(*highest, block) {
             return DescendantOfPersistingBlocks::Descendant
         }
@@ -2390,7 +2366,7 @@ where
             let trie_input_start = Instant::now();
             let trie_input = self
                 .compute_trie_input(
-                    descendant_of_persisting_blocks.is_descendant(),
+                    descendant_of_persisting_blocks,
                     consistent_view.clone(),
                     block.header().parent_hash(),
                 )
@@ -2473,7 +2449,7 @@ where
                 }
             } else {
                 match self.compute_state_root_parallel(
-                    descendant_of_persisting_blocks.is_descendant(),
+                    descendant_of_persisting_blocks,
                     block.header().parent_hash(),
                     &hashed_state,
                 ) {
@@ -2568,14 +2544,14 @@ where
     /// should be used instead.
     fn compute_state_root_parallel(
         &self,
-        is_descendant_of_persisting_blocks: bool,
+        descendant_of_persisting_blocks: DescendantOfPersistingBlocks,
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
         let mut input = self.compute_trie_input(
-            is_descendant_of_persisting_blocks,
+            descendant_of_persisting_blocks,
             consistent_view.clone(),
             parent_hash,
         )?;
@@ -2586,9 +2562,23 @@ where
     }
 
     /// Computes the trie input at the provided parent hash.
+    ///
+    /// The goal of this function is to take in-memory blocks and generate a [`TrieInput`] that
+    /// serves as an overlay to the database blocks.
+    ///
+    /// It works as follows:
+    /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
+    ///    [`TreeState::blocks_by_hash`].
+    /// 2. If the persistence is in progress, and the block that we're computing the trie input for
+    ///    is a descendant of the currently persisting blocks, we need to be sure that in-memory
+    ///    blocks are not overlapping with the database blocks that may have been already persisted.
+    ///    To do that, we're filtering out in-memory blocks that are lower than the highest database
+    ///    block.
+    /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
+    ///    [`HashedPostState`] from them.
     fn compute_trie_input(
         &self,
-        is_descendant_of_persisting_blocks: bool,
+        descendant_of_persisting_blocks: DescendantOfPersistingBlocks,
         consistent_view: ConsistentDbView<P>,
         parent_hash: B256,
     ) -> Result<TrieInput, ParallelStateRootError> {
@@ -2605,7 +2595,7 @@ where
 
         // If the current block is a descendant of the currently persisting blocks, then we need to
         // filter in-memory blocks, so that none of them are already persisted in the database.
-        if is_descendant_of_persisting_blocks {
+        if descendant_of_persisting_blocks.is_descendant() {
             // Iterate over the blocks from oldest to newest.
             while let Some(block) = blocks.last() {
                 let recovered_block = block.recovered_block();
@@ -2628,8 +2618,35 @@ where
             debug!(target: "engine::tree", %parent_hash, %historical, blocks = blocks.len(), "Parent found in memory");
         }
 
+        // Convert the historical block to the block number.
+        let block_number = match historical {
+            BlockHashOrNumber::Hash(block_hash) => provider
+                .block_number(block_hash)?
+                .ok_or(ProviderError::BlockHashNotFound(block_hash))?,
+            BlockHashOrNumber::Number(block_number) => block_number,
+        };
+
         // Retrieve revert state for historical block.
-        let revert_state = self.revert_state(provider, best_block_number, historical)?;
+        let revert_state = if block_number == best_block_number {
+            // We do not check against the `last_block_number` here because
+            // `HashedPostState::from_reverts` only uses the database tables, and not static files.
+            debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
+            HashedPostState::default()
+        } else {
+            let revert_state = HashedPostState::from_reverts::<
+                <P::StateCommitment as StateCommitment>::KeyHasher,
+            >(provider.tx_ref(), block_number + 1)
+            .map_err(ProviderError::from)?;
+            debug!(
+                target: "engine::tree",
+                block_number,
+                best_block_number,
+                accounts = revert_state.accounts.len(),
+                storages = revert_state.storages.len(),
+                "Non-empty revert state"
+            );
+            revert_state
+        };
         input.append(revert_state);
 
         // Extend with contents of parent in-memory blocks.
@@ -2638,42 +2655,6 @@ where
         }
 
         Ok(input)
-    }
-
-    /// Retrieve revert hashed state down to the given block hash or number.
-    fn revert_state(
-        &self,
-        provider: P::Provider,
-        best_block_number: BlockNumber,
-        block: BlockHashOrNumber,
-    ) -> ProviderResult<HashedPostState> {
-        let block_number = match block {
-            BlockHashOrNumber::Hash(block_hash) => provider
-                .block_number(block_hash)?
-                .ok_or(ProviderError::BlockHashNotFound(block_hash))?,
-            BlockHashOrNumber::Number(block_number) => block_number,
-        };
-
-        // We do not check against the `last_block_number` here because
-        // `HashedPostState::from_reverts` only uses the database tables, and not static files.
-        if block_number == best_block_number {
-            debug!(target: "engine::tree", ?block, block_number, "Returning empty revert state");
-            Ok(HashedPostState::default())
-        } else {
-            let revert_state = HashedPostState::from_reverts::<
-                <P::StateCommitment as StateCommitment>::KeyHasher,
-            >(provider.tx_ref(), block_number + 1)?;
-            debug!(
-                target: "engine::tree",
-                ?block,
-                block_number,
-                best_block_number,
-                accounts = revert_state.accounts.len(),
-                storages = revert_state.storages.len(),
-                "Returning non-empty revert state"
-            );
-            Ok(revert_state)
-        }
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -2986,6 +2967,30 @@ pub enum InsertPayloadOk {
     AlreadySeen(BlockStatus),
     /// The payload was valid and inserted into the tree.
     Inserted(BlockStatus),
+}
+
+/// Whether or not the blocks are currently persisting and the input block is a descendant.
+#[derive(Debug, Clone, Copy)]
+pub enum DescendantOfPersistingBlocks {
+    /// The blocks are not currently persisting.
+    NotPersisting,
+    /// The blocks are currently persisting but the input block is not a descendant.
+    NotDescendant,
+    /// The blocks are currently persisting and the input block is a descendant.
+    Descendant,
+}
+
+impl DescendantOfPersistingBlocks {
+    /// Returns true if the blocks are not currently being persisted.
+    pub fn is_not_persisting(&self) -> bool {
+        matches!(self, Self::NotPersisting)
+    }
+
+    /// Returns true if the blocks are currently being persisted and the input block is a
+    /// descendant.
+    pub fn is_descendant(&self) -> bool {
+        matches!(self, Self::Descendant)
+    }
 }
 
 #[cfg(test)]
