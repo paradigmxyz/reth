@@ -110,7 +110,7 @@ where
             // load the toml config
             .with_loaded_toml_config(config)?
             // add resolved peers
-            .with_resolved_peers().await?
+            .with_resolved_peers()?
             // attach the database
             .attach(database.clone())
             // ensure certain settings take effect
