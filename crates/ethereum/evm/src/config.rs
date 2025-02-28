@@ -34,7 +34,7 @@ pub fn revm_spec_by_timestamp_and_block_number(
         .active_at_timestamp_or_number(timestamp, block_number)
     {
         SpecId::SHANGHAI
-    } else if chain_spec.is_paris_active_at_block(block_number).is_some_and(|active| active) {
+    } else if chain_spec.is_paris_active_at_block(block_number) {
         SpecId::MERGE
     } else if chain_spec
         .fork(EthereumHardfork::London)
