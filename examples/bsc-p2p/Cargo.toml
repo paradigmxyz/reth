@@ -5,14 +5,10 @@ publish = false
 edition.workspace = true
 license.workspace = true
 
-[lib]
-name = "example_bsc_p2p"
-path = "src/lib.rs"
 
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-codecs-derive.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
 reth-eth-wire.workspace = true
@@ -25,7 +21,6 @@ reth-provider.workspace = true
 reth-tracing.workspace = true
 
 # alloy
-alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
@@ -33,7 +28,6 @@ alloy-rlp.workspace = true
 bytes.workspace = true
 derive_more.workspace = true
 futures.workspace = true
-rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
@@ -52,5 +46,4 @@ serde = [
     "reth-provider/serde",
     "secp256k1/serde",
     "bytes/serde",
-    "rand/serde",
 ]

@@ -1,9 +1,10 @@
+use crate::upgrade_status::{UpgradeStatus, UpgradeStatusExtension};
 use alloy_rlp::Decodable;
 use derive_more::Debug;
 use futures::SinkExt;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
-    handshake::{eth_handshake, EthRlpxHandshake, UnauthEth},
+    handshake::{EthRlpxHandshake, EthereumEthHandshake, UnauthEth},
 };
 use reth_eth_wire_types::{DisconnectReason, EthVersion, Status};
 use reth_ethereum_forks::ForkFilter;
@@ -11,8 +12,6 @@ use std::{future::Future, pin::Pin};
 use tokio::time::{timeout, Duration};
 use tokio_stream::StreamExt;
 use tracing::debug;
-
-use crate::upgrade_status::{UpgradeStatus, UpgradeStatusExtension};
 
 #[derive(Debug, Default)]
 /// The Binance Smart Chain (BSC) P2P handshake.
@@ -74,7 +73,8 @@ impl EthRlpxHandshake for BscHandshake {
     ) -> Pin<Box<dyn Future<Output = Result<Status, EthStreamError>> + 'a + Send>> {
         Box::pin(async move {
             let fut = async {
-                let negotiated_status = eth_handshake(unauth, status, fork_filter).await?;
+                let negotiated_status =
+                    EthereumEthHandshake(unauth).eth_handshake(status, fork_filter).await?;
                 Self::upgrade_status(unauth, negotiated_status).await
             };
             timeout(timeout_limit, fut).await.map_err(|_| EthStreamError::StreamTimeout)?

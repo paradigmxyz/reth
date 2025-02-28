@@ -10,8 +10,6 @@
 //!
 //! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
 
-#![warn(unused_crate_dependencies)]
-
 use chainspec::{boot_nodes, bsc_chain_spec, head};
 use handshake::BscHandshake;
 use reth_discv4::Discv4ConfigBuilder;

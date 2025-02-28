@@ -3070,15 +3070,12 @@ dependencies = [
 name = "example-bsc-p2p"
 version = "0.0.0"
 dependencies = [
- "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "bytes",
  "derive_more 2.0.1",
  "futures",
- "rand 0.8.5",
  "reth-chainspec",
- "reth-codecs-derive",
  "reth-discv4",
  "reth-eth-wire",
  "reth-eth-wire-types",

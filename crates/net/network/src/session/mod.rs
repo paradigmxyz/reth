@@ -1000,7 +1000,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
     // Add extra protocols to the hello message
     extra_handlers.retain(|handler| hello.try_add_protocol(handler.protocol()).is_ok());
 
-    // conduct the p2p handshake and return the authenticated stream
+    // conduct the p2p rlpx handshake and return the rlpx authenticated stream
     let (mut p2p_stream, their_hello) = match stream.handshake(hello).await {
         Ok(stream_res) => stream_res,
         Err(err) => {
@@ -1032,6 +1032,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         // Before trying status handshake, set up the version to negotiated shared version
         status.set_eth_version(eth_version);
 
+        // perform the eth protocol handshake
         match handshake
             .handshake(&mut p2p_stream, status, fork_filter.clone(), HANDSHAKE_TIMEOUT)
             .await
