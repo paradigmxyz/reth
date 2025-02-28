@@ -3,7 +3,9 @@ use crate::{
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
-    tree::{cached_state::CachedStateProvider, metrics::EngineApiMetrics},
+    tree::{
+        cached_state::CachedStateProvider, executor::WorkloadExecutor, metrics::EngineApiMetrics,
+    },
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
@@ -70,20 +72,16 @@ mod invalid_headers;
 mod metrics;
 mod payload_processor;
 mod persistence_state;
-pub mod root;
 // TODO(alexey): compare trie updates in `insert_block_inner`
 #[allow(unused)]
 mod trie_updates;
 
-use crate::tree::{
-    config::MIN_BLOCKS_FOR_PIPELINE_RUN,
-    error::AdvancePersistenceError,
-    payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
-};
+use crate::tree::{config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError};
 pub use block_buffer::BlockBuffer;
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
+pub use payload_processor::*;
 pub use persistence_state::PersistenceState;
 
 /// Keeps track of the state of the tree.
@@ -441,7 +439,7 @@ pub struct StateProviderBuilder<N: NodePrimitives, P> {
 impl<N: NodePrimitives, P> StateProviderBuilder<N, P> {
     /// Creates a new state provider from the provider factory, historical block hash and optional
     /// overlaid blocks.
-    fn new(
+    pub fn new(
         provider_factory: P,
         historical: B256,
         overlay: Option<Vec<ExecutedBlockWithTrieUpdates<N>>>,
@@ -663,7 +661,7 @@ where
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
         let payload_processor =
-            PayloadProcessor::new(WorkloadExecutor::new(), evm_config.clone(), &config);
+            PayloadProcessor::new(WorkloadExecutor::default(), evm_config.clone(), &config);
 
         Self {
             provider,

@@ -1,6 +1,6 @@
 //! Engine tree configuration.
 
-use crate::tree::root::has_enough_parallelism;
+use crate::tree::payload_processor::executor::has_enough_parallelism;
 use alloy_eips::merge::EPOCH_SLOTS;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`

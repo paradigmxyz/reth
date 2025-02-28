@@ -1,3 +1,5 @@
+//! Executor for mixed I/O and CPU workloads.
+
 use rayon::ThreadPool as RayonPool;
 use std::sync::{Arc, OnceLock};
 use tokio::{
@@ -11,16 +13,17 @@ use tokio::{
 ///
 /// It will reuse an existing tokio runtime if available or create its own.
 #[derive(Debug, Clone)]
-pub(crate) struct WorkloadExecutor {
+pub struct WorkloadExecutor {
     inner: WorkloadExecutorInner,
 }
 
-impl WorkloadExecutor {
-    /// Creates a new instance with default settings.
-    pub(crate) fn new() -> Self {
+impl Default for WorkloadExecutor {
+    fn default() -> Self {
         Self { inner: WorkloadExecutorInner::new(rayon::ThreadPoolBuilder::new().build().unwrap()) }
     }
+}
 
+impl WorkloadExecutor {
     /// Creates a new executor with the given number of threads for cpu bound work (rayon).
     #[allow(unused)]
     pub(super) fn with_num_cpu_threads(cpu_threads: usize) -> Self {
@@ -68,4 +71,16 @@ impl WorkloadExecutorInner {
 
         Self { handle: get_runtime_handle(), rayon_pool: Arc::new(rayon_pool) }
     }
+}
+
+/// Determines if the host has enough parallelism to run the payload processor.
+///
+/// It requires at least 5 parallel threads:
+/// - Engine in main thread that spawns the state root task.
+/// - Multiproof task in [`super::multiproof::MultiProofTask::run`]
+/// - Sparse Trie task in [`super::sparse_trie::SparseTrieTask::run`]
+/// - Multiproof computation spawned in [`super::multiproof::MultiproofManager::spawn_multiproof`]
+/// - Storage root computation spawned in [`reth_trie_parallel::proof::ParallelProof::multiproof`]
+pub(crate) fn has_enough_parallelism() -> bool {
+    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
 }
