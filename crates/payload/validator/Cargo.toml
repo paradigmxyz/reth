@@ -22,7 +22,7 @@ alloy-consensus.workspace = true
 [features]
 default = ["std"]
 std = [
-	"alloy-consensus/std",
-	"alloy-rpc-types-engine/std",
-	"reth-primitives-traits/std"
+    "alloy-consensus/std",
+    "alloy-rpc-types-engine/std",
+    "reth-primitives-traits/std",
 ]
