@@ -7,7 +7,7 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
-use alloy_rlp::{BufMut, Decodable, Encodable, Error, Header};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 
 /// Message IDs for the snap sync protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +33,7 @@ pub enum SnapMessageId {
 
 /// Request for a range of accounts from the state trie.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getaccountrange-0x00
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct GetAccountRangeMessage {
     /// Request ID to match up responses with
     pub request_id: u64,
@@ -47,63 +47,8 @@ pub struct GetAccountRangeMessage {
     pub response_bytes: u64,
 }
 
-impl Encodable for GetAccountRangeMessage {
-    fn encode(&self, out: &mut dyn BufMut) {
-        alloy_rlp::encode_list::<_, &dyn Encodable>(
-            &[
-                &self.request_id as &dyn Encodable,
-                &self.root_hash as &dyn Encodable,
-                &self.starting_hash as &dyn Encodable,
-                &self.limit_hash as &dyn Encodable,
-                &self.response_bytes as &dyn Encodable,
-            ],
-            out,
-        );
-    }
-
-    fn length(&self) -> usize {
-        let payload_len = self.request_id.length() +
-            self.root_hash.length() +
-            self.starting_hash.length() +
-            self.limit_hash.length() +
-            self.response_bytes.length();
-
-        // Total RLP length = prefix length + payload length
-        alloy_rlp::length_of_length(payload_len) + payload_len
-    }
-}
-
-impl Decodable for GetAccountRangeMessage {
-    fn decode(buf: &mut &[u8]) -> Result<Self, Error> {
-        let list_header = Header::decode(buf)?;
-
-        if !list_header.list {
-            return Err(Error::UnexpectedString);
-        }
-
-        // Track bytes consumed
-        let original_len = buf.len();
-
-        let request_id = u64::decode(buf)?;
-        let root_hash = B256::decode(buf)?;
-        let starting_hash = B256::decode(buf)?;
-        let limit_hash = B256::decode(buf)?;
-        let response_bytes = u64::decode(buf)?;
-
-        // Ensure we consumed exactly the number of bytes specified in the header
-        if original_len - buf.len() != list_header.payload_length {
-            return Err(Error::ListLengthMismatch {
-                expected: list_header.payload_length,
-                got: original_len - buf.len(),
-            });
-        }
-
-        Ok(Self { request_id, root_hash, starting_hash, limit_hash, response_bytes })
-    }
-}
-
 /// Account data in the response.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct AccountData {
     /// Hash of the account address (trie path)
     pub hash: B256,
@@ -113,7 +58,7 @@ pub struct AccountData {
 
 /// Response containing a number of consecutive accounts and the Merkle proofs for the entire range.
 // http://github.com/ethereum/devp2p/blob/master/caps/snap.md#accountrange-0x01
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct AccountRangeMessage {
     /// ID of the request this is a response for
     pub request_id: u64,
@@ -125,7 +70,7 @@ pub struct AccountRangeMessage {
 
 /// Request for the storage slots of multiple accounts' storage tries.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getstorageranges-0x02
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct GetStorageRangesMessage {
     /// Request ID to match up responses with
     pub request_id: u64,
@@ -142,7 +87,7 @@ pub struct GetStorageRangesMessage {
 }
 
 /// Storage slot data in the response.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct StorageData {
     /// Hash of the storage slot key (trie path)
     pub hash: B256,
@@ -154,7 +99,7 @@ pub struct StorageData {
 /// and optionally the merkle proofs for the last range (boundary proofs) if it only partially
 /// covers the storage trie.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#storageranges-0x03
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct StorageRangesMessage {
     /// ID of the request this is a response for
     pub request_id: u64,
@@ -166,7 +111,7 @@ pub struct StorageRangesMessage {
 
 /// Request to get a number of requested contract codes.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getbytecodes-0x04
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct GetByteCodesMessage {
     /// Request ID to match up responses with
     pub request_id: u64,
@@ -178,7 +123,7 @@ pub struct GetByteCodesMessage {
 
 /// Response containing a number of requested contract codes.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#bytecodes-0x05
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct ByteCodesMessage {
     /// ID of the request this is a response for
     pub request_id: u64,
@@ -187,7 +132,7 @@ pub struct ByteCodesMessage {
 }
 
 /// Path in the trie for an account and its storage
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct TriePath {
     /// Path in the account trie
     pub account_path: Bytes,
@@ -197,7 +142,7 @@ pub struct TriePath {
 
 /// Request a number of state (either account or storage) Merkle trie nodes by path
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#gettrienodes-0x06
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct GetTrieNodesMessage {
     /// Request ID to match up responses with
     pub request_id: u64,
@@ -211,7 +156,7 @@ pub struct GetTrieNodesMessage {
 
 /// Response containing a number of requested state trie nodes
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#trienodes-0x07
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct TrieNodesMessage {
     /// ID of the request this is a response for
     pub request_id: u64,
@@ -262,7 +207,7 @@ impl SnapProtocolMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{hex, B256};
-    use alloy_rlp::Decodable;
+    use alloy_rlp::{Decodable, Encodable};
 
     #[test]
     fn test_get_account_range_roundtrip() {
