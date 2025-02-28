@@ -24,9 +24,7 @@ pub struct Runner<I> {
 impl<I: 'static> Runner<I> {
     /// Create a new test runner with the given environment
     pub fn new(instance: I) -> Self {
-        Self { 
-            env: Environment { instance, ctx: () }
-        }
+        Self { env: Environment { instance, ctx: () } }
     }
 
     /// Execute an action
