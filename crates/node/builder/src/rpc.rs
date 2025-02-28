@@ -8,7 +8,8 @@ use std::{
 
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
 use alloy_primitives::map::HashSet;
-use alloy_rpc_types::engine::{ClientVersionV1, ExecutionData};
+use alloy_rpc_types::engine::ClientVersionV1;
+use alloy_rpc_types_engine::ExecutionData;
 use futures::TryFutureExt;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{

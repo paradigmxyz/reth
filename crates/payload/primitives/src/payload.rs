@@ -149,7 +149,7 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
     }
 
     fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
-        Some(&self.payload.as_v2().withdrawals)
+        self.payload.as_v2().map(|p| &p.withdrawals)
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
@@ -157,10 +157,10 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
     }
 
     fn timestamp(&self) -> u64 {
-        self.payload.as_v2().timestamp()
+        self.payload.as_v1().timestamp
     }
 
     fn gas_used(&self) -> u64 {
-        self.payload.as_v2().payload_inner.gas_used
+        self.payload.as_v1().gas_used
     }
 }
