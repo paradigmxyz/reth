@@ -1,4 +1,5 @@
 use alloy_consensus::Header;
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -6,8 +7,8 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::{Block, FullBlockHeader, SignedTransaction};
 use reth_storage_api::{
-    errors::{ProviderError, ProviderResult},
-    BlockBodyReader, BlockBodyWriter, DBProvider, ReadBodyInput, StorageLocation,
+    errors::ProviderResult, BlockBodyReader, BlockBodyWriter, DBProvider, ReadBodyInput,
+    StorageLocation,
 };
 
 /// Optimism storage implementation.
@@ -56,14 +57,25 @@ where
     ) -> ProviderResult<Vec<<Self::Block as Block>::Body>> {
         let chain_spec = provider.chain_spec();
 
-        for (header, _) in inputs {
+        let mut bodies = Vec::with_capacity(inputs.len());
+
+        for (header, transactions) in inputs {
             // If we are past shanghai, then all blocks should have a withdrawal list,
             // even if empty
-            if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
-                return Err(ProviderError::InvalidStorageOutput);
-            }
+            let withdrawals: Option<Withdrawals> =
+                if chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
+                    Some(vec![].into())
+                } else {
+                    None
+                };
+
+            bodies.push(alloy_consensus::BlockBody::<T, H> {
+                transactions,
+                ommers: vec![],
+                withdrawals,
+            });
         }
 
-        Ok(vec![])
+        Ok(bodies)
     }
 }
