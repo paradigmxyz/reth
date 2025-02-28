@@ -27,6 +27,9 @@ pub trait ExecutionPayload:
 
     /// Returns the timestamp to be used in the payload.
     fn timestamp(&self) -> u64;
+
+    /// Gas used by the payload
+    fn gas_used(&self) -> u64;
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -52,6 +55,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn timestamp(&self) -> u64 {
         self.payload.timestamp()
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.payload.as_v1().gas_used
     }
 }
 
@@ -124,5 +131,36 @@ where
 {
     fn from(attributes: &'a AttributesType) -> Self {
         Self::PayloadAttributes(attributes)
+    }
+}
+
+#[cfg(feature = "op")]
+impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
+    fn parent_hash(&self) -> B256 {
+        self.parent_hash()
+    }
+
+    fn block_hash(&self) -> B256 {
+        self.block_hash()
+    }
+
+    fn block_number(&self) -> u64 {
+        self.block_number()
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+        self.payload.as_v2().map(|p| &p.withdrawals)
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.sidecar.parent_beacon_block_root()
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.payload.as_v1().timestamp
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.payload.as_v1().gas_used
     }
 }

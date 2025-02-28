@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
 use crate::EthApi;
-use alloy_consensus::Header;
+use alloy_consensus::{Header, TxType};
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
 use reth_evm::{ConfigureEvm, EvmEnv, SpecFor};
@@ -50,7 +50,17 @@ where
             return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
         }
 
-        let tx_type = request.preferred_type() as u8;
+        let tx_type = if request.authorization_list.is_some() {
+            TxType::Eip7702
+        } else if request.sidecar.is_some() || request.max_fee_per_blob_gas.is_some() {
+            TxType::Eip4844
+        } else if request.max_fee_per_gas.is_some() || request.max_priority_fee_per_gas.is_some() {
+            TxType::Eip1559
+        } else if request.access_list.is_some() {
+            TxType::Eip2930
+        } else {
+            TxType::Legacy
+        } as u8;
 
         let TransactionRequest {
             from,

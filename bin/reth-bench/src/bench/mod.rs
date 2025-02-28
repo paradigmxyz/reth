@@ -9,6 +9,7 @@ mod context;
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;
+mod rpc_transaction;
 mod send_payload;
 
 /// `reth bench` command

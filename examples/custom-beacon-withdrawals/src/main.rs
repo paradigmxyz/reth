@@ -1,10 +1,9 @@
 //! Example for how to modify a block post-execution step. It credits beacon withdrawals with a
 //! custom mechanism instead of minting native tokens
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
-use alloy_consensus::BlockHeader;
-use alloy_eips::eip4895::Withdrawal;
+use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth::{
@@ -13,6 +12,7 @@ use reth::{
     cli::Cli,
     providers::BlockExecutionResult,
     revm::{
+        context::result::ExecutionResult,
         db::State,
         primitives::{address, Address},
         DatabaseCommit,
@@ -24,14 +24,14 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory,
         InternalBlockExecutionError,
     },
-    Database, Evm,
+    ConfigureEvmEnv, Database, Evm, EvmEnv, EvmFor, InspectorFor, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
 use reth_primitives::{
-    Block, EthPrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, TransactionSigned,
+    EthPrimitives, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
 };
-use std::{fmt::Display, sync::Arc};
+use std::fmt::Display;
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
 pub const WITHDRAWALS_ADDRESS: Address = address!("4200000000000000000000000000000000000000");
@@ -66,54 +66,99 @@ where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
-    type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<CustomExecutorStrategyFactory>;
+    type EVM = CustomEvmConfig;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let chain_spec = ctx.chain_spec();
-        let evm_config = EthEvmConfig::new(ctx.chain_spec());
-        let strategy_factory =
-            CustomExecutorStrategyFactory { chain_spec, evm_config: evm_config.clone() };
-        let executor = BasicBlockExecutorProvider::new(strategy_factory);
+        let evm_config = CustomEvmConfig { inner: EthEvmConfig::new(ctx.chain_spec()) };
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
     }
 }
 
-#[derive(Clone)]
-pub struct CustomExecutorStrategyFactory {
-    /// The chainspec
-    chain_spec: Arc<ChainSpec>,
-    /// How to create an EVM.
-    evm_config: EthEvmConfig,
+#[derive(Debug, Clone)]
+pub struct CustomEvmConfig {
+    inner: EthEvmConfig,
 }
 
-impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
-    type Primitives = EthPrimitives;
+impl ConfigureEvmEnv for CustomEvmConfig {
+    type Error = <EthEvmConfig as ConfigureEvmEnv>::Error;
+    type Header = <EthEvmConfig as ConfigureEvmEnv>::Header;
+    type Spec = <EthEvmConfig as ConfigureEvmEnv>::Spec;
+    type Transaction = <EthEvmConfig as ConfigureEvmEnv>::Transaction;
+    type TxEnv = <EthEvmConfig as ConfigureEvmEnv>::TxEnv;
 
-    fn create_strategy<'a, DB>(
-        &'a mut self,
-        db: &'a mut State<DB>,
-        block: &'a RecoveredBlock<Block>,
-    ) -> impl BlockExecutionStrategy<Primitives = Self::Primitives, Error = BlockExecutionError> + 'a
+    fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
+        self.inner.evm_env(header)
+    }
+
+    fn next_evm_env(
+        &self,
+        parent: &Self::Header,
+        attributes: NextBlockEnvAttributes,
+    ) -> Result<EvmEnv<Self::Spec>, Self::Error> {
+        self.inner.next_evm_env(parent, attributes)
+    }
+}
+
+impl ConfigureEvm for CustomEvmConfig {
+    type EvmFactory = <EthEvmConfig as ConfigureEvm>::EvmFactory;
+
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        self.inner.evm_factory()
+    }
+}
+
+pub struct CustomExecutionCtx<'a> {
+    withdrawals: Option<&'a Withdrawals>,
+}
+
+impl BlockExecutionStrategyFactory for CustomEvmConfig {
+    type Primitives = EthPrimitives;
+    type ExecutionCtx<'a> = CustomExecutionCtx<'a>;
+    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
+        CustomExecutorStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
+
+    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> Self::ExecutionCtx<'a> {
+        CustomExecutionCtx { withdrawals: block.body().withdrawals.as_ref() }
+    }
+
+    fn context_for_next_block<'a>(
+        &self,
+        _parent: &SealedHeader,
+        attributes: NextBlockEnvAttributes<'a>,
+    ) -> Self::ExecutionCtx<'a> {
+        CustomExecutionCtx { withdrawals: attributes.withdrawals }
+    }
+
+    fn create_strategy<'a, DB, I>(
+        &'a self,
+        evm: EvmFor<Self, &'a mut State<DB>, I>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> Self::Strategy<'a, DB, I>
     where
         DB: Database,
+        I: InspectorFor<&'a mut State<DB>, Self> + 'a,
     {
-        let evm = self.evm_config.evm_for_block(db, block.header());
-        CustomExecutorStrategy { evm, factory: self, block }
+        CustomExecutorStrategy {
+            evm,
+            chain_spec: self.inner.chain_spec(),
+            withdrawals: ctx.withdrawals,
+        }
     }
 }
 
 pub struct CustomExecutorStrategy<'a, Evm> {
-    /// Reference to the parent factory.
-    factory: &'a CustomExecutorStrategyFactory,
+    /// Chainspec.
+    chain_spec: &'a ChainSpec,
     /// EVM used for execution.
     evm: Evm,
-    /// Block being executed.
-    block: &'a SealedBlock,
+    /// Block withdrawals.
+    withdrawals: Option<&'a Withdrawals>,
 }
 
 impl<'db, DB, E> BlockExecutionStrategy for CustomExecutorStrategy<'_, E>
@@ -123,19 +168,21 @@ where
 {
     type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
+    type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            (*self.factory.chain_spec).is_spurious_dragon_active_at_block(self.block.number());
+            self.chain_spec.is_spurious_dragon_active_at_block(self.evm.block().number);
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
 
         Ok(())
     }
 
-    fn execute_transaction(
+    fn execute_transaction_with_result_closure(
         &mut self,
         _tx: Recovered<&TransactionSigned>,
+        _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, Self::Error> {
         Ok(0)
     }
@@ -143,7 +190,7 @@ where
     fn apply_post_execution_changes(
         mut self,
     ) -> Result<BlockExecutionResult<Receipt>, Self::Error> {
-        if let Some(withdrawals) = self.block.body().withdrawals.as_ref() {
+        if let Some(withdrawals) = self.withdrawals {
             apply_withdrawals_contract_call(withdrawals, &mut self.evm)?;
         }
 
@@ -151,6 +198,10 @@ where
     }
 
     fn with_state_hook(&mut self, _hook: Option<Box<dyn reth_evm::system_calls::OnStateHook>>) {}
+
+    fn evm_mut(&mut self) -> &mut Self::Evm {
+        &mut self.evm
+    }
 }
 
 sol!(

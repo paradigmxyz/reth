@@ -32,8 +32,8 @@ reth-optimism-primitives = { workspace = true, optional = true }
 
 # codecs
 modular-bitfield.workspace = true
-roaring = "0.10.2"
-parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
+roaring.workspace = true
+parity-scale-codec = { workspace = true, features = ["bytes"] }
 serde = { workspace = true, default-features = false }
 
 # metrics
