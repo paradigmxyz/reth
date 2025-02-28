@@ -14,15 +14,14 @@ use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, EngineValidator};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
-use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
+use reth_rpc_engine_api::EngineApi;
 use reth_transaction_pool::TransactionPool;
-use std::collections::HashSet;
 use tracing::trace;
 
 /// The list of all supported Engine capabilities available over the engine endpoint.
 ///
 /// Spec: <https://specs.optimism.io/protocol/exec-engine.html>
-pub const OP_CAPABILITIES: &[&str] = &[
+pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
     "engine_exchangeTransitionConfigurationV1",
