@@ -7437,6 +7437,7 @@ dependencies = [
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
+ "reth-db-common",
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-consensus",
