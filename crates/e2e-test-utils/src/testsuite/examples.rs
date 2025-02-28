@@ -1,13 +1,12 @@
 //! Example tests using the test suite framework.
 
 use crate::testsuite::{
-    actions::{
-        AdvanceBlock, BlockTag, Call, ForkchoiceUpdated, GetTransactionCount, SubmitTransaction,
-    },
+    actions::{AdvanceBlock, Call, ForkchoiceUpdated, GetTransactionCount, SubmitTransaction},
     assertions::{BlockExists, TransactionExists, ValueEquals},
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{B256, U256};
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -69,7 +68,7 @@ async fn test_testsuite_chain_reorg() -> Result<()> {
         .with_action(GetTransactionCount {
             node_idx: 1,
             address: B256::ZERO,
-            block_tag: BlockTag::Latest,
+            block_id: BlockId::Number(BlockNumberOrTag::Latest),
             result_id: "count1".to_string(),
         })
         .with_assertion(ValueEquals { value_id: "count1".to_string(), expected: U256::from(0) });
@@ -101,7 +100,7 @@ async fn test_testsuite_complex_scenario() -> Result<()> {
         .with_action(Call {
             node_idx: 1,
             request: Default::default(),
-            block_tag: BlockTag::Latest,
+            block_id: BlockId::Number(BlockNumberOrTag::Latest),
             result_id: "call1".to_string(),
         })
         .with_assertion(TransactionExists { tx_hash: B256::ZERO })

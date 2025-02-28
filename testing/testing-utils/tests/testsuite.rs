@@ -1,9 +1,10 @@
 //! Tests for the e2e test framework.
 
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{B256, U256};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
-    actions::{AdvanceBlock, BlockTag, GetTransactionCount, SubmitTransaction},
+    actions::{AdvanceBlock, GetTransactionCount, SubmitTransaction},
     assertions::{BlockExists, ValueEquals},
     setup::{NetworkSetup, Setup},
     TestBuilder,
@@ -36,7 +37,7 @@ async fn test_testsuite_complete_example() {
         .with_action(GetTransactionCount {
             node_idx: 0,
             address: B256::ZERO,
-            block_tag: BlockTag::Latest,
+            block_id: BlockId::Number(BlockNumberOrTag::Latest),
             result_id: "count1".to_string(),
         })
         .with_assertion(BlockExists { block_hash: B256::ZERO })

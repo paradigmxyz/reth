@@ -1,6 +1,7 @@
 //! Actions that can be performed in tests.
 
 use crate::testsuite::{BoxFuture, Environment};
+use alloy_eips::BlockId;
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rpc_types_engine::{ExecutionPayload, PayloadAttributes};
 use eyre::Result;
@@ -210,8 +211,8 @@ pub struct GetTransactionCount {
     pub node_idx: usize,
     /// Account address
     pub address: B256,
-    /// Block tag or number
-    pub block_tag: BlockTag,
+    /// Block identifier
+    pub block_id: BlockId,
     /// Identifier for storing the result
     pub result_id: String,
 }
@@ -230,21 +231,6 @@ where
     }
 }
 
-/// Block tag for queries
-#[derive(Debug)]
-pub enum BlockTag {
-    /// Latest block
-    Latest,
-    /// Pending block
-    Pending,
-    /// Finalized block
-    Finalized,
-    /// Safe block
-    Safe,
-    /// Specific block number
-    Number(BlockNumber),
-}
-
 /// Get the storage value at a specific slot.
 #[derive(Debug)]
 pub struct GetStorageAt {
@@ -254,8 +240,8 @@ pub struct GetStorageAt {
     pub address: B256,
     /// Storage slot
     pub slot: B256,
-    /// Block tag or number
-    pub block_tag: BlockTag,
+    /// Block Identifier
+    pub block_id: BlockId,
     /// Identifier for storing the result
     pub result_id: String,
 }
@@ -281,8 +267,8 @@ pub struct Call {
     pub node_idx: usize,
     /// Call request (tx data)
     pub request: Vec<u8>,
-    /// Block tag or number
-    pub block_tag: BlockTag,
+    /// Block identifier
+    pub block_id: BlockId,
     /// Identifier for storing the result
     pub result_id: String,
 }
