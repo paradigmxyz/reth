@@ -60,7 +60,7 @@ where
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> OpExecutionData {
-        OpExecutionData::from_block_unchecked(&block)
+        OpExecutionData::from_block_unchecked(block.hash(), &block.into_block())
     }
 }
 

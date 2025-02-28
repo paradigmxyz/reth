@@ -58,7 +58,7 @@ where
             ctx.node.pool().clone(),
             Box::new(ctx.node.task_executor().clone()),
             client,
-            capabilities.unwrap_or(op_capabilities()),
+            capabilities.unwrap_or_else(op_capabilities),
             engine_validator,
         );
 
