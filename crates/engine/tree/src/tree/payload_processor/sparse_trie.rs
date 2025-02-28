@@ -1,4 +1,4 @@
-//! Contains the implementation of the sparse trie logic responsible for creating the
+//! Sparse Trie task related functionality.
 
 use crate::tree::payload_processor::{
     executor::WorkloadExecutor,
@@ -108,8 +108,10 @@ where
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates.
 #[derive(Debug)]
-pub(crate) struct StateRootComputeOutcome {
+pub struct StateRootComputeOutcome {
+    /// The state root.
     pub state_root: B256,
+    /// The trie updates.
     pub trie_updates: TrieUpdates,
 }
 
