@@ -62,12 +62,9 @@ where
         for (header, transactions) in inputs {
             // If we are past shanghai, then all blocks should have a withdrawal list,
             // even if empty
-            let withdrawals: Option<Withdrawals> =
-                if chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
-                    Some(vec![].into())
-                } else {
-                    None
-                };
+            let withdrawals: Option<Withdrawals> = chain_spec
+                .is_shanghai_active_at_timestamp(header.timestamp())
+                .then(|| vec![].into());
 
             bodies.push(alloy_consensus::BlockBody::<T, H> {
                 transactions,

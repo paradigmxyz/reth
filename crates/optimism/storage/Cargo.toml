@@ -48,4 +48,5 @@ std = [
     "reth-optimism-forks/std",
     "reth-optimism-primitives/std",
     "reth-primitives-traits/std",
+    "alloy-eips/std",
 ]
