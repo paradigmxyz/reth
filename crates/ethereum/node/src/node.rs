@@ -1,11 +1,10 @@
 //! Ethereum Node types config.
 
-pub use crate::payload::EthereumPayloadBuilder;
+pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
-pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
@@ -20,7 +19,7 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
-    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
+    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
@@ -227,6 +226,22 @@ where
 
     fn add_ons(&self) -> Self::AddOns {
         EthereumAddOns::default()
+    }
+}
+
+impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
+    type RpcBlock = alloy_rpc_types_eth::Block;
+
+    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
+        let alloy_rpc_types_eth::Block { header, transactions, withdrawals, .. } = rpc_block;
+        reth_ethereum_primitives::Block {
+            header: header.inner,
+            body: reth_ethereum_primitives::BlockBody {
+                transactions: transactions.into_transactions().map(|tx| tx.inner.into()).collect(),
+                ommers: Default::default(),
+                withdrawals,
+            },
+        }
     }
 }
 

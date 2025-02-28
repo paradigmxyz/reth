@@ -1,6 +1,6 @@
 //! This example shows how to implement a node with a custom EVM that uses a stateful precompile
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_genesis::Genesis;
