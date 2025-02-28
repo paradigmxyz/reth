@@ -48,3 +48,6 @@ serde.workspace = true
 tempfile.workspace = true
 reth-testing-utils.workspace = true
 reth-ethereum-engine-primitives.workspace = true
+anyhow.workspace = true
+jsonrpc-core.workspace = true
+serde_json.workspace = true

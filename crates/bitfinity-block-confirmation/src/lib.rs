@@ -67,7 +67,8 @@ where
         let execution_result = self.execute_blocks(blocks)?;
         let last_block = blocks.iter().last().expect("no blocks");
 
-        let confirmation_data = self.calculate_confirmation_data(last_block, execution_result)?;
+        let confirmation_data =
+            self.calculate_confirmation_data(last_block, execution_result).await?;
 
         self.send_confirmation_request(confirmation_data).await?;
 
@@ -91,18 +92,19 @@ where
     }
 
     /// Calculates confirmation data for a block based on execution result.
-    fn calculate_confirmation_data(
+    async fn calculate_confirmation_data(
         &self,
         block: &Block,
         execution_result: ExecutionOutcome,
     ) -> eyre::Result<BlockConfirmationData> {
+        let proof_of_work = self.compute_pow_hash(block, execution_result).await?;
         Ok(BlockConfirmationData {
             block_number: block.number,
             hash: block.hash_slow().into(),
             state_root: block.state_root.into(),
             transactions_root: block.transactions_root.into(),
             receipts_root: block.receipts_root.into(),
-            proof_of_work: self.compute_pow_hash(&block, execution_result)?,
+            proof_of_work,
         })
     }
 
@@ -149,7 +151,7 @@ where
     }
 
     /// Calculates POW hash
-    fn compute_pow_hash(
+    async fn compute_pow_hash(
         &self,
         block: &Block,
         execution_result: ExecutionOutcome,
@@ -169,12 +171,18 @@ where
         let chain_spec = self.provider_factory.chain_spec();
         let evm_config = EthEvmConfig::new(chain_spec);
 
-        let EvmEnv { mut cfg_env_with_handler_cfg, block_env } =
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } =
             evm_config.cfg_and_block_env(&block.header);
 
-        cfg_env_with_handler_cfg.cfg_env.disable_balance_check = true;
-        let base_fee = block.base_fee_per_gas;
-        let pow_tx = did::utils::block_confirmation_pow_transaction(base_fee.map(Into::into));
+        let base_fee = block.base_fee_per_gas.map(Into::into);
+
+        let genesis_accounts =
+            self.evm_client.get_genesis_balances().await.map_err(|e| eyre!("{e}"))?;
+
+        let (from, _) = genesis_accounts.first().ok_or_else(|| eyre!("no genesis accounts"))?;
+
+        let pow_tx = did::utils::block_confirmation_pow_transaction(from.clone(), base_fee);
+
         // Simple transaction
         let to = match pow_tx.to {
             Some(to) => TxKind::Call(to.0),
@@ -216,18 +224,24 @@ where
 
 #[cfg(test)]
 mod tests {
-    use ethereum_json_rpc_client::reqwest::ReqwestClient;
+    use alloy_genesis::{Genesis, GenesisAccount};
+    use alloy_primitives::Address;
+    use did::U256;
+    use jsonrpc_core::{Output, Request, Response, Success, Version};
     use reth_chain_state::test_utils::TestBlockBuilder;
-    use reth_chainspec::ChainSpec;
+    use reth_chainspec::{Chain, ChainSpec};
     use reth_db::test_utils::TempDatabase;
     use reth_db::DatabaseEnv;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_engine_primitives::EthEngineTypes;
+    use std::collections::BTreeMap;
+    use std::future::Future;
     use std::sync::Arc;
 
+    use super::*;
     use reth_node_types::{AnyNodeTypesWithEngine, NodeTypesWithDBAdapter};
     use reth_primitives::{EthPrimitives, SealedBlockWithSenders};
-    use reth_provider::test_utils::create_test_provider_factory;
+    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use reth_provider::{
         BlockReader, BlockWriter, DatabaseProviderFactory, EthStorage, StorageLocation,
         TransactionVariant,
@@ -237,12 +251,40 @@ mod tests {
     use reth_trie::StateRoot;
     use reth_trie_db::{DatabaseStateRoot, MerklePatriciaTrie};
 
-    use super::*;
+    #[derive(Clone)]
+    struct MockClient {
+        pub genesis_accounts: Vec<(did::H160, U256)>,
+    }
+
+    impl MockClient {
+        fn new(genesis_accounts: Vec<(did::H160, U256)>) -> Self {
+            Self { genesis_accounts }
+        }
+    }
+
+    impl Client for MockClient {
+        fn send_rpc_request(
+            &self,
+            _request: Request,
+        ) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<Response>> + Send>> {
+            let genesis_accounts = self.genesis_accounts.clone();
+
+            Box::pin(async move {
+                let response = Response::Single(Output::Success(Success {
+                    jsonrpc: Some(Version::V2),
+                    result: serde_json::json!(genesis_accounts),
+                    id: jsonrpc_core::Id::Null,
+                }));
+
+                anyhow::Ok(response)
+            })
+        }
+    }
 
     // Common test setup function to initialize the test environment.
     fn setup_test_block_validator() -> (
         BitfinityBlockConfirmation<
-            ReqwestClient,
+            MockClient,
             NodeTypesWithDBAdapter<
                 AnyNodeTypesWithEngine<
                     EthPrimitives,
@@ -256,7 +298,20 @@ mod tests {
         >,
         SealedBlockWithSenders,
     ) {
-        let provider_factory = create_test_provider_factory();
+        let chain_spec = Arc::new(ChainSpec {
+            chain: Chain::from_id(1),
+            genesis: Genesis {
+                alloc: BTreeMap::from([(
+                    Address::ZERO,
+                    GenesisAccount { balance: U256::max_value().into(), ..Default::default() },
+                )]),
+                ..Default::default()
+            },
+            ..(**reth_chainspec::MAINNET).clone()
+        });
+
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
+
         let genesis_hash = init_genesis(&provider_factory).unwrap();
         let genesis_block = provider_factory
             .sealed_block_with_senders(genesis_hash.into(), TransactionVariant::NoHash)
@@ -266,10 +321,13 @@ mod tests {
 
         // Insert genesis block into the underlying database.
         let provider_rw = provider_factory.database_provider_rw().unwrap();
+
         provider_rw.insert_block(genesis_block.clone(), StorageLocation::Database).unwrap();
         provider_rw.commit().unwrap();
 
-        let canister_client = EthJsonRpcClient::new(ReqwestClient::new("".to_string()));
+        let canister_client =
+            EthJsonRpcClient::new(MockClient::new(vec![(did::H160::zero(), U256::from(u64::MAX))]));
+
         let block_validator =
             BitfinityBlockConfirmation::new(canister_client, provider_factory.clone());
 
@@ -312,7 +370,8 @@ mod tests {
                 .unwrap();
 
         // Calculate the POW hash.
-        let pow = block_validator.compute_pow_hash(&block1, ExecutionOutcome::default()).unwrap();
+        let pow =
+            block_validator.compute_pow_hash(&block1, ExecutionOutcome::default()).await.unwrap();
 
         assert_ne!(pow.0, KECCAK_EMPTY, "Proof of work hash should not be empty");
 
@@ -338,7 +397,7 @@ mod tests {
         let block =
             block.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
 
-        let pow_res = block_validator.compute_pow_hash(&block.block, outcome.clone());
+        let pow_res = block_validator.compute_pow_hash(&block.block, outcome.clone()).await;
 
         assert!(pow_res.is_ok());
 
@@ -357,8 +416,8 @@ mod tests {
             block.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
 
         // Compute POW hash twice with the same input
-        let pow1 = block_validator.compute_pow_hash(&block.block, outcome.clone()).unwrap();
-        let pow2 = block_validator.compute_pow_hash(&block.block, outcome.clone()).unwrap();
+        let pow1 = block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
+        let pow2 = block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
 
         // Results should be deterministic
         assert_eq!(pow1, pow2, "POW hash computation should be deterministic");
@@ -383,7 +442,7 @@ mod tests {
 
         // Compute POW multiple times
         for _ in 0..3 {
-            let _ = block_validator.compute_pow_hash(&block.block, outcome.clone()).unwrap();
+            let _ = block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
 
             // Check state after each computation
             let current_state =
@@ -396,5 +455,34 @@ mod tests {
                 "State should remain unchanged after POW computation"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_pow_hash_deterministic_with_different_blocks() {
+        let (block_validator, genesis_block) = setup_test_block_validator();
+        let mut block_builder = TestBlockBuilder::eth();
+        let block1 = block_builder
+            .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
+        let block2 = block_builder
+            .get_executed_block_with_number(genesis_block.number + 2, genesis_block.hash_slow());
+
+        let outcome1 = block1.execution_outcome();
+        let outcome2 = block2.execution_outcome();
+
+        let block1 =
+            block1.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
+        let block2 =
+            block2.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
+
+        // Compute POW hash for two different blocks
+        let pow1 = block_validator.compute_pow_hash(&block1.block, outcome1.clone()).await.unwrap();
+        let pow2 = block_validator.compute_pow_hash(&block2.block, outcome2.clone()).await.unwrap();
+
+        // Results should be deterministic for each block
+        assert_eq!(pow1, pow1, "POW hash computation should be deterministic");
+        assert_eq!(pow2, pow2, "POW hash computation should be deterministic");
+
+        // Results should be different for different blocks
+        assert_ne!(pow1, pow2, "POW hash should differ for different blocks");
     }
 }
