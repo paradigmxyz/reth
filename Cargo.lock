@@ -7496,7 +7496,6 @@ dependencies = [
  "reth-evm",
  "reth-fs-util",
  "reth-payload-primitives",
- "reth-payload-validator",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
