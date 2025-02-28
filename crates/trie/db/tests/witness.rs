@@ -11,7 +11,10 @@ use reth_db::{cursor::DbCursorRW, tables};
 use reth_db_api::transaction::DbTxMut;
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
-use reth_trie::{proof::Proof, witness::TrieWitness, HashedPostState, HashedStorage, StateRoot};
+use reth_trie::{
+    proof::Proof, witness::TrieWitness, HashedPostState, HashedStorage, MultiProofTargets,
+    StateRoot,
+};
 use reth_trie_db::{DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness};
 
 #[test]
@@ -39,7 +42,10 @@ fn includes_empty_node_preimage() {
 
     let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
     let multiproof = Proof::from_tx(provider.tx_ref())
-        .multiproof(HashMap::from_iter([(hashed_address, HashSet::from_iter([hashed_slot]))]))
+        .multiproof(MultiProofTargets::from_iter([(
+            hashed_address,
+            HashSet::from_iter([hashed_slot]),
+        )]))
         .unwrap();
 
     let witness = TrieWitness::from_tx(provider.tx_ref())
@@ -77,7 +83,10 @@ fn includes_nodes_for_destroyed_storage_nodes() {
 
     let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
     let multiproof = Proof::from_tx(provider.tx_ref())
-        .multiproof(HashMap::from_iter([(hashed_address, HashSet::from_iter([hashed_slot]))]))
+        .multiproof(MultiProofTargets::from_iter([(
+            hashed_address,
+            HashSet::from_iter([hashed_slot]),
+        )]))
         .unwrap();
 
     let witness =
@@ -122,7 +131,7 @@ fn correctly_decodes_branch_node_values() {
 
     let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
     let multiproof = Proof::from_tx(provider.tx_ref())
-        .multiproof(HashMap::from_iter([(
+        .multiproof(MultiProofTargets::from_iter([(
             hashed_address,
             HashSet::from_iter([hashed_slot1, hashed_slot2]),
         )]))

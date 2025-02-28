@@ -2,7 +2,7 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p rpc-db
 //! ```
 //!
@@ -11,6 +11,8 @@
 //! ```sh
 //! cast rpc myrpcExt_customMethod
 //! ```
+
+#![warn(unused_crate_dependencies)]
 
 use std::{path::Path, sync::Arc};
 

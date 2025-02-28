@@ -1,6 +1,5 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_consensus::{BlockHeader, Header, Sealable};
-use alloy_eips::{eip1898::BlockWithParent, NumHash};
+use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
@@ -343,24 +342,15 @@ where
             let execute_start = Instant::now();
 
             let result = self.metrics.metered_one(&block, |input| {
-                executor.execute_one(input).map_err(|error| {
-                    let header = block.header();
-                    StageError::Block {
-                        block: Box::new(BlockWithParent::new(
-                            header.parent_hash(),
-                            NumHash::new(header.number(), header.hash_slow()),
-                        )),
-                        error: BlockErrorKind::Execution(error),
-                    }
+                executor.execute_one(input).map_err(|error| StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Execution(error),
                 })
             })?;
 
             if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
                 return Err(StageError::Block {
-                    block: Box::new(BlockWithParent::new(
-                        block.header().parent_hash(),
-                        NumHash::new(block.header().number(), block.hash_slow()),
-                    )),
+                    block: Box::new(block.block_with_parent()),
                     error: BlockErrorKind::Validation(err),
                 })
             }

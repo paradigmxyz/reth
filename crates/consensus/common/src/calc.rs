@@ -25,7 +25,7 @@ pub fn base_block_reward(
     chain_spec: impl EthereumHardforks,
     block_number: BlockNumber,
 ) -> Option<u128> {
-    if chain_spec.is_paris_active_at_block(block_number).is_some_and(|active| active) {
+    if chain_spec.is_paris_active_at_block(block_number) {
         None
     } else {
         Some(base_block_reward_pre_merge(chain_spec, block_number))

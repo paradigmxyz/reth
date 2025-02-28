@@ -54,7 +54,7 @@ strum = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 
 # io
-dirs-next = "2.0.0"
+dirs-next.workspace = true
 shellexpand.workspace = true
 
 # tracing
@@ -77,4 +77,4 @@ jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
 
 [build-dependencies]
-vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
+vergen = { workspace = true, features = ["build", "cargo", "git", "gitcl"] }
