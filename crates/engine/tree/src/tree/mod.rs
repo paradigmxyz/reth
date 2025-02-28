@@ -2424,31 +2424,32 @@ where
             return Err(e.into())
         }
 
-        // We only run the parallel state root if we are currently persisting blocks that are all
-        // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
-        // trie updates being committed are a subset of the in-memory trie updates collected before
-        // fetching reverts. So any diff in reverts (pre vs post commit) is already covered by the
-        // in-memory trie updates we collect in `compute_state_root_parallel`.
+        let descendant_of_persisting_blocks =
+            self.is_descendant_of_persisting_blocks(block.header());
+
+        // We only run the parallel state root if we are currently not persisting blocks or
+        // persisting blocks that are all ancestors of the one we are executing. If we're
+        // committing ancestor blocks, then: any trie updates being committed are a subset
+        // of the in-memory trie updates collected before fetching reverts. So any diff in
+        // reverts (pre vs post commit) is already covered by the in-memory trie updates we
+        // collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let is_descendant_of_persisting_blocks =
-            self.is_descendant_of_persisting_blocks(block.header());
+        let run_parallel_state_root = descendant_of_persisting_blocks.is_not_persisting() ||
+            descendant_of_persisting_blocks.is_descendant();
 
         // Atomic bool for letting the prewarm tasks know when to stop
         let cancel_execution = ManualCancel::default();
 
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
-            if (is_descendant_of_persisting_blocks.is_not_persisting() ||
-                is_descendant_of_persisting_blocks.is_descendant()) &&
-                self.config.use_state_root_task()
-            {
+            if run_parallel_state_root && self.config.use_state_root_task() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
                 // Compute trie input
                 let trie_input_start = Instant::now();
                 let trie_input = self
                     .compute_trie_input(
-                        is_descendant_of_persisting_blocks,
+                        descendant_of_persisting_blocks.is_descendant(),
                         consistent_view.clone(),
                         block.header().parent_hash(),
                     )
@@ -2578,10 +2579,7 @@ where
         // is being persisted as we are computing in parallel, because we initialize
         // a different database transaction per thread and it might end up with a
         // different view of the database.
-        let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks
-            .is_not_persisting() ||
-            is_descendant_of_persisting_blocks.is_descendant()
-        {
+        let (state_root, trie_output, root_elapsed) = if run_parallel_state_root {
             if self.config.use_state_root_task() {
                 let state_root_handle = state_root_handle
                     .expect("state root handle must exist if legacy_state_root is false");
@@ -2598,7 +2596,7 @@ where
                 )?
             } else {
                 match self.compute_state_root_parallel(
-                    is_descendant_of_persisting_blocks,
+                    descendant_of_persisting_blocks.is_descendant(),
                     block.header().parent_hash(),
                     &hashed_state,
                 ) {
@@ -2621,7 +2619,7 @@ where
                 }
             }
         } else {
-            debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", block=?block_num_hash, ?descendant_of_persisting_blocks, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
@@ -2702,7 +2700,7 @@ where
     /// should be used instead.
     fn compute_state_root_parallel(
         &self,
-        is_descendant_of_persisting_blocks: DescendantOfPersistingBlocks,
+        is_descendant_of_persisting_blocks: bool,
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
@@ -2722,7 +2720,7 @@ where
     /// Computes the trie input at the provided parent hash.
     fn compute_trie_input(
         &self,
-        is_descendant_of_persisting_blocks: DescendantOfPersistingBlocks,
+        is_descendant_of_persisting_blocks: bool,
         consistent_view: ConsistentDbView<P>,
         parent_hash: B256,
     ) -> Result<TrieInput, ParallelStateRootError> {
@@ -2737,9 +2735,9 @@ where
             .blocks_by_hash(parent_hash)
             .map_or_else(|| (parent_hash.into(), vec![]), |(hash, blocks)| (hash.into(), blocks));
 
-        // If the current block is a descendant of the persisted blocks, then we need to
+        // If the current block is a descendant of the currently persisting blocks, then we need to
         // filter in-memory blocks, so that none of them are already persisted in the database.
-        if is_descendant_of_persisting_blocks.is_descendant() {
+        if is_descendant_of_persisting_blocks {
             // Iterate over the blocks from oldest to newest.
             while let Some(block) = blocks.last() {
                 let recovered_block = block.recovered_block();
@@ -2754,6 +2752,12 @@ where
                     break
                 }
             }
+        }
+
+        if blocks.is_empty() {
+            debug!(target: "engine::tree", %parent_hash, "Parent found on disk");
+        } else {
+            debug!(target: "engine::tree", %parent_hash, %historical, blocks = blocks.len(), "Parent found in memory");
         }
 
         // Retrieve revert state for historical block.
