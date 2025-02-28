@@ -85,6 +85,7 @@ reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 reth-trie-db.workspace = true
+reth-node-ethereum.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
@@ -128,4 +129,5 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-trie-parallel/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "reth-node-ethereum/test-utils",
 ]
