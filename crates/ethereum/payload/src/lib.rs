@@ -9,6 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
+pub mod validator;
+pub use validator::EthereumExecutionPayloadValidator;
+
 use alloy_consensus::{BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, merge::BEACON_NONCE};
 use alloy_primitives::U256;

@@ -1160,8 +1160,9 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, EthereumHardfork, MAINNET};
     use reth_engine_primitives::BeaconEngineMessage;
-    use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
+    use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_ethereum_primitives::Block;
+    use reth_node_ethereum::EthereumEngineValidator;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
     use reth_provider::test_utils::MockEthProvider;
     use reth_tasks::TokioTaskExecutor;
