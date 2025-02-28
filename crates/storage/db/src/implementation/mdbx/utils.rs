@@ -1,7 +1,9 @@
 //! Small database table utilities and helper functions.
 
-use crate::DatabaseError;
-use reth_db_api::table::{Decode, Decompress, Table, TableRow};
+use crate::{
+    table::{Decode, Decompress, Table, TableRow},
+    DatabaseError,
+};
 use std::borrow::Cow;
 
 /// Helper function to decode a `(key, value)` pair.

@@ -5,7 +5,7 @@ use downloader::{DownloaderError, S3DownloaderResponse};
 mod filelist;
 use filelist::DOWNLOAD_FILE_LIST;
 
-use reth_db::transaction::DbTxMut;
+use reth_db_api::transaction::DbTxMut;
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
     DBProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,

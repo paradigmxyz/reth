@@ -11,8 +11,7 @@ use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_consensus::{Consensus, ConsensusError};
-use reth_db::tables;
-use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
@@ -113,7 +112,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let executor_provider = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Initialize the fetch client
-        info!(target: "reth::cli", target_block_number=self.to, "Downloading tip of block range");
+        info!(target: "reth::cli", target_block_number = self.to, "Downloading tip of block range");
         let fetch_client = network.fetch_client().await?;
 
         // fetch the header at `self.to`

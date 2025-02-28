@@ -1,20 +1,17 @@
 //! Helpers for testing.
 
 use crate::{
-    execute::{
-        BasicBlockExecutor, BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider,
-        Executor,
-    },
+    execute::{BasicBlockExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
     Database,
 };
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives::{EthPrimitives, NodePrimitives, RecoveredBlock};
-use revm::State;
-use std::sync::Arc;
+use revm_database::State;
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
@@ -100,7 +97,7 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         _f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&revm::db::State<DB>),
+        F: FnMut(&revm_database::State<DB>),
     {
         <Self as Executor<DB>>::execute(self, block)
     }
@@ -116,7 +113,7 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
         <Self as Executor<DB>>::execute(self, block)
     }
 
-    fn into_state(self) -> revm::db::State<DB> {
+    fn into_state(self) -> revm_database::State<DB> {
         unreachable!()
     }
 
@@ -125,23 +122,20 @@ impl<DB: Database> Executor<DB> for MockExecutorProvider {
     }
 }
 
-impl<S> BasicBlockExecutor<S>
-where
-    S: BlockExecutionStrategy,
-{
+impl<Factory, DB> BasicBlockExecutor<Factory, DB> {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&State<S::DB>) -> R,
+        F: FnOnce(&State<DB>) -> R,
     {
-        f(self.strategy.state_ref())
+        f(&self.db)
     }
 
     /// Provides safe write access to the state
     pub fn with_state_mut<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&mut State<S::DB>) -> R,
+        F: FnOnce(&mut State<DB>) -> R,
     {
-        f(self.strategy.state_mut())
+        f(&mut self.db)
     }
 }

@@ -1,23 +1,29 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
-use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header, Transaction, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{
+    constants::EMPTY_WITHDRAWALS, transaction::Recovered, Header, Transaction,
+    EMPTY_OMMER_ROOT_HASH,
+};
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::ConfigureEvm;
-use reth_primitives::{logs_bloom, BlockBody, Receipt};
+use reth_evm::execute::BlockExecutionStrategyFactory;
+use reth_node_api::NodePrimitives;
+use reth_primitives::{logs_bloom, BlockBody, Receipt, SealedHeader};
 use reth_primitives_traits::proofs::calculate_transaction_root;
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderReceipt, ProviderTx,
-    StateProviderFactory,
+    BlockExecutionResult, BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock,
+    ProviderHeader, ProviderReceipt, ProviderTx, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
+    types::RpcTypes,
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm_primitives::{BlockEnv, B256};
+use revm::{context::BlockEnv, context_interface::Block};
+use revm_primitives::B256;
 
 use crate::EthApi;
 
@@ -25,7 +31,7 @@ impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: SpawnBlocking<
-            NetworkTypes: alloy_network::Network<HeaderResponse = alloy_rpc_types_eth::Header>,
+            NetworkTypes: RpcTypes<Header = alloy_rpc_types_eth::Header>,
             Error: FromEvmError<Self::Evm>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<
@@ -38,7 +44,13 @@ where
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
-            Evm: ConfigureEvm<Header = Header, Transaction = ProviderTx<Self::Provider>>,
+            Evm: BlockExecutionStrategyFactory<
+                Primitives: NodePrimitives<
+                    BlockHeader = Header,
+                    SignedTx = ProviderTx<Self::Provider>,
+                    Receipt = ProviderReceipt<Self::Provider>,
+                >,
+            >,
         >,
     Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
 {
@@ -54,44 +66,44 @@ where
     fn assemble_block(
         &self,
         block_env: &BlockEnv,
-        parent_hash: revm_primitives::B256,
+        result: &BlockExecutionResult<ProviderReceipt<Self::Provider>>,
+        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
         state_root: revm_primitives::B256,
-        transactions: Vec<ProviderTx<Self::Provider>>,
-        receipts: &[ProviderReceipt<Self::Provider>],
+        transactions: Vec<Recovered<ProviderTx<Self::Provider>>>,
     ) -> reth_provider::ProviderBlock<Self::Provider> {
         let chain_spec = self.provider().chain_spec();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root = Receipt::calculate_receipt_root_no_memo(receipts);
+        let receipts_root = Receipt::calculate_receipt_root_no_memo(&result.receipts);
 
-        let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
+        let logs_bloom = logs_bloom(result.receipts.iter().flat_map(|r| &r.logs));
 
-        let timestamp = block_env.timestamp.to::<u64>();
+        let timestamp = block_env.timestamp;
         let is_shanghai = chain_spec.is_shanghai_active_at_timestamp(timestamp);
         let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
         let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
 
         let header = Header {
-            parent_hash,
+            parent_hash: parent.hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: block_env.coinbase,
+            beneficiary: block_env.beneficiary,
             state_root,
             transactions_root,
             receipts_root,
             withdrawals_root: is_shanghai.then_some(EMPTY_WITHDRAWALS),
             logs_bloom,
-            timestamp: block_env.timestamp.to::<u64>(),
+            timestamp: block_env.timestamp,
             mix_hash: block_env.prevrandao.unwrap_or_default(),
             nonce: BEACON_NONCE.into(),
-            base_fee_per_gas: Some(block_env.basefee.to::<u64>()),
-            number: block_env.number.to::<u64>(),
-            gas_limit: block_env.gas_limit.to::<u64>(),
+            base_fee_per_gas: Some(block_env.basefee),
+            number: block_env.number,
+            gas_limit: block_env.gas_limit,
             difficulty: U256::ZERO,
-            gas_used: receipts.last().map(|r| r.cumulative_gas_used).unwrap_or_default(),
+            gas_used: result.gas_used,
             blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
-            excess_blob_gas: block_env.get_blob_excess_gas(),
+            excess_blob_gas: block_env.blob_excess_gas(),
             extra_data: Default::default(),
             parent_beacon_block_root: is_cancun.then_some(B256::ZERO),
             requests_hash: is_prague.then_some(EMPTY_REQUESTS_HASH),
@@ -100,23 +112,11 @@ where
         // seal the block
         reth_primitives::Block {
             header,
-            body: BlockBody { transactions, ommers: vec![], withdrawals: None },
-        }
-    }
-
-    fn assemble_receipt(
-        &self,
-        tx: &ProviderTx<Self::Provider>,
-        result: revm_primitives::ExecutionResult,
-        cumulative_gas_used: u64,
-    ) -> reth_provider::ProviderReceipt<Self::Provider> {
-        #[allow(clippy::needless_update)]
-        Receipt {
-            tx_type: tx.tx_type(),
-            success: result.is_success(),
-            cumulative_gas_used,
-            logs: result.into_logs().into_iter().collect(),
-            ..Default::default()
+            body: BlockBody {
+                transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
+                ommers: vec![],
+                withdrawals: None,
+            },
         }
     }
 }

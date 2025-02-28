@@ -223,7 +223,7 @@ impl<T> LaunchContextWith<T> {
 
 impl<ChainSpec> LaunchContextWith<WithConfigs<ChainSpec>> {
     /// Resolves the trusted peers and adds them to the toml config.
-    pub async fn with_resolved_peers(mut self) -> eyre::Result<Self> {
+    pub fn with_resolved_peers(mut self) -> eyre::Result<Self> {
         if !self.attachment.config.network.trusted_peers.is_empty() {
             info!(target: "reth::cli", "Adding trusted nodes");
 
@@ -895,7 +895,7 @@ where
                 Ok(match hook {
                     InvalidBlockHookType::Witness => Box::new(InvalidBlockWitnessHook::new(
                         self.blockchain_db().clone(),
-                        self.components().evm_config().clone(),
+                        self.components().block_executor().clone(),
                         output_directory,
                         healthy_node_rpc_client.clone(),
                     )),

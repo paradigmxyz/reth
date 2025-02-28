@@ -12,7 +12,7 @@ use reth_transaction_pool::{
     EthPoolTransaction, EthTransactionValidator, TransactionOrigin, TransactionValidationOutcome,
     TransactionValidator,
 };
-use revm::L1BlockInfo;
+use revm_optimism::L1BlockInfo;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,

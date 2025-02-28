@@ -1,9 +1,8 @@
 //! Transaction wrapper for libmdbx-sys.
 
-use super::cursor::Cursor;
+use super::{cursor::Cursor, utils::*};
 use crate::{
     metrics::{DatabaseEnvMetrics, Operation, TransactionMode, TransactionOutcome},
-    tables::utils::decode_one,
     DatabaseError,
 };
 use reth_db_api::{

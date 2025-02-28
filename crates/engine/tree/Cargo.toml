@@ -18,7 +18,7 @@ reth-consensus.workspace = true
 reth-db.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["metrics"] }
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
@@ -46,7 +46,7 @@ revm-primitives.workspace = true
 # common
 futures.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "sync"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 mini-moka = { workspace = true, features = ["sync"] }
 
 # metrics
@@ -58,6 +58,7 @@ schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
+parking_lot.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }
@@ -86,10 +87,11 @@ reth-trie-db.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
+revm-state.workspace = true
 
 assert_matches.workspace = true
 criterion.workspace = true
-crossbeam-channel = "0.5.13"
+crossbeam-channel.workspace = true
 proptest.workspace = true
 rand.workspace = true
 

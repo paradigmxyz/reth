@@ -30,6 +30,7 @@ reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
+reth-payload-builder.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
@@ -46,7 +47,7 @@ eyre.workspace = true
 itertools = { workspace = true, features = ["use_std"] }
 metrics.workspace = true
 parking_lot.workspace = true
-rmp-serde = "1.3"
+rmp-serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 

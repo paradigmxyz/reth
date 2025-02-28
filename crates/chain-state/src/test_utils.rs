@@ -18,8 +18,8 @@ use rand::{thread_rng, Rng};
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, BlockBody, EthPrimitives, NodePrimitives,
-    Receipt, Recovered, RecoveredBlock, SealedBlock, SealedHeader, Transaction, TransactionSigned,
+    transaction::SignedTransaction, BlockBody, EthPrimitives, NodePrimitives, Receipt, Recovered,
+    RecoveredBlock, SealedBlock, SealedHeader, Transaction, TransactionSigned,
 };
 use reth_primitives_traits::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
@@ -27,7 +27,8 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
-use revm::{db::BundleState, primitives::AccountInfo};
+use revm_database::BundleState;
+use revm_state::AccountInfo;
 use std::{
     collections::HashMap,
     ops::Range,
