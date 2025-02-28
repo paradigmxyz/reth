@@ -3,14 +3,15 @@
 use crate::tree::{
     cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
     payload_processor::{
-        executor::WorkloadExecutor,
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
-        sparse_trie::{SparseTrieTask, StateRootComputeOutcome},
+        sparse_trie::StateRootComputeOutcome,
     },
+    sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_primitives::B256;
+use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
@@ -35,14 +36,14 @@ use std::{
     },
 };
 
-pub(crate) mod executor;
-pub(crate) mod sparse_trie;
-
-mod multiproof;
-mod prewarm;
+pub mod executor;
+pub mod multiproof;
+pub mod prewarm;
+pub mod sparse_trie;
 
 /// Entrypoint for executing the payload.
-pub(super) struct PayloadProcessor<N, Evm> {
+#[derive(Debug, Clone)]
+pub struct PayloadProcessor<N, Evm> {
     /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
@@ -59,7 +60,8 @@ pub(super) struct PayloadProcessor<N, Evm> {
 }
 
 impl<N, Evm> PayloadProcessor<N, Evm> {
-    pub(super) fn new(executor: WorkloadExecutor, evm_config: Evm, config: &TreeConfig) -> Self {
+    /// Creates a new payload processor.
+    pub fn new(executor: WorkloadExecutor, evm_config: Evm, config: &TreeConfig) -> Self {
         Self {
             executor,
             execution_cache: Default::default(),
@@ -112,7 +114,7 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    pub(super) fn spawn<P>(
+    pub fn spawn<P>(
         &self,
         header: SealedHeaderFor<N>,
         transactions: VecDeque<Recovered<N::SignedTx>>,
@@ -246,7 +248,8 @@ where
 }
 
 /// Handle to all the spawned tasks.
-pub(super) struct PayloadHandle {
+#[derive(Debug)]
+pub struct PayloadHandle {
     /// Channel for evm state updates
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
@@ -261,7 +264,7 @@ impl PayloadHandle {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
-    pub(super) fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()
             .expect("state_root is None")
@@ -272,7 +275,7 @@ impl PayloadHandle {
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
-    pub(super) fn state_hook(&self) -> impl OnStateHook {
+    pub fn state_hook(&self) -> impl OnStateHook {
         // convert the channel into a `StateHookSender` that emits an event on drop
         let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
 
@@ -308,6 +311,7 @@ impl PayloadHandle {
 }
 
 /// Access to the spawned [`PrewarmCacheTask`].
+#[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
     /// The shared cache the task operates with.
     cache: ProviderCaches,
@@ -514,7 +518,7 @@ mod tests {
         }
 
         let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
-            WorkloadExecutor::new(),
+            WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
         );
