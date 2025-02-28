@@ -42,3 +42,19 @@ impl<N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockHooks<N> {
         }
     }
 }
+
+impl<N: NodePrimitives> InvalidBlockHooks<N> {
+    pub fn on_invalid_block_with_cache_check(
+        &self,
+        invalid_header_cache: &InvalidHeaderCache,
+        parent_header: &SealedHeader<N::BlockHeader>,
+        block: &RecoveredBlock<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        trie_updates: Option<(&TrieUpdates, B256)>,
+    ) {
+        if invalid_header_cache.get(&block.hash()).is_some() {
+            return;
+        }
+        self.on_invalid_block(parent_header, block, output, trie_updates);
+    }
+}
