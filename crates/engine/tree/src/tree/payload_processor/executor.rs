@@ -69,3 +69,15 @@ impl WorkloadExecutorInner {
         Self { handle: get_runtime_handle(), rayon_pool: Arc::new(rayon_pool) }
     }
 }
+
+/// Determines if the host has enough parallelism to run the payload processor.
+///
+/// It requires at least 5 parallel threads:
+/// - Engine in main thread that spawns the state root task.
+/// - Multiproof task in [`super::MultiProofTask::run`]
+/// - Sparse Trie task in [`super::sparse_trie::SparseTrieTask::run`]
+/// - Multiproof computation spawned in [`super::MultiProofManager::spawn_multiproof`]
+/// - Storage root computation spawned in [`reth_trie_parallel::proof::ParallelProof::multiproof`]
+pub(crate) fn has_enough_parallelism() -> bool {
+    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
+}

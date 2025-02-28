@@ -253,7 +253,7 @@ struct MultiproofInput<Factory> {
 /// concurrency, further calculation requests are queued and spawn later, after
 /// availability has been signaled.
 #[derive(Debug)]
-struct MultiproofManager<Factory> {
+pub(crate) struct MultiproofManager<Factory> {
     /// Maximum number of concurrent calculations.
     max_concurrent: usize,
     /// Currently running calculations.
