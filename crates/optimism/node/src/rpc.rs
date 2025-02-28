@@ -2,6 +2,7 @@
 
 pub use reth_optimism_rpc::OpEngineApi;
 
+use crate::OP_NAME_CLIENT;
 use alloy_rpc_types_engine::ClientVersionV1;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_chainspec::EthereumHardforks;
@@ -9,7 +10,7 @@ use reth_node_api::{
     AddOnsContext, EngineTypes, FullNodeComponents, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_builder::rpc::{EngineApiBuilder, EngineValidatorBuilder};
-use reth_node_core::version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA};
+use reth_node_core::version::{CARGO_PKG_VERSION, CLIENT_CODE, VERGEN_GIT_SHA};
 use reth_optimism_rpc::engine::op_capabilities;
 use reth_payload_builder::PayloadStore;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
@@ -45,7 +46,7 @@ where
         let engine_validator = engine_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
-            name: NAME_CLIENT.to_string(),
+            name: OP_NAME_CLIENT.to_string(),
             version: CARGO_PKG_VERSION.to_string(),
             commit: VERGEN_GIT_SHA.to_string(),
         };

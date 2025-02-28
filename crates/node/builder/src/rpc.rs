@@ -703,7 +703,7 @@ where
         let engine_validator = engine_validator_builder.build(ctx).await?;
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
-            name: OP_NAME_CLIENT.to_string(),
+            name: NAME_CLIENT.to_string(),
             version: CARGO_PKG_VERSION.to_string(),
             commit: VERGEN_GIT_SHA.to_string(),
         };
