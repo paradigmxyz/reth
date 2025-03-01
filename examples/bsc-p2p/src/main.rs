@@ -31,6 +31,7 @@ use std::{
 use tokio_stream::StreamExt;
 use tracing::info;
 
+mod block_import;
 mod chainspec;
 mod handshake;
 mod upgrade_status;
