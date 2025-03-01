@@ -34,15 +34,13 @@ reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types.workspace = true
 reth-engine-primitives.workspace = true
-reth-errors.workspace = true
-reth-payload-primitives.workspace = true
 
 # ethereum
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-rpc-types.workspace = true
+
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 discv5.workspace = true
 
