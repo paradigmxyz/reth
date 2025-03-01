@@ -15,7 +15,8 @@ workspace = true
 reth-chainspec.workspace = true
 reth-primitives-traits.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives.workspace = true
+#
+reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
 reth-trie-common.workspace = true
 reth-storage-api.workspace = true
 
@@ -26,7 +27,7 @@ alloy-consensus.workspace = true
 revm.workspace = true
 
 [dev-dependencies]
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true

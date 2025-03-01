@@ -1,5 +1,5 @@
+use alloc::{vec, vec::Vec};
 use alloy_consensus::Header;
-use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -59,16 +59,17 @@ where
 
         let mut bodies = Vec::with_capacity(inputs.len());
 
-        let mut withdrawals: Option<Withdrawals> = Some(vec![].into());
         for (header, transactions) in inputs {
-            if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
-                withdrawals = None;
-            };
+            let mut withdrawals = None;
+            if chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
+                // after shanghai the body should have an empty withdrawals list
+                withdrawals.replace(vec![].into());
+            }
 
             bodies.push(alloy_consensus::BlockBody::<T, H> {
-                transactions: transactions.clone(),
+                transactions,
                 ommers: vec![],
-                withdrawals: withdrawals.clone(),
+                withdrawals,
             });
         }
 
