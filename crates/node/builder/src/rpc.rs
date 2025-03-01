@@ -1,13 +1,6 @@
 //! Builder support for rpc components.
 
-use std::{
-    fmt::{self, Debug},
-    future::Future,
-    ops::{Deref, DerefMut},
-};
-
-use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle, EthApiBuilderCtx};
-use alloy_primitives::map::HashSet;
+use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use futures::TryFutureExt;
@@ -34,6 +27,11 @@ use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache}
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
+use std::{
+    fmt::{self, Debug},
+    future::Future,
+    ops::{Deref, DerefMut},
+};
 
 /// Contains the handles to the spawned RPC servers.
 ///
