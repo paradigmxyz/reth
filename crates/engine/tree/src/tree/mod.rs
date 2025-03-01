@@ -2276,6 +2276,19 @@ where
         Ok(None)
     }
 
+    fn on_invalid_block_checked(
+        &mut self,
+        parent_header: &SealedHeader<N::BlockHeader>,
+        block: &RecoveredBlock<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        trie_updates: Option<(&TrieUpdates, B256)>,
+    ) {
+        if self.state.invalid_headers.get(&block.hash()).is_some() {
+            return;
+        }
+        self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
+    }
+
     fn insert_block(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2396,7 +2409,7 @@ where
 
         if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            self.on_invalid_block_checked(&parent_block, &block, &output, None);
             return Err(err.into())
         }
 
