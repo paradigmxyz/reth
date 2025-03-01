@@ -24,3 +24,6 @@ pub mod node;
 pub use node::{EthereumEthApiBuilder, EthereumNode};
 
 pub mod payload;
+
+pub mod engine;
+pub use engine::EthereumEngineValidator;

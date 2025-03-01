@@ -1,4 +1,4 @@
-//! multi proof task related functionality.
+//! Multiproof task related functionality.
 
 use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::SparseTrieEvent};
 use alloy_primitives::map::HashSet;
@@ -31,7 +31,7 @@ use tracing::{debug, error, trace};
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
-pub(crate) struct SparseTrieUpdate {
+pub struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
     pub(crate) state: HashedPostState,
     /// The calculated multiproof
@@ -253,7 +253,7 @@ struct MultiproofInput<Factory> {
 /// concurrency, further calculation requests are queued and spawn later, after
 /// availability has been signaled.
 #[derive(Debug)]
-struct MultiproofManager<Factory> {
+pub struct MultiproofManager<Factory> {
     /// Maximum number of concurrent calculations.
     max_concurrent: usize,
     /// Currently running calculations.

@@ -1,3 +1,5 @@
+//! Caching and prewarming related functionality.
+
 use crate::tree::{
     cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCaches, SavedCache},
     payload_processor::{
