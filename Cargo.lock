@@ -232,7 +232,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_with",
- "thiserror 2.0.12",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
@@ -2378,9 +2378,9 @@ dependencies = [
 
 [[package]]
 name = "crunchy"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
+checksum = "43da5946c66ffcc7745f48db692ffbb10a83bfe0afd96235c5c2a4fb23994929"
 
 [[package]]
 name = "crypto-bigint"
@@ -3094,18 +3094,23 @@ version = "0.0.0"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types",
  "bytes",
  "derive_more 2.0.1",
  "futures",
  "reth-chainspec",
  "reth-discv4",
+ "reth-engine-primitives",
+ "reth-errors",
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
  "reth-network",
  "reth-network-api",
  "reth-network-peers",
+ "reth-payload-primitives",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-tracing",
  "secp256k1",
@@ -6401,7 +6406,7 @@ checksum = "3779b94aeb87e8bd4e834cee3650289ee9e0d5677f976ecdb6d219e5f4f6cd94"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.3",
- "zerocopy 0.8.22",
+ "zerocopy 0.8.21",
 ]
 
 [[package]]
@@ -8085,7 +8090,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-rlp",
- "alloy-rpc-types",
  "aquamarine",
  "auto_impl",
  "codspeed-criterion-compat",
@@ -8106,7 +8110,6 @@ dependencies = [
  "reth-dns-discovery",
  "reth-ecies",
  "reth-engine-primitives",
- "reth-errors",
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
@@ -8119,7 +8122,6 @@ dependencies = [
  "reth-network-p2p",
  "reth-network-peers",
  "reth-network-types",
- "reth-payload-primitives",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
@@ -12703,11 +12705,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.22"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09612fda0b63f7cb9e0af7e5916fe5a1f8cdcb066829f10f36883207628a4872"
+checksum = "dcf01143b2dd5d134f11f545cf9f1431b13b749695cb33bcce051e7568f99478"
 dependencies = [
- "zerocopy-derive 0.8.22",
+ "zerocopy-derive 0.8.21",
 ]
 
 [[package]]
@@ -12723,9 +12725,9 @@ dependencies = [
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.22"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79f81d38d7a2ed52d8f034e62c568e111df9bf8aba2f7cf19ddc5bf7bd89d520"
+checksum = "712c8386f4f4299382c9abee219bee7084f78fb939d88b6840fcc1320d5f6da2"
 dependencies = [
  "proc-macro2",
  "quote",
