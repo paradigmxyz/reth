@@ -81,9 +81,6 @@ impl<EngineT: EngineTypes>
                             PayloadStatusEnum::Invalid { validation_error } => {
                                 Err(BlockImportError::InvalidPayload(validation_error))
                             }
-                            PayloadStatusEnum::Syncing => {
-                                Err(BlockImportError::InvalidPayload("Syncing".to_string()))
-                            }
                             _ => continue,
                         },
                     });
