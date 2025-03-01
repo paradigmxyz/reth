@@ -56,6 +56,15 @@ type WitnessFut = Pin<
     >,
 >;
 
+enum OnRessMessageOutcome {
+    /// Response to send to the peer.
+    Response(BytesMut),
+    /// Terminate the connection.
+    Terminate,
+    /// No action.
+    None,
+}
+
 /// The connection handler for the custom `RLPx` protocol.
 #[derive(Debug)]
 pub struct RessProtocolConnection<P> {
@@ -200,6 +209,79 @@ where
         });
         self.pending_witnesses.push(Box::pin(rx));
     }
+
+    fn on_ress_message(&mut self, msg: RessProtocolMessage) -> OnRessMessageOutcome {
+        match msg.message {
+            RessMessage::NodeType(node_type) => {
+                if !self.node_type.is_valid_connection(&node_type) {
+                    // Note types are not compatible, terminate the connection.
+                    return OnRessMessageOutcome::Terminate;
+                }
+            }
+            RessMessage::GetHeaders(req) => {
+                let request = req.message;
+                trace!(target: "ress::net::connection", peer_id = %self.peer_id, ?request, "serving headers");
+                let header = self.on_headers_request(request);
+                let response = RessProtocolMessage::headers(req.request_id, header);
+                return OnRessMessageOutcome::Response(response.encoded());
+            }
+            RessMessage::GetBlockBodies(req) => {
+                let request = req.message;
+                trace!(target: "ress::net::connection", peer_id = %self.peer_id, ?request, "serving block bodies");
+                let bodies = self.on_block_bodies_request(request);
+                let response = RessProtocolMessage::block_bodies(req.request_id, bodies);
+                return OnRessMessageOutcome::Response(response.encoded());
+            }
+            RessMessage::GetBytecode(req) => {
+                let code_hash = req.message;
+                trace!(target: "ress::net::connection", peer_id = %self.peer_id, %code_hash, "serving bytecode");
+                let bytecode = self.on_bytecode_request(code_hash);
+                let response = RessProtocolMessage::bytecode(req.request_id, bytecode);
+                return OnRessMessageOutcome::Response(response.encoded());
+            }
+            RessMessage::GetWitness(req) => {
+                trace!(target: "ress::net::connection", peer_id = %self.peer_id, block_hash = %req.message, "serving witness");
+                self.on_witness_request(req);
+            }
+            RessMessage::Headers(res) => {
+                if let Some(RessPeerRequest::GetHeaders { tx, .. }) =
+                    self.inflight_requests.remove(&res.request_id)
+                {
+                    let _ = tx.send(res.message);
+                } else {
+                    self.report_bad_message();
+                }
+            }
+            RessMessage::BlockBodies(res) => {
+                if let Some(RessPeerRequest::GetBlockBodies { tx, .. }) =
+                    self.inflight_requests.remove(&res.request_id)
+                {
+                    let _ = tx.send(res.message);
+                } else {
+                    self.report_bad_message();
+                }
+            }
+            RessMessage::Bytecode(res) => {
+                if let Some(RessPeerRequest::GetBytecode { tx, .. }) =
+                    self.inflight_requests.remove(&res.request_id)
+                {
+                    let _ = tx.send(res.message);
+                } else {
+                    self.report_bad_message();
+                }
+            }
+            RessMessage::Witness(res) => {
+                if let Some(RessPeerRequest::GetWitness { tx, .. }) =
+                    self.inflight_requests.remove(&res.request_id)
+                {
+                    let _ = tx.send(res.message);
+                } else {
+                    self.report_bad_message();
+                }
+            }
+        };
+        OnRessMessageOutcome::None
+    }
 }
 
 impl<P> Stream for RessProtocolConnection<P>
@@ -244,74 +326,10 @@ where
                     }
                 };
 
-                match msg.message {
-                    RessMessage::NodeType(node_type) => {
-                        if !this.node_type.is_valid_connection(&node_type) {
-                            // Terminating the stream disconnects the peer.
-                            return Poll::Ready(None);
-                        }
-                    }
-                    RessMessage::GetHeaders(req) => {
-                        let request = req.message;
-                        trace!(target: "ress::net::connection", peer_id = %this.peer_id, ?request, "serving headers");
-                        let header = this.on_headers_request(request);
-                        let response = RessProtocolMessage::headers(req.request_id, header);
-                        return Poll::Ready(Some(response.encoded()));
-                    }
-                    RessMessage::GetBlockBodies(req) => {
-                        let request = req.message;
-                        trace!(target: "ress::net::connection", peer_id = %this.peer_id, ?request, "serving block bodies");
-                        let bodies = this.on_block_bodies_request(request);
-                        let response = RessProtocolMessage::block_bodies(req.request_id, bodies);
-                        return Poll::Ready(Some(response.encoded()));
-                    }
-                    RessMessage::GetBytecode(req) => {
-                        let code_hash = req.message;
-                        trace!(target: "ress::net::connection", peer_id = %this.peer_id, %code_hash, "serving bytecode");
-                        let bytecode = this.on_bytecode_request(code_hash);
-                        let response = RessProtocolMessage::bytecode(req.request_id, bytecode);
-                        return Poll::Ready(Some(response.encoded()));
-                    }
-                    RessMessage::GetWitness(req) => {
-                        trace!(target: "ress::net::connection", peer_id = %this.peer_id, block_hash = %req.message, "serving witness");
-                        this.on_witness_request(req);
-                    }
-                    RessMessage::Headers(res) => {
-                        if let Some(RessPeerRequest::GetHeaders { tx, .. }) =
-                            this.inflight_requests.remove(&res.request_id)
-                        {
-                            let _ = tx.send(res.message);
-                        } else {
-                            this.report_bad_message();
-                        }
-                    }
-                    RessMessage::BlockBodies(res) => {
-                        if let Some(RessPeerRequest::GetBlockBodies { tx, .. }) =
-                            this.inflight_requests.remove(&res.request_id)
-                        {
-                            let _ = tx.send(res.message);
-                        } else {
-                            this.report_bad_message();
-                        }
-                    }
-                    RessMessage::Bytecode(res) => {
-                        if let Some(RessPeerRequest::GetBytecode { tx, .. }) =
-                            this.inflight_requests.remove(&res.request_id)
-                        {
-                            let _ = tx.send(res.message);
-                        } else {
-                            this.report_bad_message();
-                        }
-                    }
-                    RessMessage::Witness(res) => {
-                        if let Some(RessPeerRequest::GetWitness { tx, .. }) =
-                            this.inflight_requests.remove(&res.request_id)
-                        {
-                            let _ = tx.send(res.message);
-                        } else {
-                            this.report_bad_message();
-                        }
-                    }
+                match this.on_ress_message(msg) {
+                    OnRessMessageOutcome::Response(bytes) => return Poll::Ready(Some(bytes)),
+                    OnRessMessageOutcome::Terminate => return Poll::Ready(None),
+                    OnRessMessageOutcome::None => {}
                 };
 
                 continue;
