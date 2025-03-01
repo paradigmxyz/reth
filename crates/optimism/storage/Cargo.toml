@@ -13,8 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
@@ -36,7 +34,6 @@ reth-stages-types.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-primitives/std",
     "reth-trie-common/std",
     "reth-storage-api/std",
     "alloy-primitives/std",
