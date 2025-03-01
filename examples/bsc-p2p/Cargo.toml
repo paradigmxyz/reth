@@ -9,12 +9,15 @@ license.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
+reth-engine-primitives.workspace = true
+reth-errors.workspace = true
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
+reth-payload-primitives.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
@@ -23,10 +26,6 @@ reth-tracing.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-
-reth-engine-primitives.workspace = true
-reth-errors.workspace = true
-reth-payload-primitives.workspace = true
 alloy-rpc-types.workspace = true
 
 # misc
