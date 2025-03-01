@@ -19,6 +19,7 @@ reth-config.workspace = true
 reth-consensus.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
+reth-db-models.workspace = true
 reth-etl.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }
 reth-exex.workspace = true

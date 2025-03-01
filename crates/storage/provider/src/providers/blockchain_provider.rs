@@ -21,11 +21,8 @@ use reth_chain_state::{
     MemoryOverlayStateProvider,
 };
 use reth_chainspec::{ChainInfo, EthereumHardforks};
-use reth_db_api::{
-    models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
-    transaction::DbTx,
-    Database,
-};
+use reth_db_api::{transaction::DbTx, Database};
+use reth_db_models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_evm::{ConfigureEvmEnv, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};

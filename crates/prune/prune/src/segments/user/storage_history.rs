@@ -4,11 +4,8 @@ use crate::{
     PrunerError,
 };
 use itertools::Itertools;
-use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
-    tables,
-    transaction::DbTxMut,
-};
+use reth_db_api::{models::storage_sharded_key::StorageShardedKey, tables, transaction::DbTxMut};
+use reth_db_models::BlockNumberAddress;
 use reth_provider::DBProvider;
 use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
 use rustc_hash::FxHashMap;
