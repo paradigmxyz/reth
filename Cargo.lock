@@ -8817,10 +8817,15 @@ dependencies = [
 name = "reth-optimism-storage"
 version = "1.2.0"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
+ "reth-chainspec",
  "reth-codecs",
  "reth-db-api",
- "reth-primitives",
+ "reth-optimism-forks",
+ "reth-optimism-primitives",
+ "reth-primitives-traits",
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-api",
