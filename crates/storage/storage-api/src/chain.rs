@@ -1,13 +1,9 @@
-#[cfg(feature = "db-api")]
 use crate::{DBProvider, OmmersProvider, StorageLocation};
 use alloc::vec::Vec;
 use alloy_consensus::Header;
-#[cfg(feature = "db-api")]
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
-#[cfg(feature = "db-api")]
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-#[cfg(feature = "db-api")]
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::StoredBlockOmmers,
@@ -15,20 +11,17 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-#[cfg(feature = "db-api")]
 use reth_db_models::StoredBlockWithdrawals;
 use reth_ethereum_primitives::TransactionSigned;
-
-use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives};
-#[cfg(feature = "db-api")]
-use reth_primitives_traits::{FullBlockHeader, SignedTransaction};
+use reth_primitives_traits::{
+    Block, BlockBody, FullBlockHeader, FullNodePrimitives, SignedTransaction,
+};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Trait that implements how block bodies are written to the storage.
 ///
 /// Note: Within the current abstraction, this should only write to tables unrelated to
 /// transactions. Writing of transactions is handled separately.
-#[cfg(feature = "db-api")]
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockBodyWriter<Provider, Body: BlockBody> {
     /// Writes a set of block bodies to the storage.
@@ -49,13 +42,10 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
 }
 
 /// Trait that implements how chain-specific types are written to the storage.
-#[cfg(feature = "db-api")]
 pub trait ChainStorageWriter<Provider, Primitives: FullNodePrimitives>:
     BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
 {
 }
-
-#[cfg(feature = "db-api")]
 impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageWriter<Provider, Primitives> for T where
     T: BlockBodyWriter<Provider, <Primitives::Block as Block>::Body>
 {
@@ -104,7 +94,6 @@ impl<T, H> Default for EthStorage<T, H> {
     }
 }
 
-#[cfg(feature = "db-api")]
 impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>>
     for EthStorage<T, H>
 where
@@ -155,7 +144,6 @@ where
     }
 }
 
-#[cfg(feature = "db-api")]
 impl<Provider, T, H> BlockBodyReader<Provider> for EthStorage<T, H>
 where
     Provider:
