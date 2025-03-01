@@ -5,6 +5,7 @@ use alloy_eips::BlockId;
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{ExecutionPayload, PayloadAttributes};
 use eyre::Result;
+use std::cell::RefCell;
 
 /// An action that can be performed on an instance.
 ///
@@ -16,41 +17,54 @@ pub trait Action<I>: Send + 'static {
     fn execute(self, env: &Environment<I>) -> BoxFuture<'_, Result<()>>;
 }
 
-/// Inner action trait that uses mutable reference.
-/// This trait is used for internal trait object handling.
-pub trait ActionImpl<I>: Send + 'static {
-    /// Executes the action implementation, borrowing self mutably
-    fn execute_impl<'a>(&mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>>;
+/// A wrapper that stores an action in a `RefCell` to allow consuming it
+/// while using dynamic dispatch.
+struct RefCellWrapper<A> {
+    inner: RefCell<Option<A>>,
 }
 
-// Implement the inner trait for all actions
-impl<T, I> ActionImpl<I> for T
-where
-    T: Action<I>,
-{
-    fn execute_impl<'a>(&mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        let dummy = unsafe { std::ptr::read(self) };
-        let result = dummy.execute(env);
-
-        // we've moved out the value behind the &mut reference.
-        // this is safe because we never access the original again.
-        result
+impl<A> RefCellWrapper<A> {
+    fn new(action: A) -> Self {
+        Self { inner: RefCell::new(Some(action)) }
     }
 }
 
 /// Simplified action container for storage in tests
 #[allow(missing_debug_implementations)]
-pub struct ActionBox<I>(Box<dyn ActionImpl<I>>);
+pub struct ActionBox<I> {
+    /// The boxed action wrapped in a `RefCell` so it can be consumed
+    action: Box<dyn ActionDyn<I>>,
+}
+
+/// Trait for dynamic dispatch that mirrors Action but uses an immutable reference
+trait ActionDyn<I>: Send + 'static {
+    fn execute(&self, env: &Environment<I>) -> BoxFuture<'_, Result<()>>;
+}
+
+// Implement the Action trait for RefCellWrapper
+impl<A, I> ActionDyn<I> for RefCellWrapper<A>
+where
+    A: Action<I>,
+{
+    fn execute(&self, env: &Environment<I>) -> BoxFuture<'_, Result<()>> {
+        // Take the action out of the RefCell
+        if let Some(action) = self.inner.borrow_mut().take() {
+            action.execute(env)
+        } else {
+            Box::pin(async { Err(eyre::eyre!("Action was already consumed")) })
+        }
+    }
+}
 
 impl<I: 'static> ActionBox<I> {
     /// Constructor for [`ActionBox`].
     pub fn new<A: Action<I>>(action: A) -> Self {
-        Self(Box::new(action))
+        Self { action: Box::new(RefCellWrapper::new(action)) }
     }
 
     /// Executes an [`ActionBox`] with the given [`Environment`] reference.
-    pub async fn execute(mut self, env: &Environment<I>) -> Result<()> {
-        self.0.execute_impl(env).await
+    pub async fn execute(self, env: &Environment<I>) -> Result<()> {
+        self.action.execute(env).await
     }
 }
 
