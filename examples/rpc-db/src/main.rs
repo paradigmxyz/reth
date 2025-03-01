@@ -19,11 +19,13 @@ use std::{path::Path, sync::Arc};
 use reth::{
     api::NodeTypesWithDBAdapter,
     beacon_consensus::EthBeaconConsensus,
+    network::noop::NoopNetwork,
     providers::{
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
     },
-    rpc::eth::EthApi,
+    rpc::eth::EthApiBuilder,
+    transaction_pool::noop::NoopTransactionPool,
     utils::open_db_read_only,
 };
 use reth_chainspec::ChainSpecBuilder;
@@ -73,9 +75,18 @@ async fn main() -> eyre::Result<()> {
         .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()))
         .with_consensus(EthBeaconConsensus::new(spec.clone()));
 
+    let eth_api = EthApiBuilder::new(
+        provider.clone(),
+        NoopTransactionPool::default(),
+        NoopNetwork::default(),
+        EthEvmConfig::mainnet(),
+    )
+    .build();
+
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
-    let mut server = rpc_builder.build(config, Box::new(EthApi::with_spawner));
+
+    let mut server = rpc_builder.build(config, eth_api);
 
     // Add a custom rpc namespace
     let custom_rpc = MyRpcExt { provider };
