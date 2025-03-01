@@ -248,3 +248,6 @@ pub type ReceiptTy<N> = <PrimitivesTy<N> as NodePrimitives>::Receipt;
 
 /// Helper type for getting the `Primitives` associated type from a [`NodeTypes`].
 pub type PrimitivesTy<N> = <N as NodeTypes>::Primitives;
+
+/// Helper type for getting the `Primitives` associated type from a [`NodeTypes`].
+pub type KeyHasherTy<N> = <<N as NodeTypes>::StateCommitment as StateCommitment>::KeyHasher;

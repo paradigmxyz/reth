@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-ethereum-primitives.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-errors.workspace = true
@@ -19,7 +20,6 @@ reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-fs-util.workspace = true
 reth-engine-primitives.workspace = true
-reth-payload-validator.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
 reth-provider.workspace = true

@@ -7,6 +7,16 @@ use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::state::AccountInfo;
 use revm_database::{states::BundleState, BundleAccount};
 
+/// Type used to initialize revms bundle state.
+pub type BundleStateInit =
+    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
+
+/// Types used inside `RevertsInit` to initialize revms reverts.
+pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
+
+/// Type used to initialize revms reverts.
+pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
+
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChangedAccount {
@@ -59,16 +69,6 @@ impl<T> Default for ExecutionOutcome<T> {
         }
     }
 }
-
-/// Type used to initialize revms bundle state.
-pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
-
-/// Types used inside `RevertsInit` to initialize revms reverts.
-pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
-
-/// Type used to initialize revms reverts.
-pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
 impl<T> ExecutionOutcome<T> {
     /// Creates a new `ExecutionOutcome`.
@@ -396,6 +396,155 @@ impl ExecutionOutcome {
 impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
     fn from((output, block_number): (BlockExecutionOutput<T>, BlockNumber)) -> Self {
         Self::single(block_number, output)
+    }
+}
+
+#[cfg(feature = "serde-bincode-compat")]
+pub(super) mod serde_bincode_compat {
+    use alloc::borrow::Cow;
+    use alloy_eips::eip7685::Requests;
+    use alloy_primitives::BlockNumber;
+    use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
+    use revm_database::BundleState;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::ExecutionOutcome`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_execution_types::{serde_bincode_compat, ExecutionOutcome};
+    /// ///
+    /// use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data<T: SerdeBincodeCompat + core::fmt::Debug> {
+    ///     #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_, T>")]
+    ///     chain: ExecutionOutcome<T>,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ExecutionOutcome<'a, T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        bundle: Cow<'a, BundleState>,
+        receipts: Vec<Vec<T::BincodeRepr<'a>>>,
+        first_block: BlockNumber,
+        requests: Cow<'a, Vec<Requests>>,
+    }
+
+    impl<'a, T> From<&'a super::ExecutionOutcome<T>> for ExecutionOutcome<'a, T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
+            ExecutionOutcome {
+                bundle: Cow::Borrowed(&value.bundle),
+                receipts: value
+                    .receipts
+                    .iter()
+                    .map(|vec| vec.iter().map(|receipt| T::as_repr(receipt)).collect())
+                    .collect(),
+                first_block: value.first_block,
+                requests: Cow::Borrowed(&value.requests),
+            }
+        }
+    }
+
+    impl<'a, T> From<ExecutionOutcome<'a, T>> for super::ExecutionOutcome<T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        fn from(value: ExecutionOutcome<'a, T>) -> Self {
+            Self {
+                bundle: value.bundle.into_owned(),
+                receipts: value
+                    .receipts
+                    .into_iter()
+                    .map(|vec| vec.into_iter().map(|receipt| T::from_repr(receipt)).collect())
+                    .collect(),
+                first_block: value.first_block,
+                requests: value.requests.into_owned(),
+            }
+        }
+    }
+
+    impl<T> SerializeAs<super::ExecutionOutcome<T>> for ExecutionOutcome<'_, T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        fn serialize_as<S>(
+            source: &super::ExecutionOutcome<T>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            ExecutionOutcome::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de, T> DeserializeAs<'de, super::ExecutionOutcome<T>> for ExecutionOutcome<'de, T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::ExecutionOutcome<T>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            ExecutionOutcome::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl<T: SerdeBincodeCompat + core::fmt::Debug> SerdeBincodeCompat for super::ExecutionOutcome<T> {
+        type BincodeRepr<'a> = ExecutionOutcome<'a, T>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{serde_bincode_compat, ExecutionOutcome};
+        use rand::Rng;
+        use reth_ethereum_primitives::Receipt;
+        use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_chain_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data<T: SerdeBincodeCompat + core::fmt::Debug> {
+                #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_, T>")]
+                data: ExecutionOutcome<T>,
+            }
+
+            let mut bytes = [0u8; 1024];
+            rand::thread_rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                data: ExecutionOutcome {
+                    bundle: Default::default(),
+                    receipts: vec![],
+                    first_block: 0,
+                    requests: vec![],
+                },
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
     }
 }
 
