@@ -1,6 +1,5 @@
 //! State root task related functionality.
 
-use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use rayon::iter::{ParallelBridge, ParallelIterator};
@@ -50,7 +49,7 @@ const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 ///     - State Root Task spawned in [`StateRootTask::spawn`]
 /// - It should heave at least 3 threads to be used in:
 ///     - Sparse Trie spawned in [`run_sparse_trie`]
-///     - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+///     - Multiproof computation spawned in [`MultiProofManager::spawn_multiproof`]
 ///     - Storage root computation spawned in [`ParallelProof::multiproof`]
 ///
 /// NOTE: this value can be greater than the available cores in the host, it
@@ -65,7 +64,7 @@ pub(crate) fn rayon_thread_pool_size() -> usize {
 /// - Engine in main thread that spawns the state root task.
 /// - State Root Task spawned in [`StateRootTask::spawn`]
 /// - Sparse Trie spawned in [`run_sparse_trie`]
-/// - Multiproof computation spawned in [`MultiproofManager::spawn_multiproof`]
+/// - Multiproof computation spawned in [`MultiProofManager::spawn_multiproof`]
 /// - Storage root computation spawned in [`ParallelProof::multiproof`]
 pub(crate) fn has_enough_parallelism() -> bool {
     std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
@@ -334,7 +333,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 
 /// Input parameters for spawning a multiproof calculation.
 #[derive(Debug)]
-struct MultiproofInput<Factory> {
+struct MultiProofInput<Factory> {
     config: StateRootConfig<Factory>,
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
@@ -343,29 +342,43 @@ struct MultiproofInput<Factory> {
     state_root_message_sender: Sender<StateRootMessage>,
 }
 
+#[derive(Metrics, Clone)]
+#[metrics(scope = "tree.root")]
+struct MultiProofMetrics {
+    /// Histogram of the number of inflight multiproofs.
+    pub inflight_multiproofs_histogram: Histogram,
+    /// Histogram of the number of pending multiproofs.
+    pub pending_multiproofs_histogram: Histogram,
+}
+
 /// Manages concurrent multiproof calculations.
 /// Takes care of not having more calculations in flight than a given thread
 /// pool size, further calculation requests are queued and spawn later, after
 /// availability has been signaled.
 #[derive(Debug)]
-struct MultiproofManager<Factory> {
+struct MultiProofManager<Factory> {
     /// Maximum number of concurrent calculations.
     max_concurrent: usize,
     /// Currently running calculations.
     inflight: usize,
     /// Queued calculations.
-    pending: VecDeque<MultiproofInput<Factory>>,
+    pending: VecDeque<MultiProofInput<Factory>>,
     /// Thread pool to spawn multiproof calculations.
     thread_pool: Arc<rayon::ThreadPool>,
+    metrics: MultiProofMetrics,
 }
 
-impl<Factory> MultiproofManager<Factory>
+impl<Factory> MultiProofManager<Factory>
 where
     Factory:
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
-    /// Creates a new [`MultiproofManager`].
-    fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
+    /// Creates a new [`MultiProofManager`].
+    fn new(
+        thread_pool: Arc<rayon::ThreadPool>,
+        thread_pool_size: usize,
+        metrics: MultiProofMetrics,
+    ) -> Self {
         // we keep 2 threads to be used internally by [`StateRootTask`]
         let max_concurrent = thread_pool_size.saturating_sub(2);
         debug_assert!(max_concurrent != 0);
@@ -374,12 +387,13 @@ where
             max_concurrent,
             inflight: 0,
             pending: VecDeque::with_capacity(max_concurrent),
+            metrics,
         }
     }
 
     /// Spawns a new multiproof calculation or enqueues it for later if
     /// `max_concurrent` are already inflight.
-    fn spawn_or_queue(&mut self, input: MultiproofInput<Factory>) {
+    fn spawn_or_queue(&mut self, input: MultiProofInput<Factory>) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets.is_empty() {
             debug!(
@@ -395,6 +409,7 @@ where
 
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
+            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
             return;
         }
 
@@ -405,8 +420,10 @@ where
     /// spawn a new calculation if needed.
     fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
+        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
 
         if let Some(input) = self.pending.pop_front() {
+            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
             self.spawn_multiproof(input);
         }
     }
@@ -414,14 +431,14 @@ where
     /// Spawns a multiproof calculation.
     fn spawn_multiproof(
         &mut self,
-        MultiproofInput {
+        MultiProofInput {
             config,
             source,
             hashed_state_update,
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-        }: MultiproofInput<Factory>,
+        }: MultiProofInput<Factory>,
     ) {
         let thread_pool = self.thread_pool.clone();
 
@@ -447,7 +464,7 @@ where
                 ?source,
                 account_targets,
                 storage_targets,
-                "Multiproof calculated",
+                "MultiProof calculated",
             );
 
             match result {
@@ -473,12 +490,13 @@ where
         });
 
         self.inflight += 1;
+        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
     }
 }
 
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
-struct StateRootTaskMetrics {
+pub(crate) struct StateRootTaskMetrics {
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
     /// Histogram of proof calculation account targets.
@@ -541,7 +559,7 @@ pub struct StateRootTask<Factory> {
     /// Reference to the shared thread pool for parallel proof generation.
     thread_pool: Arc<rayon::ThreadPool>,
     /// Manages calculation of multiproofs.
-    multiproof_manager: MultiproofManager<Factory>,
+    multiproof_manager: MultiProofManager<Factory>,
     /// State root task metrics
     metrics: StateRootTaskMetrics,
 }
@@ -561,7 +579,11 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             thread_pool: thread_pool.clone(),
-            multiproof_manager: MultiproofManager::new(thread_pool, rayon_thread_pool_size()),
+            multiproof_manager: MultiProofManager::new(
+                thread_pool,
+                rayon_thread_pool_size(),
+                MultiProofMetrics::default(),
+            ),
             metrics: StateRootTaskMetrics::default(),
         }
     }
@@ -682,11 +704,11 @@ where
     }
 
     /// Handles request for proof prefetch.
-    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
-        let proof_targets = self.get_prefetch_proof_targets(targets);
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+    fn on_prefetch_proof(&mut self, mut proof_targets: MultiProofTargets) {
+        proof_targets.retain_difference(&self.fetched_proof_targets);
+        self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        self.multiproof_manager.spawn_or_queue(MultiproofInput {
+        self.multiproof_manager.spawn_or_queue(MultiProofInput {
             config: self.config.clone(),
             source: None,
             hashed_state_update: Default::default(),
@@ -694,56 +716,6 @@ where
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
         });
-    }
-
-    /// Calls `get_proof_targets` with existing proof targets for prefetching.
-    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
-        // Here we want to filter out any targets that are already fetched
-        //
-        // This means we need to remove any storage slots that have already been fetched
-        let mut duplicates = 0;
-
-        // First remove all storage targets that are subsets of already fetched storage slots
-        targets.retain(|hashed_address, target_storage| {
-            let keep = self
-                .fetched_proof_targets
-                .get(hashed_address)
-                // do NOT remove if None, because that means the account has not been fetched yet
-                .is_none_or(|fetched_storage| {
-                    // remove if a subset
-                    !target_storage.is_subset(fetched_storage)
-                });
-
-            if !keep {
-                duplicates += target_storage.len();
-            }
-
-            keep
-        });
-
-        // For all non-subset remaining targets, we have to calculate the difference
-        for (hashed_address, target_storage) in &mut targets {
-            let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
-                // this means the account has not been fetched yet, so we must fetch everything
-                // associated with this account
-                continue
-            };
-
-            let prev_target_storage_len = target_storage.len();
-
-            // keep only the storage slots that have not been fetched yet
-            //
-            // we already removed subsets, so this should only remove duplicates
-            target_storage.retain(|slot| !fetched_storage.contains(slot));
-
-            duplicates += prev_target_storage_len - target_storage.len();
-        }
-
-        if duplicates > 0 {
-            trace!(target: "engine::root", duplicates, "Removed duplicate prefetch proof targets");
-        }
-
-        targets
     }
 
     /// Handles state updates.
@@ -756,10 +728,11 @@ where
         proof_sequence_number: u64,
     ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
-        let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+        let proof_targets =
+            hashed_state_update.multi_proof_targets_difference(&self.fetched_proof_targets);
+        self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        self.multiproof_manager.spawn_or_queue(MultiproofInput {
+        self.multiproof_manager.spawn_or_queue(MultiProofInput {
             config: self.config.clone(),
             source: Some(source),
             hashed_state_update,
@@ -795,13 +768,13 @@ where
     /// 1. Either [`StateRootMessage::PrefetchProofs`] or [`StateRootMessage::StateUpdate`] is
     ///    received from the engine.
     ///    * For [`StateRootMessage::StateUpdate`], the state update is hashed with
-    ///      [`evm_state_to_hashed_post_state`], and then (proof targets)[`MultiProofTargets`] are
-    ///      extracted with [`get_proof_targets`].
+    ///      [`evm_state_to_hashed_post_state`], and then (proof targets) [`MultiProofTargets`] are
+    ///      extracted via [`HashedPostState::multi_proof_targets_difference`].
     ///    * For both messages, proof targets are deduplicated according to `fetched_proof_targets`,
     ///      so that the proofs for accounts and storage slots that were already fetched are not
     ///      requested again.
     /// 2. Using the proof targets, a new multiproof is calculated using
-    ///    [`MultiproofManager::spawn_or_queue`].
+    ///    [`MultiProofManager::spawn_or_queue`].
     ///    * If the list of proof targets is empty, the [`StateRootMessage::EmptyProof`] message is
     ///      sent back to this task along with the original state update.
     ///    * Otherwise, the multiproof is calculated and the [`StateRootMessage::ProofCalculated`]
@@ -1136,39 +1109,6 @@ where
     Ok(())
 }
 
-/// Returns accounts only with those storages that were not already fetched, and
-/// if there are no such storages and the account itself was already fetched, the
-/// account shouldn't be included.
-fn get_proof_targets(
-    state_update: &HashedPostState,
-    fetched_proof_targets: &MultiProofTargets,
-) -> MultiProofTargets {
-    let mut targets = MultiProofTargets::default();
-
-    // first collect all new accounts (not previously fetched)
-    for &hashed_address in state_update.accounts.keys() {
-        if !fetched_proof_targets.contains_key(&hashed_address) {
-            targets.insert(hashed_address, HashSet::default());
-        }
-    }
-
-    // then process storage slots for all accounts in the state update
-    for (hashed_address, storage) in &state_update.storages {
-        let fetched = fetched_proof_targets.get(hashed_address);
-        let mut changed_slots = storage
-            .storage
-            .keys()
-            .filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)))
-            .peekable();
-
-        if changed_slots.peek().is_some() {
-            targets.entry(*hashed_address).or_default().extend(changed_slots);
-        }
-    }
-
-    targets
-}
-
 /// Calculate multiproof for the targets.
 #[inline]
 fn calculate_multiproof<Factory>(
@@ -1259,206 +1199,9 @@ where
     Ok(elapsed)
 }
 
-fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
-    for (address, slots) in other {
-        targets.entry(*address).or_default().extend(slots);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::map::B256Set;
-    use reth_evm::system_calls::StateChangeSource;
-    use reth_primitives_traits::{Account as RethAccount, StorageEntry};
-    use reth_provider::{
-        providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
-    };
-    use reth_testing_utils::generators::{self, Rng};
-    use reth_trie::{test_utils::state_root, TrieInput};
-    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{
-        Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot,
-    };
-    use std::sync::Arc;
-
-    fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> RethAccount {
-        RethAccount {
-            balance: revm_account.info.balance,
-            nonce: revm_account.info.nonce,
-            bytecode_hash: if revm_account.info.code_hash == KECCAK_EMPTY {
-                None
-            } else {
-                Some(revm_account.info.code_hash)
-            },
-        }
-    }
-
-    fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
-        let mut rng = generators::rng();
-        let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.gen()).collect();
-        let mut updates = Vec::new();
-
-        for _ in 0..updates_per_account {
-            let num_accounts_in_update = rng.gen_range(1..=num_accounts);
-            let mut state_update = EvmState::default();
-
-            let selected_addresses = &all_addresses[0..num_accounts_in_update];
-
-            for &address in selected_addresses {
-                let mut storage = HashMap::default();
-                if rng.gen_bool(0.7) {
-                    for _ in 0..rng.gen_range(1..10) {
-                        let slot = U256::from(rng.gen::<u64>());
-                        storage.insert(
-                            slot,
-                            EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.gen::<u64>())),
-                        );
-                    }
-                }
-
-                let account = RevmAccount {
-                    info: AccountInfo {
-                        balance: U256::from(rng.gen::<u64>()),
-                        nonce: rng.gen::<u64>(),
-                        code_hash: KECCAK_EMPTY,
-                        code: Some(Default::default()),
-                    },
-                    storage,
-                    status: AccountStatus::Touched,
-                };
-
-                state_update.insert(address, account);
-            }
-
-            updates.push(state_update);
-        }
-
-        updates
-    }
-
-    fn create_state_root_config<F>(factory: F, input: TrieInput) -> StateRootConfig<F>
-    where
-        F: DatabaseProviderFactory<Provider: BlockReader>
-            + StateCommitmentProvider
-            + Clone
-            + 'static,
-    {
-        let consistent_view = ConsistentDbView::new(factory, None);
-        let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
-        let state_sorted = Arc::new(input.state.clone().into_sorted());
-        let prefix_sets = Arc::new(input.prefix_sets);
-
-        StateRootConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
-    }
-
-    fn create_test_state_root_task<F>(factory: F) -> StateRootTask<F>
-    where
-        F: DatabaseProviderFactory<Provider: BlockReader>
-            + StateCommitmentProvider
-            + Clone
-            + 'static,
-    {
-        let num_threads = rayon_thread_pool_size();
-
-        let thread_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .thread_name(|i| format!("test-worker-{}", i))
-            .build()
-            .expect("Failed to create test proof worker thread pool");
-
-        let thread_pool = Arc::new(thread_pool);
-        let config = create_state_root_config(factory, TrieInput::default());
-
-        StateRootTask::new(config, thread_pool)
-    }
-
-    #[test]
-    fn test_state_root_task() {
-        reth_tracing::init_test_tracing();
-
-        let factory = create_test_provider_factory();
-
-        let state_updates = create_mock_state_updates(10, 10);
-        let mut hashed_state = HashedPostState::default();
-        let mut accumulated_state: HashMap<Address, (RethAccount, HashMap<B256, U256>)> =
-            HashMap::default();
-
-        {
-            let provider_rw = factory.provider_rw().expect("failed to get provider");
-
-            for update in &state_updates {
-                let account_updates = update.iter().map(|(address, account)| {
-                    (*address, Some(convert_revm_to_reth_account(account)))
-                });
-                provider_rw
-                    .insert_account_for_hashing(account_updates)
-                    .expect("failed to insert accounts");
-
-                let storage_updates = update.iter().map(|(address, account)| {
-                    let storage_entries = account.storage.iter().map(|(slot, value)| {
-                        StorageEntry { key: B256::from(*slot), value: value.present_value }
-                    });
-                    (*address, storage_entries)
-                });
-                provider_rw
-                    .insert_storage_for_hashing(storage_updates)
-                    .expect("failed to insert storage");
-            }
-            provider_rw.commit().expect("failed to commit changes");
-        }
-
-        for update in &state_updates {
-            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
-
-            for (address, account) in update {
-                let storage: HashMap<B256, U256> = account
-                    .storage
-                    .iter()
-                    .map(|(k, v)| (B256::from(*k), v.present_value))
-                    .collect();
-
-                let entry = accumulated_state.entry(*address).or_default();
-                entry.0 = convert_revm_to_reth_account(account);
-                entry.1.extend(storage);
-            }
-        }
-
-        let input = TrieInput::from_state(hashed_state);
-        let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
-        let state_sorted = Arc::new(input.state.clone().into_sorted());
-        let config = StateRootConfig {
-            consistent_view: ConsistentDbView::new(factory, None),
-            nodes_sorted,
-            state_sorted,
-            prefix_sets: Arc::new(input.prefix_sets),
-        };
-
-        let num_threads = rayon_thread_pool_size();
-
-        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .thread_name(|i| format!("proof-worker-{}", i))
-            .build()
-            .expect("Failed to create proof worker thread pool");
-
-        let task = StateRootTask::new(config, Arc::new(state_root_task_pool));
-        let mut state_hook = task.state_hook();
-        let handle = task.spawn();
-
-        for (i, update) in state_updates.into_iter().enumerate() {
-            state_hook.on_state(StateChangeSource::Transaction(i), &update);
-        }
-        drop(state_hook);
-
-        let (root_from_task, _) = handle.wait_for_result().expect("task failed").state_root;
-        let root_from_base = state_root(accumulated_state);
-
-        assert_eq!(
-            root_from_task, root_from_base,
-            "State root mismatch: task={root_from_task:?}, base={root_from_base:?}"
-        );
-    }
 
     #[test]
     fn test_add_proof_in_sequence() {
@@ -1540,248 +1283,5 @@ mod tests {
         let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()));
         assert_eq!(ready.len(), 5);
         assert!(!sequencer.has_pending());
-    }
-
-    fn create_get_proof_targets_state() -> HashedPostState {
-        let mut state = HashedPostState::default();
-
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        state.accounts.insert(addr1, Some(Default::default()));
-        state.accounts.insert(addr2, Some(Default::default()));
-
-        let mut storage = HashedStorage::default();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-        storage.storage.insert(slot1, U256::ZERO);
-        storage.storage.insert(slot2, U256::from(1));
-        state.storages.insert(addr1, storage);
-
-        state
-    }
-
-    #[test]
-    fn test_get_proof_targets_new_account_targets() {
-        let state = create_get_proof_targets_state();
-        let fetched = MultiProofTargets::default();
-
-        let targets = get_proof_targets(&state, &fetched);
-
-        // should return all accounts as targets since nothing was fetched before
-        assert_eq!(targets.len(), state.accounts.len());
-        for addr in state.accounts.keys() {
-            assert!(targets.contains_key(addr));
-        }
-    }
-
-    #[test]
-    fn test_get_proof_targets_new_storage_targets() {
-        let state = create_get_proof_targets_state();
-        let fetched = MultiProofTargets::default();
-
-        let targets = get_proof_targets(&state, &fetched);
-
-        // verify storage slots are included for accounts with storage
-        for (addr, storage) in &state.storages {
-            assert!(targets.contains_key(addr));
-            let target_slots = &targets[addr];
-            assert_eq!(target_slots.len(), storage.storage.len());
-            for slot in storage.storage.keys() {
-                assert!(target_slots.contains(slot));
-            }
-        }
-    }
-
-    #[test]
-    fn test_get_proof_targets_filter_already_fetched_accounts() {
-        let state = create_get_proof_targets_state();
-        let mut fetched = MultiProofTargets::default();
-
-        // select an account that has no storage updates
-        let fetched_addr = state
-            .accounts
-            .keys()
-            .find(|&&addr| !state.storages.contains_key(&addr))
-            .expect("Should have an account without storage");
-
-        // mark the account as already fetched
-        fetched.insert(*fetched_addr, HashSet::default());
-
-        let targets = get_proof_targets(&state, &fetched);
-
-        // should not include the already fetched account since it has no storage updates
-        assert!(!targets.contains_key(fetched_addr));
-        // other accounts should still be included
-        assert_eq!(targets.len(), state.accounts.len() - 1);
-    }
-
-    #[test]
-    fn test_get_proof_targets_filter_already_fetched_storage() {
-        let state = create_get_proof_targets_state();
-        let mut fetched = MultiProofTargets::default();
-
-        // mark one storage slot as already fetched
-        let (addr, storage) = state.storages.iter().next().unwrap();
-        let mut fetched_slots = HashSet::default();
-        let fetched_slot = *storage.storage.keys().next().unwrap();
-        fetched_slots.insert(fetched_slot);
-        fetched.insert(*addr, fetched_slots);
-
-        let targets = get_proof_targets(&state, &fetched);
-
-        // should not include the already fetched storage slot
-        let target_slots = &targets[addr];
-        assert!(!target_slots.contains(&fetched_slot));
-        assert_eq!(target_slots.len(), storage.storage.len() - 1);
-    }
-
-    #[test]
-    fn test_get_proof_targets_empty_state() {
-        let state = HashedPostState::default();
-        let fetched = MultiProofTargets::default();
-
-        let targets = get_proof_targets(&state, &fetched);
-
-        assert!(targets.is_empty());
-    }
-
-    #[test]
-    fn test_get_proof_targets_mixed_fetched_state() {
-        let mut state = HashedPostState::default();
-        let mut fetched = MultiProofTargets::default();
-
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-
-        state.accounts.insert(addr1, Some(Default::default()));
-        state.accounts.insert(addr2, Some(Default::default()));
-
-        let mut storage = HashedStorage::default();
-        storage.storage.insert(slot1, U256::ZERO);
-        storage.storage.insert(slot2, U256::from(1));
-        state.storages.insert(addr1, storage);
-
-        let mut fetched_slots = HashSet::default();
-        fetched_slots.insert(slot1);
-        fetched.insert(addr1, fetched_slots);
-
-        let targets = get_proof_targets(&state, &fetched);
-
-        assert!(targets.contains_key(&addr2));
-        assert!(!targets[&addr1].contains(&slot1));
-        assert!(targets[&addr1].contains(&slot2));
-    }
-
-    #[test]
-    fn test_get_proof_targets_unmodified_account_with_storage() {
-        let mut state = HashedPostState::default();
-        let fetched = MultiProofTargets::default();
-
-        let addr = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-
-        // don't add the account to state.accounts (simulating unmodified account)
-        // but add storage updates for this account
-        let mut storage = HashedStorage::default();
-        storage.storage.insert(slot1, U256::from(1));
-        storage.storage.insert(slot2, U256::from(2));
-        state.storages.insert(addr, storage);
-
-        assert!(!state.accounts.contains_key(&addr));
-        assert!(!fetched.contains_key(&addr));
-
-        let targets = get_proof_targets(&state, &fetched);
-
-        // verify that we still get the storage slots for the unmodified account
-        assert!(targets.contains_key(&addr));
-
-        let target_slots = &targets[&addr];
-        assert_eq!(target_slots.len(), 2);
-        assert!(target_slots.contains(&slot1));
-        assert!(target_slots.contains(&slot2));
-    }
-
-    #[test]
-    fn test_get_prefetch_proof_targets_no_duplicates() {
-        let test_provider_factory = create_test_provider_factory();
-        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
-
-        // populate some targets
-        let mut targets = MultiProofTargets::default();
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-        targets.insert(addr1, vec![slot1].into_iter().collect());
-        targets.insert(addr2, vec![slot2].into_iter().collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets are the same because there are no fetched proof
-        // targets yet
-        assert_eq!(prefetch_proof_targets, targets);
-
-        // add a different addr and slot to fetched proof targets
-        let addr3 = B256::random();
-        let slot3 = B256::random();
-        test_state_root_task.fetched_proof_targets.insert(addr3, vec![slot3].into_iter().collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets are the same because the fetched proof targets
-        // don't overlap with the prefetch targets
-        assert_eq!(prefetch_proof_targets, targets);
-    }
-
-    #[test]
-    fn test_get_prefetch_proof_targets_remove_subset() {
-        let test_provider_factory = create_test_provider_factory();
-        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
-
-        // populate some targe
-        let mut targets = MultiProofTargets::default();
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-        targets.insert(addr1, vec![slot1].into_iter().collect());
-        targets.insert(addr2, vec![slot2].into_iter().collect());
-
-        // add a subset of the first target to fetched proof targets
-        test_state_root_task.fetched_proof_targets.insert(addr1, vec![slot1].into_iter().collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets do not include the subset
-        assert_eq!(prefetch_proof_targets.len(), 1);
-        assert!(!prefetch_proof_targets.contains_key(&addr1));
-        assert!(prefetch_proof_targets.contains_key(&addr2));
-
-        // now add one more slot to the prefetch targets
-        let slot3 = B256::random();
-        targets.get_mut(&addr1).unwrap().insert(slot3);
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets do not include the subset
-        // but include the new slot
-        assert_eq!(prefetch_proof_targets.len(), 2);
-        assert!(prefetch_proof_targets.contains_key(&addr1));
-        assert_eq!(
-            *prefetch_proof_targets.get(&addr1).unwrap(),
-            vec![slot3].into_iter().collect::<B256Set>()
-        );
-        assert!(prefetch_proof_targets.contains_key(&addr2));
-        assert_eq!(
-            *prefetch_proof_targets.get(&addr2).unwrap(),
-            vec![slot2].into_iter().collect::<B256Set>()
-        );
     }
 }

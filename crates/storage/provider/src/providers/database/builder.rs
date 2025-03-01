@@ -114,7 +114,7 @@ pub struct ReadOnlyConfig {
 impl ReadOnlyConfig {
     /// Derives the [`ReadOnlyConfig`] from the datadir.
     ///
-    /// By default this assumes the following datadir layour:
+    /// By default this assumes the following datadir layout:
     ///
     /// ```text
     ///  -`datadir`
@@ -131,7 +131,7 @@ impl ReadOnlyConfig {
 
     /// Derives the [`ReadOnlyConfig`] from the database dir.
     ///
-    /// By default this assumes the following datadir layour:
+    /// By default this assumes the following datadir layout:
     ///
     /// ```text
     ///    - db

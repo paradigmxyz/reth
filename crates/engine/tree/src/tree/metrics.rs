@@ -16,8 +16,6 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) block_validation: BlockValidationMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
     pub(crate) tree: TreeMetrics,
-    /// Metrics for transaction prewarming threads
-    pub(crate) prewarm: PrewarmThreadMetrics,
 }
 
 /// Metrics for the entire blockchain tree
@@ -71,10 +69,6 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_duration: Gauge,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Gauge,
-    /// Cache saving duration
-    pub(crate) cache_saving_duration: Gauge,
-    /// State root config creation duration
-    pub(crate) state_root_config_duration: Gauge,
 }
 
 impl BlockValidationMetrics {
@@ -85,26 +79,6 @@ impl BlockValidationMetrics {
         self.state_root_duration.set(elapsed_as_secs);
         self.state_root_histogram.record(elapsed_as_secs);
     }
-}
-
-/// Metrics for prewarming threads
-#[derive(Metrics, Clone)]
-#[metrics(scope = "sync.prewarm")]
-pub(crate) struct PrewarmThreadMetrics {
-    /// Prewarm thread spawn duration
-    pub(crate) spawn_duration: Gauge,
-    /// A histogram of the prewarm thread spawn duration
-    pub(crate) spawn_duration_histogram: Histogram,
-    /// The number of transactions in the block
-    pub(crate) transactions: Gauge,
-    /// A histogram of the number of transactions in the block
-    pub(crate) transactions_histogram: Histogram,
-    /// A histogram of total runtime durations for prewarm threads
-    pub(crate) total_runtime: Histogram,
-    /// A histogram of execution durations for prewarm threads
-    pub(crate) execution_duration: Histogram,
-    /// A histogram for total prefetch targets in prewarm threads
-    pub(crate) prefetch_storage_targets: Histogram,
 }
 
 /// Metrics for the blockchain tree block buffer

@@ -3,6 +3,7 @@
 pub mod common;
 mod exex;
 
+pub(crate) mod debug;
 pub(crate) mod engine;
 
 pub use common::LaunchContext;
