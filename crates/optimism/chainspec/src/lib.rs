@@ -16,6 +16,13 @@ pub mod constants;
 mod dev;
 mod op;
 mod op_sepolia;
+mod superchain_registry;
+
+pub use base::BASE_MAINNET;
+pub use base_sepolia::BASE_SEPOLIA;
+pub use dev::OP_DEV;
+pub use op::OP_MAINNET;
+pub use op_sepolia::OP_SEPOLIA;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
@@ -23,15 +30,10 @@ use alloy_consensus::{proofs::storage_root_unhashed, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
-pub use base::BASE_MAINNET;
-pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, From, Into};
-pub use dev::OP_DEV;
-pub use op::OP_MAINNET;
-pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
-    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
-    DepositContract, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
+    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
@@ -367,7 +369,7 @@ impl From<Genesis> for OpChainSpec {
         Self {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
-                genesis_header: SealedHeader::new_unhashed(make_genesis_header(
+                genesis_header: SealedHeader::new_unhashed(make_op_genesis_header(
                     &genesis, &hardforks,
                 )),
                 genesis,
@@ -450,6 +452,7 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::String;
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
@@ -986,7 +989,6 @@ mod tests {
         ];
 
         for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {
-            println!("got {expected:?}, {actual:?}");
             assert_eq!(&**expected, &**actual);
         }
         assert_eq!(expected_hardforks.len(), hardforks.len());
