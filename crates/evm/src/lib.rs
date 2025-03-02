@@ -48,21 +48,21 @@ pub type EvmEnvFor<Evm> = EvmEnv<<Evm as ConfigureEvmEnv>::Spec>;
 
 /// Helper trait to bound [`Inspector`] for a [`ConfigureEvm`].
 pub trait InspectorFor<DB: Database, Evm: ConfigureEvm>:
-    Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>
+    Inspector<<Evm::EvmFactory as EvmFactory>::Context<DB>>
 {
 }
 impl<T, DB, Evm> InspectorFor<DB, Evm> for T
 where
     DB: Database,
     Evm: ConfigureEvm,
-    T: Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>,
+    T: Inspector<<Evm::EvmFactory as EvmFactory>::Context<DB>>,
 {
 }
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// The EVM factory.
-    type EvmFactory: EvmFactory<EvmEnv<Self::Spec>, Tx = Self::TxEnv>;
+    type EvmFactory: EvmFactory<Tx = Self::TxEnv, Spec = Self::Spec>;
 
     /// Provides a reference to [`EvmFactory`] implementation.
     fn evm_factory(&self) -> &Self::EvmFactory;

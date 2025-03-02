@@ -41,6 +41,9 @@ use reth_ethereum_forks::EthereumHardfork;
 
 pub mod execute;
 
+mod build;
+pub use build::EthBlockBuilder;
+
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;
 
@@ -85,7 +88,7 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
 
 impl<EvmF> ConfigureEvmEnv for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
+    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
         + Send
         + Sync
         + Unpin
@@ -185,7 +188,7 @@ where
 
 impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
+    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
         + Send
         + Sync
         + Unpin

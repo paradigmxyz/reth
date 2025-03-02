@@ -30,7 +30,7 @@ use revm::{
 
 impl<EvmF> BlockExecutionStrategyFactory for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
+    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
         + Send
         + Sync
         + Unpin
@@ -190,9 +190,7 @@ where
         Ok(gas_used)
     }
 
-    fn apply_post_execution_changes(
-        mut self,
-    ) -> Result<BlockExecutionResult<Receipt>, Self::Error> {
+    fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), Self::Error> {
         let requests = if self.chain_spec.is_prague_active_at_timestamp(self.evm.block().timestamp)
         {
             // Collect all EIP-6110 deposits
@@ -246,7 +244,7 @@ where
         );
 
         let gas_used = self.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or_default();
-        Ok(BlockExecutionResult { receipts: self.receipts, requests, gas_used })
+        Ok((self.evm, BlockExecutionResult { receipts: self.receipts, requests, gas_used }))
     }
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {

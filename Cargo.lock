@@ -261,7 +261,6 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=04fa394#04fa3947c5694c2d15956bb18a31834b95e0e975"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
@@ -369,7 +368,6 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=04fa394#04fa3947c5694c2d15956bb18a31834b95e0e975"
 dependencies = [
  "alloy-evm",
  "alloy-primitives",
@@ -7767,6 +7765,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-primitives-traits",
+ "reth-storage-api",
  "reth-storage-errors",
  "revm",
  "revm-database",
@@ -7789,6 +7788,7 @@ dependencies = [
  "reth-execution-types",
  "reth-primitives",
  "reth-primitives-traits",
+ "reth-storage-api",
  "reth-testing-utils",
  "revm",
  "secp256k1 0.30.0",

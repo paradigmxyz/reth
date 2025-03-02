@@ -253,9 +253,7 @@ where
         Ok(gas_used)
     }
 
-    fn apply_post_execution_changes(
-        mut self,
-    ) -> Result<BlockExecutionResult<N::Receipt>, Self::Error> {
+    fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<N::Receipt>), Self::Error> {
         let balance_increments = post_block_balance_increments::<Header>(
             &self.chain_spec.clone(),
             self.evm.block(),
@@ -275,7 +273,7 @@ where
         );
 
         let gas_used = self.receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or_default();
-        Ok(BlockExecutionResult { receipts: self.receipts, requests: Default::default(), gas_used })
+        Ok((self.evm, BlockExecutionResult { receipts: self.receipts, requests: Default::default(), gas_used }))
     }
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
