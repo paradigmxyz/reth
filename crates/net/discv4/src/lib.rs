@@ -3012,4 +3012,38 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn test_bootnode_not_in_update_stream() {
+        let (_, service_1) = create_discv4().await;
+
+        let config = Discv4Config::builder().add_boot_node(service_1.local_node_record).build();
+        let (_, mut service_2) = create_discv4_with_config(config).await;
+
+        let mut updates = service_2.update_stream();
+
+        service_2.bootstrap();
+
+        // Poll for events for a reasonable time
+        let mut bootnode_appeared = false;
+        let timeout = tokio::time::sleep(Duration::from_secs(1));
+        tokio::pin!(timeout);
+
+        loop {
+            tokio::select! {
+                Some(update) = updates.next() => {
+                    if let DiscoveryUpdate::Added(record) = update {
+                        if record.id == *service_1.local_peer_id() {
+                            bootnode_appeared = true;
+                            break;
+                        }
+                    }
+                }
+                _ = &mut timeout => break,
+            }
+        }
+
+        // Assert bootnode did not appear in update stream
+        assert!(!bootnode_appeared, "Bootnode should not appear in update stream");
+    }
 }
