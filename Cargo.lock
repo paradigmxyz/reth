@@ -2355,9 +2355,9 @@ dependencies = [
 
 [[package]]
 name = "crunchy"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
+checksum = "43da5946c66ffcc7745f48db692ffbb10a83bfe0afd96235c5c2a4fb23994929"
 
 [[package]]
 name = "crypto-bigint"
@@ -3071,18 +3071,23 @@ version = "0.0.0"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types",
  "bytes",
  "derive_more 2.0.1",
  "futures",
  "reth-chainspec",
  "reth-discv4",
+ "reth-engine-primitives",
+ "reth-errors",
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
  "reth-network",
  "reth-network-api",
  "reth-network-peers",
+ "reth-payload-primitives",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-tracing",
  "secp256k1 0.30.0",
@@ -8070,6 +8075,7 @@ dependencies = [
  "reth-discv5",
  "reth-dns-discovery",
  "reth-ecies",
+ "reth-engine-primitives",
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
