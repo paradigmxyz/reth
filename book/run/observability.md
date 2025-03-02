@@ -26,9 +26,13 @@ We're finally getting somewhere! As a final step, though, wouldn't it be great t
 
 We're going to be using Prometheus to collect metrics off of the endpoint we set up, and use Grafana to scrape the metrics from Prometheus and define a dashboard with them.
 
-Let's begin by installing both Prometheus and Grafana, which one can do with e.g. Homebrew:
+Let's begin by installing both Prometheus and Grafana:
 
-<!-- TODO: Provide cross-platform guidance -->
+### Installation
+
+#### macOS
+
+Using Homebrew:
 
 ```bash
 brew update
@@ -43,15 +47,72 @@ brew services start prometheus
 brew services start grafana
 ```
 
+#### Linux (Debian/Ubuntu)
+
+For Prometheus:
+
+```bash
+# Download the latest version of Prometheus
+wget https://github.com/prometheus/prometheus/releases/download/v2.45.0/prometheus-2.45.0.linux-amd64.tar.gz
+
+# Extract the archive
+tar xvfz prometheus-*.tar.gz
+cd prometheus-*
+
+# Start Prometheus (in the background)
+./prometheus --config.file=prometheus.yml > prometheus.log 2>&1 &
+```
+
+For Grafana:
+
+```bash
+# Add the GPG key
+wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
+
+# Add the repository
+echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+
+# Update and install
+sudo apt-get update
+sudo apt-get install -y grafana
+
+# Start Grafana
+sudo systemctl start grafana-server
+sudo systemctl enable grafana-server
+```
+
+#### Windows
+
+For Prometheus:
+
+1. Download the latest Windows release from [Prometheus releases page](https://github.com/prometheus/prometheus/releases)
+2. Extract the archive to a directory of your choice (e.g., `C:\prometheus`)
+3. Open a command prompt as administrator and navigate to the directory
+4. Run Prometheus with the default configuration:
+   ```
+   prometheus.exe --config.file=prometheus.yml
+   ```
+
+For Grafana:
+
+1. Download the latest Windows release from [Grafana download page](https://grafana.com/grafana/download?platform=windows)
+2. Run the installer and follow the instructions
+3. Grafana will be installed as a Windows service and should start automatically
+4. If it doesn't start, you can start it manually from the Services management console
+
+### Configuration
+
 This will start a Prometheus service which [by default scrapes itself about the current instance](https://prometheus.io/docs/introduction/first_steps/#:~:text=The%20job%20contains%20a%20single,%3A%2F%2Flocalhost%3A9090%2Fmetrics.). So you'll need to change its config to hit your Reth nodes metrics endpoint at `localhost:9001` which you set using the `--metrics` flag.
 
 You can find an example config for the Prometheus service in the repo here: [`etc/prometheus/prometheus.yml`](https://github.com/paradigmxyz/reth/blob/main/etc/prometheus/prometheus.yml)
 
 Depending on your installation you may find the config for your Prometheus service at:
 
-- OSX: `/opt/homebrew/etc/prometheus.yml`
+- macOS (Homebrew): `/opt/homebrew/etc/prometheus.yml`
 - Linuxbrew: `/home/linuxbrew/.linuxbrew/etc/prometheus.yml`
-- Others: `/usr/local/etc/prometheus/prometheus.yml`
+- Linux (manual install): In the directory where you extracted Prometheus
+- Linux (package manager): `/etc/prometheus/prometheus.yml`
+- Windows: In the directory where you extracted Prometheus (e.g., `C:\prometheus\prometheus.yml`)
 
 Next, open up "localhost:3000" in your browser, which is the default URL for Grafana. Here, "admin" is the default for both the username and password.
 
