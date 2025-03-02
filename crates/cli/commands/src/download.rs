@@ -7,12 +7,13 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_node_core::args::DatadirArgs;
 use std::{
     fs,
-    io::{Cursor, Read, Write},
+    io::{self, Read, Write},
     path::Path,
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tar::Archive;
+use tokio::task;
 use tracing::info;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
@@ -77,11 +78,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     }
 }
 
-// Monitor process status and display progress every 100ms to avoid overwhelming stdout
+// Monitor process status and display progress every 100ms
+// to avoid overwhelming stdout
 struct DownloadProgress {
     downloaded: u64,
     total_size: u64,
-    last_displayed: std::time::Instant,
+    last_displayed: Instant,
 }
 
 impl DownloadProgress {
@@ -100,15 +102,15 @@ impl DownloadProgress {
             unit_index += 1;
         }
 
-        format!("{:.2}{}", size, BYTE_UNITS[unit_index])
+        format!("{:.2} {}", size, BYTE_UNITS[unit_index])
     }
 
     /// Updates progress bar
     fn update(&mut self, chunk_size: u64) -> Result<()> {
         self.downloaded += chunk_size;
 
-        if self.last_displayed.elapsed() >= std::time::Duration::from_millis(100) {
-            // Display progress
+        // Only update display at most 10 times per second for efficiency
+        if self.last_displayed.elapsed() >= Duration::from_millis(100) {
             let formatted_downloaded = Self::format_size(self.downloaded);
             let formatted_total = Self::format_size(self.total_size);
             let progress = (self.downloaded as f64 / self.total_size as f64) * 100.0;
@@ -117,8 +119,7 @@ impl DownloadProgress {
                 "\rDownloading and extracting... {:.2}% ({} / {})",
                 progress, formatted_downloaded, formatted_total
             );
-            std::io::stdout().flush()?;
-
+            io::stdout().flush()?;
             self.last_displayed = Instant::now();
         }
 
@@ -126,10 +127,34 @@ impl DownloadProgress {
     }
 }
 
-/// Downloads snapshot and pipes it through lz4 decompression into tar extraction
-async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
-    let client = Client::new();
-    let mut response = client.get(url).send().await?.error_for_status()?;
+/// Adapter to track progress while reading
+struct ProgressReader<R> {
+    reader: R,
+    progress: DownloadProgress,
+}
+
+impl<R: Read> ProgressReader<R> {
+    fn new(reader: R, total_size: u64) -> Self {
+        Self { reader, progress: DownloadProgress::new(total_size) }
+    }
+}
+
+impl<R: Read> Read for ProgressReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let bytes = self.reader.read(buf)?;
+        if bytes > 0 {
+            if let Err(e) = self.progress.update(bytes as u64) {
+                return Err(io::Error::new(io::ErrorKind::Other, e));
+            }
+        }
+        Ok(bytes)
+    }
+}
+
+/// Downloads and extracts a snapshot with blocking approach
+fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
+    let client = reqwest::blocking::Client::builder().build()?;
+    let response = client.get(url).send()?.error_for_status()?;
 
     let total_size = response.content_length().ok_or_else(|| {
         eyre::eyre!(
@@ -137,32 +162,22 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
         )
     })?;
 
-    let mut global_progress: DownloadProgress = DownloadProgress::new(total_size);
+    let progress_reader = ProgressReader::new(response, total_size);
 
-    // Buffer to store downloaded chunks before processing
-    let mut buffer = Vec::new();
-    // Stream download chunks
-    while let Some(chunk) = response.chunk().await? {
-        buffer.extend_from_slice(&chunk);
-        global_progress.update(chunk.len() as u64)?;
-    }
-
-    println!("\nDownload complete. Decompressing and extracting...");
-
-    let cursor = Cursor::new(buffer);
-    let mut decoder = Decoder::new(cursor)?;
-
-    let mut decompressed_data = Vec::new();
-    decoder.read_to_end(&mut decompressed_data)?;
-
-    println!("Decompression complete. Extracting files...");
-
-    let cursor = Cursor::new(decompressed_data);
-    let mut archive = Archive::new(cursor);
+    let decoder = Decoder::new(progress_reader)?;
+    let mut archive = Archive::new(decoder);
 
     archive.unpack(target_dir)?;
 
+    info!(target: "reth::cli", "Extraction complete.");
     println!("\nExtraction complete.");
+    Ok(())
+}
+
+async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
+    let target_dir = target_dir.to_path_buf();
+    let url = url.to_string();
+    task::spawn_blocking(move || blocking_download_and_extract(&url, &target_dir)).await??;
 
     Ok(())
 }
