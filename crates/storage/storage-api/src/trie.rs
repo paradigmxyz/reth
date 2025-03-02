@@ -85,7 +85,7 @@ pub trait StateProofProvider: Send + Sync {
     ) -> ProviderResult<MultiProof>;
 
     /// Get trie witness for provided state.
-    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<B256Map<Bytes>>;
+    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>>;
 }
 
 /// Trie Writer
