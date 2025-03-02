@@ -3,10 +3,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_evm::Evm;
 // Re-export execution types
-use crate::{
-    system_calls::OnStateHook, ConfigureEvmFor, Database, EvmFor, InspectorFor,
-    NextBlockEnvAttributes,
-};
+use crate::{system_calls::OnStateHook, ConfigureEvmFor, Database, EvmFor, InspectorFor};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
@@ -268,7 +265,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     fn context_for_next_block<'a>(
         &self,
         parent: &SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
-        attributes: NextBlockEnvAttributes<'a>,
+        attributes: Self::NextBlockEnvCtx<'a>,
     ) -> Self::ExecutionCtx<'a>;
 
     /// Creates a strategy with given EVM and execution context.
@@ -297,7 +294,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         &'a self,
         db: &'a mut State<DB>,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
-        attributes: NextBlockEnvAttributes<'a>,
+        attributes: Self::NextBlockEnvCtx<'a>,
     ) -> Result<Self::Strategy<'a, DB, NoOpInspector>, Self::Error> {
         let evm_env = self.next_evm_env(parent, attributes)?;
         let evm = self.evm_with_env(db, evm_env);

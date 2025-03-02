@@ -1,13 +1,13 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
 use alloy_consensus::{
-    constants::EMPTY_WITHDRAWALS, transaction::Recovered, Header, Transaction,
+    constants::EMPTY_WITHDRAWALS, transaction::Recovered, BlockHeader, Header, Transaction,
     EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::execute::BlockExecutionStrategyFactory;
+use reth_evm::{execute::BlockExecutionStrategyFactory, NextBlockEnvAttributes};
 use reth_node_api::NodePrimitives;
 use reth_primitives::{logs_bloom, BlockBody, Receipt, SealedHeader};
 use reth_primitives_traits::proofs::calculate_transaction_root;
@@ -44,12 +44,13 @@ where
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
-            Evm: BlockExecutionStrategyFactory<
+            Evm: for<'a> BlockExecutionStrategyFactory<
                 Primitives: NodePrimitives<
                     BlockHeader = Header,
                     SignedTx = ProviderTx<Self::Provider>,
                     Receipt = ProviderReceipt<Self::Provider>,
                 >,
+                NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
             >,
         >,
     Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
@@ -61,6 +62,20 @@ where
         Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>,
     > {
         self.inner.pending_block()
+    }
+
+    fn next_env_attributes(
+        &self,
+        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+    ) -> Result<<Self::Evm as reth_evm::ConfigureEvmEnv>::NextBlockEnvCtx<'_>, Self::Error> {
+        Ok(NextBlockEnvAttributes {
+            timestamp: parent.timestamp().saturating_add(12),
+            suggested_fee_recipient: parent.beneficiary(),
+            prev_randao: B256::random(),
+            gas_limit: parent.gas_limit(),
+            parent_beacon_block_root: parent.parent_beacon_block_root(),
+            withdrawals: None,
+        })
     }
 
     fn assemble_block(

@@ -161,6 +161,11 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// Identifier of the EVM specification.
     type Spec: Debug + Copy + Send + Sync + 'static;
 
+    /// Context required for configuring next block environment.
+    ///
+    /// Contains values that can't be derived from the parent block.
+    type NextBlockEnvCtx<'a>: Clone + Copy;
+
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
     fn tx_env(&self, transaction: impl IntoTxEnv<Self::TxEnv>) -> Self::TxEnv {
         transaction.into_tx_env()
@@ -177,7 +182,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes<'_>,
+        attributes: Self::NextBlockEnvCtx<'_>,
     ) -> Result<EvmEnv<Self::Spec>, Self::Error>;
 }
 

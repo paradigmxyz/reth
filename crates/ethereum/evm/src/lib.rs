@@ -96,6 +96,7 @@ where
     type Error = Infallible;
     type TxEnv = EvmF::Tx;
     type Spec = SpecId;
+    type NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>;
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         let spec = config::revm_spec(self.chain_spec(), header);

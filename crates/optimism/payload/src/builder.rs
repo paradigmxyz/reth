@@ -163,7 +163,10 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
-    EvmConfig: BlockExecutionStrategyFactory<Primitives = N>,
+    EvmConfig: for<'a> BlockExecutionStrategyFactory<
+        Primitives = N,
+        NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+    >,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -248,7 +251,10 @@ where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
     N: OpPayloadPrimitives,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
-    EvmConfig: BlockExecutionStrategyFactory<Primitives = N>,
+    EvmConfig: for<'a> BlockExecutionStrategyFactory<
+        Primitives = N,
+        NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+    >,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
@@ -327,7 +333,10 @@ impl<Txs> OpBuilder<'_, Txs> {
     where
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
-        EvmConfig: BlockExecutionStrategyFactory<Primitives = N>,
+        EvmConfig: for<'a> BlockExecutionStrategyFactory<
+            Primitives = N,
+            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+        >,
         ChainSpec: EthChainSpec + OpHardforks,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StorageRootProvider,
@@ -406,7 +415,10 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx: OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        EvmConfig: BlockExecutionStrategyFactory<Primitives = N>,
+        EvmConfig: for<'a> BlockExecutionStrategyFactory<
+            Primitives = N,
+            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+        >,
         ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
@@ -529,7 +541,10 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx: &OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        EvmConfig: BlockExecutionStrategyFactory<Primitives = N>,
+        for<'a> EvmConfig: BlockExecutionStrategyFactory<
+            Primitives = N,
+            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+        >,
         ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,

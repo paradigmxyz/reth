@@ -3,12 +3,12 @@
 use crate::OpEthApi;
 use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, transaction::Recovered,
-    Header, Transaction as _, TxReceipt, EMPTY_OMMER_ROOT_HASH,
+    BlockHeader, Header, Transaction as _, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE, BlockNumberOrTag};
 use alloy_primitives::{B256, U256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::execute::BlockExecutionStrategyFactory;
+use reth_evm::{execute::BlockExecutionStrategyFactory, NextBlockEnvAttributes};
 use reth_node_api::NodePrimitives;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
@@ -45,12 +45,13 @@ where
         > + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
-        Evm: BlockExecutionStrategyFactory<
+        Evm: for<'a> BlockExecutionStrategyFactory<
             Primitives: NodePrimitives<
                 SignedTx = ProviderTx<Self::Provider>,
                 BlockHeader = ProviderHeader<Self::Provider>,
                 Receipt = ProviderReceipt<Self::Provider>,
             >,
+            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
         >,
     >,
 {
@@ -61,6 +62,20 @@ where
         Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>,
     > {
         self.inner.eth_api.pending_block()
+    }
+
+    fn next_env_attributes(
+        &self,
+        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+    ) -> Result<<Self::Evm as reth_evm::ConfigureEvmEnv>::NextBlockEnvCtx<'_>, Self::Error> {
+        Ok(NextBlockEnvAttributes {
+            timestamp: parent.timestamp().saturating_add(12),
+            suggested_fee_recipient: parent.beneficiary(),
+            prev_randao: B256::random(),
+            gas_limit: parent.gas_limit(),
+            parent_beacon_block_root: parent.parent_beacon_block_root(),
+            withdrawals: None,
+        })
     }
 
     /// Returns the locally built pending block

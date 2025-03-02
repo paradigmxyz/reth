@@ -84,7 +84,10 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
-    EvmConfig: BlockExecutionStrategyFactory<Primitives = EthPrimitives>,
+    EvmConfig: for<'a> BlockExecutionStrategyFactory<
+        Primitives = EthPrimitives,
+        NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+    >,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
@@ -139,7 +142,10 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: BlockExecutionStrategyFactory<Primitives = EthPrimitives>,
+    EvmConfig: for<'a> BlockExecutionStrategyFactory<
+        Primitives = EthPrimitives,
+        NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+    >,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,

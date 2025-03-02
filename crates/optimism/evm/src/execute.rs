@@ -18,7 +18,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    Database, Evm, EvmFor, InspectorFor, NextBlockEnvAttributes,
+    Database, Evm, EvmFor, InspectorFor,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_chainspec::OpChainSpec;
@@ -51,7 +51,7 @@ where
     fn context_for_next_block<'a>(
         &self,
         parent: &SealedHeader<N::BlockHeader>,
-        attributes: NextBlockEnvAttributes<'a>,
+        attributes: Self::NextBlockEnvCtx<'a>,
     ) -> Self::ExecutionCtx<'a> {
         OpBlockExecutionCtx {
             parent_hash: parent.hash(),

@@ -17,8 +17,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    Database, Evm, EvmEnv, EvmFactory, EvmFor, InspectorFor, NextBlockEnvAttributes,
-    TransactionEnv,
+    Database, Evm, EvmEnv, EvmFactory, EvmFor, InspectorFor, TransactionEnv,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{
@@ -55,7 +54,7 @@ where
     fn context_for_next_block<'a>(
         &self,
         parent: &SealedHeader,
-        attributes: NextBlockEnvAttributes<'a>,
+        attributes: Self::NextBlockEnvCtx<'a>,
     ) -> Self::ExecutionCtx<'a> {
         EthBlockExecutionCtx {
             parent_hash: parent.hash(),

@@ -12,7 +12,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
     execute::{BlockExecutionStrategy, BlockExecutionStrategyFactory},
-    ConfigureEvmEnv, Evm, NextBlockEnvAttributes,
+    ConfigureEvmEnv, Evm,
 };
 use reth_node_api::NodePrimitives;
 use reth_primitives::{InvalidTransactionError, RecoveredBlock, SealedHeader};
@@ -122,16 +122,7 @@ pub trait LoadPendingBlock:
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<NextBlockEnvAttributes<'_>, Self::Error> {
-        Ok(NextBlockEnvAttributes {
-            timestamp: parent.timestamp().saturating_add(12),
-            suggested_fee_recipient: parent.beneficiary(),
-            prev_randao: B256::random(),
-            gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent.parent_beacon_block_root(),
-            withdrawals: None,
-        })
-    }
+    ) -> Result<<Self::Evm as ConfigureEvmEnv>::NextBlockEnvCtx<'_>, Self::Error>;
 
     /// Returns the locally built pending block
     #[expect(clippy::type_complexity)]

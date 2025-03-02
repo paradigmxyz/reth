@@ -10,6 +10,7 @@ use op_alloy_consensus::OpPooledTransaction;
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
+    NextBlockEnvAttributes,
 };
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
@@ -272,14 +273,17 @@ where
 
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<
+    N: for<'a> FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
+        Evm: ConfigureEvmEnv<
+            TxEnv = revm_optimism::OpTransaction<TxEnv>,
+            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+        >,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
@@ -344,14 +348,17 @@ where
 
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<
+    N: for<'a> FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = revm_optimism::OpTransaction<TxEnv>>,
+        Evm: ConfigureEvm<
+            TxEnv = revm_optimism::OpTransaction<TxEnv>,
+            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+        >,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,

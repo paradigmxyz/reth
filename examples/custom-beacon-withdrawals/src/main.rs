@@ -91,6 +91,7 @@ impl ConfigureEvmEnv for CustomEvmConfig {
     type Spec = <EthEvmConfig as ConfigureEvmEnv>::Spec;
     type Transaction = <EthEvmConfig as ConfigureEvmEnv>::Transaction;
     type TxEnv = <EthEvmConfig as ConfigureEvmEnv>::TxEnv;
+    type NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>;
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
         self.inner.evm_env(header)
@@ -130,7 +131,7 @@ impl BlockExecutionStrategyFactory for CustomEvmConfig {
     fn context_for_next_block<'a>(
         &self,
         _parent: &SealedHeader,
-        attributes: NextBlockEnvAttributes<'a>,
+        attributes: Self::NextBlockEnvCtx<'a>,
     ) -> Self::ExecutionCtx<'a> {
         CustomExecutionCtx { withdrawals: attributes.withdrawals }
     }

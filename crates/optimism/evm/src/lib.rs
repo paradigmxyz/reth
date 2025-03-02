@@ -98,6 +98,7 @@ where
     type Error = EIP1559ParamError;
     type TxEnv = OpTransaction<TxEnv>;
     type Spec = OpSpecId;
+    type NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>;
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
         let spec = config::revm_spec(self.chain_spec(), header);
