@@ -120,7 +120,7 @@ where
     /// Sets the safe header of the chain.
     pub fn set_safe(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.safe_block.send_if_modified(|current_header| {
-            if current_header.as_ref().map(SealedHeader::hash) != Some(header.hash()) {
+            if current_header.as_ref().map(SealedHeader::hash) != Some(header.num_hash()) {
                 let _ = current_header.replace(header);
                 return true
             }
@@ -132,7 +132,7 @@ where
     /// Sets the finalized header of the chain.
     pub fn set_finalized(&self, header: SealedHeader<N::BlockHeader>) {
         self.inner.finalized_block.send_if_modified(|current_header| {
-            if current_header.as_ref().map(SealedHeader::hash) != Some(header.hash()) {
+            if current_header.as_ref().map(SealedHeader::hash) != Some(header.num_hash()) {
                 let _ = current_header.replace(header);
                 return true
             }
@@ -196,7 +196,7 @@ mod tests {
 
         // Verify that the chain information matches the header
         assert_eq!(chain_info.best_number, header.number);
-        assert_eq!(chain_info.best_hash, header.hash());
+        assert_eq!(chain_info.best_hash, header.num_hash());
     }
 
     #[test]
