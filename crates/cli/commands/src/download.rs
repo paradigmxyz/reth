@@ -1,22 +1,23 @@
 use clap::Parser;
 use eyre::Result;
+use lz4::Decoder;
 use reqwest::Client;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_core::args::DatadirArgs;
 use std::{
     fs,
-    io::Write,
+    io::{Cursor, Read, Write},
     path::Path,
-    process::{Child, Command as ProcessCommand, Stdio},
     sync::Arc,
     time::Instant,
 };
+use tar::Archive;
 use tracing::info;
 
-// 1MB chunks
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-const MERKLE_BASE_URL: &str = "https://downloads.merkle.io/";
+const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
+const EXTENSION_TAR_FILE: &str = ".tar.lz4";
 
 #[derive(Debug, Parser, Clone)]
 pub struct Command<C: ChainSpecParser> {
@@ -76,36 +77,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     }
 }
 
-/// Spawns lz4 process for streaming decompression
-fn spawn_lz4_process() -> Result<Child> {
-    ProcessCommand::new("lz4")
-        .arg("-d") // Decompress
-        .arg("-") // Read from stdin
-        .arg("-") // Write to stdout
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => {
-                eyre::eyre!("lz4 command not found. Please ensure lz4 is installed on your system")
-            }
-            _ => e.into(),
-        })
-}
-
-/// Spawns tar process to extract streaming data to target directory
-fn spawn_tar_process(target_dir: &Path, lz4_stdout: Stdio) -> Result<Child> {
-    Ok(ProcessCommand::new("tar")
-        .arg("-xf")
-        .arg("-") // Read from stdin
-        .arg("-C")
-        .arg(target_dir)
-        .stdin(lz4_stdout)
-        .stderr(Stdio::inherit())
-        .spawn()?)
-}
-
 // Monitor process status and display progress every 100ms to avoid overwhelming stdout
 struct DownloadProgress {
     downloaded: u64,
@@ -132,18 +103,11 @@ impl DownloadProgress {
         format!("{:.2}{}", size, BYTE_UNITS[unit_index])
     }
 
-    /// Updates progress bar and ensures child processes are still running
-    fn update(&mut self, chunk_size: u64, lz4: &mut Child, tar: &mut Child) -> Result<()> {
+    /// Updates progress bar
+    fn update(&mut self, chunk_size: u64) -> Result<()> {
         self.downloaded += chunk_size;
 
         if self.last_displayed.elapsed() >= std::time::Duration::from_millis(100) {
-            // Check process status
-            if let Ok(Some(status)) = lz4.try_wait() {
-                return Err(eyre::eyre!("lz4 process exited prematurely with status: {}", status));
-            }
-            if let Ok(Some(status)) = tar.try_wait() {
-                return Err(eyre::eyre!("tar process exited prematurely with status: {}", status));
-            }
             // Display progress
             let formatted_downloaded = Self::format_size(self.downloaded);
             let formatted_total = Self::format_size(self.total_size);
@@ -175,39 +139,30 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
 
     let mut global_progress: DownloadProgress = DownloadProgress::new(total_size);
 
-    // Setup processing pipeline: download -> lz4 -> tar
-    let mut lz4_process = spawn_lz4_process()?;
-    let mut tar_process = spawn_tar_process(
-        target_dir,
-        lz4_process.stdout.take().expect("Failed to get lz4 stdout").into(),
-    )?;
-
-    let mut lz4_stdin = lz4_process.stdin.take().expect("Failed to get lz4 stdin");
-
-    // Stream download chunks through the pipeline
+    // Buffer to store downloaded chunks before processing
+    let mut buffer = Vec::new();
+    // Stream download chunks
     while let Some(chunk) = response.chunk().await? {
-        lz4_stdin.write_all(&chunk)?;
-        global_progress.update(chunk.len() as u64, &mut lz4_process, &mut tar_process)?;
+        buffer.extend_from_slice(&chunk);
+        global_progress.update(chunk.len() as u64)?;
     }
 
-    // Cleanup and verify process completion
-    drop(lz4_stdin);
-    let lz4_status = lz4_process.wait()?;
-    let tar_status = tar_process.wait()?;
+    println!("\nDownload complete. Decompressing and extracting...");
 
-    if !lz4_status.success() {
-        return Err(eyre::eyre!(
-            "lz4 process failed with exit code: {}",
-            lz4_status.code().unwrap_or(-1)
-        ));
-    }
+    let cursor = Cursor::new(buffer);
+    let mut decoder = Decoder::new(cursor)?;
 
-    if !tar_status.success() {
-        return Err(eyre::eyre!(
-            "tar process failed with exit code: {}",
-            tar_status.code().unwrap_or(-1)
-        ));
-    }
+    let mut decompressed_data = Vec::new();
+    decoder.read_to_end(&mut decompressed_data)?;
+
+    println!("Decompression complete. Extracting files...");
+
+    let cursor = Cursor::new(decompressed_data);
+    let mut archive = Archive::new(cursor);
+
+    archive.unpack(target_dir)?;
+
+    println!("\nExtraction complete.");
 
     Ok(())
 }
@@ -225,7 +180,7 @@ async fn get_latest_snapshot_url() -> Result<String> {
         .trim()
         .to_string();
 
-    if !filename.ends_with(".tar.lz4") {
+    if !filename.ends_with(EXTENSION_TAR_FILE) {
         return Err(eyre::eyre!("Unexpected snapshot filename format: {}", filename));
     }
 
