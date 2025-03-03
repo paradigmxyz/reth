@@ -28,7 +28,7 @@ use reth_evm::{
     ConfigureEvm, ConfigureEvmEnv, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv,
 };
 use reth_primitives::TransactionSigned;
-use reth_revm::{
+use revm::{
     context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
     specification::hardfork::SpecId,
@@ -123,7 +123,7 @@ where
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
+        attributes: NextBlockEnvAttributes<'_>,
     ) -> Result<EvmEnv, Self::Error> {
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_and_block_number(
@@ -204,10 +204,10 @@ mod tests {
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec};
     use reth_evm::{execute::ProviderError, EvmEnv};
-    use reth_revm::{
+    use revm::{
         context::{BlockEnv, CfgEnv},
+        database::CacheDB,
         database_interface::EmptyDBTyped,
-        db::CacheDB,
         inspector::NoOpInspector,
     };
 

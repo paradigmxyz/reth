@@ -73,13 +73,13 @@ pub trait EthereumHardforks: Clone {
     /// The Paris hardfork (merge) is activated via block number. If we have knowledge of the block,
     /// this function will return true if the block number is greater than or equal to the Paris
     /// (merge) block.
-    fn is_paris_active_at_block(&self, block_number: u64) -> Option<bool> {
+    fn is_paris_active_at_block(&self, block_number: u64) -> bool {
         match self.ethereum_fork_activation(EthereumHardfork::Paris) {
             ForkCondition::TTD { activation_block_number, .. } => {
-                Some(block_number >= activation_block_number)
+                block_number >= activation_block_number
             }
-            ForkCondition::Block(paris_block) => Some(block_number >= paris_block),
-            _ => None,
+            ForkCondition::Block(paris_block) => block_number >= paris_block,
+            _ => false,
         }
     }
 

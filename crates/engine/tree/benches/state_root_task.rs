@@ -8,13 +8,19 @@ use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
-use reth_engine_tree::tree::root::{StateRootConfig, StateRootTask};
+use reth_chain_state::EthPrimitives;
+use reth_chainspec::ChainSpec;
+use reth_db_common::init::init_genesis;
+use reth_engine_tree::tree::{
+    executor::WorkloadExecutor, PayloadProcessor, StateProviderBuilder, TreeConfig,
+};
 use reth_evm::system_calls::{OnStateHook, StateChangeSource};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Account as RethAccount, StorageEntry};
 use reth_provider::{
-    providers::ConsistentDbView,
-    test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-    AccountReader, HashingWriter, ProviderFactory,
+    providers::{BlockchainProvider, ConsistentDbView},
+    test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+    AccountReader, ChainSpecProvider, HashingWriter, ProviderFactory,
 };
 use reth_trie::TrieInput;
 use revm_primitives::{HashMap, U256};
@@ -197,40 +203,40 @@ fn bench_state_root(c: &mut Criterion) {
             |b, params| {
                 b.iter_with_setup(
                     || {
-                        let factory = create_test_provider_factory();
+                        let factory = create_test_provider_factory_with_chain_spec(Arc::new(
+                            ChainSpec::default(),
+                        ));
+                        let genesis_hash = init_genesis(&factory).unwrap();
                         let state_updates = create_bench_state_updates(params);
                         setup_provider(&factory, &state_updates).expect("failed to setup provider");
 
-                        let trie_input = TrieInput::from_state(Default::default());
-                        let config = StateRootConfig::new_from_input(
-                            ConsistentDbView::new(factory, None),
-                            trie_input,
+                        let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
+                            WorkloadExecutor::default(),
+                            EthEvmConfig::new(factory.chain_spec()),
+                            &TreeConfig::default(),
                         );
-                        let num_threads = std::thread::available_parallelism()
-                            .map_or(1, |num| (num.get() / 2).max(1));
+                        let provider = BlockchainProvider::new(factory).unwrap();
 
-                        let state_root_task_pool = Arc::new(
-                            rayon::ThreadPoolBuilder::new()
-                                .num_threads(num_threads)
-                                .thread_name(|i| format!("proof-worker-{}", i))
-                                .build()
-                                .expect("Failed to create proof worker thread pool"),
-                        );
-
-                        (config, state_updates, state_root_task_pool)
+                        (genesis_hash, payload_processor, provider, state_updates)
                     },
-                    |(config, state_updates, state_root_task_pool)| {
+                    |(genesis_hash, payload_processor, provider, state_updates)| {
                         black_box({
-                            let task = StateRootTask::new(config, state_root_task_pool);
-                            let mut hook = task.state_hook();
-                            let handle = task.spawn();
+                            let mut handle = payload_processor.spawn(
+                                Default::default(),
+                                Default::default(),
+                                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                                TrieInput::default(),
+                            );
+
+                            let mut state_hook = handle.state_hook();
 
                             for (i, update) in state_updates.into_iter().enumerate() {
-                                hook.on_state(StateChangeSource::Transaction(i), &update)
+                                state_hook.on_state(StateChangeSource::Transaction(i), &update);
                             }
-                            drop(hook);
+                            drop(state_hook);
 
-                            handle.wait_for_result().expect("task failed")
+                            handle.state_root().expect("task failed")
                         });
                     },
                 )

@@ -27,9 +27,12 @@ reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-errors.workspace = true
 reth-chainspec.workspace = true
+reth-payload-validator.workspace = true
+reth-primitives.workspace = true
 
 # ethereum
 revm.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # alloy
 alloy-eips.workspace = true
