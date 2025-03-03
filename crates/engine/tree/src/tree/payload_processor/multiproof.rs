@@ -18,7 +18,7 @@ use reth_trie::{
 use reth_trie_parallel::proof::ParallelProof;
 use revm_primitives::{keccak256, B256};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{hash_map::Entry, BTreeMap, VecDeque},
     ops::DerefMut,
     sync::{
         mpsc::{channel, Receiver, Sender},
@@ -473,14 +473,16 @@ where
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        self.multiproof_manager.spawn_or_queue(MultiproofInput {
-            config: self.config.clone(),
-            source: None,
-            hashed_state_update: Default::default(),
-            proof_targets,
-            proof_sequence_number: self.proof_sequencer.next_sequence(),
-            state_root_message_sender: self.tx.clone(),
-        });
+        for proof_targets_chunk in proof_targets.chunks(10) {
+            self.multiproof_manager.spawn_or_queue(MultiproofInput {
+                config: self.config.clone(),
+                source: None,
+                hashed_state_update: Default::default(),
+                proof_targets: proof_targets_chunk,
+                proof_sequence_number: self.proof_sequencer.next_sequence(),
+                state_root_message_sender: self.tx.clone(),
+            });
+        }
     }
 
     // Returns true if all state updates finished and all proofs processed.
@@ -558,24 +560,60 @@ where
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(
-        &mut self,
-        source: StateChangeSource,
-        update: EvmState,
-        proof_sequence_number: u64,
-    ) {
-        let hashed_state_update = evm_state_to_hashed_post_state(update);
+    fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
+        let mut hashed_state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        self.multiproof_manager.spawn_or_queue(MultiproofInput {
-            config: self.config.clone(),
-            source: Some(source),
-            hashed_state_update,
-            proof_targets,
-            proof_sequence_number,
-            state_root_message_sender: self.tx.clone(),
-        });
+        let mut chunks = 0;
+        for proof_targets_chunk in proof_targets.chunks(10) {
+            let state_update_chunk = proof_targets_chunk.iter().fold(
+                HashedPostState::default(),
+                |mut acc, (&address, slots)| {
+                    acc.accounts
+                        .insert(address, *hashed_state_update.accounts.get(&address).unwrap());
+
+                    if let Entry::Occupied(mut original_entry) =
+                        hashed_state_update.storages.entry(address)
+                    {
+                        let original_entry_mut = original_entry.get_mut();
+                        let entry = acc.storages.entry(address).or_default();
+                        for slot in slots {
+                            entry
+                                .storage
+                                .insert(*slot, original_entry_mut.storage.remove(slot).unwrap());
+                        }
+
+                        if original_entry_mut.storage.is_empty() {
+                            hashed_state_update.accounts.remove(&address);
+                            original_entry.remove();
+                        }
+                    }
+
+                    acc
+                },
+            );
+
+            self.multiproof_manager.spawn_or_queue(MultiproofInput {
+                config: self.config.clone(),
+                source: Some(source),
+                hashed_state_update: state_update_chunk,
+                proof_targets: proof_targets_chunk,
+                proof_sequence_number: self.proof_sequencer.next_sequence(),
+                state_root_message_sender: self.tx.clone(),
+            });
+            chunks += 1;
+        }
+
+        // Send the rest of the state update that did not require any proofs as one update.
+        self.tx
+            .send(MultiProofMessage::EmptyProof {
+                sequence_number: self.proof_sequencer.next_sequence(),
+                state: hashed_state_update,
+            })
+            .unwrap();
+
+        chunks + 1
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -670,16 +708,13 @@ where
                         }
                         last_update_time = Some(Instant::now());
 
-                        updates_received += 1;
                         debug!(
                             target: "engine::root",
                             ?source,
                             len = update.len(),
-                            total_updates = updates_received,
                             "Received new state update"
                         );
-                        let next_sequence = self.proof_sequencer.next_sequence();
-                        self.on_state_update(source, update, next_sequence);
+                        updates_received += self.on_state_update(source, update);
                     }
                     MultiProofMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
