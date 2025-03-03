@@ -84,7 +84,9 @@ impl MultiProofTargets {
     }
 
     /// Returns an iterator that yields chunks of the proof targets of at most `size` account and
-    /// storage targets.
+    /// storage targets combined.
+    ///
+    /// See [`ChunkedMultiProofTargets`] for more information.
     pub fn chunks(
         self,
         size: usize,
@@ -93,6 +95,9 @@ impl MultiProofTargets {
             .into_iter()
             .flat_map(|(address, slots)| {
                 if slots.is_empty() {
+                    // If the account has no storage slots, we still need to yield the account
+                    // address with empty storage slots. `None` here means that
+                    // there's no storage slot to fetch.
                     itertools::Either::Left(core::iter::once((address, None)))
                 } else {
                     itertools::Either::Right(
@@ -108,6 +113,15 @@ impl MultiProofTargets {
 
 /// An iterator that yields chunks of the proof targets of at most `size` account and storage
 /// targets.
+///
+/// For example, for the following proof targets:
+/// - 0x1: 0x10, 0x20, 0x30
+/// - 0x2: 0x40, 0x50
+///
+/// and `size = 3`, the iterator will yield the following chunks:
+/// - 0x1: 0x10, 0x20
+/// - 0x1: 0x30
+/// - 0x2: 0x40, 0x50
 #[derive(Debug)]
 pub struct ChunkedMultiProofTargets<I: Iterator<Item = (B256, Option<B256>)>> {
     flat_targets: I,
