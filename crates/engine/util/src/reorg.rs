@@ -303,7 +303,7 @@ where
         .with_bundle_update()
         .build();
 
-    let mut strategy = evm_config.create_strategy(&mut state, &reorg_target);
+    let mut strategy = evm_config.strategy_for_block(&mut state, &reorg_target);
 
     strategy.apply_pre_execution_changes()?;
 

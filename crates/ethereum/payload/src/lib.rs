@@ -9,6 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
+pub mod validator;
+pub use validator::EthereumExecutionPayloadValidator;
+
 use alloy_consensus::{BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, merge::BEACON_NONCE};
 use alloy_primitives::U256;
@@ -17,12 +20,12 @@ use reth_basic_payload_builder::{
 };
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
-use reth_ethereum_primitives::{Block, BlockBody, TransactionSigned};
-use reth_evm::{execute::BlockExecutionStrategy, ConfigureEvm, NextBlockEnvAttributes};
-use reth_evm_ethereum::{
-    execute::{EthBlockExecutionInput, EthExecutionStrategy},
-    EthEvmConfig,
+use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives, TransactionSigned};
+use reth_evm::{
+    execute::{BlockExecutionStrategy, BlockExecutionStrategyFactory},
+    Evm, NextBlockEnvAttributes,
 };
+use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
@@ -81,7 +84,10 @@ impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
 // Default implementation of [PayloadBuilder] for unit type
 impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    EvmConfig: BlockExecutionStrategyFactory<
+        Primitives = EthPrimitives,
+        NextBlockEnvCtx = NextBlockEnvAttributes,
+    >,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
@@ -136,7 +142,10 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    EvmConfig: BlockExecutionStrategyFactory<
+        Primitives = EthPrimitives,
+        NextBlockEnvCtx = NextBlockEnvAttributes,
+    >,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
@@ -154,43 +163,31 @@ where
         suggested_fee_recipient: attributes.suggested_fee_recipient(),
         prev_randao: attributes.prev_randao(),
         gas_limit: builder_config.gas_limit(parent_header.gas_limit),
+        parent_beacon_block_root: attributes.parent_beacon_block_root(),
+        withdrawals: Some(attributes.withdrawals().clone()),
     };
-    let evm_env = evm_config
-        .next_evm_env(&parent_header, next_attributes)
+
+    let mut strategy = evm_config
+        .strategy_for_next_block(&mut db, &parent_header, next_attributes)
         .map_err(PayloadBuilderError::other)?;
 
     let chain_spec = client.chain_spec();
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = evm_env.block_env.gas_limit;
-    let base_fee = evm_env.block_env.basefee;
+    let block_gas_limit: u64 = strategy.evm_mut().block().gas_limit;
+    let base_fee = strategy.evm_mut().block().basefee;
 
     let mut executed_txs = Vec::new();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
-        evm_env.block_env.blob_gasprice().map(|gasprice| gasprice as u64),
+        strategy.evm_mut().block().blob_gasprice().map(|gasprice| gasprice as u64),
     ));
     let mut total_fees = U256::ZERO;
 
-    let block_number = evm_env.block_env.number;
-    let beneficiary = evm_env.block_env.beneficiary;
-
-    let mut strategy = EthExecutionStrategy::new(
-        evm_config.evm_with_env(&mut db, evm_env),
-        EthBlockExecutionInput {
-            number: parent_header.number + 1,
-            timestamp: attributes.timestamp(),
-            parent_hash: parent_header.hash(),
-            gas_limit: next_attributes.gas_limit,
-            parent_beacon_block_root: attributes.parent_beacon_block_root,
-            beneficiary,
-            ommers: &[],
-            withdrawals: Some(&attributes.withdrawals),
-        },
-        &chain_spec,
-    );
+    let block_number = strategy.evm_mut().block().number;
+    let beneficiary = strategy.evm_mut().block().beneficiary;
 
     strategy.apply_pre_execution_changes().map_err(|err| {
         warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");

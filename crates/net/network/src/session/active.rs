@@ -63,7 +63,7 @@ const TIMEOUT_SCALING: u32 = 3;
 /// With proper softlimits in place (2MB) this targets 10MB (4+1 * 2MB) of outgoing response data.
 ///
 /// This parameter serves as backpressure for reading additional requests from the remote.
-/// Once we've queued up more responses than this, the session should priorotize message flushing
+/// Once we've queued up more responses than this, the session should prioritize message flushing
 /// before reading any more messages from the remote peer, throttling the peer.
 const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 
@@ -845,8 +845,9 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
-        EthNetworkPrimitives, EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream,
-        Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockBodies,
+        HelloMessageWithProtocols, P2PStream, Status, StatusBuilder, UnauthedEthStream,
+        UnauthedP2PStream,
     };
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
@@ -919,6 +920,7 @@ mod tests {
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
 
             tokio::task::spawn(start_pending_incoming_session(
+                Arc::new(EthHandshake::default()),
                 disconnect_rx,
                 session_id,
                 stream,

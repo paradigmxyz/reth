@@ -41,9 +41,9 @@ pub mod utils {
 
 /// Re-exported payload related types
 pub mod payload {
+    pub use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
     pub use reth_payload_builder::*;
     pub use reth_payload_primitives::*;
-    pub use reth_payload_validator::ExecutionPayloadValidator;
 }
 
 /// Re-exported from `reth_node_api`.

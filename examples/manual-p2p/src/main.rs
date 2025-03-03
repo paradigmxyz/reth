@@ -2,9 +2,11 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p manual-p2p
 //! ```
+
+#![warn(unused_crate_dependencies)]
 
 use std::time::Duration;
 

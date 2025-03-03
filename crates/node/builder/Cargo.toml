@@ -61,6 +61,7 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-eips = { workspace = true, features = ["kzg"] }
+alloy-rpc-types-engine.workspace = true
 
 ## async
 futures.workspace = true
