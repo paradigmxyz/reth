@@ -2349,8 +2349,8 @@ where
         // collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let descendant_of_persisting_blocks = self.persisting_kind_for(block.header());
-        let run_parallel_state_root = descendant_of_persisting_blocks.can_run_parallel_state_root();
+        let persisting_kind = self.persisting_kind_for(block.header());
+        let run_parallel_state_root = persisting_kind.can_run_parallel_state_root();
 
         // use prewarming background task
         let header = block.clone_sealed_header();
@@ -2363,7 +2363,7 @@ where
             let trie_input_start = Instant::now();
             let trie_input = self
                 .compute_trie_input(
-                    descendant_of_persisting_blocks,
+                    persisting_kind,
                     consistent_view.clone(),
                     block.header().parent_hash(),
                 )
@@ -2446,7 +2446,7 @@ where
                 }
             } else {
                 match self.compute_state_root_parallel(
-                    descendant_of_persisting_blocks,
+                    persisting_kind,
                     block.header().parent_hash(),
                     &hashed_state,
                 ) {
@@ -2473,7 +2473,7 @@ where
             maybe_state_root
         } else {
             // fallback is to compute the state root regularly in sync
-            debug!(target: "engine::tree", block=?block_num_hash, ?descendant_of_persisting_blocks, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
@@ -2541,17 +2541,14 @@ where
     /// should be used instead.
     fn compute_state_root_parallel(
         &self,
-        descendant_of_persisting_blocks: PersistingKind,
+        persisting_kind: PersistingKind,
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-        let mut input = self.compute_trie_input(
-            descendant_of_persisting_blocks,
-            consistent_view.clone(),
-            parent_hash,
-        )?;
+        let mut input =
+            self.compute_trie_input(persisting_kind, consistent_view.clone(), parent_hash)?;
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
@@ -2575,7 +2572,7 @@ where
     ///    [`HashedPostState`] from them.
     fn compute_trie_input(
         &self,
-        descendant_of_persisting_blocks: PersistingKind,
+        persisting_kind: PersistingKind,
         consistent_view: ConsistentDbView<P>,
         parent_hash: B256,
     ) -> Result<TrieInput, ParallelStateRootError> {
@@ -2592,7 +2589,7 @@ where
 
         // If the current block is a descendant of the currently persisting blocks, then we need to
         // filter in-memory blocks, so that none of them are already persisted in the database.
-        if descendant_of_persisting_blocks.is_descendant() {
+        if persisting_kind.is_descendant() {
             // Iterate over the blocks from oldest to newest.
             while let Some(block) = blocks.last() {
                 let recovered_block = block.recovered_block();
