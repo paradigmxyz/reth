@@ -273,7 +273,14 @@ where
         );
 
         let gas_used = self.receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or_default();
-        Ok((self.evm, BlockExecutionResult { receipts: self.receipts, requests: Default::default(), gas_used }))
+        Ok((
+            self.evm,
+            BlockExecutionResult {
+                receipts: self.receipts,
+                requests: Default::default(),
+                gas_used,
+            },
+        ))
     }
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {

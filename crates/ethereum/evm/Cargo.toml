@@ -18,7 +18,6 @@ reth-ethereum-forks.workspace = true
 revm.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
-reth-storage-api.workspace = true
 
 # Alloy
 alloy-primitives.workspace = true

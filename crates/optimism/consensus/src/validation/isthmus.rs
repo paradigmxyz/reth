@@ -66,7 +66,7 @@ pub fn verify_withdrawals_root_prehashed<DB, H>(
     header: H,
 ) -> Result<(), OpConsensusError>
 where
-    DB: reth_storage_api::StorageRootProvider,
+    DB: StorageRootProvider,
     H: BlockHeader + core::fmt::Debug,
 {
     let header_storage_root =

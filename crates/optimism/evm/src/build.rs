@@ -5,19 +5,27 @@ use alloy_consensus::{
 };
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::logs_bloom;
-use reth_evm::execute::{BlockBuilder, BlockBuilderInput};
+use reth_evm::execute::{BlockBuilderInput, BlockFactory};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_consensus::{calculate_receipt_root_no_memo_optimism, isthmus};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpBlock;
-use reth_primitives_traits::BlockTy;
 
+/// Block builder for Optimism.
+#[derive(Debug)]
 pub struct OpBlockBuilder<ChainSpec> {
     chain_spec: ChainSpec,
 }
 
-impl<ChainSpec: OpHardforks> BlockBuilder<OpEvmConfig> for OpBlockBuilder<ChainSpec> {
+impl<ChainSpec> OpBlockBuilder<ChainSpec> {
+    /// Creates a new [`OpBlockBuilder`].
+    pub fn new(chain_spec: ChainSpec) -> Self {
+        Self { chain_spec }
+    }
+}
+
+impl<ChainSpec: OpHardforks> BlockFactory<OpEvmConfig> for OpBlockBuilder<ChainSpec> {
     fn build_block(
         &self,
         input: BlockBuilderInput<'_, '_, OpEvmConfig>,
@@ -25,9 +33,9 @@ impl<ChainSpec: OpHardforks> BlockBuilder<OpEvmConfig> for OpBlockBuilder<ChainS
         let BlockBuilderInput {
             evm_env,
             execution_ctx: ctx,
-            parent,
+            next_attributes,
             transactions,
-            output: BlockExecutionResult { receipts, requests, gas_used },
+            output: BlockExecutionResult { receipts, gas_used, .. },
             bundle_state,
             state_root,
             state_provider,
@@ -38,13 +46,13 @@ impl<ChainSpec: OpHardforks> BlockBuilder<OpEvmConfig> for OpBlockBuilder<ChainS
 
         let transactions_root = proofs::calculate_transaction_root(&transactions);
         let receipts_root =
-            calculate_receipt_root_no_memo_optimism(&receipts, &self.chain_spec, timestamp);
+            calculate_receipt_root_no_memo_optimism(receipts, &self.chain_spec, timestamp);
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
 
         let withdrawals_root = if self.chain_spec.is_isthmus_active_at_timestamp(timestamp) {
             // withdrawals root field in block header is used for storage root of L2 predeploy
             // `l2tol1-message-passer`
-            Some(isthmus::withdrawals_root(&bundle_state, &state_provider)?)
+            Some(isthmus::withdrawals_root(bundle_state, state_provider)?)
         } else if self.chain_spec.is_canyon_active_at_timestamp(timestamp) {
             Some(EMPTY_WITHDRAWALS)
         } else {
@@ -57,8 +65,6 @@ impl<ChainSpec: OpHardforks> BlockBuilder<OpEvmConfig> for OpBlockBuilder<ChainS
             } else {
                 (None, None)
             };
-
-        let extra_data = todo!();
 
         let header = Header {
             parent_hash: ctx.parent_hash,
@@ -77,24 +83,22 @@ impl<ChainSpec: OpHardforks> BlockBuilder<OpEvmConfig> for OpBlockBuilder<ChainS
             gas_limit: evm_env.block_env.gas_limit,
             difficulty: evm_env.block_env.difficulty,
             gas_used: *gas_used,
-            extra_data,
+            extra_data: next_attributes.extra_data,
             parent_beacon_block_root: ctx.parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
             requests_hash: None,
         };
 
-        let transactions = transactions.into_iter().map(|tx| tx.into_tx()).collect();
-
         Ok(Block {
             header,
             body: BlockBody {
                 transactions,
-                ommers: vec![],
+                ommers: Default::default(),
                 withdrawals: self
                     .chain_spec
                     .is_canyon_active_at_timestamp(timestamp)
-                    .then(|| Default::default()),
+                    .then(Default::default),
             },
         })
     }

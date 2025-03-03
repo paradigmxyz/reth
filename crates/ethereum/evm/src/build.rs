@@ -1,26 +1,25 @@
-use crate::{execute::EthBlockExecutionCtx, EthEvmConfig};
+use crate::EthEvmConfig;
 use alloc::sync::Arc;
 use alloy_consensus::{
     proofs, Block, BlockBody, BlockHeader, Header, Transaction, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, merge::BEACON_NONCE};
+use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::Bytes;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
-use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderInput, BlockExecutionError, ProviderError},
-    EvmEnv,
-};
+use reth_evm::execute::{BlockBuilderInput, BlockExecutionError, BlockFactory};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{logs_bloom, HeaderTy, Receipt, Recovered, SealedHeader, TransactionSigned};
-use reth_storage_api::StateProvider;
-use revm::database::BundleState;
+use reth_primitives::{logs_bloom, Receipt, TransactionSigned};
 
+/// Block builder for Ethereum.
+#[derive(Debug, Clone)]
 pub struct EthBlockBuilder {
-    chain_spec: Arc<ChainSpec>,
-    extra_data: Bytes,
+    /// The chainspec.
+    pub chain_spec: Arc<ChainSpec>,
+    /// Extra data to use for the blocks.
+    pub extra_data: Bytes,
 }
 
-impl BlockBuilder<EthEvmConfig> for EthBlockBuilder {
+impl BlockFactory<EthEvmConfig> for EthBlockBuilder {
     fn build_block(
         &self,
         input: BlockBuilderInput<'_, '_, EthEvmConfig>,
@@ -31,7 +30,6 @@ impl BlockBuilder<EthEvmConfig> for EthBlockBuilder {
             parent,
             transactions,
             output: BlockExecutionResult { receipts, requests, gas_used },
-            bundle_state,
             state_root,
             ..
         } = input;
@@ -39,13 +37,13 @@ impl BlockBuilder<EthEvmConfig> for EthBlockBuilder {
         let timestamp = evm_env.block_env.timestamp;
 
         let transactions_root = proofs::calculate_transaction_root(&transactions);
-        let receipts_root = Receipt::calculate_receipt_root_no_memo(&receipts);
+        let receipts_root = Receipt::calculate_receipt_root_no_memo(receipts);
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
 
         let withdrawals = self
             .chain_spec
             .is_shanghai_active_at_timestamp(timestamp)
-            .then(|| ctx.withdrawals.cloned().unwrap_or_default());
+            .then(|| ctx.withdrawals.map(|w| w.into_owned()).unwrap_or_default());
 
         let withdrawals_root =
             withdrawals.as_deref().map(|w| proofs::calculate_withdrawals_root(w));

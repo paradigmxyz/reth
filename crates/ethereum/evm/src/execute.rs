@@ -17,7 +17,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    Database, Evm, EvmEnv, EvmFactory, EvmFor, InspectorFor, TransactionEnv,
+    Database, Evm, EvmFactory, EvmFor, InspectorFor, TransactionEnv,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{
