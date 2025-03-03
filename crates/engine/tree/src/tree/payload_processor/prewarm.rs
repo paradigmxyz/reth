@@ -209,7 +209,7 @@ where
         + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
         + 'static,
 {
-    /// Transacts the the transactions and transform the state into [`MultiProofTargets`].
+    /// Transacts the transactions and transform the state into [`MultiProofTargets`].
     fn prepare_multiproof_targets(self, tx: Recovered<N::SignedTx>) -> Option<MultiProofTargets> {
         let metrics = self.metrics.clone();
         let state = self.transact(tx)?;
