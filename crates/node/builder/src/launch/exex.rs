@@ -14,6 +14,7 @@ use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
 use std::{fmt, fmt::Debug};
 use tracing::Instrument;
+use alloy_primitives::private::serde;
 
 use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
 
@@ -42,7 +43,10 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     /// installed.
     pub async fn launch(
         self,
-    ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<Node::Types>>>> {
+    ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<Node::Types>>>>
+    where
+        PrimitivesTy<Node::Types>: serde::Serialize + serde::de::DeserializeOwned,
+    {
         let Self { head, extensions, components, config_container } = self;
         let head = BlockNumHash::new(head.number, head.hash);
 

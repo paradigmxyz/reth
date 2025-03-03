@@ -88,6 +88,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+// Acknowledge intentional dependencies
+// #[cfg(feature = "bincode-serialization")]
+use rmp_serde as _;
+use serde_with as _;
+
 mod backfill;
 pub use backfill::*;
 

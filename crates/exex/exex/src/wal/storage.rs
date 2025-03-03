@@ -10,6 +10,7 @@ use reth_node_api::NodePrimitives;
 use reth_primitives::EthPrimitives;
 use reth_tracing::tracing::debug;
 use tracing::instrument;
+use alloy_primitives::private::serde;
 
 static FILE_EXTENSION: &str = "wal";
 
@@ -26,7 +27,7 @@ pub struct Storage<N: NodePrimitives = EthPrimitives> {
 
 impl<N> Storage<N>
 where
-    N: NodePrimitives,
+    N: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Creates a new instance of [`Storage`] backed by the file at the given path and creates
     /// it doesn't exist.
@@ -141,12 +142,24 @@ where
         };
         let size = file.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len();
 
-        // Deserialize using the bincode- and msgpack-compatible serde wrapper
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
-            rmp_serde::decode::from_read(&mut file)
-                .map_err(|err| WalError::Decode(file_id, file_path, err))?;
+        #[cfg(feature = "bincode-serialization")]
+        {
+            // Deserialize using the bincode- and msgpack-compatible serde wrapper
+            let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_, N> =
+                rmp_serde::decode::from_read(&mut file)
+                    .map_err(|err| WalError::Decode(file_id, file_path, err))?;
 
-        Ok(Some((notification.into(), size)))
+            Ok(Some((notification.into(), size)))
+        }
+
+        #[cfg(not(feature = "bincode-serialization"))]
+        {
+            // Deserialize using JSON format
+            let notification: ExExNotification<N> = serde_json::from_reader(&mut file)
+                .map_err(|err| WalError::Decode(file_id, file_path, err.into()))?;
+
+            Ok(Some((notification, size)))
+        }
     }
 
     /// Writes the notification to the file with the given ID.
@@ -163,13 +176,24 @@ where
         let file_path = self.file_path(file_id);
         debug!(target: "exex::wal::storage", ?file_path, "Writing notification to WAL");
 
-        // Serialize using the bincode- and msgpack-compatible serde wrapper
-        let notification =
-            reth_exex_types::serde_bincode_compat::ExExNotification::<N>::from(notification);
+        #[cfg(feature = "bincode-serialization")]
+        {
+            // Serialize using the bincode- and msgpack-compatible serde wrapper
+            let notification =
+                reth_exex_types::serde_bincode_compat::ExExNotification::<N>::from(notification);
 
-        reth_fs_util::atomic_write_file(&file_path, |file| {
-            rmp_serde::encode::write(file, &notification)
-        })?;
+            reth_fs_util::atomic_write_file(&file_path, |file| {
+                rmp_serde::encode::write(file, &notification)
+            })?;
+        }
+
+        #[cfg(not(feature = "bincode-serialization"))]
+        {
+            // Serialize using JSON format
+            reth_fs_util::atomic_write_file(&file_path, |file| {
+                serde_json::to_writer(file, notification)
+            })?;
+        }
 
         Ok(file_path.metadata().map_err(|err| WalError::FileMetadata(file_id, err))?.len())
     }

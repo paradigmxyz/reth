@@ -15,6 +15,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::Receiver;
+use alloy_primitives::private::serde;
 
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks. If the
 /// stream is configured with a head via [`ExExNotifications::set_with_head`] or
@@ -105,7 +106,7 @@ where
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block> + serde::Serialize + serde::de::DeserializeOwned>
         + Clone
         + Unpin
         + 'static,
@@ -157,7 +158,7 @@ where
 impl<P, E> Stream for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block> + serde::Serialize + serde::de::DeserializeOwned>
         + Clone
         + Unpin
         + 'static,
@@ -301,7 +302,7 @@ where
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block> + serde::Serialize + serde::de::DeserializeOwned>
         + Clone
         + Unpin
         + 'static,
@@ -381,7 +382,7 @@ where
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block> + serde::Serialize + serde::de::DeserializeOwned>
         + Clone
         + Unpin
         + 'static,

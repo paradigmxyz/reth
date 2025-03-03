@@ -7869,6 +7869,8 @@ dependencies = [
  "reth-tracing",
  "rmp-serde",
  "secp256k1 0.30.0",
+ "serde_json",
+ "serde_with",
  "tempfile",
  "thiserror 2.0.11",
  "tokio",

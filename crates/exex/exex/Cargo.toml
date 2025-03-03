@@ -18,6 +18,8 @@ reth-chainspec.workspace = true
 reth-config.workspace = true
 reth-evm.workspace = true
 reth-exex-types = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+serde_json.workspace = true
+serde_with.workspace = true
 reth-fs-util.workspace = true
 reth-metrics.workspace = true
 reth-node-api.workspace = true
@@ -80,4 +82,7 @@ serde = [
     "secp256k1/serde",
     "reth-primitives-traits/serde",
     "reth-prune-types/serde",
+]
+bincode-serialization = [
+    "reth-exex-types/serde-bincode-compat",
 ]

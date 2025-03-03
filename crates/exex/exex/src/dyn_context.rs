@@ -9,7 +9,7 @@ use reth_primitives::EthPrimitives;
 use reth_provider::BlockReader;
 use std::fmt::Debug;
 use tokio::sync::mpsc;
-
+use alloy_primitives::private::serde;
 use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
 
 // TODO(0xurb) - add `node` after abstractions
@@ -52,7 +52,7 @@ impl<N: NodePrimitives> Debug for ExExContextDyn<N> {
 
 impl<Node> From<ExExContext<Node>> for ExExContextDyn<PrimitivesTy<Node::Types>>
 where
-    Node: FullNodeComponents<Types: NodeTypes<Primitives: NodePrimitives>>,
+    Node: FullNodeComponents<Types: NodeTypes<Primitives: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned>>,
     Node::Provider: Debug + BlockReader,
     Node::Executor: Debug,
 {
@@ -60,7 +60,7 @@ where
         let config = ctx.config.map_chainspec(|chainspec| {
             Box::new(chainspec) as Box<dyn EthChainSpec<Header = HeaderTy<Node::Types>>>
         });
-        let notifications = Box::new(ctx.notifications) as Box<_>;
+        let notifications = Box::new(ctx.notifications);
 
         Self {
             head: ctx.head,

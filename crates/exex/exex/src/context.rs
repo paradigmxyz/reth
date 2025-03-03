@@ -10,7 +10,7 @@ use reth_provider::BlockReader;
 use reth_tasks::TaskExecutor;
 use std::fmt::Debug;
 use tokio::sync::mpsc::{error::SendError, UnboundedSender};
-
+use alloy_primitives::private::serde;
 /// Captures the context that an `ExEx` has access to.
 ///
 /// This type wraps various node components that the `ExEx` has access to.
@@ -64,7 +64,7 @@ where
     Node: FullNodeComponents,
     Node::Provider: Debug + BlockReader,
     Node::Executor: Debug,
-    Node::Types: NodeTypes<Primitives: NodePrimitives>,
+    Node::Types: NodeTypes<Primitives: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned>,
 {
     /// Returns dynamic version of the context
     pub fn into_dyn(self) -> ExExContextDyn<PrimitivesTy<Node::Types>> {
@@ -75,7 +75,7 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Types: NodeTypes<Primitives: NodePrimitives>,
+    Node::Types: NodeTypes<Primitives: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned>,
 {
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {
@@ -143,6 +143,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ExExContext;
+    use alloy_primitives::private::serde;
+    use reth_node_api::{NodePrimitives, NodeTypes};
     use reth_exex_types::ExExHead;
     use reth_node_api::FullNodeComponents;
     use reth_provider::BlockReader;
@@ -158,6 +160,7 @@ mod tests {
         impl<Node: FullNodeComponents> ExEx<Node>
         where
             Node::Provider: BlockReader,
+            Node::Types: NodeTypes<Primitives: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned>,
         {
             async fn _test_bounds(mut self) -> eyre::Result<()> {
                 self.ctx.pool();
