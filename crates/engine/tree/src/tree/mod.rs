@@ -2444,7 +2444,7 @@ where
                         }
                     }
                     Err(error) => {
-                        debug!(target: "engine", %error, "Background parallel state root computation failed");
+                        debug!(target: "engine::tree", %error, "Background parallel state root computation failed");
                     }
                 }
             } else {
@@ -2463,7 +2463,7 @@ where
                         maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                        debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                        debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
                     }
                     Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
                 }
@@ -2591,7 +2591,10 @@ where
             .state
             .tree_state
             .blocks_by_hash(parent_hash)
-            .map_or_else(|| (parent_hash.into(), vec![]), |(hash, blocks)| (hash.into(), blocks));
+            .map_or_else(|| {
+                debug!(target: "engine::tree", ?parent_hash, "No blocks by hash found, returning parent hash");
+                (parent_hash.into(), vec![])
+            }, |(hash, blocks)| (hash.into(), blocks));
 
         // If the current block is a descendant of the currently persisting blocks, then we need to
         // filter in-memory blocks, so that none of them are already persisted in the database.
@@ -2619,12 +2622,9 @@ where
         }
 
         // Convert the historical block to the block number.
-        let block_number = match historical {
-            BlockHashOrNumber::Hash(block_hash) => provider
-                .block_number(block_hash)?
-                .ok_or(ProviderError::BlockHashNotFound(block_hash))?,
-            BlockHashOrNumber::Number(block_number) => block_number,
-        };
+        let block_number = provider
+            .convert_hash_or_number(historical)?
+            .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
 
         // Retrieve revert state for historical block.
         let revert_state = if block_number == best_block_number {
