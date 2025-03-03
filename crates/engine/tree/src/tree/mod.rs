@@ -2413,7 +2413,6 @@ where
 
         let root_time = Instant::now();
 
-        //  (state_root, trie_output, root_elapsed)
         let mut maybe_state_root = None;
 
         if is_descendant_of_persisting_blocks {
@@ -2423,7 +2422,6 @@ where
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         // we double check the state root here for good measure
-                        // TODO: clean this ups
                         if state_root == block.header().state_root() {
                             maybe_state_root =
                                 Some((state_root, trie_updates, execution_finish.elapsed()))
