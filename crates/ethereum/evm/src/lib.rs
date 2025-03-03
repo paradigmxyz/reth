@@ -96,6 +96,7 @@ where
     type Error = Infallible;
     type TxEnv = EvmF::Tx;
     type Spec = SpecId;
+    type NextBlockEnvCtx = NextBlockEnvAttributes;
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         let spec = config::revm_spec(self.chain_spec(), header);
@@ -123,7 +124,7 @@ where
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes<'_>,
+        attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_and_block_number(
