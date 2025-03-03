@@ -33,7 +33,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{trace, warn};
+use tracing::{trace, warn, error};
 
 /// Maintains the state of _all_ the peers known to the network.
 ///
@@ -116,7 +116,10 @@ impl PeersManager {
                 Ok(NodeRecord { address, tcp_port, udp_port, id }) => {
                     trusted_peer_ids.insert(id);
                     peers.entry(id).or_insert_with(|| {
-                        Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
+                        Peer::trusted(
+                            PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)),
+                            trusted_peer.clone()
+                        )
                     });
                 }
                 Err(err) => {
@@ -894,6 +897,25 @@ impl PeersManager {
                 };
 
                 trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
+
+                // For trusted peers, use the stored TrustedPeer for resolution
+                if peer.is_trusted() {
+                    trace!(target: "net::peers", ?peer_id, "Resolving trusted peer information");
+                    
+                    if let Some(trusted_peer) = &peer.trusted_peer_info {
+                        match trusted_peer.resolve_blocking() {
+                            Ok(NodeRecord { address, tcp_port, udp_port, id: _ }) => {
+                                // Update the peer's address with the newly resolved one
+                                peer.addr = PeerAddr::new_with_ports(address, tcp_port, Some(udp_port));
+                            }
+                            Err(err) => {
+                                warn!(target: "net::peers", ?peer_id, ?trusted_peer, ?err, "Failed to re-resolve trusted peer");
+                            }
+                        }
+                    } else {
+                        error!(target: "net::peers", ?peer_id, "Trusted peer info is missing for a trusted peer");
+                    }
+                }
 
                 peer.state = PeerConnectionState::PendingOut;
                 PeerAction::Connect { peer_id, remote_addr: peer.addr.tcp() }

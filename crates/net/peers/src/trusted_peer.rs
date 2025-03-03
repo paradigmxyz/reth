@@ -17,8 +17,6 @@ use url::Host;
 ///
 /// This is useful when specifying nodes which are in internal infrastructure and may only be
 /// discoverable reliably using DNS.
-///
-/// This should NOT be used for any use case other than in trusted peer lists.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, SerializeDisplay, DeserializeFromStr)]
 pub struct TrustedPeer {
     /// The host of a node.
