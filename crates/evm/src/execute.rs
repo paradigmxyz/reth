@@ -370,15 +370,6 @@ pub struct BlockBuilderInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
     pub state_root: B256,
 }
 
-/// Abstraction over block building logic.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait BlockFactory<Evm: BlockExecutionStrategyFactory> {
-    /// Builds a block. see [`BlockBuilderInput`] documentation for more details.
-    fn build_block(
-        &self,
-        input: BlockBuilderInput<'_, '_, Evm>,
-    ) -> Result<BlockTy<Evm::Primitives>, BlockExecutionError>;
-}
 
 /// Output of block building.
 #[derive(Debug, Clone)]
@@ -393,10 +384,22 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub block: RecoveredBlock<N::Block>,
 }
 
+/// Abstraction over block building logic.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait BlockFactory<Evm: BlockExecutionStrategyFactory> {
+    /// Builds a block. see [`BlockBuilderInput`] documentation for more details.
+    fn build_block(
+        &self,
+        input: BlockBuilderInput<'_, '_, Evm>,
+    ) -> Result<BlockTy<Evm::Primitives>, BlockExecutionError>;
+}
+
 /// A type that knows how to execute and build a block.
 ///
 /// It wraps an inner [`BlockExecutionStrategy`] and provides a way to execute transactions and
 /// construct a block.
+/// 
+/// This is a helper to erase `BasicBlockBuilder` type.
 pub trait BlockBuilder {
     /// The primitive types used by the inner [`BlockExecutionStrategy`].
     type Primitives: NodePrimitives;
