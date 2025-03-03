@@ -349,11 +349,11 @@ impl<N: NodePrimitives> Chain<N> {
         // TODO: Currently, trie updates are reset on chain split.
         // Add tests ensuring that it is valid to leave updates in the pending chain.
         ChainSplit::Split {
-            canonical: Self {
+            canonical: Box::new(Self {
                 execution_outcome: canonical_block_exec_outcome.expect("split in range"),
                 blocks: self.blocks,
                 trie_updates: None,
-            },
+            }),
             pending: Self {
                 execution_outcome: pending_block_exec_outcome,
                 blocks: higher_number_blocks,
@@ -514,7 +514,7 @@ pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives>
         /// Contains lower block numbers that are considered canonicalized. It ends with
         /// the [`ChainSplitTarget`] block. The state of this chain is now empty and no longer
         /// usable.
-        canonical: Chain<N>,
+        canonical: Box<Chain<N>>,
         /// Right contains all subsequent blocks __after__ the [`ChainSplitTarget`] that are still
         /// pending.
         ///
@@ -822,7 +822,7 @@ mod tests {
         // split in two
         assert_eq!(
             chain.clone().split(block1_hash.into()),
-            ChainSplit::Split { canonical: chain_split1, pending: chain_split2 }
+            ChainSplit::Split { canonical: Box::new(chain_split1), pending: chain_split2 }
         );
 
         // split at unknown block hash

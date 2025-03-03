@@ -102,7 +102,7 @@ pub(super) mod serde_bincode_compat {
         N: NodePrimitives,
     {
         ChainCommitted { new: Chain<'a, N> },
-        ChainReorged { old: Chain<'a, N>, new: Chain<'a, N> },
+        ChainReorged { old: Box<Chain<'a, N>>, new: Chain<'a, N> },
         ChainReverted { old: Chain<'a, N> },
     }
 
@@ -117,7 +117,7 @@ pub(super) mod serde_bincode_compat {
                 }
                 super::ExExNotification::ChainReorged { old, new } => {
                     ExExNotification::ChainReorged {
-                        old: Chain::from(old.as_ref()),
+                        old: Box::new(Chain::from(old.as_ref())),
                         new: Chain::from(new.as_ref()),
                     }
                 }
@@ -138,7 +138,7 @@ pub(super) mod serde_bincode_compat {
                     Self::ChainCommitted { new: Arc::new(new.into()) }
                 }
                 ExExNotification::ChainReorged { old, new } => {
-                    Self::ChainReorged { old: Arc::new(old.into()), new: Arc::new(new.into()) }
+                    Self::ChainReorged { old: Arc::new((*old).into()), new: Arc::new(new.into()) }
                 }
                 ExExNotification::ChainReverted { old } => {
                     Self::ChainReverted { old: Arc::new(old.into()) }

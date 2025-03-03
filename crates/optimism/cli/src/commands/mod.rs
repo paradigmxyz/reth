@@ -19,6 +19,7 @@ pub mod test_vectors;
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
+#[expect(clippy::large_enum_variant)]
 pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
 {
     /// Start the node
