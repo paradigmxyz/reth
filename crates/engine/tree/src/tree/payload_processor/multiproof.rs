@@ -123,10 +123,6 @@ pub(super) struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
-    /// Total number of account targets
-    account_targets: usize,
-    /// Total number of storage slot targets
-    storage_targets: usize,
     /// The time taken to calculate the proof.
     elapsed: Duration,
 }
@@ -333,7 +329,7 @@ where
 
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
-            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum();
+            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
             trace!(
                 target: "engine::root",
@@ -373,8 +369,6 @@ where
                                 state: hashed_state_update,
                                 multiproof: proof,
                             },
-                            account_targets,
-                            storage_targets,
                             elapsed,
                         }),
                     ));
@@ -409,10 +403,6 @@ pub(crate) struct MultiProofTaskMetrics {
 
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
-    /// Histogram of proof calculation account targets.
-    pub proof_calculation_account_targets_histogram: Histogram,
-    /// Histogram of proof calculation storage targets.
-    pub proof_calculation_storage_targets_histogram: Histogram,
 
     /// Histogram of sparse trie update durations.
     pub sparse_trie_update_duration_histogram: Histogram,
@@ -822,12 +812,6 @@ where
                         self.metrics
                             .proof_calculation_duration_histogram
                             .record(proof_calculated.elapsed);
-                        self.metrics
-                            .proof_calculation_account_targets_histogram
-                            .record(proof_calculated.account_targets as f64);
-                        self.metrics
-                            .proof_calculation_storage_targets_histogram
-                            .record(proof_calculated.storage_targets as f64);
 
                         debug!(
                             target: "engine::root",
