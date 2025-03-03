@@ -530,7 +530,7 @@ pub(super) mod serde_bincode_compat {
         serde_bincode_compat::{self, SerdeBincodeCompat},
         Block,
     };
-    use alloc::{borrow::Cow, vec::Vec};
+    use alloc::borrow::Cow;
     use alloy_primitives::Address;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -563,7 +563,7 @@ pub(super) mod serde_bincode_compat {
             bound = "serde_bincode_compat::SealedBlock<'a, T>: Serialize + serde::de::DeserializeOwned"
         )]
         block: serde_bincode_compat::SealedBlock<'a, T>,
-        senders: Cow<'a, Vec<Address>>,
+        senders: Cow<'a, [Address]>,
     }
 
     impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
