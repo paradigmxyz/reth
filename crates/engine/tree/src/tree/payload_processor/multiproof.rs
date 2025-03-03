@@ -393,6 +393,11 @@ where
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
+    /// Histogram of the number of prefetch proof target chunks.
+    pub prefetch_proof_chunks_histogram: Histogram,
+    /// Histogram of the number of state update proof target chunks.
+    pub state_update_proof_chunks_histogram: Histogram,
+
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
     /// Histogram of proof calculation account targets.
@@ -489,6 +494,8 @@ where
             });
             chunks += 1;
         }
+
+        self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
         chunks
     }
 
@@ -635,6 +642,7 @@ where
         });
         chunks += 1;
 
+        self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
         chunks
     }
 
