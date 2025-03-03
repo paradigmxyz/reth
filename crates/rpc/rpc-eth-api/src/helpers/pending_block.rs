@@ -118,7 +118,7 @@ pub trait LoadPendingBlock:
         Ok(PendingBlockEnv::new(evm_env, PendingBlockEnvOrigin::DerivedFromLatest(latest)))
     }
 
-    /// Returns [`ConfigureEvmEnv::NextBlockEnvAttributes`] for building a local pending block.
+    /// Returns [`ConfigureEvmEnv::NextBlockEnvCtx`] for building a local pending block.
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
