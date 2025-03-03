@@ -393,15 +393,19 @@ where
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
-    /// Histogram of the number of prefetch proof targets.
-    pub prefetch_proof_targets_histogram: Histogram,
+    /// Histogram of the number of prefetch proof target accounts.
+    pub prefetch_proof_targets_accounts_histogram: Histogram,
+    /// Histogram of the number of prefetch proof target storages.
+    pub prefetch_proof_targets_storages_histogram: Histogram,
     /// Histogram of the number of prefetch proof target chunks.
     pub prefetch_proof_chunks_histogram: Histogram,
 
+    /// Histogram of the number of state update proof target accounts.
+    pub state_update_proof_targets_accounts_histogram: Histogram,
+    /// Histogram of the number of state update proof target storages.
+    pub state_update_proof_targets_storages_histogram: Histogram,
     /// Histogram of the number of state update proof target chunks.
     pub state_update_proof_chunks_histogram: Histogram,
-    /// Histogram of the number of state update proof targets.
-    pub state_update_proof_targets_histogram: Histogram,
 
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
@@ -486,7 +490,10 @@ where
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        self.metrics.prefetch_proof_targets_histogram.record(proof_targets.len() as f64);
+        self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
+        self.metrics
+            .prefetch_proof_targets_storages_histogram
+            .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
 
         // Send proof targets in chunks.
         let mut chunks = 0;
@@ -501,8 +508,8 @@ where
             });
             chunks += 1;
         }
-
         self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
+
         chunks
     }
 
@@ -587,7 +594,12 @@ where
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        self.metrics.state_update_proof_targets_histogram.record(proof_targets.len() as f64);
+        self.metrics
+            .state_update_proof_targets_accounts_histogram
+            .record(proof_targets.len() as f64);
+        self.metrics
+            .state_update_proof_targets_storages_histogram
+            .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
 
         // Process proof targets in chunks.
         let mut chunks = 0;
@@ -643,16 +655,15 @@ where
             });
             chunks += 1;
         }
+        self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
 
         // Send the rest of the state update that did not require any proofs as one update.
         let _ = self.tx.send(MultiProofMessage::EmptyProof {
             sequence_number: self.proof_sequencer.next_sequence(),
             state: hashed_state_update,
         });
-        chunks += 1;
 
-        self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
-        chunks
+        chunks + 1
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
