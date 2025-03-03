@@ -3338,7 +3338,7 @@ mdbx_limits_valsize4page_max(intptr_t pagesize, MDBX_db_flags_t flags);
 MDBX_NOTHROW_CONST_FUNCTION LIBMDBX_API intptr_t
 mdbx_limits_txnsize_max(intptr_t pagesize);
 
-/** \brief Set the maximum number of threads/reader slots for for all processes
+/** \brief Set the maximum number of threads/reader slots for all processes
  * interacts with the database.
  * \ingroup c_settings
  *
