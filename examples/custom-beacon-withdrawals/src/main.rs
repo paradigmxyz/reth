@@ -31,7 +31,7 @@ use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, Ether
 use reth_primitives::{
     EthPrimitives, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
 };
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
 pub const WITHDRAWALS_ADDRESS: Address = address!("4200000000000000000000000000000000000000");
@@ -91,6 +91,7 @@ impl ConfigureEvmEnv for CustomEvmConfig {
     type Spec = <EthEvmConfig as ConfigureEvmEnv>::Spec;
     type Transaction = <EthEvmConfig as ConfigureEvmEnv>::Transaction;
     type TxEnv = <EthEvmConfig as ConfigureEvmEnv>::TxEnv;
+    type NextBlockEnvCtx = NextBlockEnvAttributes;
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
         self.inner.evm_env(header)
@@ -99,7 +100,7 @@ impl ConfigureEvmEnv for CustomEvmConfig {
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
+        attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnv<Self::Spec>, Self::Error> {
         self.inner.next_evm_env(parent, attributes)
     }
@@ -114,7 +115,7 @@ impl ConfigureEvm for CustomEvmConfig {
 }
 
 pub struct CustomExecutionCtx<'a> {
-    withdrawals: Option<&'a Withdrawals>,
+    withdrawals: Option<Cow<'a, Withdrawals>>,
 }
 
 impl BlockExecutionStrategyFactory for CustomEvmConfig {
@@ -124,15 +125,15 @@ impl BlockExecutionStrategyFactory for CustomEvmConfig {
         CustomExecutorStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
 
     fn context_for_block<'a>(&self, block: &'a SealedBlock) -> Self::ExecutionCtx<'a> {
-        CustomExecutionCtx { withdrawals: block.body().withdrawals.as_ref() }
+        CustomExecutionCtx { withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed) }
     }
 
-    fn context_for_next_block<'a>(
+    fn context_for_next_block(
         &self,
         _parent: &SealedHeader,
-        attributes: NextBlockEnvAttributes<'a>,
-    ) -> Self::ExecutionCtx<'a> {
-        CustomExecutionCtx { withdrawals: attributes.withdrawals }
+        attributes: Self::NextBlockEnvCtx,
+    ) -> Self::ExecutionCtx<'_> {
+        CustomExecutionCtx { withdrawals: attributes.withdrawals.map(Cow::Owned) }
     }
 
     fn create_strategy<'a, DB, I>(
@@ -158,7 +159,7 @@ pub struct CustomExecutorStrategy<'a, Evm> {
     /// EVM used for execution.
     evm: Evm,
     /// Block withdrawals.
-    withdrawals: Option<&'a Withdrawals>,
+    withdrawals: Option<Cow<'a, Withdrawals>>,
 }
 
 impl<'db, DB, E> BlockExecutionStrategy for CustomExecutorStrategy<'_, E>
@@ -191,7 +192,7 @@ where
         mut self,
     ) -> Result<BlockExecutionResult<Receipt>, Self::Error> {
         if let Some(withdrawals) = self.withdrawals {
-            apply_withdrawals_contract_call(withdrawals, &mut self.evm)?;
+            apply_withdrawals_contract_call(withdrawals.as_ref(), &mut self.evm)?;
         }
 
         Ok(Default::default())

@@ -4,7 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
     EthEvmConfig,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip4895::Withdrawals, eip6110, eip7685::Requests};
 use alloy_evm::FromRecoveredTx;
@@ -17,8 +17,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    Database, Evm, EvmEnv, EvmFactory, EvmFor, InspectorFor, NextBlockEnvAttributes,
-    TransactionEnv,
+    Database, Evm, EvmEnv, EvmFactory, EvmFor, InspectorFor, TransactionEnv,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{
@@ -48,20 +47,20 @@ where
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             ommers: &block.body().ommers,
-            withdrawals: block.body().withdrawals.as_ref(),
+            withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
         }
     }
 
-    fn context_for_next_block<'a>(
+    fn context_for_next_block(
         &self,
         parent: &SealedHeader,
-        attributes: NextBlockEnvAttributes<'a>,
-    ) -> Self::ExecutionCtx<'a> {
+        attributes: Self::NextBlockEnvCtx,
+    ) -> Self::ExecutionCtx<'_> {
         EthBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             ommers: &[],
-            withdrawals: attributes.withdrawals,
+            withdrawals: attributes.withdrawals.map(Cow::Owned),
         }
     }
 
@@ -79,7 +78,7 @@ where
 }
 
 /// Context for Ethereum block execution.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct EthBlockExecutionCtx<'a> {
     /// Parent block hash.
     pub parent_hash: B256,
@@ -88,7 +87,7 @@ pub struct EthBlockExecutionCtx<'a> {
     /// Block ommers
     pub ommers: &'a [Header],
     /// Block withdrawals.
-    pub withdrawals: Option<&'a Withdrawals>,
+    pub withdrawals: Option<Cow<'a, Withdrawals>>,
 }
 
 /// Block execution strategy for Ethereum.
@@ -216,7 +215,7 @@ where
             self.chain_spec,
             self.evm.block(),
             self.ctx.ommers,
-            self.ctx.withdrawals,
+            self.ctx.withdrawals.as_deref(),
         );
 
         // Irregular state change at Ethereum DAO hardfork
