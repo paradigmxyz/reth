@@ -99,19 +99,19 @@ pub struct EthBlockExecutionCtx<'a> {
 #[derive(Debug)]
 pub struct EthExecutionStrategy<'a, Evm> {
     /// Reference to the [`ChainSpec`].
-    pub chain_spec: &'a ChainSpec,
+    chain_spec: &'a ChainSpec,
 
     /// Context for block execution.
     pub ctx: EthBlockExecutionCtx<'a>,
     /// The EVM used by strategy.
-    pub evm: Evm,
+    evm: Evm,
     /// Utility to call system smart contracts.
-    pub system_caller: SystemCaller<&'a ChainSpec>,
+    system_caller: SystemCaller<&'a ChainSpec>,
 
     /// Receipts of executed transactions.
-    pub receipts: Vec<Receipt>,
+    receipts: Vec<Receipt>,
     /// Total gas used by transactions in this block.
-    pub gas_used: u64,
+    gas_used: u64,
 }
 
 impl<'a, Evm> EthExecutionStrategy<'a, Evm> {

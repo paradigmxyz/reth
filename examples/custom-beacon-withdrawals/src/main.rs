@@ -181,8 +181,8 @@ where
     }
 
     fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), Self::Error> {
-        if let Some(withdrawals) = &self.inner.ctx.withdrawals {
-            apply_withdrawals_contract_call(withdrawals.as_ref(), &mut self.inner.evm)?;
+        if let Some(withdrawals) = self.inner.ctx.withdrawals.clone() {
+            apply_withdrawals_contract_call(withdrawals.as_ref(), self.inner.evm_mut())?;
         }
 
         // Invoke inner finish method to apply Ethereum post-execution changes
