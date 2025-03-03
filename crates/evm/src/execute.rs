@@ -232,7 +232,7 @@ pub trait BlockExecutionStrategy {
 ///
 /// Strategy is required to provide a way to obtain [`ExecutionCtx`] from either a complete
 /// [`SealedBlock`] (in case of execution of an externally obtained block), or from a parent header
-/// along with [`NextBlockEnvAttributes`] (in the case of block building).
+/// along with [`crate::ConfigureEvmEnv::NextBlockEnvCtx`] (in the case of block building).
 ///
 /// For more context on the strategy design, see the documentation for [`BlockExecutionStrategy`].
 ///
