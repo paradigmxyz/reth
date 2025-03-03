@@ -16,7 +16,7 @@ use reth_trie_common::{
     MultiProof, Nibbles, RlpNode, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{collections::VecDeque, fmt, iter::Peekable};
+use std::{collections::VecDeque, fmt, iter::Peekable, sync::Arc};
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {
@@ -27,9 +27,9 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Sparse storage tries.
     storages: B256Map<SparseTrie<F::StorageNodeProvider>>,
     /// Collection of revealed account trie paths.
-    revealed_account_paths: HashSet<Nibbles>,
+    revealed_account_paths: HashSet<Arc<Nibbles>>,
     /// Collection of revealed storage trie paths, per account.
-    revealed_storage_paths: B256Map<HashSet<Nibbles>>,
+    revealed_storage_paths: B256Map<HashSet<Arc<Nibbles>>>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
@@ -184,7 +184,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 continue
             }
             let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(&path, node, TrieMasks::none())?;
+            let path = Arc::new(path);
+            trie.reveal_node(path.clone(), node, TrieMasks::none())?;
 
             // Track the revealed path.
             self.revealed_account_paths.insert(path);
@@ -231,7 +232,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 continue
             }
             let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(&path, node, TrieMasks::none())?;
+            let path = Arc::new(path);
+            trie.reveal_node(path.clone(), node, TrieMasks::none())?;
 
             // Track the revealed path.
             revealed_nodes.insert(path);
@@ -274,8 +276,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     (None, None)
                 };
 
+                let path = Arc::new(path);
                 trace!(target: "trie::sparse", ?path, ?node, ?hash_mask, ?tree_mask, "Revealing account node");
-                trie.reveal_node(&path, node, TrieMasks { hash_mask, tree_mask })?;
+                trie.reveal_node(path.clone(), node, TrieMasks { hash_mask, tree_mask })?;
 
                 // Track the revealed path.
                 self.revealed_account_paths.insert(path);
@@ -321,8 +324,9 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         (None, None)
                     };
 
+                    let path = Arc::new(path);
                     trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
-                    trie.reveal_node(&path, node, TrieMasks { hash_mask, tree_mask })?;
+                    trie.reveal_node(path.clone(), node, TrieMasks { hash_mask, tree_mask })?;
 
                     // Track the revealed path.
                     revealed_nodes.insert(path);
@@ -386,6 +390,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 TrieNode::EmptyRoot => {} // nothing to do here
             };
 
+            let path = Arc::new(path);
+
             // Reveal the node itself.
             if let Some(account) = maybe_account {
                 // Check that the path was not already revealed.
@@ -408,7 +414,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         storage_trie_entry
                             .as_revealed_mut()
                             .ok_or(SparseTrieErrorKind::Blind)?
-                            .reveal_node(&path, trie_node, TrieMasks::none())?;
+                            .reveal_node(path.clone(), trie_node, TrieMasks::none())?;
                     }
 
                     // Track the revealed path.
@@ -428,7 +434,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 } else {
                     // Reveal non-root state trie node.
                     self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?.reveal_node(
-                        &path.clone(),
+                        path.clone(),
                         trie_node,
                         TrieMasks::none(),
                     )?;

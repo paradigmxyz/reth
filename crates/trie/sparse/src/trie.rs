@@ -179,9 +179,9 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     /// All trie nodes.
     nodes: HashMap<Arc<Nibbles>, SparseNode>,
     /// All branch node tree masks.
-    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    branch_node_tree_masks: HashMap<Arc<Nibbles>, TrieMask>,
     /// All branch node hash masks.
-    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+    branch_node_hash_masks: HashMap<Arc<Nibbles>, TrieMask>,
     /// All leaf values.
     values: HashMap<Nibbles, Vec<u8>>,
     /// Prefix set.
@@ -205,6 +205,7 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
             .finish_non_exhaustive()
     }
 }
+
 /// Turns a [`Nibbles`] into a [`String`] by concatenating each nibbles' hex character.
 fn encode_nibbles(nibbles: &Nibbles) -> String {
     let encoded = hex::encode(nibbles.pack());
@@ -310,7 +311,7 @@ impl RevealedSparseTrie {
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(&Nibbles::default(), node, masks)?;
+        this.reveal_node(Arc::new(Nibbles::default()), node, masks)?;
         Ok(this)
     }
 }
@@ -334,7 +335,7 @@ impl<P> RevealedSparseTrie<P> {
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(&Nibbles::default(), node, masks)?;
+        this.reveal_node(Arc::new(Nibbles::default()), node, masks)?;
         Ok(this)
     }
 
@@ -383,12 +384,12 @@ impl<P> RevealedSparseTrie<P> {
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(
         &mut self,
-        path: &Nibbles,
+        path: Arc<Nibbles>,
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
         // If the node is already revealed and it's not a hash node, do nothing.
-        if self.nodes.get(path).is_some_and(|node| !node.is_hash()) {
+        if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
             return Ok(())
         }
 
@@ -402,20 +403,20 @@ impl<P> RevealedSparseTrie<P> {
         match node {
             TrieNode::EmptyRoot => {
                 debug_assert!(path.is_empty());
-                self.nodes.insert(Arc::new(path.clone()), SparseNode::Empty);
+                self.nodes.insert(path, SparseNode::Empty);
             }
             TrieNode::Branch(branch) => {
                 let mut stack_ptr = branch.as_ref().first_child_index();
                 for idx in CHILD_INDEX_RANGE {
                     if branch.state_mask.is_bit_set(idx) {
-                        let mut child_path = path.clone();
+                        let mut child_path = path.as_ref().clone();
                         child_path.push_unchecked(idx);
-                        self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                        self.reveal_node_or_hash(Arc::new(child_path), &branch.stack[stack_ptr])?;
                         stack_ptr += 1;
                     }
                 }
 
-                match self.nodes.entry(Arc::new(path.clone())) {
+                match self.nodes.entry(path) {
                     Entry::Occupied(mut entry) => match entry.get() {
                         // Blinded nodes can be replaced.
                         SparseNode::Hash(hash) => {
@@ -447,7 +448,7 @@ impl<P> RevealedSparseTrie<P> {
                     }
                 }
             }
-            TrieNode::Extension(ext) => match self.nodes.entry(Arc::new(path.clone())) {
+            TrieNode::Extension(ext) => match self.nodes.entry(path) {
                 Entry::Occupied(mut entry) => match entry.get() {
                     SparseNode::Hash(hash) => {
                         let mut child_path = (entry.key()).as_ref().clone();
@@ -459,7 +460,7 @@ impl<P> RevealedSparseTrie<P> {
                             hash: Some(*hash),
                             store_in_db_trie: None,
                         });
-                        self.reveal_node_or_hash(child_path.clone(), &ext.child)?;
+                        self.reveal_node_or_hash(Arc::new(child_path), &ext.child)?;
                     }
                     // Extension node already exists, or an extension node was placed where a branch
                     // node was before.
@@ -477,10 +478,10 @@ impl<P> RevealedSparseTrie<P> {
                     let mut child_path = (entry.key()).as_ref().clone();
                     child_path.extend_from_slice_unchecked(&ext.key);
                     entry.insert(SparseNode::new_ext(ext.key));
-                    self.reveal_node_or_hash(child_path.clone(), &ext.child)?;
+                    self.reveal_node_or_hash(Arc::new(child_path), &ext.child)?;
                 }
             },
-            TrieNode::Leaf(leaf) => match self.nodes.entry(Arc::new(path.clone())) {
+            TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
                 Entry::Occupied(mut entry) => match entry.get() {
                     SparseNode::Hash(hash) => {
                         let mut full: Nibbles = (entry.key()).as_ref().clone();
@@ -518,10 +519,10 @@ impl<P> RevealedSparseTrie<P> {
         Ok(())
     }
 
-    fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
+    fn reveal_node_or_hash(&mut self, path: Arc<Nibbles>, child: &[u8]) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
-            match self.nodes.entry(Arc::new(path)) {
+            match self.nodes.entry(path) {
                 Entry::Occupied(entry) => match entry.get() {
                     // Hash node with a different hash can't be handled.
                     SparseNode::Hash(previous_hash) if previous_hash != &hash => {
@@ -540,7 +541,7 @@ impl<P> RevealedSparseTrie<P> {
             return Ok(())
         }
 
-        self.reveal_node(&path, TrieNode::decode(&mut &child[..])?, TrieMasks::none())
+        self.reveal_node(path, TrieNode::decode(&mut &child[..])?, TrieMasks::none())
     }
 
     /// Traverse trie nodes down to the leaf node and collect all nodes along the path.
@@ -1111,6 +1112,8 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         let common = current.common_prefix_length(&path);
                         *key = current.slice(current.len() - key.len()..common);
 
+                        let current = Arc::new(current);
+
                         // If branch node updates retention is enabled, we need to query the
                         // extension node child to later set the hash mask for a parent branch node
                         // correctly.
@@ -1130,7 +1133,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                                         "Revealing extension node child",
                                     );
                                     self.reveal_node(
-                                        &current,
+                                        current.clone(),
                                         decoded,
                                         TrieMasks { hash_mask, tree_mask },
                                     )?;
@@ -1278,6 +1281,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         // Get full path of the only child node left.
                         let mut child_path = removed_path.clone();
                         child_path.push_unchecked(child_nibble);
+                        let child_path = Arc::new(child_path);
 
                         trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
@@ -1296,7 +1300,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                                     "Revealing remaining blinded branch child"
                                 );
                                 self.reveal_node(
-                                    &child_path.clone(),
+                                    child_path.clone(),
                                     decoded,
                                     TrieMasks { hash_mask, tree_mask },
                                 )?;
@@ -1311,7 +1315,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                             SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                             &SparseNode::Hash(hash) => {
                                 return Err(SparseTrieErrorKind::BlindedNode {
-                                    path: child_path,
+                                    path: child_path.as_ref().clone(),
                                     hash,
                                 }
                                 .into())
