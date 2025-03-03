@@ -161,6 +161,11 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// Identifier of the EVM specification.
     type Spec: Debug + Copy + Send + Sync + 'static;
 
+    /// Context required for configuring next block environment.
+    ///
+    /// Contains values that can't be derived from the parent block.
+    type NextBlockEnvCtx: Debug + Clone;
+
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
     fn tx_env(&self, transaction: impl IntoTxEnv<Self::TxEnv>) -> Self::TxEnv {
         transaction.into_tx_env()
@@ -177,7 +182,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes<'_>,
+        attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<Self::Spec>, Self::Error>;
 }
 
@@ -185,8 +190,8 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
 /// This is used to configure the next block's environment
 /// [`ConfigureEvmEnv::next_evm_env`] and contains fields that can't be derived from the
 /// parent header alone (attributes that are determined by the CL.)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NextBlockEnvAttributes<'a> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NextBlockEnvAttributes {
     /// The timestamp of the next block.
     pub timestamp: u64,
     /// The suggested fee recipient for the next block.
@@ -198,7 +203,7 @@ pub struct NextBlockEnvAttributes<'a> {
     /// The parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
     /// Withdrawals
-    pub withdrawals: Option<&'a Withdrawals>,
+    pub withdrawals: Option<Withdrawals>,
 }
 
 /// Abstraction over transaction environment.

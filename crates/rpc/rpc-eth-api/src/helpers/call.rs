@@ -107,7 +107,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 for block in block_state_calls {
                     let mut evm_env = this
                         .evm_config()
-                        .next_evm_env(&parent, this.next_env_attributes(&parent)?)
+                        .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
 
