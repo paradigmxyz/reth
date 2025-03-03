@@ -57,6 +57,7 @@ enum Mode {
 
 impl Command {
     /// Read input from either a file or stdin
+    #[expect(clippy::unbuffered_bytes)]
     fn read_input(&self) -> Result<String> {
         Ok(match &self.path {
             Some(path) => reth_fs_util::read_to_string(path)?,
