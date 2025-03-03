@@ -589,15 +589,15 @@ where
                             .expect("account should be present"),
                     );
 
-                    if let Entry::Occupied(mut original_entry) =
+                    if let Entry::Occupied(mut original_storage_entry) =
                         hashed_state_update.storages.entry(address)
                     {
-                        let original_entry_mut = original_entry.get_mut();
-                        let entry = acc.storages.entry(address).or_default();
+                        let original_storage_entry_mut = original_storage_entry.get_mut();
+                        let storage_entry = acc.storages.entry(address).or_default();
                         for slot in slots {
-                            entry.storage.insert(
+                            storage_entry.storage.insert(
                                 *slot,
-                                original_entry_mut
+                                original_storage_entry_mut
                                     .storage
                                     .remove(slot)
                                     .expect("storage slot should be present"),
@@ -606,9 +606,9 @@ where
 
                         // If the original state update has no more storage slots, we can remove
                         // both account and storage entries from the original state update.
-                        if original_entry_mut.storage.is_empty() {
+                        if original_storage_entry_mut.storage.is_empty() {
                             hashed_state_update.accounts.remove(&address);
-                            original_entry.remove();
+                            original_storage_entry.remove();
                         }
                     }
 
