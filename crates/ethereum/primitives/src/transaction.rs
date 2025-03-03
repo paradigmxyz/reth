@@ -381,6 +381,7 @@ impl TransactionSigned {
     ///
     /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
     /// EIP-4844.
+    #[expect(clippy::result_large_err)]
     pub fn try_into_pooled_eip4844(
         self,
         sidecar: BlobTransactionSidecar,

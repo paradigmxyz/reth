@@ -254,7 +254,7 @@ mod compact {
         tx_type: OpTxType,
         success: bool,
         cumulative_gas_used: u64,
-        logs: Cow<'a, Vec<Log>>,
+        logs: Cow<'a, [Log]>,
         deposit_nonce: Option<u64>,
         deposit_receipt_version: Option<u64>,
     }
