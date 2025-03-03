@@ -1075,28 +1075,25 @@ where
         Ok(true)
     }
 
-    /// Returns whether or not the input block is a descendant of the blocks persisting.
-    fn is_descendant_of_persisting_blocks(
-        &self,
-        block: &N::BlockHeader,
-    ) -> DescendantOfPersistingBlocks {
+    /// Returns the persisting kind for the input block.
+    fn persisting_kind_for(&self, block: &N::BlockHeader) -> PersistingKind {
         // Check that we're currently persisting.
         let Some(action) = self.persistence_state.current_action() else {
-            return DescendantOfPersistingBlocks::NotPersisting
+            return PersistingKind::NotPersisting
         };
         // Check that the persistince action is saving blocks, not removing them.
         let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return DescendantOfPersistingBlocks::NotDescendant
+            return PersistingKind::PersistingNotDescendant
         };
 
         // The block being validated can only be a descendant if its number is higher than
         // the highest block persisting. Otherwise, it's likely a fork of a lower block.
         if block.number() > highest.number && self.state.tree_state.is_descendant(*highest, block) {
-            return DescendantOfPersistingBlocks::Descendant
+            return PersistingKind::PersistingDescendant
         }
 
         // In all other cases, the block is not a descendant.
-        DescendantOfPersistingBlocks::NotDescendant
+        PersistingKind::PersistingNotDescendant
     }
 
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
@@ -2343,17 +2340,17 @@ where
 
         let state_provider = provider_builder.build()?;
 
-        // We only run the parallel state root if we are currently persisting blocks that are all
-        // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
-        // trie updates being committed are a subset of the in-memory trie updates collected before
-        // fetching reverts. So any diff in reverts (pre vs post commit) is already covered by the
-        // in-memory trie updates we collect in `compute_state_root_parallel`.
+        // We only run the parallel state root if we are not currently persisting any blocks or
+        // persisting blocks that are all ancestors of the one we are executing.
+        //
+        // If we're committing ancestor blocks, then: any trie updates being committed are a subset
+        // of the in-memory trie updates collected before fetching reverts. So any diff in
+        // reverts (pre vs post commit) is already covered by the in-memory trie updates we
+        // collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let descendant_of_persisting_blocks =
-            self.is_descendant_of_persisting_blocks(block.header());
-        let run_parallel_state_root = descendant_of_persisting_blocks.is_not_persisting() ||
-            descendant_of_persisting_blocks.is_descendant();
+        let descendant_of_persisting_blocks = self.persisting_kind_for(block.header());
+        let run_parallel_state_root = descendant_of_persisting_blocks.can_run_parallel_state_root();
 
         // use prewarming background task
         let header = block.clone_sealed_header();
@@ -2544,7 +2541,7 @@ where
     /// should be used instead.
     fn compute_state_root_parallel(
         &self,
-        descendant_of_persisting_blocks: DescendantOfPersistingBlocks,
+        descendant_of_persisting_blocks: PersistingKind,
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
@@ -2578,7 +2575,7 @@ where
     ///    [`HashedPostState`] from them.
     fn compute_trie_input(
         &self,
-        descendant_of_persisting_blocks: DescendantOfPersistingBlocks,
+        descendant_of_persisting_blocks: PersistingKind,
         consistent_view: ConsistentDbView<P>,
         parent_hash: B256,
     ) -> Result<TrieInput, ParallelStateRootError> {
@@ -2976,25 +2973,28 @@ pub enum InsertPayloadOk {
 
 /// Whether or not the blocks are currently persisting and the input block is a descendant.
 #[derive(Debug, Clone, Copy)]
-pub enum DescendantOfPersistingBlocks {
+pub enum PersistingKind {
     /// The blocks are not currently persisting.
     NotPersisting,
     /// The blocks are currently persisting but the input block is not a descendant.
-    NotDescendant,
+    PersistingNotDescendant,
     /// The blocks are currently persisting and the input block is a descendant.
-    Descendant,
+    PersistingDescendant,
 }
 
-impl DescendantOfPersistingBlocks {
-    /// Returns true if the blocks are not currently being persisted.
-    pub fn is_not_persisting(&self) -> bool {
-        matches!(self, Self::NotPersisting)
+impl PersistingKind {
+    /// Returns true if the parallel state root can be run.
+    ///
+    /// We only run the parallel state root if we are not currently persisting any blocks or
+    /// persisting blocks that are all ancestors of the one we are calculating the state root for.
+    pub fn can_run_parallel_state_root(&self) -> bool {
+        matches!(self, Self::NotPersisting | Self::PersistingDescendant)
     }
 
     /// Returns true if the blocks are currently being persisted and the input block is a
     /// descendant.
     pub fn is_descendant(&self) -> bool {
-        matches!(self, Self::Descendant)
+        matches!(self, Self::PersistingDescendant)
     }
 }
 
