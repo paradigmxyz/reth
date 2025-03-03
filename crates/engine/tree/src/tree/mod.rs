@@ -38,13 +38,14 @@ use reth_primitives_traits::{
     Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
+    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
     cmp::Ordering,
@@ -1072,23 +1073,25 @@ where
         Ok(true)
     }
 
-    /// Returns whether or not the input block is a descendant of the blocks being persisted.
-    fn is_descendant_of_persisting_blocks(&self, block: &N::BlockHeader) -> bool {
-        self.persistence_state.current_action().is_none_or(|action| {
-            match action {
-                CurrentPersistenceAction::SavingBlocks { highest } => {
-                    // The block being validated can't be a descendant if its number is lower than
-                    // the highest block being persisted. In that case, it's likely a fork of a
-                    // lower block.
-                    if block.number() <= highest.number {
-                        return false
-                    }
+    /// Returns the persisting kind for the input block.
+    fn persisting_kind_for(&self, block: &N::BlockHeader) -> PersistingKind {
+        // Check that we're currently persisting.
+        let Some(action) = self.persistence_state.current_action() else {
+            return PersistingKind::NotPersisting
+        };
+        // Check that the persistince action is saving blocks, not removing them.
+        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
+            return PersistingKind::PersistingNotDescendant
+        };
 
-                    self.state.tree_state.is_descendant(*highest, block)
-                }
-                CurrentPersistenceAction::RemovingBlocks { new_tip_num: _ } => false,
-            }
-        })
+        // The block being validated can only be a descendant if its number is higher than
+        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
+        if block.number() > highest.number && self.state.tree_state.is_descendant(*highest, block) {
+            return PersistingKind::PersistingDescendant
+        }
+
+        // In all other cases, the block is not a descendant.
+        PersistingKind::PersistingNotDescendant
     }
 
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
@@ -2334,28 +2337,34 @@ where
         }
 
         let state_provider = provider_builder.build()?;
-        // We only run the parallel state root if we are currently persisting blocks that are all
-        // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
-        // trie updates being committed are a subset of the in-memory trie updates collected before
-        // fetching reverts. So any diff in reverts (pre vs post commit) is already covered by the
-        // in-memory trie updates we collect in `compute_state_root_parallel`.
+
+        // We only run the parallel state root if we are not currently persisting any blocks or
+        // persisting blocks that are all ancestors of the one we are executing.
+        //
+        // If we're committing ancestor blocks, then: any trie updates being committed are a subset
+        // of the in-memory trie updates collected before fetching reverts. So any diff in
+        // reverts (pre vs post commit) is already covered by the in-memory trie updates we
+        // collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let is_descendant_of_persisting_blocks =
-            self.is_descendant_of_persisting_blocks(block.header());
+        let persisting_kind = self.persisting_kind_for(block.header());
+        let run_parallel_state_root = persisting_kind.can_run_parallel_state_root();
 
         // use prewarming background task
         let header = block.clone_sealed_header();
         let txs = block.clone_transactions_recovered().collect();
-        let mut handle = if is_descendant_of_persisting_blocks && self.config.use_state_root_task()
-        {
+        let mut handle = if run_parallel_state_root && self.config.use_state_root_task() {
             // use background tasks for state root calc
             let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
             // Compute trie input
             let trie_input_start = Instant::now();
             let trie_input = self
-                .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+                .compute_trie_input(
+                    persisting_kind,
+                    consistent_view.clone(),
+                    block.header().parent_hash(),
+                )
                 .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
 
             self.metrics
@@ -2415,7 +2424,7 @@ where
 
         let mut maybe_state_root = None;
 
-        if is_descendant_of_persisting_blocks {
+        if run_parallel_state_root {
             // if we new payload extends the current canonical change we attempt to use the
             // background task or try to compute it in parallel
             if self.config.use_state_root_task() {
@@ -2428,12 +2437,15 @@ where
                         }
                     }
                     Err(error) => {
-                        debug!(target: "engine", %error, "Background parallel state root computation failed");
+                        debug!(target: "engine::tree", %error, "Background parallel state root computation failed");
                     }
                 }
             } else {
-                match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
-                {
+                match self.compute_state_root_parallel(
+                    persisting_kind,
+                    block.header().parent_hash(),
+                    &hashed_state,
+                ) {
                     Ok(result) => {
                         info!(
                             target: "engine::tree",
@@ -2444,7 +2456,7 @@ where
                         maybe_state_root = Some((result.0, result.1, root_time.elapsed()));
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                        debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                        debug!(target: "engine::tree", %error, "Parallel state root computation failed consistency check, falling back");
                     }
                     Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
                 }
@@ -2457,7 +2469,7 @@ where
             maybe_state_root
         } else {
             // fallback is to compute the state root regularly in sync
-            debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
@@ -2525,12 +2537,14 @@ where
     /// should be used instead.
     fn compute_state_root_parallel(
         &self,
+        persisting_kind: PersistingKind,
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-        let mut input = self.compute_trie_input(consistent_view.clone(), parent_hash)?;
+        let mut input =
+            self.compute_trie_input(persisting_kind, consistent_view.clone(), parent_hash)?;
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
@@ -2538,28 +2552,101 @@ where
     }
 
     /// Computes the trie input at the provided parent hash.
+    ///
+    /// The goal of this function is to take in-memory blocks and generate a [`TrieInput`] that
+    /// serves as an overlay to the database blocks.
+    ///
+    /// It works as follows:
+    /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
+    ///    [`TreeState::blocks_by_hash`].
+    /// 2. If the persistence is in progress, and the block that we're computing the trie input for
+    ///    is a descendant of the currently persisting blocks, we need to be sure that in-memory
+    ///    blocks are not overlapping with the database blocks that may have been already persisted.
+    ///    To do that, we're filtering out in-memory blocks that are lower than the highest database
+    ///    block.
+    /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
+    ///    [`HashedPostState`] from them.
     fn compute_trie_input(
         &self,
+        persisting_kind: PersistingKind,
         consistent_view: ConsistentDbView<P>,
         parent_hash: B256,
     ) -> Result<TrieInput, ParallelStateRootError> {
         let mut input = TrieInput::default();
 
-        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
-            debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
-            // Retrieve revert state for historical block.
-            let revert_state = consistent_view.revert_state(historical)?;
-            input.append(revert_state);
+        let provider = consistent_view.provider_ro()?;
+        let best_block_number = provider.best_block_number()?;
 
-            // Extend with contents of parent in-memory blocks.
-            for block in blocks.iter().rev() {
-                input.append_cached_ref(block.trie_updates(), block.hashed_state())
+        let (mut historical, mut blocks) = self
+            .state
+            .tree_state
+            .blocks_by_hash(parent_hash)
+            .map_or_else(|| (parent_hash.into(), vec![]), |(hash, blocks)| (hash.into(), blocks));
+
+        // If the current block is a descendant of the currently persisting blocks, then we need to
+        // filter in-memory blocks, so that none of them are already persisted in the database.
+        if persisting_kind.is_descendant() {
+            // Iterate over the blocks from oldest to newest.
+            while let Some(block) = blocks.last() {
+                let recovered_block = block.recovered_block();
+                if recovered_block.number() <= best_block_number {
+                    // Remove those blocks that lower than or equal to the highest database
+                    // block.
+                    blocks.pop();
+                } else {
+                    // If the block is higher than the best block number, stop filtering, as it's
+                    // the first block that's not in the database.
+                    break
+                }
             }
-        } else {
-            // The block attaches to canonical persisted parent.
+
+            historical = if let Some(block) = blocks.last() {
+                // If there are any in-memory blocks left after filtering, set the anchor to the
+                // parent of the oldest block.
+                (block.recovered_block().number() - 1).into()
+            } else {
+                // Otherwise, set the anchor to the original provided parent hash.
+                parent_hash.into()
+            };
+        }
+
+        if blocks.is_empty() {
             debug!(target: "engine::tree", %parent_hash, "Parent found on disk");
-            let revert_state = consistent_view.revert_state(parent_hash)?;
-            input.append(revert_state);
+        } else {
+            debug!(target: "engine::tree", %parent_hash, %historical, blocks = blocks.len(), "Parent found in memory");
+        }
+
+        // Convert the historical block to the block number.
+        let block_number = provider
+            .convert_hash_or_number(historical)?
+            .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
+
+        // Retrieve revert state for historical block.
+        let revert_state = if block_number == best_block_number {
+            // We do not check against the `last_block_number` here because
+            // `HashedPostState::from_reverts` only uses the database tables, and not static files.
+            debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
+            HashedPostState::default()
+        } else {
+            let revert_state = HashedPostState::from_reverts::<
+                <P::StateCommitment as StateCommitment>::KeyHasher,
+            >(provider.tx_ref(), block_number + 1)
+            .map_err(ProviderError::from)?;
+            debug!(
+                target: "engine::tree",
+                block_number,
+                best_block_number,
+                accounts = revert_state.accounts.len(),
+                storages = revert_state.storages.len(),
+                "Non-empty revert state"
+            );
+            revert_state
+        };
+        input.append(revert_state);
+
+        // Extend with contents of parent in-memory blocks.
+        for block in blocks.iter().rev() {
+            input.append_cached_ref(block.trie_updates(), block.hashed_state())
         }
 
         Ok(input)
@@ -2875,6 +2962,33 @@ pub enum InsertPayloadOk {
     AlreadySeen(BlockStatus),
     /// The payload was valid and inserted into the tree.
     Inserted(BlockStatus),
+}
+
+/// Whether or not the blocks are currently persisting and the input block is a descendant.
+#[derive(Debug, Clone, Copy)]
+pub enum PersistingKind {
+    /// The blocks are not currently persisting.
+    NotPersisting,
+    /// The blocks are currently persisting but the input block is not a descendant.
+    PersistingNotDescendant,
+    /// The blocks are currently persisting and the input block is a descendant.
+    PersistingDescendant,
+}
+
+impl PersistingKind {
+    /// Returns true if the parallel state root can be run.
+    ///
+    /// We only run the parallel state root if we are not currently persisting any blocks or
+    /// persisting blocks that are all ancestors of the one we are calculating the state root for.
+    pub fn can_run_parallel_state_root(&self) -> bool {
+        matches!(self, Self::NotPersisting | Self::PersistingDescendant)
+    }
+
+    /// Returns true if the blocks are currently being persisted and the input block is a
+    /// descendant.
+    pub fn is_descendant(&self) -> bool {
+        matches!(self, Self::PersistingDescendant)
+    }
 }
 
 #[cfg(test)]
