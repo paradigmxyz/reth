@@ -6,7 +6,7 @@ use crate::{
     tree::{cached_state::CachedStateProvider, metrics::EngineApiMetrics},
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::{BlockHashOrNumber, BlockNumHash};
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256, U256,
@@ -2591,10 +2591,7 @@ where
             .state
             .tree_state
             .blocks_by_hash(parent_hash)
-            .map_or_else(|| {
-                debug!(target: "engine::tree", ?parent_hash, "No blocks by hash found, returning parent hash");
-                (parent_hash.into(), vec![])
-            }, |(hash, blocks)| (hash.into(), blocks));
+            .map_or_else(|| (parent_hash.into(), vec![]), |(hash, blocks)| (hash.into(), blocks));
 
         // If the current block is a descendant of the currently persisting blocks, then we need to
         // filter in-memory blocks, so that none of them are already persisted in the database.
@@ -2609,10 +2606,18 @@ where
                 } else {
                     // If the block is higher than the best block number, stop filtering, as it's
                     // the first block that's not in the database.
-                    historical = (recovered_block.number() - 1).into();
                     break
                 }
             }
+
+            historical = if let Some(block) = blocks.last() {
+                // If there are any in-memory blocks left after filtering, set the anchor to the
+                // parent of the oldest block.
+                (block.recovered_block().number() - 1).into()
+            } else {
+                // Otherwise, set the anchor to the original provided parent hash.
+                parent_hash.into()
+            };
         }
 
         if blocks.is_empty() {
