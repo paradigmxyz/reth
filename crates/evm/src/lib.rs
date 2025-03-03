@@ -19,7 +19,7 @@ extern crate alloc;
 
 use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
 pub use alloy_evm::evm::EvmFactory;
-use alloy_evm::{FromRecoveredTx, IntoTxEnv};
+use alloy_evm::IntoTxEnv;
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
@@ -41,7 +41,7 @@ pub mod system_calls;
 /// test helpers for mocking executor
 pub mod test_utils;
 
-pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, InvalidTxError};
+pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, FromRecoveredTx, InvalidTxError};
 
 /// Alias for `EvmEnv<<Evm as ConfigureEvmEnv>::Spec>`
 pub type EvmEnvFor<Evm> = EvmEnv<<Evm as ConfigureEvmEnv>::Spec>;

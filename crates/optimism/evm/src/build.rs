@@ -1,35 +1,56 @@
-use crate::OpEvmConfig;
+use crate::{OpBlockExecutionCtx, OpNextBlockEnvAttributes};
+use alloc::sync::Arc;
 use alloy_consensus::{
-    constants::EMPTY_WITHDRAWALS, proofs, Block, BlockBody, Header, TxReceipt,
-    EMPTY_OMMER_ROOT_HASH,
+    constants::EMPTY_WITHDRAWALS, proofs, BlockBody, Header, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::logs_bloom;
-use reth_evm::execute::{BlockBuilderInput, BlockFactory};
+use reth_evm::execute::{BlockBuilderInput, BlockExecutionStrategyFactory, BlockFactory};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_consensus::{calculate_receipt_root_no_memo_optimism, isthmus};
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::OpBlock;
+use reth_optimism_primitives::DepositReceipt;
+use reth_primitives_traits::{Block, BlockTy, NodePrimitives, SignedTransaction};
 
 /// Block builder for Optimism.
 #[derive(Debug)]
 pub struct OpBlockBuilder<ChainSpec> {
-    chain_spec: ChainSpec,
+    chain_spec: Arc<ChainSpec>,
 }
 
 impl<ChainSpec> OpBlockBuilder<ChainSpec> {
     /// Creates a new [`OpBlockBuilder`].
-    pub fn new(chain_spec: ChainSpec) -> Self {
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
 
-impl<ChainSpec: OpHardforks> BlockFactory<OpEvmConfig> for OpBlockBuilder<ChainSpec> {
+impl<ChainSpec> Clone for OpBlockBuilder<ChainSpec> {
+    fn clone(&self) -> Self {
+        Self { chain_spec: self.chain_spec.clone() }
+    }
+}
+
+impl<Evm, ChainSpec, T> BlockFactory<Evm> for OpBlockBuilder<ChainSpec>
+where
+    ChainSpec: OpHardforks,
+    T: SignedTransaction,
+    Evm: for<'a> BlockExecutionStrategyFactory<
+        Primitives: NodePrimitives<
+            Receipt: DepositReceipt,
+            BlockHeader = Header,
+            BlockBody = alloy_consensus::BlockBody<T>,
+            SignedTx = T,
+        >,
+        NextBlockEnvCtx = OpNextBlockEnvAttributes,
+        ExecutionCtx<'a> = OpBlockExecutionCtx,
+    >,
+{
     fn build_block(
         &self,
-        input: BlockBuilderInput<'_, '_, OpEvmConfig>,
-    ) -> Result<OpBlock, BlockExecutionError> {
+        input: BlockBuilderInput<'_, '_, Evm>,
+    ) -> Result<BlockTy<Evm::Primitives>, BlockExecutionError> {
         let BlockBuilderInput {
             evm_env,
             execution_ctx: ctx,
@@ -90,9 +111,9 @@ impl<ChainSpec: OpHardforks> BlockFactory<OpEvmConfig> for OpBlockBuilder<ChainS
             requests_hash: None,
         };
 
-        Ok(Block {
+        Ok(BlockTy::<Evm::Primitives>::new(
             header,
-            body: BlockBody {
+            BlockBody {
                 transactions,
                 ommers: Default::default(),
                 withdrawals: self
@@ -100,6 +121,6 @@ impl<ChainSpec: OpHardforks> BlockFactory<OpEvmConfig> for OpBlockBuilder<ChainS
                     .is_canyon_active_at_timestamp(timestamp)
                     .then(Default::default),
             },
-        })
+        ))
     }
 }

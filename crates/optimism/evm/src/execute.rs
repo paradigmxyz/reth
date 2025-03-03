@@ -1,8 +1,8 @@
 //! Optimism block execution strategy.
 
 use crate::{
-    l1::ensure_create2_deployer, BasicOpReceiptBuilder, OpBlockExecutionError, OpEvmConfig,
-    OpReceiptBuilder, ReceiptBuilderCtx,
+    l1::ensure_create2_deployer, BasicOpReceiptBuilder, OpBlockBuilder, OpBlockExecutionError,
+    OpEvmConfig, OpReceiptBuilder, ReceiptBuilderCtx,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
@@ -30,16 +30,27 @@ use revm_database::State;
 use revm_primitives::B256;
 use tracing::trace;
 
-impl<ChainSpec, N> BlockExecutionStrategyFactory for OpEvmConfig<ChainSpec, N>
+impl<ChainSpec, N, T> BlockExecutionStrategyFactory for OpEvmConfig<ChainSpec, N>
 where
     ChainSpec: EthChainSpec + OpHardforks + 'static,
-    N: NodePrimitives<SignedTx: OpTransaction, Receipt: DepositReceipt>,
-    revm_optimism::OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx>,
+    T: SignedTransaction + OpTransaction,
+    N: NodePrimitives<
+        Receipt: DepositReceipt,
+        SignedTx = T,
+        BlockHeader = Header,
+        BlockBody = alloy_consensus::BlockBody<T>,
+    >,
+    revm_optimism::OpTransaction<TxEnv>: FromRecoveredTx<T>,
 {
     type Primitives = N;
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
         OpExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>, N, &'a ChainSpec>;
     type ExecutionCtx<'a> = OpBlockExecutionCtx;
+    type BlockFactory = OpBlockBuilder<ChainSpec>;
+
+    fn block_factory(&self) -> &Self::BlockFactory {
+        &self.block_builder
+    }
 
     fn context_for_block<'a>(&self, block: &'a SealedBlock<N::Block>) -> Self::ExecutionCtx<'a> {
         OpBlockExecutionCtx {

@@ -2,7 +2,7 @@
 
 use crate::{
     dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
-    EthEvmConfig,
+    EthBlockBuilder, EthEvmConfig,
 };
 use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Header, Transaction};
@@ -41,6 +41,11 @@ where
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
         EthExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
+    type BlockFactory = EthBlockBuilder<ChainSpec>;
+
+    fn block_factory(&self) -> &Self::BlockFactory {
+        &self.block_builder
+    }
 
     fn context_for_block<'a>(&self, block: &'a SealedBlock) -> Self::ExecutionCtx<'a> {
         EthBlockExecutionCtx {
@@ -94,19 +99,19 @@ pub struct EthBlockExecutionCtx<'a> {
 #[derive(Debug)]
 pub struct EthExecutionStrategy<'a, Evm> {
     /// Reference to the [`ChainSpec`].
-    chain_spec: &'a ChainSpec,
+    pub chain_spec: &'a ChainSpec,
 
     /// Context for block execution.
-    ctx: EthBlockExecutionCtx<'a>,
+    pub ctx: EthBlockExecutionCtx<'a>,
     /// The EVM used by strategy.
-    evm: Evm,
+    pub evm: Evm,
     /// Utility to call system smart contracts.
-    system_caller: SystemCaller<&'a ChainSpec>,
+    pub system_caller: SystemCaller<&'a ChainSpec>,
 
     /// Receipts of executed transactions.
-    receipts: Vec<Receipt>,
+    pub receipts: Vec<Receipt>,
     /// Total gas used by transactions in this block.
-    gas_used: u64,
+    pub gas_used: u64,
 }
 
 impl<'a, Evm> EthExecutionStrategy<'a, Evm> {

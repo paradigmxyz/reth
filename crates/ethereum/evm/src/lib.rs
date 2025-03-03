@@ -54,6 +54,7 @@ pub mod eip6110;
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {
     chain_spec: Arc<ChainSpec>,
+    block_builder: EthBlockBuilder<ChainSpec>,
     evm_factory: EvmFactory,
 }
 
@@ -77,7 +78,7 @@ impl EthEvmConfig {
 impl<EvmFactory> EthEvmConfig<EvmFactory> {
     /// Creates a new Ethereum EVM configuration with the given chain spec and EVM factory.
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
-        Self { chain_spec, evm_factory }
+        Self { block_builder: EthBlockBuilder::new(chain_spec.clone()), chain_spec, evm_factory }
     }
 
     /// Returns the chain spec associated with this configuration.

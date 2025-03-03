@@ -1,28 +1,44 @@
-use crate::EthEvmConfig;
+use crate::execute::EthBlockExecutionCtx;
 use alloc::sync::Arc;
 use alloy_consensus::{
     proofs, Block, BlockBody, BlockHeader, Header, Transaction, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::Bytes;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
-use reth_evm::execute::{BlockBuilderInput, BlockExecutionError, BlockFactory};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_evm::execute::{
+    BlockBuilderInput, BlockExecutionError, BlockExecutionStrategyFactory, BlockFactory,
+};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{logs_bloom, Receipt, TransactionSigned};
+use reth_primitives::{logs_bloom, EthPrimitives, Receipt, TransactionSigned};
 
 /// Block builder for Ethereum.
 #[derive(Debug, Clone)]
-pub struct EthBlockBuilder {
+pub struct EthBlockBuilder<ChainSpec> {
     /// The chainspec.
     pub chain_spec: Arc<ChainSpec>,
     /// Extra data to use for the blocks.
     pub extra_data: Bytes,
 }
 
-impl BlockFactory<EthEvmConfig> for EthBlockBuilder {
+impl<ChainSpec> EthBlockBuilder<ChainSpec> {
+    /// Creates a new [`EthBlockBuilder`].
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { chain_spec, extra_data: Default::default() }
+    }
+}
+
+impl<Evm, ChainSpec> BlockFactory<Evm> for EthBlockBuilder<ChainSpec>
+where
+    Evm: for<'a> BlockExecutionStrategyFactory<
+        Primitives = EthPrimitives,
+        ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+    >,
+    ChainSpec: EthChainSpec + EthereumHardforks,
+{
     fn build_block(
         &self,
-        input: BlockBuilderInput<'_, '_, EthEvmConfig>,
+        input: BlockBuilderInput<'_, '_, Evm>,
     ) -> Result<Block<TransactionSigned>, BlockExecutionError> {
         let BlockBuilderInput {
             evm_env,
@@ -93,8 +109,6 @@ impl BlockFactory<EthEvmConfig> for EthBlockBuilder {
             excess_blob_gas,
             requests_hash,
         };
-
-        let transactions = transactions.into_iter().map(|tx| tx.into_tx()).collect();
 
         Ok(Block { header, body: BlockBody { transactions, ommers: vec![], withdrawals } })
     }
