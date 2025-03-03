@@ -94,6 +94,8 @@ impl MultiProofTargets {
 /// An iterator that yields chunks of the proof targets of at most `size` account and storage
 /// targets.
 ///
+/// # Logic
+///
 /// For example, for the following proof targets:
 /// ```text
 /// - 0x1: [0x10, 0x20, 0x30]
@@ -111,14 +113,41 @@ impl MultiProofTargets {
 /// It follows two rules:
 /// - If account has associated storage slots, each storage slot is counted towards the chunk size.
 /// - If account has no associated storage slots, the account is counted towards the chunk size.
+///
+/// # Performance
+///
+/// If the proof targets will fit in a single chunk, the iterator will short-circuit and return a
+/// single chunk with no additional allocations.
 #[derive(Debug)]
-pub struct ChunkedMultiProofTargets {
-    flattened_targets: alloc::vec::IntoIter<(B256, Option<B256>)>,
-    size: usize,
+pub enum ChunkedMultiProofTargets {
+    /// Single chunk.
+    SingleChunk {
+        /// Proof targets
+        targets: Option<MultiProofTargets>,
+    },
+    /// Multiple chunks of the specified size.
+    MultipleChunks {
+        /// Flattened proof targets.
+        flattened_targets: alloc::vec::IntoIter<(B256, Option<B256>)>,
+        /// Chunk size.
+        size: usize,
+    },
 }
 
 impl ChunkedMultiProofTargets {
     fn new(targets: MultiProofTargets, size: usize) -> Self {
+        // If the total number of chunks will be less than or equal to the chunk size,
+        // short-circuit and return a single chunk.
+        if targets
+            .values()
+            // Count an account with no storage slots as 1 towards the chunk size.
+            .map(|slots| if slots.is_empty() { 1 } else { slots.len() })
+            .sum::<usize>() <=
+            size
+        {
+            return Self::SingleChunk { targets: Some(targets) }
+        }
+
         let flattened_targets = targets
             .into_iter()
             .flat_map(|(address, slots)| {
@@ -134,7 +163,7 @@ impl ChunkedMultiProofTargets {
                 }
             })
             .sorted();
-        Self { flattened_targets, size }
+        Self::MultipleChunks { flattened_targets, size }
     }
 }
 
@@ -142,21 +171,26 @@ impl Iterator for ChunkedMultiProofTargets {
     type Item = MultiProofTargets;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let chunk = self.flattened_targets.by_ref().take(self.size).fold(
-            MultiProofTargets::default(),
-            |mut acc, (address, slot)| {
-                let entry = acc.entry(address).or_default();
-                if let Some(slot) = slot {
-                    entry.insert(slot);
-                }
-                acc
-            },
-        );
+        match self {
+            Self::SingleChunk { targets } => targets.take(),
+            Self::MultipleChunks { flattened_targets, size } => {
+                let chunk = flattened_targets.by_ref().take(*size).fold(
+                    MultiProofTargets::default(),
+                    |mut acc, (address, slot)| {
+                        let entry = acc.entry(address).or_default();
+                        if let Some(slot) = slot {
+                            entry.insert(slot);
+                        }
+                        acc
+                    },
+                );
 
-        if chunk.is_empty() {
-            None
-        } else {
-            Some(chunk)
+                if chunk.is_empty() {
+                    None
+                } else {
+                    Some(chunk)
+                }
+            }
         }
     }
 }
