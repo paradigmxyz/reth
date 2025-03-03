@@ -93,7 +93,7 @@ impl MultiProofTargets {
             .into_iter()
             .flat_map(|(address, slots)| {
                 if slots.is_empty() {
-                    itertools::Either::Left(std::iter::once((address, None)))
+                    itertools::Either::Left(core::iter::once((address, None)))
                 } else {
                     itertools::Either::Right(
                         slots.into_iter().map(move |slot| (address, Some(slot))),
