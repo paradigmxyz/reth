@@ -17,6 +17,7 @@ crates_to_check=(
     reth-execution-types
     reth-db-models
     reth-evm
+    reth-storage-api
 
     ## ethereum
     reth-evm-ethereum
