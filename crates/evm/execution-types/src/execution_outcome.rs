@@ -427,6 +427,7 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
+    #[expect(clippy::owned_cow)]
     pub struct ExecutionOutcome<'a, T>
     where
         T: SerdeBincodeCompat + core::fmt::Debug,

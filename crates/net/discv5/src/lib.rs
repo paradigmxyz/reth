@@ -336,6 +336,7 @@ impl Discv5 {
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
     /// w.r.t. local `RLPx` [`IpMode`]. Uses source socket as udp socket.
+    #[expect(clippy::result_large_err)]
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,

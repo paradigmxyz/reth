@@ -250,11 +250,12 @@ mod compact {
         compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
         decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
     )]
+    #[expect(clippy::owned_cow)]
     struct CompactOpReceipt<'a> {
         tx_type: OpTxType,
         success: bool,
         cumulative_gas_used: u64,
-        logs: Cow<'a, [Log]>,
+        logs: Cow<'a, Vec<Log>>,
         deposit_nonce: Option<u64>,
         deposit_receipt_version: Option<u64>,
     }
