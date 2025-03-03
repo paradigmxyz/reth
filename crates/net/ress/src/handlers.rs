@@ -90,7 +90,11 @@ where
         _direction: Direction,
         _peer_id: PeerId,
     ) -> OnNotSupported {
-        OnNotSupported::Disconnect
+        if self.node_type.is_stateful() {
+            OnNotSupported::KeepAlive
+        } else {
+            OnNotSupported::Disconnect
+        }
     }
 
     fn into_connection(
