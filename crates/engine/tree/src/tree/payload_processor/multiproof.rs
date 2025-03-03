@@ -393,10 +393,15 @@ where
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
+    /// Histogram of the number of prefetch proof targets.
+    pub prefetch_proof_targets_histogram: Histogram,
     /// Histogram of the number of prefetch proof target chunks.
     pub prefetch_proof_chunks_histogram: Histogram,
+
     /// Histogram of the number of state update proof target chunks.
     pub state_update_proof_chunks_histogram: Histogram,
+    /// Histogram of the number of state update proof targets.
+    pub state_update_proof_targets_histogram: Histogram,
 
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
@@ -480,6 +485,8 @@ where
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
+
+        self.metrics.prefetch_proof_targets_histogram.record(proof_targets.len() as f64);
 
         // Send proof targets in chunks.
         let mut chunks = 0;
@@ -579,6 +586,8 @@ where
         let mut hashed_state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
+
+        self.metrics.state_update_proof_targets_histogram.record(proof_targets.len() as f64);
 
         // Process proof targets in chunks.
         let mut chunks = 0;
