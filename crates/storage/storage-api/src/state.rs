@@ -85,10 +85,12 @@ pub trait StateProvider:
     }
 }
 
-/// Trait implemented for database providers that can provide the [`StateCommitment`] type.
+/// Trait implemented for database providers that can provide the [`reth_trie_db::StateCommitment`]
+/// type.
 #[cfg(feature = "db-api")]
 pub trait StateCommitmentProvider: Send + Sync {
-    /// The [`StateCommitment`] type that can be used to perform state commitment operations.
+    /// The [`reth_trie_db::StateCommitment`] type that can be used to perform state commitment
+    /// operations.
     type StateCommitment: reth_trie_db::StateCommitment;
 }
 
