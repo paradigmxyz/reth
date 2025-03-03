@@ -471,11 +471,12 @@ where
     }
 
     /// Handles request for proof prefetch.
-    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
+    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
         // Send proof targets in chunks.
+        let mut chunks = 0;
         for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
                 config: self.config.clone(),
@@ -485,29 +486,32 @@ where
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
             });
+            chunks += 1;
         }
+        chunks
     }
 
     // Returns true if all state updates finished and all proofs processed.
     fn is_done(
         &self,
         proofs_processed: u64,
-        updates_received: u64,
-        prefetch_proofs_received: u64,
+        state_update_proofs_requested: u64,
+        prefetch_proofs_requested: u64,
         updates_finished: bool,
     ) -> bool {
-        let all_proofs_received = proofs_processed >= updates_received + prefetch_proofs_received;
+        let all_proofs_processed =
+            proofs_processed >= state_update_proofs_requested + prefetch_proofs_requested;
         let no_pending = !self.proof_sequencer.has_pending();
         debug!(
             target: "engine::root",
             proofs_processed,
-            updates_received,
-            prefetch_proofs_received,
+            state_update_proofs_requested,
+            prefetch_proofs_requested,
             no_pending,
             updates_finished,
             "Checking end condition"
         );
-        all_proofs_received && no_pending && updates_finished
+        all_proofs_processed && no_pending && updates_finished
     }
 
     /// Calls `get_proof_targets` with existing proof targets for prefetching.
@@ -568,8 +572,8 @@ where
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        let mut chunks = 0;
         // Process proof targets in chunks.
+        let mut chunks = 0;
         for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
             // Collect state updates for the current chunk to update accounts and storage slots that
             // were revealed from the proof.
@@ -690,8 +694,8 @@ where
     /// 6. This task exits after all pending proofs are processed.
     pub(crate) fn run(mut self) {
         // TODO convert those into fields
-        let mut prefetch_proofs_received = 0;
-        let mut updates_received = 0;
+        let mut prefetch_proofs_requested = 0;
+        let mut state_update_proofs_requested = 0;
         let mut proofs_processed = 0;
 
         let mut updates_finished = false;
@@ -707,41 +711,45 @@ where
                 Ok(message) => match message {
                     MultiProofMessage::PrefetchProofs(targets) => {
                         trace!(target: "engine::root", "processing MultiProofMessage::PrefetchProofs");
-                        prefetch_proofs_received += 1;
+
+                        let account_targets = targets.len();
+                        let storage_targets =
+                            targets.values().map(|slots| slots.len()).sum::<usize>();
+                        prefetch_proofs_requested += self.on_prefetch_proof(targets);
                         debug!(
                             target: "engine::root",
-                            targets = targets.len(),
-                            storage_targets = targets.values().map(|slots|
-                            slots.len()).sum::<usize>(),
-                            total_prefetches = prefetch_proofs_received,
+                            account_targets,
+                            storage_targets,
+                            prefetch_proofs_requested,
                             "Prefetching proofs"
                         );
-                        self.on_prefetch_proof(targets);
                     }
                     MultiProofMessage::StateUpdate(source, update) => {
                         trace!(target: "engine::root", "processing
         MultiProofMessage::StateUpdate");
-                        if updates_received == 0 {
+                        if state_update_proofs_requested == 0 {
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
                         last_update_time = Some(Instant::now());
 
+                        let len = update.len();
+                        state_update_proofs_requested += self.on_state_update(source, update);
                         debug!(
                             target: "engine::root",
                             ?source,
-                            len = update.len(),
+                            len,
+                            ?state_update_proofs_requested,
                             "Received new state update"
                         );
-                        updates_received += self.on_state_update(source, update);
                     }
                     MultiProofMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
                         updates_finished = true;
                         if self.is_done(
                             proofs_processed,
-                            updates_received,
-                            prefetch_proofs_received,
+                            state_update_proofs_requested,
+                            prefetch_proofs_requested,
                             updates_finished,
                         ) {
                             debug!(
@@ -765,8 +773,8 @@ where
 
                         if self.is_done(
                             proofs_processed,
-                            updates_received,
-                            prefetch_proofs_received,
+                            state_update_proofs_requested,
+                            prefetch_proofs_requested,
                             updates_finished,
                         ) {
                             debug!(
@@ -811,8 +819,8 @@ where
 
                         if self.is_done(
                             proofs_processed,
-                            updates_received,
-                            prefetch_proofs_received,
+                            state_update_proofs_requested,
+                            prefetch_proofs_requested,
                             updates_finished,
                         ) {
                             debug!(
@@ -843,7 +851,7 @@ where
 
         debug!(
             target: "engine::root",
-            total_updates = updates_received,
+            total_updates = state_update_proofs_requested,
             total_proofs = proofs_processed,
             total_time =? first_update_time.map(|t|t.elapsed()),
             time_from_last_update =?last_update_time.map(|t|t.elapsed()),
@@ -851,7 +859,7 @@ where
         );
 
         // update total metrics on finish
-        self.metrics.state_updates_received_histogram.record(updates_received as f64);
+        self.metrics.state_updates_received_histogram.record(state_update_proofs_requested as f64);
         self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
     }
 }
