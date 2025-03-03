@@ -28,7 +28,8 @@ use std::{
 };
 use tracing::{debug, error, trace};
 
-/// The size of proof targets chunk to spawn in one calculation.
+/// The size of proof targets chunk to spawn in one calculation. For more information about chunk
+/// sizes, see [`reth_trie::ChunkedMultiProofTargets`].
 const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
