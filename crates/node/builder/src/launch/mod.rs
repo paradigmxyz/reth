@@ -11,18 +11,6 @@ pub use exex::ExExLauncher;
 
 use std::future::Future;
 
-use reth_rpc::eth::RpcNodeCore;
-use reth_tasks::TaskExecutor;
-
-/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`RpcNodeCore`].
-pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as RpcNodeCore>::Provider,
-    <N as RpcNodeCore>::Pool,
-    <N as RpcNodeCore>::Evm,
-    <N as RpcNodeCore>::Network,
-    TaskExecutor,
->;
-
 /// A general purpose trait that launches a new node of any kind.
 ///
 /// Acts as a node factory that targets a certain node configuration and returns a handle to the
