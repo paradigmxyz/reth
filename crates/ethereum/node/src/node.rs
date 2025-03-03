@@ -178,7 +178,7 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: for<'a> ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>>,
+        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
 {
@@ -218,7 +218,7 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>>,
+        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
 {

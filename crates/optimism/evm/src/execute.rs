@@ -48,11 +48,11 @@ where
         }
     }
 
-    fn context_for_next_block<'a>(
+    fn context_for_next_block(
         &self,
         parent: &SealedHeader<N::BlockHeader>,
-        attributes: Self::NextBlockEnvCtx<'a>,
-    ) -> Self::ExecutionCtx<'a> {
+        attributes: Self::NextBlockEnvCtx,
+    ) -> Self::ExecutionCtx<'_> {
         OpBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,

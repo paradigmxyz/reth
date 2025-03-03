@@ -23,11 +23,11 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory,
         BlockValidationError,
     },
-    ConfigureEvm, ConfigureEvmFor, Database, Evm, HaltReasonFor, NextBlockEnvAttributes,
+    ConfigureEvm, ConfigureEvmFor, Database, Evm, HaltReasonFor,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_optimism_evm::OpReceiptBuilder;
+use reth_optimism_evm::{OpNextBlockEnvAttributes, OpReceiptBuilder};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::transaction::signed::OpTransaction;
 use reth_optimism_storage::predeploys;
@@ -163,10 +163,8 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
     N: OpPayloadPrimitives,
-    EvmConfig: for<'a> BlockExecutionStrategyFactory<
-        Primitives = N,
-        NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
-    >,
+    EvmConfig:
+        BlockExecutionStrategyFactory<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -251,10 +249,8 @@ where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
     N: OpPayloadPrimitives,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
-    EvmConfig: for<'a> BlockExecutionStrategyFactory<
-        Primitives = N,
-        NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
-    >,
+    EvmConfig:
+        BlockExecutionStrategyFactory<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
@@ -333,9 +329,9 @@ impl<Txs> OpBuilder<'_, Txs> {
     where
         N: OpPayloadPrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
-        EvmConfig: for<'a> BlockExecutionStrategyFactory<
+        EvmConfig: BlockExecutionStrategyFactory<
             Primitives = N,
-            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+            NextBlockEnvCtx = OpNextBlockEnvAttributes,
         >,
         ChainSpec: EthChainSpec + OpHardforks,
         DB: Database<Error = ProviderError> + AsRef<P>,
@@ -349,13 +345,13 @@ impl<Txs> OpBuilder<'_, Txs> {
             .strategy_for_next_block(
                 &mut *state,
                 ctx.parent(),
-                NextBlockEnvAttributes {
+                OpNextBlockEnvAttributes {
                     timestamp: ctx.attributes().timestamp(),
                     suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
                     prev_randao: ctx.attributes().prev_randao(),
                     gas_limit: ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit),
                     parent_beacon_block_root: ctx.attributes().parent_beacon_block_root(),
-                    withdrawals: None,
+                    extra_data: ctx.extra_data()?,
                 },
             )
             .map_err(PayloadBuilderError::other)?;
@@ -415,9 +411,9 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx: OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        EvmConfig: for<'a> BlockExecutionStrategyFactory<
+        EvmConfig: BlockExecutionStrategyFactory<
             Primitives = N,
-            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+            NextBlockEnvCtx = OpNextBlockEnvAttributes,
         >,
         ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,
@@ -543,7 +539,7 @@ impl<Txs> OpBuilder<'_, Txs> {
     where
         for<'a> EvmConfig: BlockExecutionStrategyFactory<
             Primitives = N,
-            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+            NextBlockEnvCtx = OpNextBlockEnvAttributes,
         >,
         ChainSpec: EthChainSpec + OpHardforks,
         N: OpPayloadPrimitives,

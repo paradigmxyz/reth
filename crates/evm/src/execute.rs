@@ -262,11 +262,11 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
 
     /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for `parent + 1`
     /// block.
-    fn context_for_next_block<'a>(
+    fn context_for_next_block(
         &self,
         parent: &SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
-        attributes: Self::NextBlockEnvCtx<'a>,
-    ) -> Self::ExecutionCtx<'a>;
+        attributes: Self::NextBlockEnvCtx,
+    ) -> Self::ExecutionCtx<'_>;
 
     /// Creates a strategy with given EVM and execution context.
     fn create_strategy<'a, DB, I>(
@@ -294,9 +294,9 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         &'a self,
         db: &'a mut State<DB>,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
-        attributes: Self::NextBlockEnvCtx<'a>,
+        attributes: Self::NextBlockEnvCtx,
     ) -> Result<Self::Strategy<'a, DB, NoOpInspector>, Self::Error> {
-        let evm_env = self.next_evm_env(parent, attributes)?;
+        let evm_env = self.next_evm_env(parent, &attributes)?;
         let evm = self.evm_with_env(db, evm_env);
         let ctx = self.context_for_next_block(parent, attributes);
         Ok(self.create_strategy(evm, ctx))

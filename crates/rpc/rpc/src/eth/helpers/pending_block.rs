@@ -44,13 +44,13 @@ where
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
-            Evm: for<'a> BlockExecutionStrategyFactory<
+            Evm: BlockExecutionStrategyFactory<
                 Primitives: NodePrimitives<
                     BlockHeader = Header,
                     SignedTx = ProviderTx<Self::Provider>,
                     Receipt = ProviderReceipt<Self::Provider>,
                 >,
-                NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+                NextBlockEnvCtx = NextBlockEnvAttributes,
             >,
         >,
     Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
@@ -67,7 +67,7 @@ where
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as reth_evm::ConfigureEvmEnv>::NextBlockEnvCtx<'_>, Self::Error> {
+    ) -> Result<<Self::Evm as reth_evm::ConfigureEvmEnv>::NextBlockEnvCtx, Self::Error> {
         Ok(NextBlockEnvAttributes {
             timestamp: parent.timestamp().saturating_add(12),
             suggested_fee_recipient: parent.beneficiary(),

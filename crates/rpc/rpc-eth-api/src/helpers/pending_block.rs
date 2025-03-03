@@ -111,7 +111,7 @@ pub trait LoadPendingBlock:
 
         let evm_env = self
             .evm_config()
-            .next_evm_env(&latest, self.next_env_attributes(&latest)?)
+            .next_evm_env(&latest, &self.next_env_attributes(&latest)?)
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
@@ -122,7 +122,7 @@ pub trait LoadPendingBlock:
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as ConfigureEvmEnv>::NextBlockEnvCtx<'_>, Self::Error>;
+    ) -> Result<<Self::Evm as ConfigureEvmEnv>::NextBlockEnvCtx, Self::Error>;
 
     /// Returns the locally built pending block
     #[expect(clippy::type_complexity)]

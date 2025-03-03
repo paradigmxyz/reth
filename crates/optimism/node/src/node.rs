@@ -10,7 +10,6 @@ use op_alloy_consensus::OpPooledTransaction;
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
-    NextBlockEnvAttributes,
 };
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
@@ -30,7 +29,7 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{BasicOpReceiptBuilder, OpEvmConfig};
+use reth_optimism_evm::{BasicOpReceiptBuilder, OpEvmConfig, OpNextBlockEnvAttributes};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -282,7 +281,7 @@ where
         >,
         Evm: ConfigureEvmEnv<
             TxEnv = revm_optimism::OpTransaction<TxEnv>,
-            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+            NextBlockEnvCtx = OpNextBlockEnvAttributes,
         >,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -357,7 +356,7 @@ where
         >,
         Evm: ConfigureEvm<
             TxEnv = revm_optimism::OpTransaction<TxEnv>,
-            NextBlockEnvCtx<'a> = NextBlockEnvAttributes<'a>,
+            NextBlockEnvCtx = OpNextBlockEnvAttributes,
         >,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
