@@ -629,12 +629,10 @@ where
         }
 
         // Send the rest of the state update that did not require any proofs as one update.
-        self.tx
-            .send(MultiProofMessage::EmptyProof {
-                sequence_number: self.proof_sequencer.next_sequence(),
-                state: hashed_state_update,
-            })
-            .unwrap();
+        let _ = self.tx.send(MultiProofMessage::EmptyProof {
+            sequence_number: self.proof_sequencer.next_sequence(),
+            state: hashed_state_update,
+        });
         chunks += 1;
 
         chunks
