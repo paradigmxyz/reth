@@ -144,7 +144,7 @@ impl<R: Read> Read for ProgressReader<R> {
         let bytes = self.reader.read(buf)?;
         if bytes > 0 {
             if let Err(e) = self.progress.update(bytes as u64) {
-                return Err(io::Error::new(io::ErrorKind::Other, e));
+                return Err(io::Error::other(e));
             }
         }
         Ok(bytes)
