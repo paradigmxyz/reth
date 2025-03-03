@@ -55,7 +55,6 @@ op-alloy-consensus.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-optimism-primitives/reth-codec",
     "reth-chainspec/std",
     "reth-consensus/std",
     "reth-consensus-common/std",
