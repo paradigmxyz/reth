@@ -20,15 +20,16 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
-use alloy_evm::EthEvmFactory;
-use alloy_primitives::{Address, U256};
+use alloy_evm::{EthEvmFactory, FromRecoveredTx};
+use alloy_primitives::U256;
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
+use reth_evm::{
+    ConfigureEvm, ConfigureEvmEnv, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv,
+};
 use reth_primitives::TransactionSigned;
-use reth_primitives_traits::transaction::execute::FillTxEnv;
-use reth_revm::{
-    context::{BlockEnv, CfgEnv, TxEnv},
+use revm::{
+    context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
     specification::hardfork::SpecId,
 };
@@ -48,20 +49,32 @@ pub mod eip6110;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
-pub struct EthEvmConfig {
+pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {
     chain_spec: Arc<ChainSpec>,
-    evm_factory: EthEvmFactory,
+    evm_factory: EvmFactory,
 }
 
 impl EthEvmConfig {
     /// Creates a new Ethereum EVM configuration with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, evm_factory: Default::default() }
+        Self::ethereum(chain_spec)
+    }
+
+    /// Creates a new Ethereum EVM configuration.
+    pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
+        Self::new_with_evm_factory(chain_spec, EthEvmFactory::default())
     }
 
     /// Creates a new Ethereum EVM configuration for the ethereum mainnet.
     pub fn mainnet() -> Self {
-        Self::new(MAINNET.clone())
+        Self::ethereum(MAINNET.clone())
+    }
+}
+
+impl<EvmFactory> EthEvmConfig<EvmFactory> {
+    /// Creates a new Ethereum EVM configuration with the given chain spec and EVM factory.
+    pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
+        Self { chain_spec, evm_factory }
     }
 
     /// Returns the chain spec associated with this configuration.
@@ -70,18 +83,19 @@ impl EthEvmConfig {
     }
 }
 
-impl ConfigureEvmEnv for EthEvmConfig {
+impl<EvmF> ConfigureEvmEnv for EthEvmConfig<EvmF>
+where
+    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
+        + Send
+        + Sync
+        + Unpin
+        + Clone,
+{
     type Header = Header;
     type Transaction = TransactionSigned;
     type Error = Infallible;
-    type TxEnv = TxEnv;
+    type TxEnv = EvmF::Tx;
     type Spec = SpecId;
-
-    fn tx_env(&self, transaction: &TransactionSigned, sender: Address) -> Self::TxEnv {
-        let mut tx_env = TxEnv::default();
-        transaction.fill_tx_env(&mut tx_env, sender);
-        tx_env
-    }
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         let spec = config::revm_spec(self.chain_spec(), header);
@@ -109,7 +123,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
+        attributes: NextBlockEnvAttributes<'_>,
     ) -> Result<EvmEnv, Self::Error> {
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_and_block_number(
@@ -168,8 +182,15 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl ConfigureEvm for EthEvmConfig {
-    type EvmFactory = EthEvmFactory;
+impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
+where
+    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
+        + Send
+        + Sync
+        + Unpin
+        + Clone,
+{
+    type EvmFactory = EvmF;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
         &self.evm_factory
@@ -181,12 +202,12 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, ChainSpec, MAINNET};
+    use reth_chainspec::{Chain, ChainSpec};
     use reth_evm::{execute::ProviderError, EvmEnv};
-    use reth_revm::{
+    use revm::{
         context::{BlockEnv, CfgEnv},
+        database::CacheDB,
         database_interface::EmptyDBTyped,
-        db::CacheDB,
         inspector::NoOpInspector,
     };
 
@@ -217,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_default_spec() {
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let evm_config = EthEvmConfig::mainnet();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
@@ -232,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_custom_cfg() {
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let evm_config = EthEvmConfig::mainnet();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
@@ -249,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_custom_block_and_tx() {
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let evm_config = EthEvmConfig::mainnet();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
@@ -270,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_spec_id() {
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let evm_config = EthEvmConfig::mainnet();
 
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
@@ -287,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_and_default_inspector() {
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let evm_config = EthEvmConfig::mainnet();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv::default();
@@ -301,7 +322,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_inspector_and_custom_cfg() {
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let evm_config = EthEvmConfig::mainnet();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let cfg_env = CfgEnv::default().with_chain_id(111);
@@ -317,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_inspector_and_custom_block_tx() {
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let evm_config = EthEvmConfig::mainnet();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create custom block and tx environment
@@ -334,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_evm_with_env_inspector_and_spec_id() {
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
+        let evm_config = EthEvmConfig::mainnet();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env = EvmEnv {

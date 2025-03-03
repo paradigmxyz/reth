@@ -2,6 +2,7 @@
 use crate::{ConfigureEvm, ConfigureEvmEnv};
 use alloy_evm::{EvmEnv, EvmFactory};
 use reth_primitives_traits::NodePrimitives;
+use revm::inspector::NoOpInspector;
 
 /// This is a type alias to make type bounds simpler when we have a [`NodePrimitives`] and need a
 /// [`ConfigureEvmEnv`] whose associated types match the [`NodePrimitives`] associated types.
@@ -43,3 +44,8 @@ pub type HaltReasonFor<Evm> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory<
 
 /// Helper to access [`ConfigureEvmEnv::Spec`] for a given [`ConfigureEvmEnv`].
 pub type SpecFor<Evm> = <Evm as ConfigureEvmEnv>::Spec;
+
+/// Helper to access [`EvmFactory::Evm`] for a given [`ConfigureEvm`].
+pub type EvmFor<Evm, DB, I = NoOpInspector> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory<
+    EvmEnv<<Evm as ConfigureEvmEnv>::Spec>,
+>>::Evm<DB, I>;

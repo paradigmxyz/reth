@@ -6,7 +6,7 @@ use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
+use reth_evm::execute::{BlockExecutionStrategyFactory, BlockExecutorProvider};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
@@ -68,7 +68,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvmFor<<Self::Types as NodeTypes>::Primitives>;
+    type Evm: BlockExecutionStrategyFactory<Primitives = <Self::Types as NodeTypes>::Primitives>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;
@@ -81,9 +81,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
     /// Network API.
     type Network: FullNetwork;
-
-    /// Builds new blocks.
-    type PayloadBuilder: PayloadBuilderFor<Self::Types>;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
@@ -99,9 +96,6 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
     /// Returns the handle to the network
     fn network(&self) -> &Self::Network;
-
-    /// Returns the configured payload builder.
-    fn payload_builder(&self) -> &Self::PayloadBuilder;
 
     /// Returns the handle to the payload builder service handling payload building requests from
     /// the engine.

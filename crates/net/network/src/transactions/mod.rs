@@ -49,7 +49,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, TransactionSigned};
+use reth_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{

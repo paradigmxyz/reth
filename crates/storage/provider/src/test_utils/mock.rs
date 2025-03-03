@@ -1,9 +1,9 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, DatabaseProvider, EthStorage, HeaderProvider,
-    ReceiptProviderIdExt, StateProvider, StateProviderBox, StateProviderFactory, StateReader,
-    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ChainSpecProvider, ChangeSetReader, EthStorage, HeaderProvider, ReceiptProviderIdExt,
+    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_consensus::{
     constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header, Transaction,
@@ -15,6 +15,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
+use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
 use reth_chainspec::{ChainInfo, EthChainSpec};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
@@ -27,10 +28,12 @@ use reth_primitives::{
     SealedHeader, TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
+use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, HashedPostStateProvider, OmmersProvider,
-    StageCheckpointReader, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+    BlockBodyIndicesProvider, DBProvider, DatabaseProviderFactory, HashedPostStateProvider,
+    NodePrimitivesProvider, OmmersProvider, StageCheckpointReader, StateCommitmentProvider,
+    StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -43,6 +46,7 @@ use std::{
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
+use tokio::sync::broadcast;
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug)]
@@ -57,6 +61,8 @@ pub struct MockEthProvider<T = TransactionSigned, ChainSpec = reth_chainspec::Ch
     pub chain_spec: Arc<ChainSpec>,
     /// Local state roots
     pub state_roots: Arc<Mutex<Vec<B256>>>,
+    tx: TxMock,
+    prune_modes: Arc<PruneModes>,
 }
 
 impl<T, ChainSpec> Clone for MockEthProvider<T, ChainSpec> {
@@ -67,6 +73,8 @@ impl<T, ChainSpec> Clone for MockEthProvider<T, ChainSpec> {
             accounts: self.accounts.clone(),
             chain_spec: self.chain_spec.clone(),
             state_roots: self.state_roots.clone(),
+            tx: self.tx.clone(),
+            prune_modes: self.prune_modes.clone(),
         }
     }
 }
@@ -80,6 +88,8 @@ impl<T> MockEthProvider<T> {
             accounts: Default::default(),
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
             state_roots: Default::default(),
+            tx: Default::default(),
+            prune_modes: Default::default(),
         }
     }
 }
@@ -136,6 +146,8 @@ impl<T, ChainSpec> MockEthProvider<T, ChainSpec> {
             accounts: self.accounts,
             chain_spec: Arc::new(chain_spec),
             state_roots: self.state_roots,
+            tx: self.tx,
+            prune_modes: self.prune_modes,
         }
     }
 }
@@ -200,19 +212,47 @@ impl<T: Transaction, ChainSpec: EthChainSpec> StateCommitmentProvider
     type StateCommitment = <MockNode as NodeTypes>::StateCommitment;
 }
 
-impl<T: Transaction, ChainSpec: EthChainSpec> DatabaseProviderFactory
+impl<T: Transaction, ChainSpec: EthChainSpec + Clone + 'static> DatabaseProviderFactory
     for MockEthProvider<T, ChainSpec>
 {
     type DB = DatabaseMock;
-    type Provider = DatabaseProvider<TxMock, MockNode>;
-    type ProviderRW = DatabaseProvider<TxMock, MockNode>;
+    type Provider = Self;
+    type ProviderRW = Self;
 
     fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+        // TODO: return Ok(self.clone()) when engine tests stops relying on an
+        // Error returned here https://github.com/paradigmxyz/reth/pull/14482
+        //Ok(self.clone())
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
     }
 
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        // TODO: return Ok(self.clone()) when engine tests stops relying on an
+        // Error returned here https://github.com/paradigmxyz/reth/pull/14482
+        //Ok(self.clone())
         Err(ConsistentViewError::Syncing { best_block: GotExpected::new(0, 0) }.into())
+    }
+}
+
+impl<T: Transaction, ChainSpec: EthChainSpec + 'static> DBProvider
+    for MockEthProvider<T, ChainSpec>
+{
+    type Tx = TxMock;
+
+    fn tx_ref(&self) -> &Self::Tx {
+        &self.tx
+    }
+
+    fn tx_mut(&mut self) -> &mut Self::Tx {
+        &mut self.tx
+    }
+
+    fn into_tx(self) -> Self::Tx {
+        self.tx
+    }
+
+    fn prune_modes_ref(&self) -> &PruneModes {
+        &self.prune_modes
     }
 }
 
@@ -865,4 +905,18 @@ impl<T: Transaction, ChainSpec: EthChainSpec> StateReader for MockEthProvider<T,
     fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
         Ok(None)
     }
+}
+
+impl<T: Transaction, ChainSpec: EthChainSpec> CanonStateSubscriptions
+    for MockEthProvider<T, ChainSpec>
+{
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<EthPrimitives> {
+        broadcast::channel(1).1
+    }
+}
+
+impl<T: Transaction, ChainSpec: EthChainSpec> NodePrimitivesProvider
+    for MockEthProvider<T, ChainSpec>
+{
+    type Primitives = EthPrimitives;
 }

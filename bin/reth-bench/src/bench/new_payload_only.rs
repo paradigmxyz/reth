@@ -11,9 +11,7 @@ use crate::{
     },
     valid_payload::call_new_payload,
 };
-use alloy_primitives::B256;
 use alloy_provider::Provider;
-use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
@@ -46,10 +44,10 @@ impl Command {
                 let block_res =
                     block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
-                let block = from_any_rpc_block(block);
+                let response = from_any_rpc_block(block).unwrap();
 
                 next_block += 1;
-                sender.send(block).await.unwrap();
+                sender.send(response).await.unwrap();
             }
         });
 
@@ -58,32 +56,31 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some(block) = {
+        while let Some((header, versioned_hashes, payload)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
             result
         } {
             // just put gas used here
-            let gas_used = block.gas_used;
-
-            let versioned_hashes: Vec<B256> =
-                block.body().blob_versioned_hashes_iter().copied().collect();
-            let parent_beacon_block_root = block.parent_beacon_block_root;
-            let (payload, _) =
-                ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+            let gas_used = header.gas_used;
 
             let block_number = payload.block_number();
 
             debug!(
                 target: "reth-bench",
-                number=?payload.block_number(),
+                number=?header.number,
                 "Sending payload to engine",
             );
 
             let start = Instant::now();
-            call_new_payload(&auth_provider, payload, parent_beacon_block_root, versioned_hashes)
-                .await?;
+            call_new_payload(
+                &auth_provider,
+                payload,
+                header.parent_beacon_block_root,
+                versioned_hashes,
+            )
+            .await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
             info!(%new_payload_result);

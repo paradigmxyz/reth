@@ -2,11 +2,6 @@
 
 use crate::OpConsensusError;
 use alloy_consensus::BlockHeader;
-use core::fmt;
-use reth_optimism_primitives::predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
-use reth_storage_api::StorageRootProvider;
-use reth_trie_common::HashedStorage;
-use revm::database::BundleAccount;
 
 /// Verifies that `withdrawals_root` (i.e. `l2tol1-msg-passer` storage root since Isthmus) field is
 /// set in block header.
@@ -21,31 +16,60 @@ pub fn ensure_withdrawals_storage_root_is_some<H: BlockHeader>(
 /// Verifies block header field `withdrawals_root` against storage root of
 /// `L2ToL1MessagePasser.sol` predeploy post block execution.
 ///
+/// Takes state updates resulting from execution of block.
+///
 /// See <https://specs.optimism.io/protocol/isthmus/exec-engine.html#l2tol1messagepasser-storage-root-in-header>.
-pub fn verify_withdrawals_storage_root<DB, H>(
-    predeploy_account_updates: Option<&BundleAccount>,
+#[cfg(feature = "std")]
+pub fn verify_withdrawals_root<DB, H>(
+    state_updates: &revm::database::BundleState,
     state: DB,
     header: H,
 ) -> Result<(), OpConsensusError>
 where
-    DB: StorageRootProvider,
-    H: BlockHeader + fmt::Debug,
+    DB: reth_storage_api::StorageRootProvider,
+    H: BlockHeader + core::fmt::Debug,
 {
     let header_storage_root =
         header.withdrawals_root().ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
 
-    // if block contained l2 withdrawals transactions, use predeploy storage updates from
-    // execution
-    let hashed_storage_updates = predeploy_account_updates.map(|acc| {
-        HashedStorage::from_plain_storage(
-            acc.status,
-            acc.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-        )
-    });
-
-    let storage_root = state
-        .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, hashed_storage_updates.unwrap_or_default())
+    let storage_root = reth_optimism_storage::predeploys::withdrawals_root(state_updates, state)
         .map_err(OpConsensusError::L2WithdrawalsRootCalculationFail)?;
+
+    if header_storage_root != storage_root {
+        return Err(OpConsensusError::L2WithdrawalsRootMismatch {
+            header: header_storage_root,
+            exec_res: storage_root,
+        })
+    }
+
+    Ok(())
+}
+
+/// Verifies block header field `withdrawals_root` against storage root of
+/// `L2ToL1MessagePasser.sol` predeploy post block execution.
+///
+/// Takes pre-hashed storage updates of `L2ToL1MessagePasser.sol` predeploy, resulting from
+/// execution of block, if any. Otherwise takes empty [`reth_trie_common::HashedStorage::default`].
+///
+/// See <https://specs.optimism.io/protocol/isthmus/exec-engine.html#l2tol1messagepasser-storage-root-in-header>.
+#[cfg(feature = "std")]
+pub fn verify_withdrawals_root_prehashed<DB, H>(
+    hashed_storage_updates: reth_trie_common::HashedStorage,
+    state: DB,
+    header: H,
+) -> Result<(), OpConsensusError>
+where
+    DB: reth_storage_api::StorageRootProvider,
+    H: BlockHeader + core::fmt::Debug,
+{
+    let header_storage_root =
+        header.withdrawals_root().ok_or(OpConsensusError::L2WithdrawalsRootMissing)?;
+
+    let storage_root = reth_optimism_storage::predeploys::withdrawals_root_prehashed(
+        hashed_storage_updates,
+        state,
+    )
+    .map_err(OpConsensusError::L2WithdrawalsRootCalculationFail)?;
 
     if header_storage_root != storage_root {
         return Err(OpConsensusError::L2WithdrawalsRootMismatch {
@@ -68,12 +92,14 @@ mod test {
     use reth_db_common::init::init_genesis;
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_node::OpNode;
+    use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_node_types,
         StateWriter,
     };
+    use reth_revm::db::BundleState;
     use reth_storage_api::StateProviderFactory;
-    use reth_trie::test_utils::storage_root_prehashed;
+    use reth_trie::{test_utils::storage_root_prehashed, HashedStorage};
     use reth_trie_common::HashedPostState;
 
     #[test]
@@ -117,8 +143,8 @@ mod test {
         let state_provider_factory = BlockchainProvider::new(provider_factory).unwrap();
 
         // validate block against existing state by passing empty state updates
-        verify_withdrawals_storage_root(
-            None,
+        verify_withdrawals_root(
+            &BundleState::default(),
             state_provider_factory.latest().expect("load state"),
             &header,
         )

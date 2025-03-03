@@ -34,7 +34,7 @@ pub struct ValidationTask {
 }
 
 impl ValidationTask {
-    /// Creates a new clonable task pair
+    /// Creates a new cloneable task pair
     pub fn new() -> (ValidationJobSender, Self) {
         let (tx, rx) = mpsc::channel(1);
         (ValidationJobSender { tx }, Self::with_receiver(rx))

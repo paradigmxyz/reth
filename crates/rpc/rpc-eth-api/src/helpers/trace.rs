@@ -204,14 +204,14 @@ pub trait Trace:
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
-                let block_txs = block.transactions_with_sender();
+                let block_txs = block.transactions_recovered();
 
                 this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
 
-                let tx_env = this.evm_config().tx_env(tx.tx(), tx.signer());
+                let tx_env = this.evm_config().tx_env(tx);
                 let (res, _) = this.inspect(
                     StateCacheDbRefMutWrapper(&mut db),
                     evm_env,
@@ -339,10 +339,10 @@ pub trait Trace:
                 let mut results = Vec::with_capacity(max_transactions);
 
                 let mut transactions = block
-                    .transactions_with_sender()
+                    .transactions_recovered()
                     .take(max_transactions)
                     .enumerate()
-                    .map(|(idx, (signer, tx))| {
+                    .map(|(idx, tx)| {
                         let tx_info = TransactionInfo {
                             hash: Some(*tx.tx_hash()),
                             index: Some(idx as u64),
@@ -350,7 +350,7 @@ pub trait Trace:
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = this.evm_config().tx_env(tx, *signer);
+                        let tx_env = this.evm_config().tx_env(tx);
                         (tx_info, tx_env)
                     })
                     .peekable();
@@ -468,18 +468,13 @@ pub trait Trace:
         db: &mut DB,
         evm_env: &EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
     ) -> Result<(), Self::Error> {
-        let mut system_caller =
-            SystemCaller::new(self.evm_config().clone(), self.provider().chain_spec());
-        // apply relevant system calls
-        system_caller
-            .pre_block_beacon_root_contract_call(db, evm_env, block.parent_beacon_block_root())
-            .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
+        let mut system_caller = SystemCaller::new(self.provider().chain_spec());
 
+        // apply relevant system calls
+        let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
         system_caller
-            .pre_block_blockhashes_contract_call(db, evm_env, block.parent_hash())
-            .map_err(|_| {
-                EthApiError::EvmCustom("failed to apply blockhashes system call".to_string())
-            })?;
+            .apply_pre_execution_changes(block.header(), &mut evm)
+            .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
 
         Ok(())
     }

@@ -20,13 +20,13 @@ reth-fs-util.workspace = true
 
 # compression
 zstd = { workspace = true, features = ["experimental", "zdict_builder"] }
-lz4_flex = { version = "0.11", default-features = false }
+lz4_flex.workspace = true
 
-memmap2 = "0.9.4"
+memmap2.workspace = true
 bincode.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tracing.workspace = true
-anyhow = "1.0"
+anyhow.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 

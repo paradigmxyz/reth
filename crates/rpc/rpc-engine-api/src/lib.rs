@@ -14,6 +14,7 @@ mod engine_api;
 
 /// Engine API capabilities.
 pub mod capabilities;
+pub use capabilities::EngineCapabilities;
 
 /// Engine API error.
 mod error;

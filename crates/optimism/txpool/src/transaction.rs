@@ -33,6 +33,9 @@ pub struct OpPooledTransaction<
 
     /// Optional conditional attached to this transaction.
     conditional: Option<Box<TransactionConditional>>,
+
+    /// Cached EIP-2718 encoded bytes of the transaction, lazily computed.
+    encoded_2718: OnceLock<Bytes>,
 }
 
 impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
@@ -43,16 +46,23 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
             estimated_tx_compressed_size: Default::default(),
             conditional: None,
             _pd: core::marker::PhantomData,
+            encoded_2718: Default::default(),
         }
     }
 
     /// Returns the estimated compressed size of a transaction in bytes scaled by 1e6.
     /// This value is computed based on the following formula:
     /// `max(minTransactionSize, intercept + fastlzCoef*fastlzSize)`
+    /// Uses cached EIP-2718 encoded bytes to avoid recomputing the encoding for each estimation.
     pub fn estimated_compressed_size(&self) -> u64 {
-        *self.estimated_tx_compressed_size.get_or_init(|| {
-            op_alloy_flz::tx_estimated_size_fjord(&self.inner.transaction().encoded_2718())
-        })
+        *self
+            .estimated_tx_compressed_size
+            .get_or_init(|| op_alloy_flz::tx_estimated_size_fjord(self.encoded_2718()))
+    }
+
+    /// Returns lazily computed EIP-2718 encoded bytes of the transaction.
+    pub fn encoded_2718(&self) -> &Bytes {
+        self.encoded_2718.get_or_init(|| self.inner.transaction().encoded_2718().into())
     }
 
     /// Conditional setter.

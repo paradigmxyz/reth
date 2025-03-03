@@ -109,12 +109,12 @@ where
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
-                let mut transactions = block.transactions_with_sender().enumerate().peekable();
+                let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let mut inspector = None;
-                while let Some((index, (signer, tx))) = transactions.next() {
+                while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
 
-                    let tx_env = this.eth_api().evm_config().tx_env(tx, *signer);
+                    let tx_env = this.eth_api().evm_config().tx_env(tx);
 
                     let (result, state_changes) = this.trace_transaction(
                         &opts,
@@ -229,7 +229,7 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(state_at, move |state| {
-                let block_txs = block.transactions_with_sender();
+                let block_txs = block.transactions_recovered();
 
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
@@ -246,7 +246,7 @@ where
                     *tx.tx_hash(),
                 )?;
 
-                let tx_env = this.eth_api().evm_config().tx_env(tx.tx(), tx.signer());
+                let tx_env = this.eth_api().evm_config().tx_env(&tx);
 
                 this.trace_transaction(
                     &opts,
@@ -530,11 +530,11 @@ where
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
                     // to be replayed
-                    let transactions = block.transactions_with_sender().take(num_txs);
+                    let transactions = block.transactions_recovered().take(num_txs);
 
                     // Execute all transactions until index
-                    for (signer, tx) in transactions {
-                        let tx_env = this.eth_api().evm_config().tx_env(tx, *signer);
+                    for tx in transactions {
+                        let tx_env = this.eth_api().evm_config().tx_env(tx);
                         let (res, _) = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }

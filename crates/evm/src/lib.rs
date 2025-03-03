@@ -17,18 +17,14 @@
 
 extern crate alloc;
 
-use alloy_consensus::transaction::Recovered;
-use alloy_eips::eip2930::AccessList;
+use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
 pub use alloy_evm::evm::EvmFactory;
+use alloy_evm::{FromRecoveredTx, IntoTxEnv};
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
-use revm::{
-    context::TxEnv,
-    inspector::{Inspector, NoOpInspector},
-};
+use revm::{context::TxEnv, inspector::Inspector};
 
-pub mod batch;
 pub mod either;
 /// EVM environment configuration.
 pub mod execute;
@@ -75,11 +71,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv<Self::Spec>,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv<Self::Spec>) -> EvmFor<Self, DB> {
         self.evm_factory().create_evm(db, evm_env)
     }
 
@@ -90,11 +82,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_for_block<DB: Database>(
-        &self,
-        db: DB,
-        header: &Self::Header,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> EvmFor<Self, DB> {
         let evm_env = self.evm_env(header);
         self.evm_with_env(db, evm_env)
     }
@@ -110,7 +98,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, I>
+    ) -> EvmFor<Self, DB, I>
     where
         DB: Database,
         I: InspectorFor<DB, Self>,
@@ -130,19 +118,11 @@ where
         (*self).evm_factory()
     }
 
-    fn evm_for_block<DB: Database>(
-        &self,
-        db: DB,
-        header: &Self::Header,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> EvmFor<Self, DB> {
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv<Self::Spec>,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, NoOpInspector> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv<Self::Spec>) -> EvmFor<Self, DB> {
         (*self).evm_with_env(db, evm_env)
     }
 
@@ -151,7 +131,7 @@ where
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<DB, I>
+    ) -> EvmFor<Self, DB, I>
     where
         DB: Database,
         I: InspectorFor<DB, Self>,
@@ -165,7 +145,7 @@ where
 ///
 /// Default trait method  implementation is done w.r.t. L1.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
+pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// The header type used by the EVM.
     type Header: BlockHeader;
 
@@ -173,21 +153,17 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     type Transaction: SignedTransaction;
 
     /// Transaction environment used by EVM.
-    type TxEnv: TransactionEnv;
+    type TxEnv: TransactionEnv + FromRecoveredTx<Self::Transaction> + IntoTxEnv<Self::TxEnv>;
 
     /// The error type that is returned by [`Self::next_evm_env`].
-    type Error: core::error::Error + Send + Sync;
+    type Error: core::error::Error + Send + Sync + 'static;
 
     /// Identifier of the EVM specification.
     type Spec: Debug + Copy + Send + Sync + 'static;
 
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
-    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv;
-
-    /// Returns a [`TxEnv`] from a [`Recovered`] transaction.
-    fn tx_env_from_recovered(&self, tx: Recovered<&Self::Transaction>) -> Self::TxEnv {
-        let (tx, address) = tx.into_parts();
-        self.tx_env(tx, address)
+    fn tx_env(&self, transaction: impl IntoTxEnv<Self::TxEnv>) -> Self::TxEnv {
+        transaction.into_tx_env()
     }
 
     /// Creates a new [`EvmEnv`] for the given header.
@@ -201,7 +177,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
+        attributes: NextBlockEnvAttributes<'_>,
     ) -> Result<EvmEnv<Self::Spec>, Self::Error>;
 }
 
@@ -210,7 +186,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 /// [`ConfigureEvmEnv::next_evm_env`] and contains fields that can't be derived from the
 /// parent header alone (attributes that are determined by the CL.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NextBlockEnvAttributes {
+pub struct NextBlockEnvAttributes<'a> {
     /// The timestamp of the next block.
     pub timestamp: u64,
     /// The suggested fee recipient for the next block.
@@ -219,6 +195,10 @@ pub struct NextBlockEnvAttributes {
     pub prev_randao: B256,
     /// Block gas limit.
     pub gas_limit: u64,
+    /// The parent beacon block root.
+    pub parent_beacon_block_root: Option<B256>,
+    /// Withdrawals
+    pub withdrawals: Option<&'a Withdrawals>,
 }
 
 /// Abstraction over transaction environment.

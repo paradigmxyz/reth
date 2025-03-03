@@ -197,6 +197,12 @@ impl PeersConfig {
         self
     }
 
+    /// Configure how long to refill outbound slots
+    pub const fn with_refill_slots_interval(mut self, interval: Duration) -> Self {
+        self.refill_slots_interval = interval;
+        self
+    }
+
     /// Maximum allowed outbound connections.
     pub const fn with_max_outbound(mut self, max_outbound: usize) -> Self {
         self.connection_info.max_outbound = max_outbound;

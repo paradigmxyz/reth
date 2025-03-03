@@ -93,7 +93,7 @@ where
     ) -> Self
     where
         V: EngineValidator<N::Engine, Block = BlockTy<N>>,
-        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>>,
+        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>> + 'static,
     {
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
@@ -163,10 +163,11 @@ mod tests {
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_consensus::EthBeaconConsensus;
-    use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
+    use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
+    use reth_node_ethereum::EthereumEngineValidator;
     use reth_primitives::SealedHeader;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
