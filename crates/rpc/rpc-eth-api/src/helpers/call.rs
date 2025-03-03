@@ -157,6 +157,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
                     };
 
+                    let ctx = this
+                        .evm_config()
+                        .context_for_next_block(&parent, this.next_env_attributes(&parent)?);
                     let (result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
@@ -164,11 +167,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let evm = this
                             .evm_config()
                             .evm_with_env_and_inspector(&mut db, evm_env, inspector);
-                        let builder = this.evm_config().create_block_builder(
-                            evm,
-                            &parent,
-                            this.next_env_attributes(&parent)?,
-                        );
+                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
                         simulate::execute_transactions(
                             builder,
                             calls,
@@ -179,11 +178,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )?
                     } else {
                         let evm = this.evm_config().evm_with_env(&mut db, evm_env);
-                        let builder = this.evm_config().create_block_builder(
-                            evm,
-                            &parent,
-                            this.next_env_attributes(&parent)?,
-                        );
+                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
                         simulate::execute_transactions(
                             builder,
                             calls,

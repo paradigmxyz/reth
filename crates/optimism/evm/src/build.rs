@@ -44,7 +44,7 @@ where
             SignedTx = T,
         >,
         NextBlockEnvCtx = OpNextBlockEnvAttributes,
-        ExecutionCtx<'a> = OpBlockExecutionCtx,
+        ExecutionCtx<'a> = OpBlockExecutionCtx<'a>,
     >,
 {
     fn build_block(
@@ -54,7 +54,6 @@ where
         let BlockBuilderInput {
             evm_env,
             execution_ctx: ctx,
-            next_attributes,
             transactions,
             output: BlockExecutionResult { receipts, gas_used, .. },
             bundle_state,
@@ -104,7 +103,7 @@ where
             gas_limit: evm_env.block_env.gas_limit,
             difficulty: evm_env.block_env.difficulty,
             gas_used: *gas_used,
-            extra_data: next_attributes.extra_data,
+            extra_data: ctx.extra_data.into_owned(),
             parent_beacon_block_root: ctx.parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,

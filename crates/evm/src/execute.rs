@@ -316,17 +316,15 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         &'a self,
         evm: EvmFor<Self, &'a mut State<DB>, I>,
         parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
-        attributes: Self::NextBlockEnvCtx,
+        ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockBuilder<Primitives = Self::Primitives, Strategy = Self::Strategy<'a, DB, I>>
     where
         DB: Database,
         I: InspectorFor<&'a mut State<DB>, Self> + 'a,
     {
-        let ctx = self.context_for_next_block(parent, attributes.clone());
         BasicBlockBuilder {
             strategy: self.create_strategy(evm, ctx.clone()),
             ctx,
-            next_attributes: attributes,
             builder: self.block_factory(),
             parent,
             transactions: Vec::new(),
@@ -342,7 +340,8 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     ) -> Result<impl BlockBuilder<Primitives = Self::Primitives>, Self::Error> {
         let evm_env = self.next_evm_env(parent, &attributes)?;
         let evm = self.evm_with_env(db, evm_env);
-        Ok(self.create_block_builder(evm, parent, attributes))
+        let ctx = self.context_for_next_block(parent, attributes);
+        Ok(self.create_block_builder(evm, parent, ctx))
     }
 }
 
@@ -356,8 +355,6 @@ pub struct BlockBuilderInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
     pub evm_env: EvmEnv<Evm::Spec>,
     /// [`BlockExecutionStrategyFactory::ExecutionCtx`] used to execute the block.
     pub execution_ctx: Evm::ExecutionCtx<'a>,
-    /// Next block environment attributes.
-    pub next_attributes: Evm::NextBlockEnvCtx,
     /// Parent block header.
     pub parent: &'a SealedHeader<HeaderTy<Evm::Primitives>>,
     /// Transactions that were executed in this block.
@@ -458,7 +455,6 @@ where
     strategy: Evm::Strategy<'a, DB, I>,
     transactions: Vec<Recovered<TxTy<Evm::Primitives>>>,
     ctx: Evm::ExecutionCtx<'a>,
-    next_attributes: Evm::NextBlockEnvCtx,
     parent: &'a SealedHeader<HeaderTy<Evm::Primitives>>,
     builder: Builder,
 }
@@ -508,7 +504,6 @@ where
         let block = self.builder.build_block(BlockBuilderInput {
             evm_env,
             execution_ctx: self.ctx,
-            next_attributes: self.next_attributes,
             parent: self.parent,
             transactions,
             output: &result,

@@ -4,11 +4,12 @@ use crate::{
     l1::ensure_create2_deployer, BasicOpReceiptBuilder, OpBlockBuilder, OpBlockExecutionError,
     OpEvmConfig, OpReceiptBuilder, ReceiptBuilderCtx,
 };
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::Recovered, BlockHeader, Eip658Value, Header, Receipt, Transaction as _, TxReceipt,
 };
 use alloy_evm::FromRecoveredTx;
+use alloy_primitives::Bytes;
 use op_alloy_consensus::OpDepositReceipt;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
@@ -45,7 +46,7 @@ where
     type Primitives = N;
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
         OpExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>, N, &'a ChainSpec>;
-    type ExecutionCtx<'a> = OpBlockExecutionCtx;
+    type ExecutionCtx<'a> = OpBlockExecutionCtx<'a>;
     type BlockFactory = OpBlockBuilder<ChainSpec>;
 
     fn block_factory(&self) -> &Self::BlockFactory {
@@ -56,6 +57,7 @@ where
         OpBlockExecutionCtx {
             parent_hash: block.header().parent_hash(),
             parent_beacon_block_root: block.header().parent_beacon_block_root(),
+            extra_data: Cow::Borrowed(block.header().extra_data()),
         }
     }
 
@@ -67,6 +69,7 @@ where
         OpBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            extra_data: Cow::Owned(attributes.extra_data),
         }
     }
 
@@ -84,12 +87,14 @@ where
 }
 
 /// Context for OP block execution.
-#[derive(Debug, Clone, Copy)]
-pub struct OpBlockExecutionCtx {
+#[derive(Debug, Clone)]
+pub struct OpBlockExecutionCtx<'a> {
     /// Parent block hash.
     pub parent_hash: B256,
     /// Parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
+    /// The block's extra data.
+    pub extra_data: Cow<'a, Bytes>,
 }
 
 /// Block execution strategy for Optimism.
@@ -101,7 +106,7 @@ pub struct OpExecutionStrategy<'a, E: Evm, N: NodePrimitives, ChainSpec> {
     receipt_builder: &'a dyn OpReceiptBuilder<N::SignedTx, E::HaltReason, Receipt = N::Receipt>,
 
     /// Context for block execution.
-    ctx: OpBlockExecutionCtx,
+    ctx: OpBlockExecutionCtx<'a>,
     /// The EVM used by strategy.
     evm: E,
     /// Receipts of executed transactions.
@@ -123,7 +128,7 @@ where
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(
         evm: E,
-        ctx: OpBlockExecutionCtx,
+        ctx: OpBlockExecutionCtx<'a>,
         chain_spec: ChainSpec,
         receipt_builder: &'a dyn OpReceiptBuilder<N::SignedTx, E::HaltReason, Receipt = N::Receipt>,
     ) -> Self {
