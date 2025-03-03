@@ -397,7 +397,7 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm::system_calls::{OnStateHook, StateChangeSource};
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{Account as RethAccount, StorageEntry};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, ConsistentDbView},
         test_utils::create_test_provider_factory_with_chain_spec,
@@ -406,21 +406,7 @@ mod tests {
     use reth_testing_utils::generators::{self, Rng};
     use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{
-        Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot,
-    };
-
-    fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> RethAccount {
-        RethAccount {
-            balance: revm_account.info.balance,
-            nonce: revm_account.info.nonce,
-            bytecode_hash: if revm_account.info.code_hash == KECCAK_EMPTY {
-                None
-            } else {
-                Some(revm_account.info.code_hash)
-            },
-        }
-    }
+    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
@@ -445,7 +431,7 @@ mod tests {
                     }
                 }
 
-                let account = RevmAccount {
+                let account = revm_state::Account {
                     info: AccountInfo {
                         balance: U256::from(rng.gen::<u64>()),
                         nonce: rng.gen::<u64>(),
@@ -474,7 +460,7 @@ mod tests {
 
         let state_updates = create_mock_state_updates(10, 10);
         let mut hashed_state = HashedPostState::default();
-        let mut accumulated_state: HashMap<Address, (RethAccount, HashMap<B256, U256>)> =
+        let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
             HashMap::default();
 
         {
@@ -482,7 +468,7 @@ mod tests {
 
             for update in &state_updates {
                 let account_updates = update.iter().map(|(address, account)| {
-                    (*address, Some(convert_revm_to_reth_account(account)))
+                    (*address, Some(Account::from_revm_account(account)))
                 });
                 provider_rw
                     .insert_account_for_hashing(account_updates)
@@ -512,7 +498,7 @@ mod tests {
                     .collect();
 
                 let entry = accumulated_state.entry(*address).or_default();
-                entry.0 = convert_revm_to_reth_account(account);
+                entry.0 = Account::from_revm_account(account);
                 entry.1.extend(storage);
             }
         }
