@@ -272,7 +272,7 @@ where
 
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
-    N: for<'a> FullNodeComponents<
+    N: FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
@@ -347,7 +347,7 @@ where
 
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
-    N: for<'a> FullNodeComponents<
+    N: FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,

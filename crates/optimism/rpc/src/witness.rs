@@ -70,7 +70,7 @@ where
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
         + 'static,
-    for<'a> EvmConfig: BlockExecutionStrategyFactory<
+    EvmConfig: BlockExecutionStrategyFactory<
             Primitives = Provider::Primitives,
             NextBlockEnvCtx = OpNextBlockEnvAttributes,
         > + 'static,

@@ -537,7 +537,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx: &OpPayloadBuilderCtx<EvmConfig, ChainSpec, N>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        for<'a> EvmConfig: BlockExecutionStrategyFactory<
+        EvmConfig: BlockExecutionStrategyFactory<
             Primitives = N,
             NextBlockEnvCtx = OpNextBlockEnvAttributes,
         >,

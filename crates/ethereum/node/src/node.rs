@@ -212,7 +212,7 @@ where
 
 impl<N> RethRpcAddOns<N> for EthereumAddOns<N>
 where
-    N: for<'a> FullNodeComponents<
+    N: FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
