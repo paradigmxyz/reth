@@ -87,7 +87,7 @@ pub struct IpcClientBuilder {
 
 impl Default for IpcClientBuilder {
     fn default() -> Self {
-        Self { request_timeout: Duration::new(60, 0) }
+        Self { request_timeout: Duration::from_secs(60) }
     }
 }
 
