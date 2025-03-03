@@ -28,6 +28,8 @@ use std::{
 };
 use tracing::{debug, error, trace};
 
+const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
+
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
@@ -473,7 +475,8 @@ where
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        for proof_targets_chunk in proof_targets.chunks(10) {
+        // Send proof targets in chunks.
+        for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
                 config: self.config.clone(),
                 source: None,
@@ -566,12 +569,20 @@ where
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
         let mut chunks = 0;
-        for proof_targets_chunk in proof_targets.chunks(10) {
+        // Process proof targets in chunks.
+        for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+            // Collect state updates for the current chunk to update accounts and storage slots that
+            // were revealed from the proof.
             let state_update_chunk = proof_targets_chunk.iter().fold(
                 HashedPostState::default(),
                 |mut acc, (&address, slots)| {
-                    acc.accounts
-                        .insert(address, *hashed_state_update.accounts.get(&address).unwrap());
+                    acc.accounts.insert(
+                        address,
+                        *hashed_state_update
+                            .accounts
+                            .get(&address)
+                            .expect("account should be present"),
+                    );
 
                     if let Entry::Occupied(mut original_entry) =
                         hashed_state_update.storages.entry(address)
@@ -579,11 +590,17 @@ where
                         let original_entry_mut = original_entry.get_mut();
                         let entry = acc.storages.entry(address).or_default();
                         for slot in slots {
-                            entry
-                                .storage
-                                .insert(*slot, original_entry_mut.storage.remove(slot).unwrap());
+                            entry.storage.insert(
+                                *slot,
+                                original_entry_mut
+                                    .storage
+                                    .remove(slot)
+                                    .expect("storage slot should be present"),
+                            );
                         }
 
+                        // If the original state update has no more storage slots, we can remove
+                        // both account and storage entries from the original state update.
                         if original_entry_mut.storage.is_empty() {
                             hashed_state_update.accounts.remove(&address);
                             original_entry.remove();
@@ -594,6 +611,7 @@ where
                 },
             );
 
+            // Send a chunk of state update and proof targets.
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
                 config: self.config.clone(),
                 source: Some(source),
@@ -612,8 +630,9 @@ where
                 state: hashed_state_update,
             })
             .unwrap();
+        chunks += 1;
 
-        chunks + 1
+        chunks
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
