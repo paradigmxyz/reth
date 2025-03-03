@@ -95,14 +95,18 @@ impl MultiProofTargets {
 /// targets.
 ///
 /// For example, for the following proof targets:
+/// ```text
 /// - 0x1: [0x10, 0x20, 0x30]
 /// - 0x2: [0x40]
 /// - 0x3: []
+/// ```
 ///
 /// and `size = 2`, the iterator will yield the following chunks:
+/// ```text
 /// - { 0x1: [0x10, 0x20] }
 /// - { 0x1: [0x30], 0x2: [0x40] }
 /// - { 0x3: [] }
+/// ```
 ///
 /// It follows two rules:
 /// - If account has associated storage slots, each storage slot is counted towards the chunk size.
