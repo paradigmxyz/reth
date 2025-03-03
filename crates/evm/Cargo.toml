@@ -67,6 +67,8 @@ std = [
     "reth-storage-errors/std",
     "futures-util/std",
     "derive_more/std",
+    "reth-storage-api/std",
+    "reth-trie-common/std",
 ]
 metrics = [
     "std",
@@ -80,6 +82,7 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "revm/test-utils",
+    "reth-trie-common/test-utils",
 ]
 op = [
     "revm-optimism",

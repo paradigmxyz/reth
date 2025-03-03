@@ -370,7 +370,6 @@ pub struct BlockBuilderInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
     pub state_root: B256,
 }
 
-
 /// Output of block building.
 #[derive(Debug, Clone)]
 pub struct BlockBuilderOutcome<N: NodePrimitives> {
@@ -398,7 +397,7 @@ pub trait BlockFactory<Evm: BlockExecutionStrategyFactory> {
 ///
 /// It wraps an inner [`BlockExecutionStrategy`] and provides a way to execute transactions and
 /// construct a block.
-/// 
+///
 /// This is a helper to erase `BasicBlockBuilder` type.
 pub trait BlockBuilder {
     /// The primitive types used by the inner [`BlockExecutionStrategy`].
