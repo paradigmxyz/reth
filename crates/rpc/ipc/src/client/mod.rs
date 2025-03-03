@@ -10,7 +10,7 @@ use jsonrpsee::{
     async_client::{Client, ClientBuilder},
     core::client::{ReceivedMessage, TransportReceiverT, TransportSenderT},
 };
-use std::io;
+use std::{io, time::Duration};
 use tokio::io::AsyncWriteExt;
 use tokio_util::codec::FramedRead;
 
@@ -79,9 +79,17 @@ impl IpcTransportClientBuilder {
 }
 
 /// Builder type for [`Client`]
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
-pub struct IpcClientBuilder;
+pub struct IpcClientBuilder {
+    request_timeout: Duration,
+}
+
+impl Default for IpcClientBuilder {
+    fn default() -> Self {
+        Self { request_timeout: Duration::from_secs(60) }
+    }
+}
 
 impl IpcClientBuilder {
     /// Connects to an IPC socket
@@ -106,7 +114,15 @@ impl IpcClientBuilder {
         S: TransportSenderT + Send,
         R: TransportReceiverT + Send,
     {
-        ClientBuilder::default().build_with_tokio(sender, receiver)
+        ClientBuilder::default()
+            .request_timeout(self.request_timeout)
+            .build_with_tokio(sender, receiver)
+    }
+
+    /// Set request timeout (default is 60 seconds).
+    pub fn request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
     }
 }
 
