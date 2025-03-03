@@ -110,6 +110,9 @@ where
             requests_hash,
         };
 
-        Ok(Block { header, body: BlockBody { transactions, ommers: vec![], withdrawals } })
+        Ok(Block {
+            header,
+            body: BlockBody { transactions, ommers: Default::default(), withdrawals },
+        })
     }
 }
