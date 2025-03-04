@@ -1,15 +1,28 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::testsuite::Environment;
-use eyre::Result;
+use crate::{setup_engine, testsuite::Environment, Adapter, TmpDB, TmpNodeAdapter};
+use alloy_primitives::B256;
+use alloy_rpc_types_engine::PayloadAttributes;
+use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
+use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::NodePrimitives;
+use reth_node_builder::{
+    components::NodeComponentsBuilder,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns},
+    Node, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
+    PayloadTypes,
+};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_primitives::Block;
+use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use revm::state::EvmState;
 use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot};
 
 /// Configuration for setting up a test environment
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Setup {
     /// Chain specification to use
     pub chain_spec: Option<Arc<ChainSpec>>,
@@ -21,6 +34,33 @@ pub struct Setup {
     pub state: Option<EvmState>,
     /// Network configuration
     pub network: NetworkSetup,
+    /// Shutdown channel to stop nodes when setup is dropped
+    shutdown_tx: Option<mpsc::Sender<()>>,
+    /// Is this setup in dev mode
+    pub is_dev: bool,
+}
+
+impl Default for Setup {
+    fn default() -> Self {
+        Self {
+            chain_spec: None,
+            genesis: None,
+            blocks: Vec::new(),
+            state: None,
+            network: NetworkSetup::default(),
+            shutdown_tx: None,
+            is_dev: true,
+        }
+    }
+}
+
+impl Drop for Setup {
+    fn drop(&mut self) {
+        // Send shutdown signal if the channel exists
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.try_send(());
+        }
+    }
 }
 
 impl Setup {
@@ -65,15 +105,119 @@ impl Setup {
         self
     }
 
+    /// Set dev mode
+    pub fn with_dev_mode(mut self, is_dev: bool) -> Self {
+        self.is_dev = is_dev;
+        self
+    }
+
     /// Apply the setup to the environment
-    pub async fn apply<I>(&self, _env: &mut Environment<I>) -> Result<()> {
-        // Apply chain spec, genesis, blocks, state, and network configuration
-        // This would involve setting up the node(s) with the specified configuration
-        // and ensuring it's in the desired state before running tests
+    pub async fn apply<N>(&mut self, env: &mut Environment) -> Result<()>
+    where
+        N: Default
+            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
+            + NodeTypesWithEngine
+            + NodeTypesForProvider,
+        N::Primitives: NodePrimitives<
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
+        >,
+        N::ComponentsBuilder: NodeComponentsBuilder<
+            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+            Components: NodeComponents<
+                TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+                Network: PeersHandleProvider,
+            >,
+        >,
+        N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
+            + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
+            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        >,
+        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
+            From<reth_payload_builder::EthPayloadBuilderAttributes>,
+        N::ChainSpec: From<ChainSpec> + Clone,
+    {
+        let chain_spec =
+            self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
 
-        // For each block in self.blocks, replay it on the node
+        let (clients_tx, clients_rx) = oneshot::channel();
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
 
-        // Set up the network connections if multiple nodes
+        self.shutdown_tx = Some(shutdown_tx);
+
+        let is_dev = self.is_dev;
+        let node_count = self.network.node_count;
+
+        let attributes_generator = move |timestamp| {
+            let attributes = PayloadAttributes {
+                timestamp,
+                prev_randao: B256::ZERO,
+                suggested_fee_recipient: alloy_primitives::Address::ZERO,
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
+            };
+            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes::from(
+                reth_payload_builder::EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
+            )
+        };
+
+        let result = setup_engine::<N>(
+            node_count,
+            Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
+            is_dev,
+            attributes_generator,
+        )
+        .await;
+
+        match result {
+            Ok((nodes, _tasks, _wallet)) => {
+                use jsonrpsee::http_client::HttpClientBuilder;
+
+                // create HTTP clients for each node's RPC endpoint
+                let mut clients = Vec::with_capacity(nodes.len());
+                for node in &nodes {
+                    let url = node.rpc_url().to_string();
+                    match HttpClientBuilder::default().build(&url) {
+                        Ok(client) => clients.push(client),
+                        Err(e) => {
+                            tracing::error!("Failed to create HTTP client for {}: {}", url, e);
+                            let _ = clients_tx.send(Vec::new());
+                            return Err(eyre!("Failed to create HTTP client: {}", e));
+                        }
+                    }
+                }
+
+                // send the clients back through the channel
+                let _ = clients_tx.send(clients);
+
+                // spawn a separate task just to handle the shutdown
+                tokio::spawn(async move {
+                    // keep nodes in scope to ensure they're not dropped
+                    let _nodes = nodes;
+                    // Wait for shutdown signal
+                    let _ = shutdown_rx.recv().await;
+                    // nodes will be dropped here when the task completes
+                });
+            }
+            Err(e) => {
+                let _ = clients_tx.send(Vec::new());
+                tracing::error!("Failed to setup nodes: {}", e);
+                return Err(eyre!("Failed to setup nodes: {}", e));
+            }
+        }
+
+        // wait for the clients to be created
+        let clients =
+            clients_rx.await.map_err(|_| eyre!("Failed to receive clients from setup task"))?;
+
+        if clients.is_empty() {
+            return Err(eyre!("No nodes were created"));
+        }
+
+        env.clients = clients;
+
+        // TODO: For each block in self.blocks, replay it on the node
 
         Ok(())
     }
@@ -88,18 +232,16 @@ pub struct Genesis {}
 pub struct NetworkSetup {
     /// Number of nodes to create
     pub node_count: usize,
-    /// Whether to disable discovery
-    pub disable_discovery: bool,
 }
 
 impl NetworkSetup {
     /// Create a new network setup with a single node
     pub fn single_node() -> Self {
-        Self { node_count: 1, disable_discovery: true }
+        Self { node_count: 1 }
     }
 
     /// Create a new network setup with multiple nodes
     pub fn multi_node(count: usize) -> Self {
-        Self { node_count: count, disable_discovery: true }
+        Self { node_count: count }
     }
 }

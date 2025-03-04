@@ -7348,6 +7348,7 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
+ "reth-node-ethereum",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
