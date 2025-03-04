@@ -2420,7 +2420,7 @@ where
             .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
         {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            self.on_invalid_block_checked(&parent_block, &block, &output, None);
             return Err(err.into())
         }
 
@@ -2485,7 +2485,7 @@ where
         // ensure state root matches
         if state_root != block.header().state_root() {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(
+            self.on_invalid_block_checked(
                 &parent_block,
                 &block,
                 &output,
