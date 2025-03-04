@@ -3,7 +3,7 @@ use core::fmt::Debug;
 
 use crate::error::ScrollConsensusError;
 use alloy_consensus::{BlockHeader as _, TxReceipt, EMPTY_OMMER_ROOT_HASH};
-use alloy_primitives::{B64, U256};
+use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
@@ -149,10 +149,6 @@ impl<ChainSpec: EthChainSpec + ScrollHardforks, H: BlockHeader> HeaderValidator<
         header: &H,
         _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        if header.nonce() != Some(B64::ZERO) {
-            return Err(ConsensusError::TheMergeNonceIsNotZero)
-        }
-
         if header.ommers_hash() != EMPTY_OMMER_ROOT_HASH {
             return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
         }
