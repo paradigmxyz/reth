@@ -373,7 +373,10 @@ where
                     pool,
                     chain_events,
                     ctx.task_executor().clone(),
-                    Default::default(),
+                    reth_transaction_pool::maintain::MaintainPoolConfig {
+                        max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
+                        ..Default::default()
+                    },
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
