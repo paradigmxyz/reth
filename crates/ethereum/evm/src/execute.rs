@@ -38,9 +38,9 @@ where
         + 'static,
 {
     type Primitives = EthPrimitives;
-    type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
         EthExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
+    type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
     fn block_assembler(&self) -> &Self::BlockAssembler {
