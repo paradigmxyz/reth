@@ -8165,6 +8165,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-network-ress"
+version = "1.2.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "arbitrary",
+ "futures",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "reth-eth-wire",
+ "reth-ethereum-primitives",
+ "reth-network",
+ "reth-network-api",
+ "reth-network-ress",
+ "reth-provider",
+ "reth-storage-errors",
+ "reth-tracing",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
 name = "reth-network-types"
 version = "1.2.0"
 dependencies = [

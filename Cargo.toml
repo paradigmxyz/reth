@@ -60,6 +60,7 @@ members = [
     "crates/net/network/",
     "crates/net/p2p/",
     "crates/net/peers/",
+    "crates/net/ress/",
     "crates/node/api/",
     "crates/node/builder/",
     "crates/node/core/",
@@ -530,6 +531,7 @@ sha2 = { version = "0.10", default-features = false }
 shellexpand = "3.0.0"
 smallvec = "1"
 strum = { version = "0.27", default-features = false }
+strum_macros = "0.27"
 syn = "2.0"
 thiserror = { version = "2.0.0", default-features = false }
 tracing = { version = "0.1.0", default-features = false }
