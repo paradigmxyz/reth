@@ -101,7 +101,7 @@ where
             account_prefix_set: PrefixSetMut::from(targets.keys().copied().map(Nibbles::unpack)),
             storage_prefix_sets: targets
                 .iter()
-                .filter(|&(_hashed_address, slots)| (!slots.is_empty()))
+                .filter(|&(_hashed_address, slots)| !slots.is_empty())
                 .map(|(hashed_address, slots)| {
                     (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
                 })
@@ -125,6 +125,8 @@ where
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
+        // stores the receiver for the storage proof outcome for the hashed addresses
+        // this way we can lazily await the outcome when we iterate over the map
         let mut storage_proofs =
             B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
 
@@ -333,6 +335,10 @@ where
         Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }
 }
+
+
+
+
 
 #[cfg(test)]
 mod tests {
