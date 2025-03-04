@@ -355,7 +355,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     }
 }
 
-/// Input for block building. Consumed by [`BlockFactory`].
+/// Input for block building. Consumed by [`BlockAssembler`].
 #[derive(derive_more::Debug)]
 #[non_exhaustive]
 pub struct BlockAssemblerInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
