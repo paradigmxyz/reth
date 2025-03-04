@@ -17,5 +17,5 @@ pub trait MinerApi {
 
     /// Sets the gaslimit to target towards during mining.
     #[method(name = "setGasLimit")]
-    fn set_gas_limit(&self, gas_price: U128) -> RpcResult<bool>;
+    fn set_gas_limit(&self, gas_limit: U128) -> RpcResult<bool>;
 }
