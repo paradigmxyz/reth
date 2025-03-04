@@ -7,6 +7,7 @@ use reth_primitives_traits::NodePrimitives;
 /// Notifications sent to an `ExEx`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[allow(clippy::large_enum_variant)]
 pub enum ExExNotification<N: NodePrimitives = reth_chain_state::EthPrimitives> {
     /// Chain got committed without a reorg, and only the new chain is returned.
     ChainCommitted {
@@ -97,6 +98,7 @@ pub(super) mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     #[allow(missing_docs)]
     #[serde(bound = "")]
+    #[allow(clippy::large_enum_variant)]
     pub enum ExExNotification<'a, N = EthPrimitives>
     where
         N: NodePrimitives,

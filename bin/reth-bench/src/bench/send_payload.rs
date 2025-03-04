@@ -14,7 +14,7 @@ use eyre::{OptionExt, Result};
 use op_alloy_rpc_types::Transaction as OpRpcTransaction;
 use reth_cli_runner::CliContext;
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 
 /// Command for generating and sending an `engine_newPayload` request constructed from an RPC
 /// block.
@@ -122,7 +122,9 @@ impl Command {
     fn read_input(&self) -> Result<String> {
         Ok(match &self.path {
             Some(path) => reth_fs_util::read_to_string(path)?,
-            None => String::from_utf8(std::io::stdin().bytes().collect::<Result<Vec<_>, _>>()?)?,
+            None => String::from_utf8(
+                BufReader::new(std::io::stdin()).bytes().collect::<Result<Vec<_>, _>>()?,
+            )?,
         })
     }
 

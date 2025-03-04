@@ -247,6 +247,7 @@ mod compact {
         tx_type: ScrollTxType,
         success: bool,
         cumulative_gas_used: u64,
+        #[allow(clippy::owned_cow)]
         logs: Cow<'a, Vec<Log>>,
         l1_fee: Option<U256>,
     }
