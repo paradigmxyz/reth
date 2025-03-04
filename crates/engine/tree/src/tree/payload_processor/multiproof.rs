@@ -1,7 +1,7 @@
 //! Multiproof task related functionality.
 
 use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::SparseTrieEvent};
-use alloy_primitives::map::HashSet;
+use alloy_primitives::{keccak256, map::HashSet, B256};
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
@@ -16,9 +16,8 @@ use reth_trie::{
     HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
 };
 use reth_trie_parallel::proof::ParallelProof;
-use revm_primitives::{keccak256, B256};
 use std::{
-    collections::{hash_map::Entry, BTreeMap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     ops::DerefMut,
     sync::{
         mpsc::{channel, Receiver, Sender},
@@ -28,8 +27,7 @@ use std::{
 };
 use tracing::{debug, error, trace};
 
-/// The size of proof targets chunk to spawn in one calculation. For more information about chunk
-/// sizes, see [`reth_trie::ChunkedMultiProofTargets`].
+/// The size of proof targets chunk to spawn in one calculation.
 const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
@@ -486,7 +484,7 @@ where
             .prefetch_proof_targets_storages_histogram
             .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
 
-        // Send proof targets in chunks.
+        // Process proof targets in chunks.
         let mut chunks = 0;
         for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
@@ -581,80 +579,53 @@ where
     ///
     /// Returns proof targets derived from the state update.
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
-        let mut hashed_state_update = evm_state_to_hashed_post_state(update);
-        let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
-        self.fetched_proof_targets.extend_ref(&proof_targets);
+        let hashed_state_update = evm_state_to_hashed_post_state(update);
+        // Split the state update into already fetched and not fetched according to the proof
+        // targets.
+        let (fetched_state_update, not_fetched_state_update) =
+            hashed_state_update.partition_by_targets(&self.fetched_proof_targets);
 
-        self.metrics
-            .state_update_proof_targets_accounts_histogram
-            .record(proof_targets.len() as f64);
-        self.metrics
-            .state_update_proof_targets_storages_histogram
-            .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+        let mut state_updates = 0;
+        // Send the state update with already fetched proof targets as one update.
+        if !fetched_state_update.is_empty() {
+            let _ = self.tx.send(MultiProofMessage::EmptyProof {
+                sequence_number: self.proof_sequencer.next_sequence(),
+                state: fetched_state_update,
+            });
+            state_updates += 1;
+        }
 
-        // Process proof targets in chunks.
+        // Process state updates in chunks.
         let mut chunks = 0;
-        for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-            // Collect state updates for the current chunk to update accounts and storage slots that
-            // were revealed from the proof.
-            let state_update_chunk = proof_targets_chunk.iter().fold(
-                HashedPostState::default(),
-                |mut acc, (&address, slots)| {
-                    acc.accounts.insert(
-                        address,
-                        *hashed_state_update
-                            .accounts
-                            .get(&address)
-                            .expect("account should be present"),
-                    );
+        let mut account_targets_total = 0;
+        let mut storage_targets_total = 0;
+        for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+            let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
+            self.fetched_proof_targets.extend_ref(&proof_targets);
 
-                    if let Entry::Occupied(mut original_storage_entry) =
-                        hashed_state_update.storages.entry(address)
-                    {
-                        let original_storage_entry_mut = original_storage_entry.get_mut();
-                        let storage_entry = acc.storages.entry(address).or_default();
-                        for slot in slots {
-                            storage_entry.storage.insert(
-                                *slot,
-                                original_storage_entry_mut
-                                    .storage
-                                    .remove(slot)
-                                    .expect("storage slot should be present"),
-                            );
-                        }
+            account_targets_total += proof_targets.len();
+            storage_targets_total += proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
-                        // If the original state update has no more storage slots, we can remove
-                        // both account and storage entries from the original state update.
-                        if original_storage_entry_mut.storage.is_empty() {
-                            hashed_state_update.accounts.remove(&address);
-                            original_storage_entry.remove();
-                        }
-                    }
-
-                    acc
-                },
-            );
-
-            // Send a chunk of state update and proof targets.
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
                 config: self.config.clone(),
                 source: Some(source),
-                hashed_state_update: state_update_chunk,
-                proof_targets: proof_targets_chunk,
+                hashed_state_update: chunk,
+                proof_targets,
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
             });
             chunks += 1;
         }
+
+        self.metrics
+            .state_update_proof_targets_accounts_histogram
+            .record(account_targets_total as f64);
+        self.metrics
+            .state_update_proof_targets_storages_histogram
+            .record(storage_targets_total as f64);
         self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
 
-        // Send the rest of the state update that did not require any proofs as one update.
-        let _ = self.tx.send(MultiProofMessage::EmptyProof {
-            sequence_number: self.proof_sequencer.next_sequence(),
-            state: hashed_state_update,
-        });
-
-        chunks + 1
+        state_updates + chunks
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
