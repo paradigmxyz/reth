@@ -16,11 +16,12 @@ reth-eth-wire.workspace = true
 reth-network-api.workspace = true
 reth-network.workspace = true
 reth-storage-errors.workspace = true
-reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-consensus.workspace = true
 
 # misc
 futures.workspace = true
@@ -51,7 +52,7 @@ proptest-arbitrary-interop.workspace = true
 test-utils = [
 	"reth-network/test-utils",
 	"reth-network-ress/test-utils",
-	"reth-primitives/test-utils",
+	"reth-ethereum-primitives/test-utils",
 	"reth-provider/test-utils"
 ]
 arbitrary = [
@@ -59,5 +60,5 @@ arbitrary = [
 	"reth-eth-wire/arbitrary",
 	"alloy-primitives/arbitrary",
 	"reth-network-ress/arbitrary",
-	"reth-primitives/arbitrary"
+	"reth-ethereum-primitives/arbitrary"
 ]

@@ -1,8 +1,9 @@
 //! Miscellaneous test utilities.
 
 use crate::{RessProtocolProvider, StateWitnessNet};
+use alloy_consensus::Header;
 use alloy_primitives::{map::B256HashMap, Bytes, B256};
-use reth_primitives::{BlockBody, Header};
+use reth_ethereum_primitives::BlockBody;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     sync::{Arc, Mutex},

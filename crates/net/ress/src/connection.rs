@@ -1,11 +1,13 @@
 use crate::{
     GetHeaders, NodeType, RessMessage, RessProtocolMessage, RessProtocolProvider, StateWitnessNet,
 };
+use alloy_consensus::Header;
 use alloy_primitives::{bytes::BytesMut, BlockHash, Bytes, B256};
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use reth_eth_wire::{message::RequestPair, multiplex::ProtocolConnection};
+use reth_ethereum_primitives::BlockBody;
 use reth_network_api::{test_utils::PeersHandle, PeerId, ReputationChangeKind};
-use reth_primitives::{BlockBody, Header};
+use reth_storage_errors::ProviderResult;
 use std::{
     collections::HashMap,
     future::Future,
@@ -15,55 +17,6 @@ use std::{
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
-
-/// Ress peer request.
-#[derive(Debug)]
-pub enum RessPeerRequest {
-    /// Get block headers.
-    GetHeaders {
-        /// The request for block headers.
-        request: GetHeaders,
-        /// The sender for the response.
-        tx: oneshot::Sender<Vec<Header>>,
-    },
-    /// Get block bodies.
-    GetBlockBodies {
-        /// The request for block bodies.
-        request: Vec<BlockHash>,
-        /// The sender for the response.
-        tx: oneshot::Sender<Vec<BlockBody>>,
-    },
-    /// Get bytecode for specific code hash
-    GetBytecode {
-        /// Target code hash that we want to get bytecode for.
-        code_hash: B256,
-        /// The sender for the response.
-        tx: oneshot::Sender<Bytes>,
-    },
-    /// Get witness for specific block.
-    GetWitness {
-        /// Target block hash that we want to get witness for.
-        block_hash: BlockHash,
-        /// The sender for the response.
-        tx: oneshot::Sender<StateWitnessNet>,
-    },
-}
-
-type WitnessFut = Pin<
-    Box<
-        dyn Future<Output = Result<(RequestPair<B256>, StateWitnessNet), oneshot::error::RecvError>>
-            + Send,
-    >,
->;
-
-enum OnRessMessageOutcome {
-    /// Response to send to the peer.
-    Response(BytesMut),
-    /// Terminate the connection.
-    Terminate,
-    /// No action.
-    None,
-}
 
 /// The connection handler for the custom `RLPx` protocol.
 #[derive(Debug)]
@@ -185,29 +138,28 @@ where
         }
     }
 
-    fn on_witness_request(&self, request: RequestPair<B256>) {
+    fn on_witness_response(
+        &self,
+        request: RequestPair<B256>,
+        witness_result: ProviderResult<Option<StateWitnessNet>>,
+    ) -> RessProtocolMessage {
         let peer_id = self.peer_id;
-        let provider = self.provider.clone();
-        let (tx, rx) = oneshot::channel();
-        tokio::spawn(async move {
-            let block_hash = request.message;
-            let witness = match provider.witness(block_hash).await {
-                Ok(Some(witness)) => {
-                    trace!(target: "ress::net::connection", %peer_id, %block_hash, "witness found");
-                    witness
-                }
-                Ok(None) => {
-                    trace!(target: "ress::net::connection", %peer_id, %block_hash, "witness not found");
-                    Default::default()
-                }
-                Err(error) => {
-                    trace!(target: "ress::net::connection", %peer_id, %block_hash, %error, "error retrieving witness");
-                    Default::default()
-                }
-            };
-            let _ = tx.send((request, witness));
-        });
-        self.pending_witnesses.push(Box::pin(rx));
+        let block_hash = request.message;
+        let witness = match witness_result {
+            Ok(Some(witness)) => {
+                trace!(target: "ress::net::connection", %peer_id, %block_hash, "witness found");
+                witness
+            }
+            Ok(None) => {
+                trace!(target: "ress::net::connection", %peer_id, %block_hash, "witness not found");
+                Default::default()
+            }
+            Err(error) => {
+                trace!(target: "ress::net::connection", %peer_id, %block_hash, %error, "error retrieving witness");
+                Default::default()
+            }
+        };
+        RessProtocolMessage::witness(request.request_id, witness)
     }
 
     fn on_ress_message(&mut self, msg: RessProtocolMessage) -> OnRessMessageOutcome {
@@ -240,8 +192,13 @@ where
                 return OnRessMessageOutcome::Response(response.encoded());
             }
             RessMessage::GetWitness(req) => {
-                trace!(target: "ress::net::connection", peer_id = %self.peer_id, block_hash = %req.message, "serving witness");
-                self.on_witness_request(req);
+                let block_hash = req.message;
+                trace!(target: "ress::net::connection", peer_id = %self.peer_id, %block_hash, "serving witness");
+                let provider = self.provider.clone();
+                self.pending_witnesses.push(Box::pin(async move {
+                    let result = provider.witness(block_hash).await;
+                    (req, result)
+                }));
             }
             RessMessage::Headers(res) => {
                 if let Some(RessPeerRequest::GetHeaders { tx, .. }) =
@@ -307,10 +264,10 @@ where
                 return Poll::Ready(Some(encoded));
             }
 
-            if let Poll::Ready(Some(Ok((request, witness)))) =
+            if let Poll::Ready(Some((request, witness_result))) =
                 this.pending_witnesses.poll_next_unpin(cx)
             {
-                let response = RessProtocolMessage::witness(request.request_id, witness);
+                let response = this.on_witness_response(request, witness_result);
                 return Poll::Ready(Some(response.encoded()));
             }
 
@@ -340,4 +297,50 @@ where
             return Poll::Pending;
         }
     }
+}
+
+type WitnessFut = Pin<
+    Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<Option<StateWitnessNet>>)> + Send>,
+>;
+
+/// Ress peer request.
+#[derive(Debug)]
+pub enum RessPeerRequest {
+    /// Get block headers.
+    GetHeaders {
+        /// The request for block headers.
+        request: GetHeaders,
+        /// The sender for the response.
+        tx: oneshot::Sender<Vec<Header>>,
+    },
+    /// Get block bodies.
+    GetBlockBodies {
+        /// The request for block bodies.
+        request: Vec<BlockHash>,
+        /// The sender for the response.
+        tx: oneshot::Sender<Vec<BlockBody>>,
+    },
+    /// Get bytecode for specific code hash
+    GetBytecode {
+        /// Target code hash that we want to get bytecode for.
+        code_hash: B256,
+        /// The sender for the response.
+        tx: oneshot::Sender<Bytes>,
+    },
+    /// Get witness for specific block.
+    GetWitness {
+        /// Target block hash that we want to get witness for.
+        block_hash: BlockHash,
+        /// The sender for the response.
+        tx: oneshot::Sender<StateWitnessNet>,
+    },
+}
+
+enum OnRessMessageOutcome {
+    /// Response to send to the peer.
+    Response(BytesMut),
+    /// Terminate the connection.
+    Terminate,
+    /// No action.
+    None,
 }

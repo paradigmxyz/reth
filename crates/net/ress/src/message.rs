@@ -4,13 +4,14 @@
 //! Examples include creating, encoding, and decoding protocol messages.
 
 use crate::{NodeType, StateWitnessNet};
+use alloy_consensus::Header;
 use alloy_primitives::{
     bytes::{Buf, BufMut},
     BlockHash, Bytes, B256,
 };
 use alloy_rlp::{BytesMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use reth_eth_wire::{message::RequestPair, protocol::Protocol, Capability};
-use reth_primitives::{BlockBody, Header};
+use reth_ethereum_primitives::BlockBody;
 
 /// An Ress protocol message, containing a message ID and payload.
 #[derive(PartialEq, Eq, Clone, Debug)]

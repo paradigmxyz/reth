@@ -1,8 +1,9 @@
 use crate::{GetHeaders, StateWitnessNet};
+use alloy_consensus::Header;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
+use reth_ethereum_primitives::BlockBody;
 use reth_network::eth_requests::{MAX_BODIES_SERVE, MAX_HEADERS_SERVE, SOFT_RESPONSE_LIMIT};
-use reth_primitives::{BlockBody, Header};
 use reth_storage_errors::provider::ProviderResult;
 use std::future::Future;
 

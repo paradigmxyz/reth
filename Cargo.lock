@@ -8168,6 +8168,7 @@ dependencies = [
 name = "reth-network-ress"
 version = "1.2.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -8175,10 +8176,10 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "reth-eth-wire",
+ "reth-ethereum-primitives",
  "reth-network",
  "reth-network-api",
  "reth-network-ress",
- "reth-primitives",
  "reth-provider",
  "reth-storage-errors",
  "reth-tracing",
