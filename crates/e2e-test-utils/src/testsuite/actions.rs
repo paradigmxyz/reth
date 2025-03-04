@@ -5,6 +5,7 @@ use alloy_eips::BlockId;
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{ExecutionPayload, PayloadAttributes};
 use eyre::Result;
+use std::future::Future;
 
 /// An action that can be performed on an instance.
 ///
@@ -324,5 +325,20 @@ where
 
             Ok(())
         })
+    }
+}
+
+/// Implementation of `Action` for any function/closure that takes an Environment
+/// reference and returns a Future resolving to Result<()>.
+///
+/// This allows using closures directly as actions with `.with_action(async move |env| {...})`.
+impl<I, F, Fut> Action<I> for F 
+where
+    I: Send + Sync + 'static,
+    F: FnMut(&Environment<I>) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<()>> + Send + 'static,
+{
+    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(self(env))
     }
 }
