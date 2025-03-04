@@ -44,7 +44,7 @@ where
             SignedTx = T,
         >,
         NextBlockEnvCtx = OpNextBlockEnvAttributes,
-        ExecutionCtx<'a> = OpBlockExecutionCtx<'a>,
+        ExecutionCtx<'a> = OpBlockExecutionCtx,
     >,
 {
     fn assemble_block(
@@ -103,7 +103,7 @@ where
             gas_limit: evm_env.block_env.gas_limit,
             difficulty: evm_env.block_env.difficulty,
             gas_used: *gas_used,
-            extra_data: ctx.extra_data.into_owned(),
+            extra_data: ctx.extra_data,
             parent_beacon_block_root: ctx.parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
