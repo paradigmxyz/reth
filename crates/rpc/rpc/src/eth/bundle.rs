@@ -178,7 +178,9 @@ where
                         .transact(eth_api.evm_config().tx_env(&tx))
                         .map_err(Eth::Error::from_evm_err)?;
 
-                    let gas_price = tx.effective_tip_per_gas(basefee).expect("fee is always valid; execution succeeded");
+                    let gas_price = tx
+                        .effective_tip_per_gas(basefee)
+                        .expect("fee is always valid; execution succeeded");
                     let gas_used = result.gas_used();
                     total_gas_used += gas_used;
 
