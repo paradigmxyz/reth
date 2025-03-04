@@ -1,13 +1,17 @@
 //! Traits for execution.
 
 use alloy_consensus::BlockHeader;
-use alloy_evm::Evm;
+use alloy_evm::{Evm, EvmEnv};
+use reth_storage_api::StateProvider;
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 // Re-export execution types
-use crate::{system_calls::OnStateHook, ConfigureEvmFor, Database, EvmFor, InspectorFor};
+use crate::{
+    system_calls::OnStateHook, ConfigureEvmFor, Database, EvmFor, HaltReasonFor, InspectorFor,
+};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
-    Address,
+    Address, B256,
 };
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
@@ -15,15 +19,16 @@ pub use reth_execution_errors::{
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives::{
-    NodePrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
+    HeaderTy, NodePrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
 };
+use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
 pub use reth_storage_errors::provider::ProviderError;
 use revm::{
     context::result::ExecutionResult,
     inspector::NoOpInspector,
     state::{Account, AccountStatus, EvmState},
 };
-use revm_database::{states::bundle_state::BundleRetention, State};
+use revm_database::{states::bundle_state::BundleRetention, BundleState, State};
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -214,13 +219,24 @@ pub trait BlockExecutionStrategy {
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
         self,
-    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        Self: Sized,
+    {
+        self.finish().map(|(_, result)| result)
+    }
 
     /// Sets a hook to be called after each state change during execution.
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>);
 
     /// Exposes mutable reference to EVM.
     fn evm_mut(&mut self) -> &mut Self::Evm;
+
+    /// Completes execution and returns the underlying EVM along with execution result.
+    #[expect(clippy::type_complexity)]
+    fn finish(
+        self,
+    ) -> Result<(Self::Evm, BlockExecutionResult<ReceiptTy<Self::Primitives>>), Self::Error>;
 }
 
 /// A factory that can create block execution strategies.
@@ -235,6 +251,11 @@ pub trait BlockExecutionStrategy {
 /// along with [`crate::ConfigureEvmEnv::NextBlockEnvCtx`] (in the case of block building).
 ///
 /// For more context on the strategy design, see the documentation for [`BlockExecutionStrategy`].
+///
+/// Additionally, trait implementations are expected to define a [`BlockAssembler`] type that is
+/// used to assemble blocks. Assember combined with strategy are used to create a [`BlockBuilder`].
+/// [`BlockBuilder`] exposes a simple API for building blocks and can be consumed by payload
+/// builder.
 ///
 /// [`ExecutionCtx`]: BlockExecutionStrategyFactory::ExecutionCtx
 pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'static {
@@ -252,7 +273,13 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     ///
     /// This is similar to [`alloy_evm::EvmEnv`], but only contains context unrelated to EVM and
     /// required for execution of an entire block.
-    type ExecutionCtx<'a>;
+    type ExecutionCtx<'a>: Clone;
+
+    /// A type that knows how to build a block.
+    type BlockAssembler: BlockAssembler<Self>;
+
+    /// Provides reference to configured [`BlockAssembler`].
+    fn block_assembler(&self) -> &Self::BlockAssembler;
 
     /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for a given block.
     fn context_for_block<'a>(
@@ -289,17 +316,225 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         self.create_strategy(evm, ctx)
     }
 
-    /// Creates a strategy for execution of a next block.
-    fn strategy_for_next_block<'a, DB: Database>(
+    /// Creates a [`BlockBuilder`]. Should be used when building a new block.
+    ///
+    /// Block builder wraps an inner [`BlockExecutionStrategy`] and has a similar interface. Builder
+    /// collects all of the executed transactions, and once [`BlockBuilder::finish`] is called, it
+    /// invokes the configured [`BlockAssembler`] to create a block.
+    fn create_block_builder<'a, DB, I>(
+        &'a self,
+        evm: EvmFor<Self, &'a mut State<DB>, I>,
+        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> impl BlockBuilder<Primitives = Self::Primitives, Strategy = Self::Strategy<'a, DB, I>>
+    where
+        DB: Database,
+        I: InspectorFor<&'a mut State<DB>, Self> + 'a,
+    {
+        BasicBlockBuilder {
+            strategy: self.create_strategy(evm, ctx.clone()),
+            ctx,
+            assembler: self.block_assembler(),
+            parent,
+            transactions: Vec::new(),
+        }
+    }
+
+    /// Creates a [`BlockBuilder`] for building of a new block. This is a helper to invoke
+    /// [`BlockExecutionStrategyFactory::create_block_builder`].
+    fn builder_for_next_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
-    ) -> Result<Self::Strategy<'a, DB, NoOpInspector>, Self::Error> {
+    ) -> Result<impl BlockBuilder<Primitives = Self::Primitives>, Self::Error> {
         let evm_env = self.next_evm_env(parent, &attributes)?;
         let evm = self.evm_with_env(db, evm_env);
         let ctx = self.context_for_next_block(parent, attributes);
-        Ok(self.create_strategy(evm, ctx))
+        Ok(self.create_block_builder(evm, parent, ctx))
+    }
+}
+
+/// Input for block building. Consumed by [`BlockAssembler`].
+#[derive(derive_more::Debug)]
+#[non_exhaustive]
+pub struct BlockAssemblerInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
+    /// Configuration of EVM used when executing the block.
+    ///
+    /// Contains context relevant to EVM such as [`revm::context::BlockEnv`].
+    pub evm_env: EvmEnv<Evm::Spec>,
+    /// [`BlockExecutionStrategyFactory::ExecutionCtx`] used to execute the block.
+    pub execution_ctx: Evm::ExecutionCtx<'a>,
+    /// Parent block header.
+    pub parent: &'a SealedHeader<HeaderTy<Evm::Primitives>>,
+    /// Transactions that were executed in this block.
+    pub transactions: Vec<TxTy<Evm::Primitives>>,
+    /// Output of block execution.
+    pub output: &'b BlockExecutionResult<ReceiptTy<Evm::Primitives>>,
+    /// [`BundleState`] after the block execution.
+    pub bundle_state: &'a BundleState,
+    /// Provider with access to state.
+    #[debug(skip)]
+    pub state_provider: &'b dyn StateProvider,
+    /// State root for this block.
+    pub state_root: B256,
+}
+
+/// A type that knows how to assemble a block.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait BlockAssembler<Evm: BlockExecutionStrategyFactory> {
+    /// Builds a block. see [`BlockAssemblerInput`] documentation for more details.
+    fn assemble_block(
+        &self,
+        input: BlockAssemblerInput<'_, '_, Evm>,
+    ) -> Result<BlockTy<Evm::Primitives>, BlockExecutionError>;
+}
+
+/// Output of block building.
+#[derive(Debug, Clone)]
+pub struct BlockBuilderOutcome<N: NodePrimitives> {
+    /// Result of block execution.
+    pub execution_result: BlockExecutionResult<N::Receipt>,
+    /// Hashed state after execution.
+    pub hashed_state: HashedPostState,
+    /// Trie updates collected during state root calculation.
+    pub trie_updates: TrieUpdates,
+    /// The built block.
+    pub block: RecoveredBlock<N::Block>,
+}
+
+/// A type that knows how to execute and build a block.
+///
+/// It wraps an inner [`BlockExecutionStrategy`] and provides a way to execute transactions and
+/// construct a block.
+///
+/// This is a helper to erase `BasicBlockBuilder` type.
+pub trait BlockBuilder {
+    /// The primitive types used by the inner [`BlockExecutionStrategy`].
+    type Primitives: NodePrimitives;
+    /// Inner [`BlockExecutionStrategy`].
+    type Strategy: BlockExecutionStrategy<
+        Primitives = Self::Primitives,
+        Error = BlockExecutionError,
+    >;
+
+    /// Invokes [`BlockExecutionStrategy::apply_pre_execution_changes`].
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
+
+    /// Invokes [`BlockExecutionStrategy::execute_transaction_with_result_closure`] and saves the
+    /// transaction in internal state.
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: Recovered<TxTy<Self::Primitives>>,
+        f: impl FnOnce(
+            &ExecutionResult<<<Self::Strategy as BlockExecutionStrategy>::Evm as Evm>::HaltReason>,
+        ),
+    ) -> Result<u64, BlockExecutionError>;
+
+    /// Invokes [`BlockExecutionStrategy::execute_transaction`] and saves the transaction in
+    /// internal state.
+    fn execute_transaction(
+        &mut self,
+        tx: Recovered<TxTy<Self::Primitives>>,
+    ) -> Result<u64, BlockExecutionError> {
+        self.execute_transaction_with_result_closure(tx, |_| ())
+    }
+
+    /// Completes the block building process and returns the [`BlockBuilderOutcome`].
+    fn finish(
+        self,
+        state_provider: impl StateProvider,
+    ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
+
+    /// Provides mutable access to the inner [`BlockExecutionStrategy`].
+    fn strategy_mut(&mut self) -> &mut Self::Strategy;
+
+    /// Helper to access inner [`BlockExecutionStrategy::Evm`].
+    fn evm_mut(&mut self) -> &mut <Self::Strategy as BlockExecutionStrategy>::Evm {
+        self.strategy_mut().evm_mut()
+    }
+
+    /// Consumes the type and returns the underlying [`BlockExecutionStrategy`].
+    fn into_strategy(self) -> Self::Strategy;
+}
+
+struct BasicBlockBuilder<'a, Evm, DB, I, Builder>
+where
+    Evm: BlockExecutionStrategyFactory,
+    DB: Database + 'a,
+    I: InspectorFor<&'a mut State<DB>, Evm> + 'a,
+{
+    strategy: Evm::Strategy<'a, DB, I>,
+    transactions: Vec<Recovered<TxTy<Evm::Primitives>>>,
+    ctx: Evm::ExecutionCtx<'a>,
+    parent: &'a SealedHeader<HeaderTy<Evm::Primitives>>,
+    assembler: Builder,
+}
+
+impl<'a, Evm, DB, I, Builder> BlockBuilder for BasicBlockBuilder<'a, Evm, DB, I, Builder>
+where
+    Evm: BlockExecutionStrategyFactory,
+    DB: Database + 'a,
+    I: InspectorFor<&'a mut State<DB>, Evm> + 'a,
+    Builder: BlockAssembler<Evm>,
+{
+    type Primitives = Evm::Primitives;
+    type Strategy = Evm::Strategy<'a, DB, I>;
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        self.strategy.apply_pre_execution_changes()
+    }
+
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: Recovered<TxTy<Self::Primitives>>,
+        f: impl FnOnce(&ExecutionResult<HaltReasonFor<Evm>>),
+    ) -> Result<u64, BlockExecutionError> {
+        let gas_used =
+            self.strategy.execute_transaction_with_result_closure(tx.as_recovered_ref(), f)?;
+        self.transactions.push(tx);
+        Ok(gas_used)
+    }
+
+    fn finish(
+        self,
+        state: impl StateProvider,
+    ) -> Result<BlockBuilderOutcome<Evm::Primitives>, BlockExecutionError> {
+        let (evm, result) = self.strategy.finish()?;
+        let (db, evm_env) = evm.finish();
+
+        // merge all transitions into bundle state
+        db.merge_transitions(BundleRetention::Reverts);
+
+        // calculate the state root
+        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let (state_root, trie_updates) = state.state_root_with_updates(hashed_state.clone())?;
+
+        let (transactions, senders) =
+            self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+
+        let block = self.assembler.assemble_block(BlockAssemblerInput {
+            evm_env,
+            execution_ctx: self.ctx,
+            parent: self.parent,
+            transactions,
+            output: &result,
+            bundle_state: &db.bundle_state,
+            state_provider: &state,
+            state_root,
+        })?;
+
+        let block = RecoveredBlock::new_unhashed(block, senders);
+
+        Ok(BlockBuilderOutcome { execution_result: result, hashed_state, trie_updates, block })
+    }
+
+    fn strategy_mut(&mut self) -> &mut Self::Strategy {
+        &mut self.strategy
+    }
+
+    fn into_strategy(self) -> Self::Strategy {
+        self.strategy
     }
 }
 
