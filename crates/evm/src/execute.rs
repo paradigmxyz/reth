@@ -311,7 +311,11 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         self.create_strategy(evm, ctx)
     }
 
-    /// Creates a [`BlockBuilder`] with the given [`BlockFactory`].
+    /// Creates a [`BlockBuilder`]. Should be used when building a new block.
+    ///
+    /// Block builder wraps an inner [`BlockExecutionStrategy`] and has a similar interface. Builder
+    /// collects all of the executed transactions, and once [`BlockBuilder::finish`] is called, it
+    /// invokes the configured [`BlockAssembler`] to create a block.
     fn create_block_builder<'a, DB, I>(
         &'a self,
         evm: EvmFor<Self, &'a mut State<DB>, I>,
@@ -331,7 +335,8 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         }
     }
 
-    /// Creates a strategy for execution of a next block.
+    /// Creates a [`BlockBuilder`] for building of a new block. This is a helper to invoke
+    /// [`BlockExecutionStrategyFactory::create_block_builder`].
     fn builder_for_next_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
