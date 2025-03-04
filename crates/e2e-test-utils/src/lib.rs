@@ -23,6 +23,7 @@ use wallet::Wallet;
 
 /// Wrapper type to create test nodes
 pub mod node;
+pub mod testsuite;
 
 /// Helper for transaction operations
 pub mod transaction;
