@@ -181,6 +181,8 @@ impl<ChainSpec: EthChainSpec + ChainConfig<Config = ScrollChainConfig> + ScrollH
 pub(crate) trait ScrollEvmT: Evm {
     /// Sets whether the evm should enable or disable the base fee checks.
     fn with_base_fee_check(&mut self, enabled: bool);
+    /// Sets whether the evm should enable or disable the nonce checks.
+    fn with_nonce_check(&mut self, enabled: bool);
     /// Returns the l1 fee for the transaction.
     fn l1_fee(&self) -> Option<U256>;
 }
@@ -192,6 +194,10 @@ where
 {
     fn with_base_fee_check(&mut self, enabled: bool) {
         self.ctx_mut().cfg.disable_base_fee = !enabled;
+    }
+
+    fn with_nonce_check(&mut self, enabled: bool) {
+        self.ctx_mut().cfg.disable_nonce_check = !enabled;
     }
 
     fn l1_fee(&self) -> Option<U256> {

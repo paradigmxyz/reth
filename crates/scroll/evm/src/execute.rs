@@ -264,8 +264,9 @@ where
 
         let hash = tx.tx_hash();
 
-        // disable the base fee checks for l1 messages.
+        // disable the base fee and nonce checks for l1 messages.
         self.evm.with_base_fee_check(!tx.is_l1_message());
+        self.evm.with_nonce_check(!tx.is_l1_message());
 
         // execute the transaction and commit the result to the database
         let ResultAndState { result, state } =
