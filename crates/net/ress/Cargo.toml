@@ -28,9 +28,6 @@ tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 tracing.workspace = true
 
-# feature `test-utils`
-parking_lot = { workspace = true, optional = true }
-
 # feature `arbitrary`
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
@@ -44,14 +41,12 @@ reth-tracing.workspace = true
 reth-network-ress = { path = ".", features = ["test-utils"] }
 
 tokio.workspace = true
-parking_lot.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-assert_matches.workspace = true
 
 [features]
-test-utils = ["parking_lot"]
+test-utils = []
 arbitrary = ["dep:arbitrary", "reth-eth-wire/arbitrary"]

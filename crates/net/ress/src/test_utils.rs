@@ -2,10 +2,12 @@
 
 use crate::{RessProtocolProvider, StateWitnessNet};
 use alloy_primitives::{map::B256HashMap, Bytes, B256};
-use parking_lot::Mutex;
 use reth_primitives::{BlockBody, Header};
 use reth_storage_errors::provider::ProviderResult;
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 /// Noop implementation of [`RessProtocolProvider`].
 #[derive(Clone, Copy, Default, Debug)]
@@ -48,62 +50,62 @@ impl MockRessProtocolProvider {
 
     /// Insert header.
     pub fn add_header(&self, block_hash: B256, header: Header) {
-        self.headers.lock().insert(block_hash, header);
+        self.headers.lock().unwrap().insert(block_hash, header);
     }
 
     /// Extend headers from iterator.
     pub fn extend_headers(&self, headers: impl IntoIterator<Item = (B256, Header)>) {
-        self.headers.lock().extend(headers);
+        self.headers.lock().unwrap().extend(headers);
     }
 
     /// Insert block body.
     pub fn add_block_body(&self, block_hash: B256, body: BlockBody) {
-        self.block_bodies.lock().insert(block_hash, body);
+        self.block_bodies.lock().unwrap().insert(block_hash, body);
     }
 
     /// Extend block bodies from iterator.
     pub fn extend_block_bodies(&self, bodies: impl IntoIterator<Item = (B256, BlockBody)>) {
-        self.block_bodies.lock().extend(bodies);
+        self.block_bodies.lock().unwrap().extend(bodies);
     }
 
     /// Insert bytecode.
     pub fn add_bytecode(&self, code_hash: B256, bytecode: Bytes) {
-        self.bytecodes.lock().insert(code_hash, bytecode);
+        self.bytecodes.lock().unwrap().insert(code_hash, bytecode);
     }
 
     /// Extend bytecodes from iterator.
     pub fn extend_bytecodes(&self, bytecodes: impl IntoIterator<Item = (B256, Bytes)>) {
-        self.bytecodes.lock().extend(bytecodes);
+        self.bytecodes.lock().unwrap().extend(bytecodes);
     }
 
     /// Insert witness.
     pub fn add_witness(&self, block_hash: B256, witness: StateWitnessNet) {
-        self.witnesses.lock().insert(block_hash, witness);
+        self.witnesses.lock().unwrap().insert(block_hash, witness);
     }
 
     /// Extend witnesses from iterator.
     pub fn extend_witnesses(&self, witnesses: impl IntoIterator<Item = (B256, StateWitnessNet)>) {
-        self.witnesses.lock().extend(witnesses);
+        self.witnesses.lock().unwrap().extend(witnesses);
     }
 }
 
 impl RessProtocolProvider for MockRessProtocolProvider {
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
-        Ok(self.headers.lock().get(&block_hash).cloned())
+        Ok(self.headers.lock().unwrap().get(&block_hash).cloned())
     }
 
     fn block_body(&self, block_hash: B256) -> ProviderResult<Option<BlockBody>> {
-        Ok(self.block_bodies.lock().get(&block_hash).cloned())
+        Ok(self.block_bodies.lock().unwrap().get(&block_hash).cloned())
     }
 
     fn bytecode(&self, code_hash: B256) -> ProviderResult<Option<Bytes>> {
-        Ok(self.bytecodes.lock().get(&code_hash).cloned())
+        Ok(self.bytecodes.lock().unwrap().get(&code_hash).cloned())
     }
 
     async fn witness(&self, block_hash: B256) -> ProviderResult<Option<StateWitnessNet>> {
         if let Some(delay) = self.witness_delay {
             tokio::time::sleep(delay).await;
         }
-        Ok(self.witnesses.lock().get(&block_hash).cloned())
+        Ok(self.witnesses.lock().unwrap().get(&block_hash).cloned())
     }
 }
