@@ -129,18 +129,18 @@ serde = [
     "reth-provider/serde",
 ]
 test-utils = [
-	"dep:tempfile",
-	"reth-transaction-pool/test-utils",
-	"reth-network-types/test-utils",
-	"reth-chainspec/test-utils",
-	"reth-consensus/test-utils",
-	"reth-discv4/test-utils",
-	"reth-network/test-utils",
-	"reth-network-p2p/test-utils",
-	"reth-primitives/test-utils",
-	"reth-primitives-traits/test-utils",
-	"reth-provider/test-utils",
-	"reth-ethereum-primitives/test-utils"
+    "dep:tempfile",
+    "reth-transaction-pool/test-utils",
+    "reth-network-types/test-utils",
+    "reth-chainspec/test-utils",
+    "reth-consensus/test-utils",
+    "reth-discv4/test-utils",
+    "reth-network/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider/test-utils",
+    "reth-ethereum-primitives/test-utils"
 ]
 
 [[bench]]
