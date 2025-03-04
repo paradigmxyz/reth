@@ -299,7 +299,8 @@ where
         }
 
         loop {
-            if let Poll::Ready(Some(cmd)) = this.commands.poll_next_unpin(cx) {
+            if let Poll::Ready(maybe_cmd) = this.commands.poll_next_unpin(cx) {
+                let Some(cmd) = maybe_cmd else { return Poll::Ready(None) };
                 let message = this.on_command(cmd);
                 let encoded = message.encoded();
                 trace!(target: "ress::net::connection", peer_id = %this.peer_id, ?message, encoded = alloy_primitives::hex::encode(&encoded), "Sending peer command");
@@ -313,7 +314,8 @@ where
                 return Poll::Ready(Some(response.encoded()));
             }
 
-            if let Poll::Ready(Some(next)) = this.conn.poll_next_unpin(cx) {
+            if let Poll::Ready(maybe_msg) = this.conn.poll_next_unpin(cx) {
+                let Some(next) = maybe_msg else { return Poll::Ready(None) };
                 let msg = match RessProtocolMessage::decode_message(&mut &next[..]) {
                     Ok(msg) => {
                         trace!(target: "ress::net::connection", peer_id = %this.peer_id, message = ?msg.message_type, "Processing message");
