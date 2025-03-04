@@ -49,13 +49,7 @@ reth-ethereum-primitives.workspace = true
 # async/futures
 futures.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = [
-    "io-util",
-    "net",
-    "macros",
-    "rt-multi-thread",
-    "time",
-] }
+tokio = { workspace = true, features = ["io-util", "net", "macros", "rt-multi-thread", "time"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 
@@ -74,11 +68,7 @@ rustc-hash.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 rand.workspace = true
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 derive_more.workspace = true
 schnellru.workspace = true
 itertools.workspace = true
@@ -139,17 +129,18 @@ serde = [
     "reth-provider/serde",
 ]
 test-utils = [
-    "dep:tempfile",
-    "reth-transaction-pool/test-utils",
-    "reth-network-types/test-utils",
-    "reth-chainspec/test-utils",
-    "reth-consensus/test-utils",
-    "reth-discv4/test-utils",
-    "reth-network/test-utils",
-    "reth-network-p2p/test-utils",
-    "reth-primitives/test-utils",
-    "reth-primitives-traits/test-utils",
-    "reth-provider/test-utils",
+	"dep:tempfile",
+	"reth-transaction-pool/test-utils",
+	"reth-network-types/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-discv4/test-utils",
+	"reth-network/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-provider/test-utils",
+	"reth-ethereum-primitives/test-utils"
 ]
 
 [[bench]]
