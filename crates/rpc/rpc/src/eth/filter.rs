@@ -274,7 +274,7 @@ where
         );
     }
 
-    /// Watch block reorgs and update filters accordingly.
+    /// Watch block reorgs and update filters accordingly. (need update)
     async fn watch_reorgs(&self, mut notifications: CanonStateNotificationStream) {
         while let Some(notification) = notifications.next().await {
             if let CanonStateNotification::Reorg { old, .. } = notification {
