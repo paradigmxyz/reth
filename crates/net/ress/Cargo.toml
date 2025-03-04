@@ -53,7 +53,7 @@ test-utils = [
     "reth-network/test-utils",
     "reth-network-ress/test-utils",
     "reth-ethereum-primitives/test-utils",
-    "reth-provider/test-utils"
+    "reth-provider/test-utils",
 ]
 arbitrary = [
     "dep:arbitrary",
@@ -61,5 +61,5 @@ arbitrary = [
     "alloy-primitives/arbitrary",
     "reth-network-ress/arbitrary",
     "reth-ethereum-primitives/arbitrary",
-    "alloy-consensus/arbitrary"
+    "alloy-consensus/arbitrary",
 ]
