@@ -164,11 +164,11 @@ where
     DB: Database + 'db,
     E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<TransactionSigned>>,
 {
-    type Primitives = EthPrimitives;
-    type Error = BlockExecutionError;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
     type Evm = E;
 
-    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.apply_pre_execution_changes()
     }
 
@@ -176,11 +176,11 @@ where
         &mut self,
         tx: Recovered<&TransactionSigned>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, Self::Error> {
+    ) -> Result<u64, BlockExecutionError> {
         self.inner.execute_transaction_with_result_closure(tx, f)
     }
 
-    fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), Self::Error> {
+    fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {
         if let Some(withdrawals) = self.inner.ctx.withdrawals.clone() {
             apply_withdrawals_contract_call(withdrawals.as_ref(), self.inner.evm_mut())?;
         }
