@@ -373,9 +373,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        if block_number == self.best_block_number().unwrap_or_default() &&
-            block_number == self.last_block_number().unwrap_or_default()
-        {
+        // if the block number is the same as the currently best block number on disk we can use the
+        // latest state provider here
+        if block_number == self.best_block_number().unwrap_or_default() {
             return Ok(Box::new(LatestStateProvider::new(self)))
         }
 
@@ -1123,6 +1123,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+        // The best block number is tracked via the finished stage which gets updated in the same tx
+        // when new blocks committed
         Ok(self
             .get_stage_checkpoint(StageId::Finish)?
             .map(|checkpoint| checkpoint.block_number)
