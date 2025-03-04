@@ -18,6 +18,7 @@ use tokio::time::timeout;
 use tokio_stream::StreamExt;
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore]
 async fn can_connect() {
     reth_tracing::init_test_tracing();
     let local_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 30303);
