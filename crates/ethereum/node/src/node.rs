@@ -22,7 +22,8 @@ use reth_node_builder::{
         EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns, RpcAddOns,
         RpcHandle,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
+    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
+    PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
@@ -306,7 +307,8 @@ where
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = EthEvmConfig::new(ctx.chain_spec());
+        let evm_config = EthEvmConfig::new(ctx.chain_spec())
+            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
         let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))

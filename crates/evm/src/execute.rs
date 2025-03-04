@@ -253,7 +253,7 @@ pub trait BlockExecutionStrategy {
 /// For more context on the strategy design, see the documentation for [`BlockExecutionStrategy`].
 ///
 /// Additionally, trait implementations are expected to define a [`BlockAssembler`] type that is
-/// used to assemble blocks. Assember combined with strategy are used to create a [`BlockBuilder`].
+/// used to assemble blocks. Assembler combined with strategy are used to create a [`BlockBuilder`].
 /// [`BlockBuilder`] exposes a simple API for building blocks and can be consumed by payload
 /// builder.
 ///
