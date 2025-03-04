@@ -2975,16 +2975,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         block: BlockNumber,
         remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        let mut canonical_headers_cursor = self.tx.cursor_write::<tables::CanonicalHeaders>()?;
-        let mut rev_headers = canonical_headers_cursor.walk_back(None)?;
-
-        while let Some(Ok((number, hash))) = rev_headers.next() {
-            if number <= block {
-                break
-            }
+        for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
-            rev_headers.delete_current()?;
         }
+
+        // Only prune canonical headers after we've removed the block hashes as we rely on data from
+        // this table in `canonical_hashes_range`.
+        self.remove::<tables::CanonicalHeaders>(block + 1..)?;
         self.remove::<tables::Headers<HeaderTy<N>>>(block + 1..)?;
         self.remove::<tables::HeaderTerminalDifficulties>(block + 1..)?;
 

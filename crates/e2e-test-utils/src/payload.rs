@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use reth_node_api::BlockBody;
+use reth_node_api::{BlockBody, PayloadKind};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadId};
 use reth_payload_builder_primitives::Events;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadTypes};
@@ -62,7 +62,13 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 continue
             }
-            break
+            // Resolve payload once its built
+            self.payload_builder
+                .resolve_kind(payload_id, PayloadKind::Earliest)
+                .await
+                .unwrap()
+                .unwrap();
+            break;
         }
     }
 

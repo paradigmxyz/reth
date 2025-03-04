@@ -1,6 +1,6 @@
 use alloy_primitives::{map::B256Map, Address, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{
+use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,

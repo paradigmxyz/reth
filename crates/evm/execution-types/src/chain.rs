@@ -500,6 +500,7 @@ impl From<BlockHash> for ChainSplitTarget {
 
 /// Result of a split chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// Chain is not split. Pending chain is returned.
     /// Given block split is higher than last block.
@@ -526,7 +527,7 @@ pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives>
 /// Bincode-compatible [`Chain`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use crate::ExecutionOutcome;
+    use crate::{serde_bincode_compat, ExecutionOutcome};
     use alloc::borrow::Cow;
     use alloy_primitives::BlockNumber;
     use reth_ethereum_primitives::EthPrimitives;
@@ -562,7 +563,7 @@ pub(super) mod serde_bincode_compat {
         >,
     {
         blocks: RecoveredBlocks<'a, N::Block>,
-        execution_outcome: Cow<'a, ExecutionOutcome<N::Receipt>>,
+        execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
         trie_updates: Option<TrieUpdates<'a>>,
     }
 
@@ -615,7 +616,7 @@ pub(super) mod serde_bincode_compat {
         fn from(value: &'a super::Chain<N>) -> Self {
             Self {
                 blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
-                execution_outcome: Cow::Borrowed(&value.execution_outcome),
+                execution_outcome: value.execution_outcome.as_repr(),
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
         }
@@ -630,7 +631,7 @@ pub(super) mod serde_bincode_compat {
         fn from(value: Chain<'a, N>) -> Self {
             Self {
                 blocks: value.blocks.0.into_owned(),
-                execution_outcome: value.execution_outcome.into_owned(),
+                execution_outcome: ExecutionOutcome::from_repr(value.execution_outcome),
                 trie_updates: value.trie_updates.map(Into::into),
             }
         }

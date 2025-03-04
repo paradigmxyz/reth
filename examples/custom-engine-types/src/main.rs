@@ -15,7 +15,7 @@
 //! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
 //! implemented:
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
@@ -36,11 +36,9 @@ use reth::{
         rpc::{EngineValidatorBuilder, RpcAddOns},
         BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
     },
-    network::NetworkHandle,
-    payload::ExecutionPayloadValidator,
     primitives::{Block, EthPrimitives, RecoveredBlock, SealedBlock, TransactionSigned},
     providers::{EthStorage, StateProviderFactory},
-    rpc::{eth::EthApi, types::engine::ExecutionPayload},
+    rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
     version::default_extra_data_bytes,
@@ -48,7 +46,7 @@ use reth::{
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
 use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
 use reth_engine_local::payload::UnsupportedLocalAttributes;
-use reth_ethereum_payload_builder::EthereumBuilderConfig;
+use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
     validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
@@ -61,7 +59,7 @@ use reth_node_ethereum::{
         EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
         EthereumPoolBuilder,
     },
-    EthEvmConfig,
+    EthEvmConfig, EthereumEthApiBuilder,
 };
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
@@ -182,13 +180,13 @@ impl EngineTypes for CustomEngineTypes {
 /// Custom engine validator
 #[derive(Debug, Clone)]
 pub struct CustomEngineValidator {
-    inner: ExecutionPayloadValidator<ChainSpec>,
+    inner: EthereumExecutionPayloadValidator<ChainSpec>,
 }
 
 impl CustomEngineValidator {
     /// Instantiates a new validator.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { inner: ExecutionPayloadValidator::new(chain_spec) }
+        Self { inner: EthereumExecutionPayloadValidator::new(chain_spec) }
     }
 
     /// Returns the chain spec used by the validator.
@@ -296,16 +294,7 @@ impl NodeTypesWithEngine for MyCustomNode {
 }
 
 /// Custom addons configuring RPC types
-pub type MyNodeAddOns<N> = RpcAddOns<
-    N,
-    EthApi<
-        <N as FullNodeTypes>::Provider,
-        <N as FullNodeComponents>::Pool,
-        NetworkHandle,
-        <N as FullNodeComponents>::Evm,
-    >,
-    CustomEngineValidatorBuilder,
->;
+pub type MyNodeAddOns<N> = RpcAddOns<N, EthereumEthApiBuilder, CustomEngineValidatorBuilder>;
 
 /// Implement the Node trait for the custom node
 ///
