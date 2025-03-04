@@ -29,7 +29,7 @@ use reth_evm::{
 };
 use reth_evm_ethereum::{
     execute::{EthBlockExecutionCtx, EthExecutionStrategy},
-    EthBlockBuilder, EthEvmConfig,
+    EthBlockAssembler, EthEvmConfig,
 };
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
 use reth_primitives::{
@@ -123,10 +123,10 @@ impl BlockExecutionStrategyFactory for CustomEvmConfig {
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
         CustomExecutorStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
-    type BlockFactory = EthBlockBuilder<ChainSpec>;
+    type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
-    fn block_factory(&self) -> &Self::BlockFactory {
-        self.inner.block_factory()
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        self.inner.block_assembler()
     }
 
     fn context_for_block<'a>(&self, block: &'a SealedBlock) -> Self::ExecutionCtx<'a> {

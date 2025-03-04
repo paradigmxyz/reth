@@ -271,10 +271,10 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     type ExecutionCtx<'a>: Clone;
 
     /// A type that knows how to build a block.
-    type BlockFactory: BlockFactory<Self>;
+    type BlockAssembler: BlockAssembler<Self>;
 
-    /// Provides reference to configured [`BlockFactory`].
-    fn block_factory(&self) -> &Self::BlockFactory;
+    /// Provides reference to configured [`BlockAssembler`].
+    fn block_assembler(&self) -> &Self::BlockAssembler;
 
     /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for a given block.
     fn context_for_block<'a>(
@@ -325,7 +325,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
         BasicBlockBuilder {
             strategy: self.create_strategy(evm, ctx.clone()),
             ctx,
-            builder: self.block_factory(),
+            assembler: self.block_assembler(),
             parent,
             transactions: Vec::new(),
         }
@@ -348,7 +348,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
 /// Input for block building. Consumed by [`BlockFactory`].
 #[derive(derive_more::Debug)]
 #[non_exhaustive]
-pub struct BlockBuilderInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
+pub struct BlockAssemblerInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
     /// Configuration of EVM used when executing the block.
     ///
     /// Contains context relevant to EVM such as [`revm::context::BlockEnv`].
@@ -370,6 +370,16 @@ pub struct BlockBuilderInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
     pub state_root: B256,
 }
 
+/// A type that knows how to assemble a block.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait BlockAssembler<Evm: BlockExecutionStrategyFactory> {
+    /// Builds a block. see [`BlockAssemblerInput`] documentation for more details.
+    fn assemble_block(
+        &self,
+        input: BlockAssemblerInput<'_, '_, Evm>,
+    ) -> Result<BlockTy<Evm::Primitives>, BlockExecutionError>;
+}
+
 /// Output of block building.
 #[derive(Debug, Clone)]
 pub struct BlockBuilderOutcome<N: NodePrimitives> {
@@ -381,16 +391,6 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
-}
-
-/// Abstraction over block building logic.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait BlockFactory<Evm: BlockExecutionStrategyFactory> {
-    /// Builds a block. see [`BlockBuilderInput`] documentation for more details.
-    fn build_block(
-        &self,
-        input: BlockBuilderInput<'_, '_, Evm>,
-    ) -> Result<BlockTy<Evm::Primitives>, BlockExecutionError>;
 }
 
 /// A type that knows how to execute and build a block.
@@ -458,7 +458,7 @@ where
     transactions: Vec<Recovered<TxTy<Evm::Primitives>>>,
     ctx: Evm::ExecutionCtx<'a>,
     parent: &'a SealedHeader<HeaderTy<Evm::Primitives>>,
-    builder: Builder,
+    assembler: Builder,
 }
 
 impl<'a, Evm, DB, I, Builder> BlockBuilder for BasicBlockBuilder<'a, Evm, DB, I, Builder>
@@ -466,7 +466,7 @@ where
     Evm: BlockExecutionStrategyFactory,
     DB: Database + 'a,
     I: InspectorFor<&'a mut State<DB>, Evm> + 'a,
-    Builder: BlockFactory<Evm>,
+    Builder: BlockAssembler<Evm>,
 {
     type Primitives = Evm::Primitives;
     type Strategy = Evm::Strategy<'a, DB, I>;
@@ -503,7 +503,7 @@ where
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
 
-        let block = self.builder.build_block(BlockBuilderInput {
+        let block = self.assembler.assemble_block(BlockAssemblerInput {
             evm_env,
             execution_ctx: self.ctx,
             parent: self.parent,

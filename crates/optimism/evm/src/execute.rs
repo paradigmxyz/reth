@@ -1,7 +1,7 @@
 //! Optimism block execution strategy.
 
 use crate::{
-    l1::ensure_create2_deployer, BasicOpReceiptBuilder, OpBlockBuilder, OpBlockExecutionError,
+    l1::ensure_create2_deployer, BasicOpReceiptBuilder, OpBlockAssembler, OpBlockExecutionError,
     OpEvmConfig, OpReceiptBuilder, ReceiptBuilderCtx,
 };
 use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
@@ -47,10 +47,10 @@ where
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
         OpExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>, N, &'a ChainSpec>;
     type ExecutionCtx<'a> = OpBlockExecutionCtx<'a>;
-    type BlockFactory = OpBlockBuilder<ChainSpec>;
+    type BlockAssembler = OpBlockAssembler<ChainSpec>;
 
-    fn block_factory(&self) -> &Self::BlockFactory {
-        &self.block_builder
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assember
     }
 
     fn context_for_block<'a>(&self, block: &'a SealedBlock<N::Block>) -> Self::ExecutionCtx<'a> {

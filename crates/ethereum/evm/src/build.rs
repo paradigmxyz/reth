@@ -7,28 +7,28 @@ use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::Bytes;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::execute::{
-    BlockBuilderInput, BlockExecutionError, BlockExecutionStrategyFactory, BlockFactory,
+    BlockAssembler, BlockAssemblerInput, BlockExecutionError, BlockExecutionStrategyFactory,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{logs_bloom, EthPrimitives, Receipt, TransactionSigned};
 
 /// Block builder for Ethereum.
 #[derive(Debug, Clone)]
-pub struct EthBlockBuilder<ChainSpec> {
+pub struct EthBlockAssembler<ChainSpec> {
     /// The chainspec.
     pub chain_spec: Arc<ChainSpec>,
     /// Extra data to use for the blocks.
     pub extra_data: Bytes,
 }
 
-impl<ChainSpec> EthBlockBuilder<ChainSpec> {
+impl<ChainSpec> EthBlockAssembler<ChainSpec> {
     /// Creates a new [`EthBlockBuilder`].
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec, extra_data: Default::default() }
     }
 }
 
-impl<Evm, ChainSpec> BlockFactory<Evm> for EthBlockBuilder<ChainSpec>
+impl<Evm, ChainSpec> BlockAssembler<Evm> for EthBlockAssembler<ChainSpec>
 where
     Evm: for<'a> BlockExecutionStrategyFactory<
         Primitives = EthPrimitives,
@@ -36,11 +36,11 @@ where
     >,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
-    fn build_block(
+    fn assemble_block(
         &self,
-        input: BlockBuilderInput<'_, '_, Evm>,
+        input: BlockAssemblerInput<'_, '_, Evm>,
     ) -> Result<Block<TransactionSigned>, BlockExecutionError> {
-        let BlockBuilderInput {
+        let BlockAssemblerInput {
             evm_env,
             execution_ctx: ctx,
             parent,

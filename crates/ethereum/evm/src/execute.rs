@@ -2,7 +2,7 @@
 
 use crate::{
     dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
-    EthBlockBuilder, EthEvmConfig,
+    EthBlockAssembler, EthEvmConfig,
 };
 use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Header, Transaction};
@@ -41,10 +41,10 @@ where
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
         EthExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
-    type BlockFactory = EthBlockBuilder<ChainSpec>;
+    type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
-    fn block_factory(&self) -> &Self::BlockFactory {
-        &self.block_builder
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assembler
     }
 
     fn context_for_block<'a>(&self, block: &'a SealedBlock) -> Self::ExecutionCtx<'a> {

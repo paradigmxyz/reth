@@ -5,7 +5,7 @@ use alloy_consensus::{
 };
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_primitives::logs_bloom;
-use reth_evm::execute::{BlockBuilderInput, BlockExecutionStrategyFactory, BlockFactory};
+use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionStrategyFactory};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_consensus::{calculate_receipt_root_no_memo_optimism, isthmus};
@@ -15,24 +15,24 @@ use reth_primitives_traits::{Block, BlockTy, NodePrimitives, SignedTransaction};
 
 /// Block builder for Optimism.
 #[derive(Debug)]
-pub struct OpBlockBuilder<ChainSpec> {
+pub struct OpBlockAssembler<ChainSpec> {
     chain_spec: Arc<ChainSpec>,
 }
 
-impl<ChainSpec> OpBlockBuilder<ChainSpec> {
+impl<ChainSpec> OpBlockAssembler<ChainSpec> {
     /// Creates a new [`OpBlockBuilder`].
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
 
-impl<ChainSpec> Clone for OpBlockBuilder<ChainSpec> {
+impl<ChainSpec> Clone for OpBlockAssembler<ChainSpec> {
     fn clone(&self) -> Self {
         Self { chain_spec: self.chain_spec.clone() }
     }
 }
 
-impl<Evm, ChainSpec, T> BlockFactory<Evm> for OpBlockBuilder<ChainSpec>
+impl<Evm, ChainSpec, T> BlockAssembler<Evm> for OpBlockAssembler<ChainSpec>
 where
     ChainSpec: OpHardforks,
     T: SignedTransaction,
@@ -47,11 +47,11 @@ where
         ExecutionCtx<'a> = OpBlockExecutionCtx<'a>,
     >,
 {
-    fn build_block(
+    fn assemble_block(
         &self,
-        input: BlockBuilderInput<'_, '_, Evm>,
+        input: BlockAssemblerInput<'_, '_, Evm>,
     ) -> Result<BlockTy<Evm::Primitives>, BlockExecutionError> {
-        let BlockBuilderInput {
+        let BlockAssemblerInput {
             evm_env,
             execution_ctx: ctx,
             transactions,
