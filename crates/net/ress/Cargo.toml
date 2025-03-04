@@ -48,5 +48,16 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 
 [features]
-test-utils = []
-arbitrary = ["dep:arbitrary", "reth-eth-wire/arbitrary"]
+test-utils = [
+	"reth-network/test-utils",
+	"reth-network-ress/test-utils",
+	"reth-primitives/test-utils",
+	"reth-provider/test-utils"
+]
+arbitrary = [
+	"dep:arbitrary",
+	"reth-eth-wire/arbitrary",
+	"alloy-primitives/arbitrary",
+	"reth-network-ress/arbitrary",
+	"reth-primitives/arbitrary"
+]
