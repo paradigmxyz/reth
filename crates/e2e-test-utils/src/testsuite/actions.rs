@@ -332,7 +332,7 @@ where
 /// reference and returns a Future resolving to Result<()>.
 ///
 /// This allows using closures directly as actions with `.with_action(async move |env| {...})`.
-impl<I, F, Fut> Action<I> for F 
+impl<I, F, Fut> Action<I> for F
 where
     I: Send + Sync + 'static,
     F: FnMut(&Environment<I>) -> Fut + Send + 'static,
