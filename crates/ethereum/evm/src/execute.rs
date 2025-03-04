@@ -133,11 +133,11 @@ where
     DB: Database + 'db,
     E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<TransactionSigned>>,
 {
-    type Error = BlockExecutionError;
-    type Primitives = EthPrimitives;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
     type Evm = E;
 
-    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
             self.chain_spec.is_spurious_dragon_active_at_block(self.evm.block().number);
@@ -153,7 +153,7 @@ where
         &mut self,
         tx: Recovered<&TransactionSigned>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, Self::Error> {
+    ) -> Result<u64, BlockExecutionError> {
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block's gasLimit.
         let block_available_gas = self.evm.block().gas_limit - self.gas_used;
@@ -195,7 +195,7 @@ where
         Ok(gas_used)
     }
 
-    fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), Self::Error> {
+    fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {
         let requests = if self.chain_spec.is_prague_active_at_timestamp(self.evm.block().timestamp)
         {
             // Collect all EIP-6110 deposits

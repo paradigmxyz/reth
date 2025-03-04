@@ -174,6 +174,18 @@ pub struct ExecuteOutput<R = Receipt> {
     pub gas_used: u64,
 }
 
+/// A helper trait to bound [`BlockExecutionStrategy`] ATs to [`NodePrimitives`].
+pub trait BlockExecutionStrategyFor<N: NodePrimitives>:
+    BlockExecutionStrategy<Transaction = N::SignedTx, Receipt = N::Receipt>
+{
+}
+impl<T, N> BlockExecutionStrategyFor<N> for T
+where
+    N: NodePrimitives,
+    T: BlockExecutionStrategy<Transaction = N::SignedTx, Receipt = N::Receipt>,
+{
+}
+
 /// Defines the strategy for executing a single block.
 ///
 /// The current abstraction assumes that block execution consists of the following steps:
@@ -186,25 +198,23 @@ pub struct ExecuteOutput<R = Receipt> {
 /// The output of [`BlockExecutionStrategy::apply_post_execution_changes`] is a
 /// [`BlockExecutionResult`] which contains all relevant information about the block execution.
 pub trait BlockExecutionStrategy {
-    /// Primitive types used by the strategy.
-    type Primitives: NodePrimitives;
-
+    /// Input transaction type.
+    type Transaction;
+    /// Receipt type this strategy produces.
+    type Receipt;
     /// EVM used by the strategy.
     type Evm: Evm;
 
-    /// The error type returned by this strategy's methods.
-    type Error: core::error::Error;
-
     /// Applies any necessary changes before executing the block's transactions.
-    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error>;
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
     /// Executes a single transaction and applies execution result to internal state.
     ///
     /// Returns the gas used by the transaction.
     fn execute_transaction(
         &mut self,
-        tx: Recovered<&<Self::Primitives as NodePrimitives>::SignedTx>,
-    ) -> Result<u64, Self::Error> {
+        tx: Recovered<&Self::Transaction>,
+    ) -> Result<u64, BlockExecutionError> {
         self.execute_transaction_with_result_closure(tx, |_| ())
     }
 
@@ -212,14 +222,14 @@ pub trait BlockExecutionStrategy {
     /// given closure with an internal [`ExecutionResult`] produced by the EVM.
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<&<Self::Primitives as NodePrimitives>::SignedTx>,
+        tx: Recovered<&Self::Transaction>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, Self::Error>;
+    ) -> Result<u64, BlockExecutionError>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
         self,
-    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    ) -> Result<BlockExecutionResult<Self::Receipt>, BlockExecutionError>
     where
         Self: Sized,
     {
@@ -233,10 +243,9 @@ pub trait BlockExecutionStrategy {
     fn evm_mut(&mut self) -> &mut Self::Evm;
 
     /// Completes execution and returns the underlying EVM along with execution result.
-    #[expect(clippy::type_complexity)]
     fn finish(
         self,
-    ) -> Result<(Self::Evm, BlockExecutionResult<ReceiptTy<Self::Primitives>>), Self::Error>;
+    ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError>;
 }
 
 /// A factory that can create block execution strategies.
@@ -263,9 +272,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     type Primitives: NodePrimitives;
 
     /// Strategy this factory produces.
-    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a>: BlockExecutionStrategy<
-        Primitives = Self::Primitives,
-        Error = BlockExecutionError,
+    type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a>: BlockExecutionStrategyFor<Self::Primitives,
         Evm = EvmFor<Self, &'a mut State<DB>, I>,
     >;
 
@@ -413,10 +420,7 @@ pub trait BlockBuilder {
     /// The primitive types used by the inner [`BlockExecutionStrategy`].
     type Primitives: NodePrimitives;
     /// Inner [`BlockExecutionStrategy`].
-    type Strategy: BlockExecutionStrategy<
-        Primitives = Self::Primitives,
-        Error = BlockExecutionError,
-    >;
+    type Strategy: BlockExecutionStrategyFor<Self::Primitives>;
 
     /// Invokes [`BlockExecutionStrategy::apply_pre_execution_changes`].
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
