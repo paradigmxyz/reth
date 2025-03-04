@@ -1,7 +1,20 @@
 //! Utilities for running e2e tests against a node or a network of nodes.
 
+use crate::{Adapter, TmpDB, TmpNodeAdapter};
 use actions::{Action, ActionBox};
 use eyre::Result;
+use jsonrpsee::http_client::HttpClient;
+use reth_chainspec::ChainSpec;
+use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::NodePrimitives;
+use reth_node_builder::{
+    components::NodeComponentsBuilder,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns},
+    Node, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
+    PayloadTypes,
+};
+use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use setup::Setup;
 
 pub mod actions;
@@ -11,25 +24,25 @@ pub mod setup;
 mod examples;
 
 /// A runner performs operations on an environment.
-#[derive(Debug)]
-pub struct Runner<I> {
+#[derive(Debug, Default)]
+pub struct Runner {
     /// The environment containing the node(s) to test
-    env: Environment<I>,
+    env: Environment,
 }
 
-impl<I: 'static> Runner<I> {
-    /// Create a new test runner with the given environment
-    pub fn new(instance: I) -> Self {
-        Self { env: Environment { instance, ctx: () } }
+impl Runner {
+    /// Create a new test runner with an empty environment
+    pub fn new() -> Self {
+        Self { env: Environment::default() }
     }
 
     /// Execute an action
-    pub async fn execute(&mut self, action: ActionBox<I>) -> Result<()> {
+    pub async fn execute(&mut self, action: ActionBox) -> Result<()> {
         action.execute(&self.env).await
     }
 
     /// Execute a sequence of actions
-    pub async fn run_actions(&mut self, actions: Vec<ActionBox<I>>) -> Result<()> {
+    pub async fn run_actions(&mut self, actions: Vec<ActionBox>) -> Result<()> {
         for action in actions {
             self.execute(action).await?;
         }
@@ -37,13 +50,38 @@ impl<I: 'static> Runner<I> {
     }
 
     /// Run a complete test scenario with setup and actions
-    pub async fn run_scenario(
+    pub async fn run_scenario<N>(
         &mut self,
         setup: Option<Setup>,
-        actions: Vec<ActionBox<I>>,
-    ) -> Result<()> {
-        if let Some(setup) = setup {
-            setup.apply(&mut self.env).await?;
+        actions: Vec<ActionBox>,
+    ) -> Result<()>
+    where
+        N: Default
+            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
+            + NodeTypesWithEngine
+            + NodeTypesForProvider,
+        N::Primitives: NodePrimitives<
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
+        >,
+        N::ComponentsBuilder: NodeComponentsBuilder<
+            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+            Components: NodeComponents<
+                TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+                Network: PeersHandleProvider,
+            >,
+        >,
+        N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
+            + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
+            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        >,
+        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
+            From<reth_payload_builder::EthPayloadBuilderAttributes>,
+        N::ChainSpec: From<ChainSpec> + Clone,
+    {
+        if let Some(mut setup) = setup {
+            setup.apply::<N>(&mut self.env).await?;
         }
 
         self.run_actions(actions).await
@@ -51,26 +89,24 @@ impl<I: 'static> Runner<I> {
 }
 
 /// Represents a test environment.
-#[derive(Debug)]
-pub struct Environment<I> {
-    /// The instance against which we can run tests.
-    pub instance: I,
-    /// Context.
-    pub ctx: (),
+#[derive(Debug, Default)]
+pub struct Environment {
+    /// JSON-RPC clients for interacting with the nodes.
+    pub clients: Vec<HttpClient>,
 }
 
 /// Builder for creating test scenarios
 #[allow(missing_debug_implementations)]
-pub struct TestBuilder<I> {
-    instance: I,
+#[derive(Default)]
+pub struct TestBuilder {
     setup: Option<Setup>,
-    actions: Vec<ActionBox<I>>,
+    actions: Vec<ActionBox>,
 }
 
-impl<I: 'static> TestBuilder<I> {
+impl TestBuilder {
     /// Create a new test builder
-    pub fn new(instance: I) -> Self {
-        Self { instance, setup: None, actions: Vec::new() }
+    pub fn new() -> Self {
+        Self { setup: None, actions: Vec::new() }
     }
 
     /// Set the test setup
@@ -82,15 +118,50 @@ impl<I: 'static> TestBuilder<I> {
     /// Add an action to the test
     pub fn with_action<A>(mut self, action: A) -> Self
     where
-        A: Action<I>,
+        A: Action,
     {
         self.actions.push(ActionBox::new(action));
         self
     }
 
+    /// Add multiple actions to the test
+    pub fn with_actions<I, A>(mut self, actions: I) -> Self
+    where
+        I: IntoIterator<Item = A>,
+        A: Action,
+    {
+        self.actions.extend(actions.into_iter().map(ActionBox::new));
+        self
+    }
+
     /// Run the test scenario
-    pub async fn run(self) -> Result<()> {
-        let mut runner = Runner::new(self.instance);
-        runner.run_scenario(self.setup, self.actions).await
+    pub async fn run<N>(self) -> Result<()>
+    where
+        N: Default
+            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
+            + NodeTypesWithEngine
+            + NodeTypesForProvider,
+        N::Primitives: NodePrimitives<
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
+        >,
+        N::ComponentsBuilder: NodeComponentsBuilder<
+            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+            Components: NodeComponents<
+                TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+                Network: PeersHandleProvider,
+            >,
+        >,
+        N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
+            + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
+            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        >,
+        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
+            From<reth_payload_builder::EthPayloadBuilderAttributes>,
+        N::ChainSpec: From<ChainSpec> + Clone,
+    {
+        let mut runner = Runner::new();
+        runner.run_scenario::<N>(self.setup, self.actions).await
     }
 }

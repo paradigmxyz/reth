@@ -55,7 +55,7 @@ where
     /// Creates a new test node
     pub async fn new(
         node: FullNode<Node, AddOns>,
-        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + 'static,
+        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
             inner: node.clone(),
