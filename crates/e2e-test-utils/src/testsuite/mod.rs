@@ -3,16 +3,12 @@
 use actions::{Action, ActionBox};
 use eyre::Result;
 use setup::Setup;
-use std::{future::Future, pin::Pin};
 
 pub mod actions;
 pub mod setup;
 
 #[cfg(test)]
 mod examples;
-
-/// A boxed future type for async trait methods
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A runner performs operations on an environment.
 #[derive(Debug)]

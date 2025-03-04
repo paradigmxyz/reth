@@ -1,10 +1,11 @@
 //! Actions that can be performed in tests.
 
-use crate::testsuite::{BoxFuture, Environment};
+use crate::testsuite::Environment;
 use alloy_eips::BlockId;
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::{ExecutionPayload, PayloadAttributes};
 use eyre::Result;
+use futures_util::future::BoxFuture;
 use std::future::Future;
 
 /// An action that can be performed on an instance.
@@ -30,6 +31,21 @@ impl<I: 'static> ActionBox<I> {
     /// Executes an [`ActionBox`] with the given [`Environment`] reference.
     pub async fn execute(mut self, env: &Environment<I>) -> Result<()> {
         self.0.execute(env).await
+    }
+}
+
+/// Implementation of `Action` for any function/closure that takes an Environment
+/// reference and returns a Future resolving to Result<()>.
+///
+/// This allows using closures directly as actions with `.with_action(async move |env| {...})`.
+impl<I, F, Fut> Action<I> for F
+where
+    I: Send + Sync + 'static,
+    F: FnMut(&Environment<I>) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<()>> + Send + 'static,
+{
+    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(self(env))
     }
 }
 
@@ -325,20 +341,5 @@ where
 
             Ok(())
         })
-    }
-}
-
-/// Implementation of `Action` for any function/closure that takes an Environment
-/// reference and returns a Future resolving to Result<()>.
-///
-/// This allows using closures directly as actions with `.with_action(async move |env| {...})`.
-impl<I, F, Fut> Action<I> for F
-where
-    I: Send + Sync + 'static,
-    F: FnMut(&Environment<I>) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<()>> + Send + 'static,
-{
-    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(self(env))
     }
 }
