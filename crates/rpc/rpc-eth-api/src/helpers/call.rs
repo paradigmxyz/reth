@@ -160,16 +160,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let ctx = this
                         .evm_config()
                         .context_for_next_block(&parent, this.next_env_attributes(&parent)?);
-                    let (transactions, result, results) = if trace_transfers {
+                    let (result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
                         let inspector = TransferInspector::new(false).with_logs(true);
                         let evm = this
                             .evm_config()
                             .evm_with_env_and_inspector(&mut db, evm_env, inspector);
-                        let strategy = this.evm_config().create_strategy(evm, ctx);
+                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
                         simulate::execute_transactions(
-                            strategy,
+                            builder,
                             calls,
                             validation,
                             default_gas_limit,
@@ -178,9 +178,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )?
                     } else {
                         let evm = this.evm_config().evm_with_env(&mut db, evm_env);
-                        let strategy = this.evm_config().create_strategy(evm, ctx);
+                        let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
                         simulate::execute_transactions(
-                            strategy,
+                            builder,
                             calls,
                             validation,
                             default_gas_limit,
@@ -189,23 +189,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )?
                     };
 
-                    let senders = transactions.iter().map(|tx| tx.signer()).collect();
-
-                    let block = this.assemble_block(
-                        &block_env,
-                        &result,
-                        &parent,
-                        // state root calculation is skipped for performance reasons
-                        B256::ZERO,
-                        transactions,
-                    );
-
                     let block = simulate::build_simulated_block(
-                        senders,
+                        result.block,
                         results,
                         return_full_transactions,
                         this.tx_resp_builder(),
-                        block,
                     )?;
 
                     parent = SealedHeader::new(

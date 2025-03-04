@@ -12,32 +12,24 @@
 pub mod validator;
 pub use validator::EthereumExecutionPayloadValidator;
 
-use alloy_consensus::{BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, merge::BEACON_NONCE};
+use alloy_consensus::{Transaction, Typed2718};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig,
 };
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
-use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    execute::{BlockExecutionStrategy, BlockExecutionStrategyFactory},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionStrategyFactory},
     Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives_traits::{
-    proofs::{self},
-    Block as _, SignedTransaction,
-};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{states::bundle_state::BundleRetention, State},
-};
+use reth_primitives_traits::SignedTransaction;
+use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
@@ -154,42 +146,39 @@ where
     let PayloadConfig { parent_header, attributes } = config;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
-    let state = StateProviderDatabase::new(state_provider);
+    let state = StateProviderDatabase::new(&state_provider);
     let mut db =
         State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
 
-    let next_attributes = NextBlockEnvAttributes {
-        timestamp: attributes.timestamp(),
-        suggested_fee_recipient: attributes.suggested_fee_recipient(),
-        prev_randao: attributes.prev_randao(),
-        gas_limit: builder_config.gas_limit(parent_header.gas_limit),
-        parent_beacon_block_root: attributes.parent_beacon_block_root(),
-        withdrawals: Some(attributes.withdrawals().clone()),
-    };
-
-    let mut strategy = evm_config
-        .strategy_for_next_block(&mut db, &parent_header, next_attributes)
+    let mut builder = evm_config
+        .builder_for_next_block(
+            &mut db,
+            &parent_header,
+            NextBlockEnvAttributes {
+                timestamp: attributes.timestamp(),
+                suggested_fee_recipient: attributes.suggested_fee_recipient(),
+                prev_randao: attributes.prev_randao(),
+                gas_limit: builder_config.gas_limit(parent_header.gas_limit),
+                parent_beacon_block_root: attributes.parent_beacon_block_root(),
+                withdrawals: Some(attributes.withdrawals().clone()),
+            },
+        )
         .map_err(PayloadBuilderError::other)?;
 
     let chain_spec = client.chain_spec();
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = strategy.evm_mut().block().gas_limit;
-    let base_fee = strategy.evm_mut().block().basefee;
-
-    let mut executed_txs = Vec::new();
+    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit;
+    let base_fee = builder.evm_mut().block().basefee;
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
-        strategy.evm_mut().block().blob_gasprice().map(|gasprice| gasprice as u64),
+        builder.evm_mut().block().blob_gasprice().map(|gasprice| gasprice as u64),
     ));
     let mut total_fees = U256::ZERO;
 
-    let block_number = strategy.evm_mut().block().number;
-    let beneficiary = strategy.evm_mut().block().beneficiary;
-
-    strategy.apply_pre_execution_changes().map_err(|err| {
+    builder.apply_pre_execution_changes().map_err(|err| {
         warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
         PayloadBuilderError::Internal(err.into())
     })?;
@@ -244,7 +233,7 @@ where
             }
         }
 
-        let gas_used = match strategy.execute_transaction(tx.as_recovered_ref()) {
+        let gas_used = match builder.execute_transaction(tx.clone()) {
             Ok(gas_used) => gas_used,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
@@ -284,119 +273,42 @@ where
             tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
         cumulative_gas_used += gas_used;
-
-        // append transaction to the block body
-        executed_txs.push(tx.into_tx());
     }
 
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
         // Release db
-        drop(strategy);
+        drop(builder);
         // can skip building the block
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockExecutionResult { receipts, requests, gas_used } = strategy
-        .apply_post_execution_changes()
-        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+    let BlockBuilderOutcome { execution_result, block, .. } =
+        builder.finish(&state_provider).map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-    let requests =
-        chain_spec.is_prague_active_at_timestamp(attributes.timestamp).then_some(requests);
-    let withdrawals_root = chain_spec
-        .is_shanghai_active_at_timestamp(attributes.timestamp)
-        .then_some(proofs::calculate_withdrawals_root(&attributes.withdrawals));
-
-    // merge all transitions into bundle state, this would apply the withdrawal balance changes
-    // and 4788 contract call
-    db.merge_transitions(BundleRetention::Reverts);
-
-    let requests_hash = requests.as_ref().map(|requests| requests.requests_hash());
-    let execution_outcome = ExecutionOutcome::new(
-        db.take_bundle(),
-        vec![receipts],
-        block_number,
-        vec![requests.clone().unwrap_or_default()],
-    );
-    let receipts_root =
-        execution_outcome.ethereum_receipts_root(block_number).expect("Number is in range");
-    let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
-
-    // calculate the state root
-    let hashed_state = db.database.db.hashed_post_state(execution_outcome.state());
-    let (state_root, _) = {
-        db.database.inner().state_root_with_updates(hashed_state).inspect_err(|err| {
-            warn!(target: "payload_builder",
-                parent_hash=%parent_header.hash(),
-                %err,
-                "failed to calculate state root for payload"
-            );
-        })?
-    };
-
-    // create the block header
-    let transactions_root = proofs::calculate_transaction_root(&executed_txs);
+    let requests = chain_spec
+        .is_prague_active_at_timestamp(attributes.timestamp)
+        .then_some(execution_result.requests);
 
     // initialize empty blob sidecars at first. If cancun is active then this will
     let mut blob_sidecars = Vec::new();
-    let mut excess_blob_gas = None;
-    let mut blob_gas_used = None;
 
     // only determine cancun fields when active
     if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
         // grab the blob sidecars from the executed txs
         blob_sidecars = pool
             .get_all_blobs_exact(
-                executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| *tx.tx_hash()).collect(),
+                block
+                    .body()
+                    .transactions()
+                    .filter(|tx| tx.is_eip4844())
+                    .map(|tx| *tx.tx_hash())
+                    .collect(),
             )
             .map_err(PayloadBuilderError::other)?;
-
-        excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
-            parent_header.maybe_next_block_excess_blob_gas(blob_params)
-        } else {
-            // for the first post-fork block, both parent.blob_gas_used and
-            // parent.excess_blob_gas are evaluated as 0
-            Some(alloy_eips::eip7840::BlobParams::cancun().next_block_excess_blob_gas(0, 0))
-        };
-
-        blob_gas_used = Some(block_blob_count * DATA_GAS_PER_BLOB);
     }
 
-    let header = Header {
-        parent_hash: parent_header.hash(),
-        ommers_hash: EMPTY_OMMER_ROOT_HASH,
-        beneficiary,
-        state_root,
-        transactions_root,
-        receipts_root,
-        withdrawals_root,
-        logs_bloom,
-        timestamp: attributes.timestamp,
-        mix_hash: attributes.prev_randao,
-        nonce: BEACON_NONCE.into(),
-        base_fee_per_gas: Some(base_fee),
-        number: parent_header.number + 1,
-        gas_limit: block_gas_limit,
-        difficulty: U256::ZERO,
-        gas_used,
-        extra_data: builder_config.extra_data,
-        parent_beacon_block_root: attributes.parent_beacon_block_root,
-        blob_gas_used,
-        excess_blob_gas,
-        requests_hash,
-    };
-
-    let withdrawals = chain_spec
-        .is_shanghai_active_at_timestamp(attributes.timestamp)
-        .then(|| attributes.withdrawals.clone());
-
-    // seal the block
-    let block = Block {
-        header,
-        body: BlockBody { transactions: executed_txs, ommers: vec![], withdrawals },
-    };
-
-    let sealed_block = Arc::new(block.seal_slow());
+    let sealed_block = Arc::new(block.sealed_block().clone());
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
     let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests);

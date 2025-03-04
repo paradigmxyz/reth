@@ -675,8 +675,8 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 
 [patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "04fa394" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "04fa394" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "68735f2" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "68735f2" }
 
 revm = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }
 revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a8a9893b" }

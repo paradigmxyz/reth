@@ -19,7 +19,7 @@ extern crate alloc;
 
 use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
 pub use alloy_evm::evm::EvmFactory;
-use alloy_evm::{FromRecoveredTx, IntoTxEnv};
+use alloy_evm::IntoTxEnv;
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
@@ -41,28 +41,28 @@ pub mod system_calls;
 /// test helpers for mocking executor
 pub mod test_utils;
 
-pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, InvalidTxError};
+pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, FromRecoveredTx, InvalidTxError};
 
 /// Alias for `EvmEnv<<Evm as ConfigureEvmEnv>::Spec>`
 pub type EvmEnvFor<Evm> = EvmEnv<<Evm as ConfigureEvmEnv>::Spec>;
 
 /// Helper trait to bound [`Inspector`] for a [`ConfigureEvm`].
 pub trait InspectorFor<DB: Database, Evm: ConfigureEvm>:
-    Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>
+    Inspector<<Evm::EvmFactory as EvmFactory>::Context<DB>>
 {
 }
 impl<T, DB, Evm> InspectorFor<DB, Evm> for T
 where
     DB: Database,
     Evm: ConfigureEvm,
-    T: Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>,
+    T: Inspector<<Evm::EvmFactory as EvmFactory>::Context<DB>>,
 {
 }
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// The EVM factory.
-    type EvmFactory: EvmFactory<EvmEnv<Self::Spec>, Tx = Self::TxEnv>;
+    type EvmFactory: EvmFactory<Tx = Self::TxEnv, Spec = Self::Spec>;
 
     /// Provides a reference to [`EvmFactory`] implementation.
     fn evm_factory(&self) -> &Self::EvmFactory;
