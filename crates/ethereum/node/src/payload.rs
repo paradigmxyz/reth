@@ -48,7 +48,7 @@ impl EthereumPayloadBuilder {
             ctx.provider().clone(),
             pool,
             evm_config,
-            EthereumBuilderConfig::new(conf.extra_data_bytes()).with_gas_limit(conf.gas_limit()),
+            EthereumBuilderConfig::new().with_gas_limit(conf.gas_limit()),
         ))
     }
 }

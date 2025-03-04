@@ -21,7 +21,7 @@ use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
 use alloy_evm::{EthEvmFactory, FromRecoveredTx};
-use alloy_primitives::U256;
+use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_evm::{
@@ -88,6 +88,12 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
+    }
+
+    /// Sets the extra data for the block assembler.
+    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
+        self.block_assembler.extra_data = extra_data;
+        self
     }
 }
 
