@@ -22,7 +22,7 @@ pub struct EthBlockAssembler<ChainSpec> {
 }
 
 impl<ChainSpec> EthBlockAssembler<ChainSpec> {
-    /// Creates a new [`EthBlockBuilder`].
+    /// Creates a new [`EthBlockAssembler`].
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec, extra_data: Default::default() }
     }

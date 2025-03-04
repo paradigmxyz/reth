@@ -20,7 +20,7 @@ pub struct OpBlockAssembler<ChainSpec> {
 }
 
 impl<ChainSpec> OpBlockAssembler<ChainSpec> {
-    /// Creates a new [`OpBlockBuilder`].
+    /// Creates a new [`OpBlockAssembler`].
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
