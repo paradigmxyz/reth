@@ -52,13 +52,12 @@ where
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
         tracing::info!("Spawning a custom payload builder");
-        let conf = ctx.payload_builder_config();
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             ctx.provider().clone(),
             pool,
             EthEvmConfig::new(ctx.chain_spec()),
-            EthereumBuilderConfig::new(conf.extra_data_bytes()),
+            EthereumBuilderConfig::new(),
         );
 
         let conf = ctx.payload_builder_config();
