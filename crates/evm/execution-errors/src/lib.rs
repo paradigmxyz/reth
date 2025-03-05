@@ -15,7 +15,6 @@ use alloc::{
     boxed::Box,
     string::{String, ToString},
 };
-use alloy_eips::BlockNumHash;
 use alloy_evm::{EvmError, InvalidTxError};
 use alloy_primitives::B256;
 use reth_storage_errors::provider::ProviderError;
@@ -161,7 +160,7 @@ impl BlockExecutionError {
 
 impl From<ProviderError> for BlockExecutionError {
     fn from(error: ProviderError) -> Self {
-        InternalBlockExecutionError::from(error).into()
+        Self::other(error)
     }
 }
 
@@ -170,16 +169,6 @@ impl revm_database_interface::DBErrorMarker for BlockExecutionError {}
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum InternalBlockExecutionError {
-    /// Error when appending chain on fork is not possible
-    #[error(
-        "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
-    )]
-    AppendChainDoesntConnect {
-        /// The tip of the current chain
-        chain_tip: Box<BlockNumHash>,
-        /// The fork on the other chain
-        other_chain_fork: Box<BlockNumHash>,
-    },
     /// EVM error occurred when executing transaction. This is different from
     /// [`BlockValidationError::InvalidTx`] because it will only contain EVM errors which are not
     /// transaction validation errors and are assumed to be fatal.
@@ -190,9 +179,6 @@ pub enum InternalBlockExecutionError {
         /// The EVM error.
         error: Box<dyn core::error::Error + Send + Sync>,
     },
-    /// Error when fetching data from the db.
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
     /// Arbitrary Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync + 'static>),
