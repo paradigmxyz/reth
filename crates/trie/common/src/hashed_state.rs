@@ -213,23 +213,30 @@ impl HashedPostState {
             false
         });
         self.storages.retain(|&address, storage| {
-            let fetched_targets = targets.get(&address);
-            let fetched_storage_state_update =
-                state_updates_not_in_targets.storages.entry(address).or_default();
+            match targets.get(&address) {
+                Some(storage_in_targets) => {
+                    let mut storage_not_in_targets = HashedStorage::default();
+                    storage.storage.retain(|&slot, value| {
+                        if storage_in_targets.contains(&slot) {
+                            return true
+                        }
 
-            if fetched_targets.is_none() {
-                fetched_storage_state_update.wiped = storage.wiped;
+                        storage_not_in_targets.storage.insert(slot, *value);
+                        false
+                    });
+
+                    if !storage_not_in_targets.storage.is_empty() {
+                        state_updates_not_in_targets
+                            .storages
+                            .insert(address, storage_not_in_targets);
+                    }
+                }
+                None => {
+                    state_updates_not_in_targets.storages.insert(address, core::mem::take(storage));
+                }
             }
 
-            storage.storage.retain(|&slot, value| {
-                if fetched_targets.is_some_and(|targets| targets.contains(&slot)) {
-                    return true
-                }
-
-                fetched_storage_state_update.storage.insert(slot, *value);
-                false
-            });
-            !storage.storage.is_empty()
+            storage.wiped || !storage.storage.is_empty()
         });
 
         (self, state_updates_not_in_targets)
