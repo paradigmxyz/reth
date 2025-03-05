@@ -1,7 +1,7 @@
 use alloy_consensus::{BlockHeader, Transaction, Typed2718};
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::{ReceiptResponse, TransactionResponse};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, Bloom, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
 use alloy_rpc_types_trace::{
     filter::{TraceFilter, TraceFilterMode},
@@ -419,7 +419,7 @@ where
                         status: receipt.status(),
                         cumulative_gas_used: receipt.cumulative_gas_used(),
                         logs: Some(vec![]),
-                        logs_bloom: None,
+                        logs_bloom: Some(Bloom::default()),
                         r#type: tx.ty(),
                     };
 
@@ -614,7 +614,7 @@ where
                         status: receipt.status(),
                         cumulative_gas_used: receipt.cumulative_gas_used(),
                         logs: Some(vec![]),
-                        logs_bloom: None,
+                        logs_bloom: Some(Bloom::default()),
                         r#type: tx.ty(),
                     };
 
