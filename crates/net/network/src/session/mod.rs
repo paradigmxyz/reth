@@ -26,7 +26,7 @@ use std::{
 use crate::{
     message::PeerMessage,
     metrics::SessionManagerMetrics,
-    protocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols},
+    protocol::{IntoRlpxSubProtocol, OnNotSupported, RlpxSubProtocolHandlers, RlpxSubProtocols},
     session::active::ActiveSession,
 };
 use counter::SessionCounter;
@@ -771,6 +771,9 @@ pub enum PendingSessionHandshakeError {
     /// Thrown when the authentication timed out
     #[error("authentication timed out")]
     Timeout,
+    /// Thrown when the remote lacks the required capability
+    #[error("Mandatory extra capability unsupported")]
+    UnsupportedExtraCapability,
 }
 
 impl PendingSessionHandshakeError {
@@ -1013,6 +1016,32 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
     };
 
+    // if we have extra handlers, check if it must be supported by the remote
+    if !extra_handlers.is_empty() {
+        // ensure that no extra handlers that aren't supported are not mandatory
+        while let Some(pos) = extra_handlers.iter().position(|handler| {
+            p2p_stream
+                .shared_capabilities()
+                .ensure_matching_capability(&handler.protocol().cap)
+                .is_err()
+        }) {
+            let handler = extra_handlers.remove(pos);
+            if handler.on_unsupported_by_peer(
+                p2p_stream.shared_capabilities(),
+                direction,
+                their_hello.id,
+            ) == OnNotSupported::Disconnect
+            {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::UnsupportedExtraCapability),
+                };
+            }
+        }
+    }
+
     // Ensure we negotiated mandatory eth protocol
     let eth_version = match p2p_stream.shared_capabilities().eth_version() {
         Ok(version) => version,
@@ -1027,6 +1056,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
     };
 
     let (conn, their_status) = if p2p_stream.shared_capabilities().len() == 1 {
+        // if the shared caps are 1, we know both support the eth version
         // if the hello handshake was successful we can try status handshake
         //
         // Before trying status handshake, set up the version to negotiated shared version
@@ -1058,6 +1088,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         for handler in extra_handlers.into_iter() {
             let cap = handler.protocol().cap;
             let remote_peer_id = their_hello.id;
+
             multiplex_stream
                 .install_protocol(&cap, move |conn| {
                     handler.into_connection(direction, remote_peer_id, conn)
