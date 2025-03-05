@@ -25,7 +25,7 @@ use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
 use std::{sync::Arc, time::Duration};
-use tracing::info;
+use tracing::trace;
 
 /// Maximum bundle depth
 const MAX_NESTED_BUNDLE_DEPTH: usize = 5;
@@ -401,7 +401,7 @@ where
         request: SendBundleRequest,
         overrides: SimBundleOverrides,
     ) -> RpcResult<SimBundleResponse> {
-        info!("mev_simBundle called, request: {:?}, overrides: {:?}", request, overrides);
+        trace!("mev_simBundle called, request: {:?}, overrides: {:?}", request, overrides);
 
         let override_timeout = overrides.timeout;
 
