@@ -25,14 +25,14 @@ pub struct CliRunner {
 
 impl CliRunner {
     /// Attempts to create a new [`CliRunner`] using the default tokio
-    /// [Runtime](tokio::runtime::Runtime).
+    /// [`Runtime`](tokio::runtime::Runtime).
     ///
     /// The default tokio runtime is multi-threaded, with both I/O and time drivers enabled.
     pub fn try_default_runtime() -> Result<Self, std::io::Error> {
         Ok(Self { tokio_runtime: tokio_runtime()? })
     }
 
-    /// Create a new [`CliRunner`] from a provided tokio [Runtime](tokio::runtime::Runtime).
+    /// Create a new [`CliRunner`] from a provided tokio [`Runtime`](tokio::runtime::Runtime).
     pub fn from_runtime(tokio_runtime: tokio::runtime::Runtime) -> Self {
         Self { tokio_runtime }
     }
@@ -141,7 +141,7 @@ struct AsyncCliRunner {
 // === impl AsyncCliRunner ===
 
 impl AsyncCliRunner {
-    /// Given a tokio [Runtime](tokio::runtime::Runtime), creates additional context required to
+    /// Given a tokio [`Runtime`](tokio::runtime::Runtime), creates additional context required to
     /// execute commands asynchronously.
     fn new(tokio_runtime: tokio::runtime::Runtime) -> Self {
         let task_manager = TaskManager::new(tokio_runtime.handle().clone());
