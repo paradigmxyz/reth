@@ -7,7 +7,7 @@ use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use eyre::{OptionExt, Result};
 use reth_cli_runner::CliContext;
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 
 use super::rpc_transaction::RpcTransaction;
 
@@ -61,7 +61,9 @@ impl Command {
     fn read_input(&self) -> Result<String> {
         Ok(match &self.path {
             Some(path) => reth_fs_util::read_to_string(path)?,
-            None => String::from_utf8(std::io::stdin().bytes().collect::<Result<Vec<_>, _>>()?)?,
+            None => String::from_utf8(
+                BufReader::new(std::io::stdin()).bytes().collect::<Result<Vec<_>, _>>()?,
+            )?,
         })
     }
 

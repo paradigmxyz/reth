@@ -77,9 +77,9 @@ impl LaunchContext {
         Self { task_executor, data_dir }
     }
 
-    /// Attaches a database to the launch context.
-    pub const fn with<DB>(self, database: DB) -> LaunchContextWith<DB> {
-        LaunchContextWith { inner: self, attachment: database }
+    /// Create launch context with attachment.
+    pub const fn with<T>(self, attachment: T) -> LaunchContextWith<T> {
+        LaunchContextWith { inner: self, attachment }
     }
 
     /// Loads the reth config with the configured `data_dir` and overrides settings according to the

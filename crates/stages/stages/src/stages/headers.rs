@@ -188,7 +188,7 @@ where
                     &RawValue::<BlockNumber>::from_vec(number),
                 )?;
             } else {
-                cursor_header_numbers.insert(
+                cursor_header_numbers.upsert(
                     RawKey::<BlockHash>::from_vec(hash),
                     &RawValue::<BlockNumber>::from_vec(number),
                 )?;

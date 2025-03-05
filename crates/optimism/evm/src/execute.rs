@@ -1,14 +1,16 @@
 //! Optimism block execution strategy.
 
 use crate::{
-    l1::ensure_create2_deployer, BasicOpReceiptBuilder, OpBlockExecutionError, OpEvmConfig,
-    OpReceiptBuilder, ReceiptBuilderCtx,
+    l1::ensure_create2_deployer, BasicOpReceiptBuilder, OpBlockAssembler, OpBlockExecutionError,
+    OpEvmConfig, OpReceiptBuilder, ReceiptBuilderCtx,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
-    transaction::Recovered, BlockHeader, Eip658Value, Header, Receipt, Transaction as _, TxReceipt,
+    transaction::Recovered, BlockHeader, Eip658Value, Header, Receipt, Transaction, TxReceipt,
 };
+use alloy_eips::Encodable2718;
 use alloy_evm::FromRecoveredTx;
+use alloy_primitives::Bytes;
 use op_alloy_consensus::OpDepositReceipt;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
@@ -18,7 +20,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    Database, Evm, EvmFor, InspectorFor, NextBlockEnvAttributes,
+    Database, Evm, EvmFor, InspectorFor,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_chainspec::OpChainSpec;
@@ -30,32 +32,51 @@ use revm_database::State;
 use revm_primitives::B256;
 use tracing::trace;
 
-impl<ChainSpec, N> BlockExecutionStrategyFactory for OpEvmConfig<ChainSpec, N>
+impl<ChainSpec, N, T> BlockExecutionStrategyFactory for OpEvmConfig<ChainSpec, N>
 where
     ChainSpec: EthChainSpec + OpHardforks + 'static,
-    N: NodePrimitives<SignedTx: OpTransaction, Receipt: DepositReceipt>,
-    revm_optimism::OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx>,
+    T: SignedTransaction + OpTransaction,
+    N: NodePrimitives<
+        Receipt: DepositReceipt,
+        SignedTx = T,
+        BlockHeader = Header,
+        BlockBody = alloy_consensus::BlockBody<T>,
+    >,
+    revm_optimism::OpTransaction<TxEnv>: FromRecoveredTx<T>,
 {
     type Primitives = N;
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
-        OpExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>, N, &'a ChainSpec>;
+        OpExecutionStrategy<
+            'a,
+            EvmFor<Self, &'a mut State<DB>, I>,
+            N::SignedTx,
+            N::Receipt,
+            &'a ChainSpec,
+        >;
     type ExecutionCtx<'a> = OpBlockExecutionCtx;
+    type BlockAssembler = OpBlockAssembler<ChainSpec>;
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assembler
+    }
 
     fn context_for_block<'a>(&self, block: &'a SealedBlock<N::Block>) -> Self::ExecutionCtx<'a> {
         OpBlockExecutionCtx {
             parent_hash: block.header().parent_hash(),
             parent_beacon_block_root: block.header().parent_beacon_block_root(),
+            extra_data: block.header().extra_data().clone(),
         }
     }
 
-    fn context_for_next_block<'a>(
+    fn context_for_next_block(
         &self,
         parent: &SealedHeader<N::BlockHeader>,
-        attributes: NextBlockEnvAttributes<'a>,
-    ) -> Self::ExecutionCtx<'a> {
+        attributes: Self::NextBlockEnvCtx,
+    ) -> Self::ExecutionCtx<'_> {
         OpBlockExecutionCtx {
             parent_hash: parent.hash(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            extra_data: attributes.extra_data,
         }
     }
 
@@ -73,28 +94,30 @@ where
 }
 
 /// Context for OP block execution.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct OpBlockExecutionCtx {
     /// Parent block hash.
     pub parent_hash: B256,
     /// Parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
+    /// The block's extra data.
+    pub extra_data: Bytes,
 }
 
 /// Block execution strategy for Optimism.
 #[derive(Debug)]
-pub struct OpExecutionStrategy<'a, E: Evm, N: NodePrimitives, ChainSpec> {
+pub struct OpExecutionStrategy<'a, E: Evm, Tx, R, ChainSpec> {
     /// Chainspec.
     chain_spec: ChainSpec,
     /// Receipt builder.
-    receipt_builder: &'a dyn OpReceiptBuilder<N::SignedTx, E::HaltReason, Receipt = N::Receipt>,
+    receipt_builder: &'a dyn OpReceiptBuilder<Tx, E::HaltReason, Receipt = R>,
 
     /// Context for block execution.
     ctx: OpBlockExecutionCtx,
     /// The EVM used by strategy.
     evm: E,
     /// Receipts of executed transactions.
-    receipts: Vec<N::Receipt>,
+    receipts: Vec<R>,
     /// Total gas used by executed transactions.
     gas_used: u64,
     /// Whether Regolith hardfork is active.
@@ -103,10 +126,9 @@ pub struct OpExecutionStrategy<'a, E: Evm, N: NodePrimitives, ChainSpec> {
     system_caller: SystemCaller<ChainSpec>,
 }
 
-impl<'a, E, N, ChainSpec> OpExecutionStrategy<'a, E, N, ChainSpec>
+impl<'a, E, Tx, R, ChainSpec> OpExecutionStrategy<'a, E, Tx, R, ChainSpec>
 where
     E: Evm,
-    N: NodePrimitives,
     ChainSpec: OpHardforks,
 {
     /// Creates a new [`OpExecutionStrategy`]
@@ -114,7 +136,7 @@ where
         evm: E,
         ctx: OpBlockExecutionCtx,
         chain_spec: ChainSpec,
-        receipt_builder: &'a dyn OpReceiptBuilder<N::SignedTx, E::HaltReason, Receipt = N::Receipt>,
+        receipt_builder: &'a dyn OpReceiptBuilder<Tx, E::HaltReason, Receipt = R>,
     ) -> Self {
         Self {
             is_regolith: chain_spec.is_regolith_active_at_timestamp(evm.block().timestamp),
@@ -129,23 +151,26 @@ where
     }
 }
 
-impl<'db, DB, E, N, ChainSpec> BlockExecutionStrategy for OpExecutionStrategy<'_, E, N, ChainSpec>
+impl<'db, DB, E, Tx, R, ChainSpec> BlockExecutionStrategy
+    for OpExecutionStrategy<'_, E, Tx, R, ChainSpec>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<N::SignedTx>>,
-    N: NodePrimitives<SignedTx: OpTransaction, Receipt: DepositReceipt>,
+    Tx: Transaction + OpTransaction + Encodable2718,
+    R: TxReceipt + Unpin + 'static,
+    E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<Tx>>,
     ChainSpec: OpHardforks,
 {
-    type Primitives = N;
-    type Error = BlockExecutionError;
+    type Transaction = Tx;
+    type Receipt = R;
     type Evm = E;
 
-    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
             self.chain_spec.is_spurious_dragon_active_at_block(self.evm.block().number);
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
 
+        self.system_caller.apply_blockhashes_contract_call(self.ctx.parent_hash, &mut self.evm)?;
         self.system_caller
             .apply_beacon_root_contract_call(self.ctx.parent_beacon_block_root, &mut self.evm)?;
 
@@ -165,9 +190,9 @@ where
 
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<&<Self::Primitives as NodePrimitives>::SignedTx>,
+        tx: Recovered<&Tx>,
         f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, Self::Error> {
+    ) -> Result<u64, BlockExecutionError> {
         // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block’s gasLimit.
         let block_available_gas = self.evm.block().gas_limit - self.gas_used;
@@ -194,11 +219,11 @@ where
             .transpose()
             .map_err(|_| OpBlockExecutionError::AccountLoadFailed(tx.signer()))?;
 
-        let hash = tx.tx_hash();
+        let hash = tx.trie_hash();
 
         // Execute transaction.
         let result_and_state =
-            self.evm.transact(&tx).map_err(move |err| BlockExecutionError::evm(err, *hash))?;
+            self.evm.transact(&tx).map_err(move |err| BlockExecutionError::evm(err, hash))?;
 
         trace!(
             target: "evm",
@@ -253,9 +278,7 @@ where
         Ok(gas_used)
     }
 
-    fn apply_post_execution_changes(
-        mut self,
-    ) -> Result<BlockExecutionResult<N::Receipt>, Self::Error> {
+    fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<R>), BlockExecutionError> {
         let balance_increments = post_block_balance_increments::<Header>(
             &self.chain_spec.clone(),
             self.evm.block(),
@@ -275,7 +298,14 @@ where
         );
 
         let gas_used = self.receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or_default();
-        Ok(BlockExecutionResult { receipts: self.receipts, requests: Default::default(), gas_used })
+        Ok((
+            self.evm,
+            BlockExecutionResult {
+                receipts: self.receipts,
+                requests: Default::default(),
+                gas_used,
+            },
+        ))
     }
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {

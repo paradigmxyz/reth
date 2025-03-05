@@ -563,7 +563,8 @@ pub(super) mod serde_bincode_compat {
             bound = "serde_bincode_compat::SealedBlock<'a, T>: Serialize + serde::de::DeserializeOwned"
         )]
         block: serde_bincode_compat::SealedBlock<'a, T>,
-        senders: Cow<'a, [Address]>,
+        #[allow(clippy::owned_cow)]
+        senders: Cow<'a, Vec<Address>>,
     }
 
     impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>

@@ -64,6 +64,7 @@ pub trait ExExNotificationsStream<N: NodePrimitives = EthPrimitives>:
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum ExExNotificationsInner<P, E>
 where
     E: BlockExecutorProvider,

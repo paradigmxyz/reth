@@ -9,7 +9,7 @@ use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, NextBlockEnvAttributes};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, BlockTy, FullNodeComponents, NodeAddOns, ReceiptTy, TxTy};
 use reth_node_builder::{
@@ -22,7 +22,8 @@ use reth_node_builder::{
         EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns, RpcAddOns,
         RpcHandle,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
+    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
+    PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
@@ -178,7 +179,7 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv>,
+        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
 {
@@ -218,7 +219,7 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv>,
+        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
 {
@@ -306,7 +307,8 @@ where
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = EthEvmConfig::new(ctx.chain_spec());
+        let evm_config = EthEvmConfig::new(ctx.chain_spec())
+            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
         let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
@@ -373,7 +375,10 @@ where
                     pool,
                     chain_events,
                     ctx.task_executor().clone(),
-                    Default::default(),
+                    reth_transaction_pool::maintain::MaintainPoolConfig {
+                        max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
+                        ..Default::default()
+                    },
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");

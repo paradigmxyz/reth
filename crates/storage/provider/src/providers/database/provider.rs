@@ -373,9 +373,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        if block_number == self.best_block_number().unwrap_or_default() &&
-            block_number == self.last_block_number().unwrap_or_default()
-        {
+        // if the block number is the same as the currently best block number on disk we can use the
+        // latest state provider here
+        if block_number == self.best_block_number().unwrap_or_default() {
             return Ok(Box::new(LatestStateProvider::new(self)))
         }
 
@@ -1123,6 +1123,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+        // The best block number is tracked via the finished stage which gets updated in the same tx
+        // when new blocks committed
         Ok(self
             .get_stage_checkpoint(StageId::Finish)?
             .map(|checkpoint| checkpoint.block_number)
@@ -2975,16 +2977,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         block: BlockNumber,
         remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        let mut canonical_headers_cursor = self.tx.cursor_write::<tables::CanonicalHeaders>()?;
-        let mut rev_headers = canonical_headers_cursor.walk_back(None)?;
-
-        while let Some(Ok((number, hash))) = rev_headers.next() {
-            if number <= block {
-                break
-            }
+        for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
-            rev_headers.delete_current()?;
         }
+
+        // Only prune canonical headers after we've removed the block hashes as we rely on data from
+        // this table in `canonical_hashes_range`.
+        self.remove::<tables::CanonicalHeaders>(block + 1..)?;
         self.remove::<tables::Headers<HeaderTy<N>>>(block + 1..)?;
         self.remove::<tables::HeaderTerminalDifficulties>(block + 1..)?;
 

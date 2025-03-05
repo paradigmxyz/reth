@@ -32,6 +32,7 @@ exclude_crates=(
   reth-exex-test-utils
   reth-ipc
   reth-net-nat
+  reth-network-ress
   reth-network
   reth-node-api
   reth-node-builder
