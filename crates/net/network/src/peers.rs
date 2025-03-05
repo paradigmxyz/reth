@@ -909,11 +909,15 @@ impl PeersManager {
                                 peer.addr = PeerAddr::new_with_ports(address, tcp_port, Some(udp_port));
                             }
                             Err(err) => {
-                                warn!(target: "net::peers", ?peer_id, ?trusted_peer, ?err, "Failed to re-resolve trusted peer");
+                                warn!(target: "net::peers", ?peer_id, ?trusted_peer, ?err, "Failed to re-resolve trusted peer, backing off");
+                                self.backoff_peer_until(peer_id, std::time::Instant::now() + self.refill_slots_interval.period());
+                                continue;
                             }
                         }
                     } else {
-                        error!(target: "net::peers", ?peer_id, "Trusted peer info is missing for a trusted peer");
+                        error!(target: "net::peers", ?peer_id, "Trusted peer info is missing for a trusted peer, banning peer");
+                        self.ban_peer(peer_id);
+                        continue;
                     }
                 }
 
