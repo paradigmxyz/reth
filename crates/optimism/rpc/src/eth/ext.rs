@@ -113,9 +113,9 @@ where
             .map_err(|_| header_not_found())?
             .ok_or_else(header_not_found)?;
 
-        // check condition against header
-        if !condition.has_exceeded_block_number(header.header().number()) ||
-            !condition.has_exceeded_timestamp(header.header().timestamp())
+        // Ensure that the condition can still be met by checking the max bounds
+        if condition.has_exceeded_block_number(header.header().number()) ||
+            condition.has_exceeded_timestamp(header.header().timestamp())
         {
             return Err(TxConditionalErr::InvalidCondition.into());
         }
@@ -132,9 +132,11 @@ where
         } else {
             // otherwise, add to pool with the appended conditional
             tx.set_conditional(condition);
-            let hash = self.pool().add_transaction(TransactionOrigin::External, tx).await.map_err(
-                |e| OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into())),
-            )?;
+            let hash =
+                self.pool().add_transaction(TransactionOrigin::Private, tx).await.map_err(|e| {
+                    OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::PoolError(e.into()))
+                })?;
+
             Ok(hash)
         }
     }

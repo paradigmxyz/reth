@@ -157,7 +157,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // We only care about modified data events
                         if !matches!(
                             event.kind,
-                            notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
+                            notify::EventKind::Modify(_) |
+                                notify::EventKind::Create(_) |
+                                notify::EventKind::Remove(_)
                         ) {
                             continue
                         }

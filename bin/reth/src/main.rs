@@ -14,12 +14,12 @@ fn main() {
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {
-        std::env::set_var("RUST_BACKTRACE", "1");
+        unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     }
 
-    if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(|builder, _| async move {
+    if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(async move |builder, _| {
         info!(target: "reth::cli", "Launching node");
-        let handle = builder.launch_node(EthereumNode::default()).await?;
+        let handle = builder.node(EthereumNode::default()).launch_with_debug_capabilities().await?;
         handle.node_exit_future.await
     }) {
         eprintln!("Error: {err:?}");

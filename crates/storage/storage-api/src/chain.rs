@@ -6,11 +6,12 @@ use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    models::{StoredBlockOmmers, StoredBlockWithdrawals},
+    models::StoredBlockOmmers,
     tables,
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
+use reth_db_models::StoredBlockWithdrawals;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{
     Block, BlockBody, FullBlockHeader, FullNodePrimitives, SignedTransaction,

@@ -85,7 +85,7 @@ where
     where
         B: PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
         V: EngineValidator<N::Engine, Block = BlockTy<N>>,
-        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>>,
+        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>> + 'static,
     {
         let chain_spec = provider.chain_spec();
         let engine_kind =

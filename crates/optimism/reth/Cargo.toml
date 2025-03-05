@@ -72,7 +72,9 @@ test-utils = [
 
 full = ["consensus", "evm", "node", "provider", "rpc", "trie"]
 
-alloy-compat = []
+alloy-compat = [
+    "reth-optimism-primitives/alloy-compat",
+]
 consensus = ["dep:reth-consensus", "dep:reth-consensus-common", "dep:reth-optimism-consensus"]
 evm = ["dep:reth-evm", "dep:reth-optimism-evm"]
 node-api = ["dep:reth-node-api"]

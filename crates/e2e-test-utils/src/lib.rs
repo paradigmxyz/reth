@@ -5,6 +5,7 @@ use reth_chainspec::EthChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::NodePrimitives;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
@@ -22,6 +23,7 @@ use wallet::Wallet;
 
 /// Wrapper type to create test nodes
 pub mod node;
+pub mod testsuite;
 
 /// Helper for transaction operations
 pub mod transaction;
@@ -35,13 +37,8 @@ mod payload;
 /// Helper for network operations
 mod network;
 
-/// Helper for engine api operations
-mod engine_api;
 /// Helper for rpc operations
 mod rpc;
-
-/// Helper traits
-mod traits;
 
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
@@ -52,6 +49,10 @@ pub async fn setup<N>(
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
     N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider + NodeTypesWithEngine,
+    N::Primitives: NodePrimitives<
+        BlockHeader = alloy_consensus::Header,
+        BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
+    >,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
@@ -123,6 +124,10 @@ where
         + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
         + NodeTypesWithEngine
         + NodeTypesForProvider,
+    N::Primitives: NodePrimitives<
+        BlockHeader = alloy_consensus::Header,
+        BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
+    >,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
         Components: NodeComponents<
@@ -180,7 +185,7 @@ where
         let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
         let genesis = node.block_hash(0);
-        node.engine_api.update_forkchoice(genesis, genesis).await?;
+        node.update_forkchoice(genesis, genesis).await?;
 
         // Connect each node in a chain.
         if let Some(previous_node) = nodes.last_mut() {

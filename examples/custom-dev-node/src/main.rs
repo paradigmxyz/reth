@@ -1,7 +1,7 @@
 //! This example shows how to run a custom dev node programmatically and submit a transaction
 //! through rpc.
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use std::sync::Arc;
 
@@ -62,7 +62,7 @@ fn custom_chain() -> Arc<ChainSpec> {
     "nonce": "0x42",
     "timestamp": "0x0",
     "extraData": "0x5343",
-    "gasLimit": "0x1388",
+    "gasLimit": "0x5208",
     "difficulty": "0x400000000",
     "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "coinbase": "0x0000000000000000000000000000000000000000",

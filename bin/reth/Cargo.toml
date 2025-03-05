@@ -49,7 +49,6 @@ reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
-reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
