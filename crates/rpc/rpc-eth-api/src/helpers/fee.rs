@@ -62,7 +62,7 @@ pub trait EthFees: LoadFee {
 
             // ensure the given reward percentiles aren't excessive
             if reward_percentiles.as_ref().map(|perc| perc.len() as u64) >
-                Some(self.gas_oracle().config().max_reward_percentile_limit)
+                Some(self.gas_oracle().config().max_reward_percentile_count)
             {
                 return Err(EthApiError::InvalidRewardPercentiles.into())
             }

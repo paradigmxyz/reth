@@ -13,7 +13,7 @@ use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
         DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
-        DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_LIMIT, SAMPLE_NUMBER,
+        DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
 use reth_storage_api::{BlockReader, BlockReaderIdExt};
@@ -47,7 +47,7 @@ pub struct GasPriceOracleConfig {
     ///
     /// This effectively limits how many transactions and receipts are fetched to compute the
     /// reward percentile.
-    pub max_reward_percentile_limit: u64,
+    pub max_reward_percentile_count: u64,
 
     /// The default gas price to use if there are no blocks to use
     pub default: Option<U256>,
@@ -66,7 +66,7 @@ impl Default for GasPriceOracleConfig {
             percentile: DEFAULT_GAS_PRICE_PERCENTILE,
             max_header_history: MAX_HEADER_HISTORY,
             max_block_history: MAX_HEADER_HISTORY,
-            max_reward_percentile_limit: MAX_REWARD_PERCENTILE_LIMIT,
+            max_reward_percentile_count: MAX_REWARD_PERCENTILE_COUNT,
             default: None,
             max_price: Some(DEFAULT_MAX_GAS_PRICE),
             ignore_price: Some(DEFAULT_IGNORE_GAS_PRICE),
