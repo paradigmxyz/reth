@@ -1,3 +1,5 @@
+use core::ops::Not;
+
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     KeyHasher, MultiProofTargets, Nibbles,
@@ -204,39 +206,41 @@ impl HashedPostState {
     pub fn partition_by_targets(mut self, targets: &MultiProofTargets) -> (Self, Self) {
         let mut state_updates_not_in_targets = Self::default();
 
-        self.storages.retain(|&address, storage| match targets.get(&address) {
-            Some(storage_in_targets) => {
-                let mut storage_not_in_targets = HashedStorage::default();
-                storage.storage.retain(|&slot, value| {
-                    if storage_in_targets.contains(&slot) {
-                        return true
+        self.storages.retain(|&address, storage| {
+            let (retain, storage_not_in_targets) = match targets.get(&address) {
+                Some(storage_in_targets) => {
+                    let mut storage_not_in_targets = HashedStorage::default();
+                    storage.storage.retain(|&slot, value| {
+                        if storage_in_targets.contains(&slot) {
+                            return true
+                        }
+
+                        storage_not_in_targets.storage.insert(slot, *value);
+                        false
+                    });
+
+                    if storage.storage.is_empty() {
+                        storage_not_in_targets.wiped = storage.wiped;
                     }
 
-                    storage_not_in_targets.storage.insert(slot, *value);
-                    false
-                });
-
-                if storage.storage.is_empty() {
-                    storage_not_in_targets.wiped = storage.wiped;
+                    (
+                        !storage.storage.is_empty(),
+                        storage_not_in_targets.is_empty().not().then_some(storage_not_in_targets),
+                    )
                 }
+                None => (false, Some(core::mem::take(storage))),
+            };
 
-                if !storage_not_in_targets.is_empty() {
-                    state_updates_not_in_targets.storages.insert(address, storage_not_in_targets);
-                    if let Some(account) = self.accounts.remove(&address) {
-                        state_updates_not_in_targets.accounts.insert(address, account);
-                    }
-                }
+            if let Some(storage_not_in_targets) = storage_not_in_targets {
+                state_updates_not_in_targets.storages.insert(address, storage_not_in_targets);
 
-                !storage.storage.is_empty()
-            }
-            None => {
-                state_updates_not_in_targets.storages.insert(address, core::mem::take(storage));
+                // Storage update should have an associated account, if it exists.
                 if let Some(account) = self.accounts.remove(&address) {
                     state_updates_not_in_targets.accounts.insert(address, account);
                 }
-
-                false
             }
+
+            retain
         });
         self.accounts.retain(|&address, account| {
             if targets.contains_key(&address) {
