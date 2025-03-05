@@ -1011,10 +1011,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
-            // if this block is higher than the final paris(merge) block, return the final paris
-            // difficulty
-            return Ok(Some(td))
+        if self.chain_spec.is_paris_active_at_block(number) {
+            if let Some(td) = self.chain_spec.final_paris_total_difficulty() {
+                // if this block is higher than the final paris(merge) block, return the final paris
+                // difficulty
+                return Ok(Some(td))
+            }
         }
 
         self.static_file_provider.get_with_static_file_or_database(
@@ -1604,7 +1606,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabasePro
         if let Some(number) = self.convert_hash_or_number(id)? {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
-            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
+            if self.chain_spec.is_paris_active_at_block(number) {
                 return Ok(Some(Vec::new()))
             }
 

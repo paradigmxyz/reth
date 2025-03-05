@@ -1163,7 +1163,7 @@ impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
             id,
             |db_provider| db_provider.ommers(id),
             |block_state| {
-                if self.chain_spec().final_paris_total_difficulty(block_state.number()).is_some() {
+                if self.chain_spec().is_paris_active_at_block(block_state.number()) {
                     return Ok(Some(Vec::new()))
                 }
 

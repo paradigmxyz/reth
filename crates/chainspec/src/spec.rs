@@ -437,17 +437,6 @@ impl ChainSpec {
         self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
     }
 
-    /// Returns the final total difficulty if the given block number is after the Paris hardfork.
-    ///
-    /// Note: technically this would also be valid for the block before the paris upgrade, but this
-    /// edge case is omitted here.
-    #[inline]
-    pub fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
-        self.paris_block_and_final_difficulty.and_then(|(activated_at, final_difficulty)| {
-            (block_number >= activated_at).then_some(final_difficulty)
-        })
-    }
-
     /// Get the fork filter for the given hardfork
     pub fn hardfork_fork_filter<H: Hardfork + Clone>(&self, fork: H) -> Option<ForkFilter> {
         match self.hardforks.fork(fork.clone()) {
@@ -784,14 +773,6 @@ impl Hardforks for ChainSpec {
 impl EthereumHardforks for ChainSpec {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
         self.fork(fork)
-    }
-
-    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
-        self.get_final_paris_total_difficulty()
-    }
-
-    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
-        self.final_paris_total_difficulty(block_number)
     }
 }
 
