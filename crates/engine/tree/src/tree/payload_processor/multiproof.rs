@@ -352,7 +352,7 @@ where
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
-                executor.rayon_pool().clone(),
+                executor.handle().clone(),
             )
             .with_branch_node_masks(true)
             .multiproof(proof_targets);
