@@ -359,13 +359,12 @@ impl From<Genesis> for OpChainSpec {
         ordered_hardforks.append(&mut block_hardforks);
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
+        let genesis_header = SealedHeader::seal_slow(make_genesis_header(&genesis, &hardforks));
 
         Self {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
-                genesis_header: SealedHeader::new_unhashed(make_genesis_header(
-                    &genesis, &hardforks,
-                )),
+                genesis_header,
                 genesis,
                 hardforks,
                 // We assume no OP network merges, and set the paris block and total difficulty to
