@@ -173,7 +173,11 @@ impl OpChainSpecBuilder {
     /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
     /// [`Self::genesis`])
     pub fn build(self) -> OpChainSpec {
-        OpChainSpec { inner: self.inner.build() }
+        let mut inner = self.inner.build();
+        inner.genesis_header =
+            SealedHeader::seal_slow(make_op_genesis_header(&inner.genesis, &inner.hardforks));
+
+        OpChainSpec { inner }
     }
 }
 
