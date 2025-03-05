@@ -17,7 +17,7 @@ reth-mdbx-sys.workspace = true
 bitflags.workspace = true
 byteorder.workspace = true
 derive_more.workspace = true
-indexmap = "2"
+indexmap.workspace = true
 parking_lot.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
@@ -34,7 +34,6 @@ read-tx-timeouts = ["dep:dashmap"]
 pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
 rand.workspace = true
-rand_xorshift = "0.3"
 tempfile.workspace = true
 
 [[bench]]

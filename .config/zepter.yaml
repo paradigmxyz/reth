@@ -12,13 +12,13 @@ workflows:
         # Check that `A` activates the features of `B`.
         "propagate-feature",
         # These are the features to check:
-        "--features=std,optimism,op,dev,asm-keccak,jemalloc,jemalloc-prof,tracy-allocator,serde-bincode-compat,serde,test-utils,arbitrary,bench",
-        # Do not try to add a new section into `[features]` of `A` only because `B` expose that feature. There are edge-cases where this is still needed, but we can add them manually.
+        "--features=std,op,dev,asm-keccak,jemalloc,jemalloc-prof,tracy-allocator,serde-bincode-compat,serde,test-utils,arbitrary,bench,alloy-compat",
+        # Do not try to add a new section to `[features]` of `A` only because `B` exposes that feature. There are edge-cases where this is still needed, but we can add them manually.
         "--left-side-feature-missing=ignore",
         # Ignore the case that `A` it outside of the workspace. Otherwise it will report errors in external dependencies that we have no influence on.
 
         "--left-side-outside-workspace=ignore",
-        # Auxilary flags:
+        # Auxiliary flags:
         "--offline",
         "--locked",
         "--show-path",

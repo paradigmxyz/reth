@@ -17,10 +17,7 @@ type ColumnResult<T> = ProviderResult<Option<T>>;
 impl<'a> StaticFileCursor<'a> {
     /// Returns a new [`StaticFileCursor`].
     pub fn new(jar: &'a NippyJar<SegmentHeader>, reader: Arc<DataReader>) -> ProviderResult<Self> {
-        Ok(Self(
-            NippyJarCursor::with_reader(jar, reader)
-                .map_err(|err| ProviderError::NippyJar(err.to_string()))?,
-        ))
+        Ok(Self(NippyJarCursor::with_reader(jar, reader).map_err(ProviderError::other)?))
     }
 
     /// Returns the current `BlockNumber` or `TxNumber` of the cursor depending on the kind of

@@ -7,38 +7,40 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 extern crate alloc;
 
-use core::fmt::Debug;
-
-use alloc::sync::Arc;
+use alloc::{format, sync::Arc};
 use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
+use core::fmt::Debug;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_consensus::{
-    Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
-};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
     validate_body_against_header, validate_cancun_gas, validate_header_base_fee,
-    validate_header_extra_data, validate_header_gas, validate_shanghai_withdrawals,
+    validate_header_extra_data, validate_header_gas,
 };
+use reth_execution_types::BlockExecutionResult;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{
+    Block, BlockBody, BlockHeader, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader,
+};
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
-use reth_primitives_traits::{Block, BlockBody, BlockHeader, SealedBlock};
 
-mod validation;
+pub mod validation;
 pub use validation::{
-    decode_holocene_base_fee, next_block_base_fee, validate_block_post_execution,
+    canyon, decode_holocene_base_fee, isthmus, next_block_base_fee, shanghai,
+    validate_block_post_execution,
 };
+
+pub mod error;
+pub use error::OpConsensusError;
 
 /// Optimism consensus implementation.
 ///
@@ -62,9 +64,9 @@ impl<ChainSpec: EthChainSpec + OpHardforks, N: NodePrimitives<Receipt: DepositRe
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
-        input: PostExecutionInput<'_, N::Receipt>,
+        result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block.header(), &self.chain_spec, input.receipts)
+        validate_block_post_execution(block.header(), &self.chain_spec, &result.receipts)
     }
 }
 
@@ -99,13 +101,30 @@ impl<ChainSpec: EthChainSpec + OpHardforks, B: Block> Consensus<B>
             return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
         }
 
-        // EIP-4895: Beacon chain push withdrawals as operations
+        // Check empty shanghai-withdrawals
         if self.chain_spec.is_shanghai_active_at_timestamp(block.timestamp()) {
-            validate_shanghai_withdrawals(block)?;
+            shanghai::ensure_empty_shanghai_withdrawals(block.body()).map_err(|err| {
+                ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
+            })?
+        } else {
+            return Ok(())
         }
 
         if self.chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
             validate_cancun_gas(block)?;
+        } else {
+            return Ok(())
+        }
+
+        // Check withdrawals root field in header
+        if self.chain_spec.is_isthmus_active_at_timestamp(block.timestamp()) {
+            // storage root of withdrawals pre-deploy is verified post-execution
+            isthmus::ensure_withdrawals_storage_root_is_some(block.header()).map_err(|err| {
+                ConsensusError::Other(format!("failed to verify block {}: {err}", block.number()))
+            })?
+        } else {
+            // canyon is active, else would have returned already
+            canyon::ensure_empty_withdrawals_root(block.header())?
         }
 
         Ok(())

@@ -43,7 +43,7 @@ pub trait BlockBody:
     fn transactions(&self) -> &[Self::Transaction];
 
     /// Returns an iterator over the transactions in the block.
-    fn transactions_iter(&self) -> impl Iterator<Item = &Self::Transaction> {
+    fn transactions_iter(&self) -> impl Iterator<Item = &Self::Transaction> + '_ {
         self.transactions().iter()
     }
 

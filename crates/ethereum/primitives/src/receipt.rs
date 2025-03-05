@@ -193,6 +193,19 @@ impl InMemorySize for Receipt {
 
 impl reth_primitives_traits::Receipt for Receipt {}
 
+#[cfg(feature = "serde-bincode-compat")]
+impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for Receipt {
+    type BincodeRepr<'a> = alloc::borrow::Cow<'a, Self>;
+
+    fn as_repr(&self) -> Self::BincodeRepr<'_> {
+        alloc::borrow::Cow::Borrowed(self)
+    }
+
+    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+        repr.into_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

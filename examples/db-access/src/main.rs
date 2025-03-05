@@ -1,13 +1,18 @@
-use alloy_consensus::BlockHeader;
+#![warn(unused_crate_dependencies)]
+
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_eth::{Filter, FilteredParams};
-use reth_chainspec::ChainSpecBuilder;
-use reth_node_ethereum::EthereumNode;
-use reth_primitives::{SealedBlock, SealedHeader, TransactionSigned};
-use reth_primitives_traits::transaction::signed::SignedTransaction;
-use reth_provider::{
-    providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
-    ReceiptProvider, StateProvider, TransactionsProvider,
+use reth_ethereum::{
+    chainspec::ChainSpecBuilder,
+    node::EthereumNode,
+    primitives::{
+        transaction::signed::SignedTransaction, AlloyBlockHeader, SealedBlock, SealedHeader,
+    },
+    provider::{
+        providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
+        ReceiptProvider, StateProvider, TransactionsProvider,
+    },
+    rpc::eth::primitives::{Filter, FilteredParams},
+    TransactionSigned,
 };
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
@@ -17,13 +22,13 @@ use reth_provider::{
 // These abstractions do not include any caching and the user is responsible for doing that.
 // Other parts of the code which include caching are parts of the `EthApi` abstraction.
 fn main() -> eyre::Result<()> {
-    // Opens a RO handle to the database file.
-    let db_path = std::env::var("RETH_DB_PATH")?;
+    // The path to data directory, e.g. "~/.local/reth/share/mainnet"
+    let datadir = std::env::var("RETH_DATADIR")?;
 
-    // Instantiate a provider factory for Ethereum mainnet using the provided DB path.
+    // Instantiate a provider factory for Ethereum mainnet using the provided datadir path.
     let spec = ChainSpecBuilder::mainnet().build();
     let factory = EthereumNode::provider_factory_builder()
-        .open_read_only(spec.into(), ReadOnlyConfig::from_db_dir(db_path))?;
+        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
@@ -112,7 +117,7 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 }
 
 /// The `BlockReader` allows querying the headers-related tables.
-fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
+fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
     provider: T,
     number: u64,
 ) -> eyre::Result<()> {
@@ -159,7 +164,7 @@ fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
 
 /// The `ReceiptProvider` allows querying the receipts tables.
 fn receipts_provider_example<
-    T: ReceiptProvider<Receipt = reth_primitives::Receipt>
+    T: ReceiptProvider<Receipt = reth_ethereum::Receipt>
         + TransactionsProvider<Transaction = TransactionSigned>
         + HeaderProvider,
 >(

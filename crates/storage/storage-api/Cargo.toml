@@ -13,19 +13,18 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
 reth-db-models.workspace = true
-reth-db-api.workspace = true
+reth-chainspec.workspace = true
+reth-db-api = { workspace = true, optional = true }
 reth-execution-types.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
-reth-trie.workspace = true
-reth-trie-db.workspace = true
-reth-db.workspace = true
-revm.workspace = true
+reth-trie-common.workspace = true
+reth-trie-db = { workspace = true, optional = true }
+revm-database.workspace = true
+reth-ethereum-primitives.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -43,8 +42,18 @@ std = [
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-rpc-types-engine/std",
-    "reth-primitives/std",
     "reth-primitives-traits/std",
-    "revm/std",
     "reth-stages-types/std",
+    "revm-database/std",
+    "reth-ethereum-primitives/std",
+    "reth-execution-types/std",
+    "reth-prune-types/std",
+    "reth-storage-errors/std",
+    "reth-db-models/std",
+    "reth-trie-common/std",
+]
+
+db-api = [
+    "dep:reth-db-api",
+    "dep:reth-trie-db",
 ]

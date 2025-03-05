@@ -111,7 +111,7 @@ pub trait EthBlocks: LoadBlock {
     where
         Self: LoadReceipt;
 
-    /// Helper method that loads a bock and all its receipts.
+    /// Helper method that loads a block and all its receipts.
     #[allow(clippy::type_complexity)]
     fn load_block_and_receipts(
         &self,

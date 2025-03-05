@@ -9,6 +9,8 @@ mod context;
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;
+mod rpc_transaction;
+mod send_payload;
 
 /// `reth bench` command
 #[derive(Debug, Parser)]
@@ -28,6 +30,18 @@ pub enum Subcommands {
 
     /// Benchmark which only calls subsequent `newPayload` calls.
     NewPayloadOnly(new_payload_only::Command),
+
+    /// Command for generating and sending an `engine_newPayload` request constructed from an RPC
+    /// block.
+    ///
+    /// This command takes a JSON block input (either from a file or stdin) and generates
+    /// an execution payload that can be used with the `engine_newPayloadV*` API.
+    ///
+    /// One powerful use case is pairing this command with the `cast block` command, for example:
+    ///
+    /// `cast block latest--full --json | reth-bench send-payload --rpc-url localhost:5000
+    /// --jwt-secret $(cat ~/.local/share/reth/mainnet/jwt.hex)`
+    SendPayload(send_payload::Command),
 }
 
 impl BenchmarkCommand {
@@ -39,6 +53,7 @@ impl BenchmarkCommand {
         match self.command {
             Subcommands::NewPayloadFcu(command) => command.execute(ctx).await,
             Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
+            Subcommands::SendPayload(command) => command.execute(ctx).await,
         }
     }
 

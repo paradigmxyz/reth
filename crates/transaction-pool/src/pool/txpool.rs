@@ -23,7 +23,7 @@ use alloy_consensus::constants::{
     LEGACY_TX_TYPE_ID,
 };
 use alloy_eips::{
-    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE},
     eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
     Typed2718,
 };
@@ -961,7 +961,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Helper macro that discards the worst transactions for the pools
         macro_rules! discard_worst {
-            ($this:ident, $removed:ident, [$($limit:ident => $pool:ident),* $(,)*]) => {
+            ($this:ident, $removed:ident, [$($limit:ident => ($pool:ident, $metric:ident)),* $(,)*]) => {
                 $ (
                 while $this.$pool.exceeds(&$this.config.$limit)
                     {
@@ -986,6 +986,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                             $this.$pool.size(),
                             $this.$pool.len()
                         );
+                        $this.metrics.$metric.increment(removed_from_subpool.len() as u64);
 
                         // 2. remove all transactions from the total set
                         for tx in removed_from_subpool {
@@ -1007,10 +1008,10 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         discard_worst!(
             self, removed, [
-                pending_limit => pending_pool,
-                basefee_limit => basefee_pool,
-                blob_limit    => blob_pool,
-                queued_limit  => queued_pool,
+                pending_limit => (pending_pool, pending_transactions_evicted),
+                basefee_limit => (basefee_pool, basefee_transactions_evicted),
+                blob_limit    => (blob_pool, blob_transactions_evicted),
+                queued_limit  => (queued_pool, queued_transactions_evicted),
             ]
         );
 
@@ -1832,7 +1833,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
         Self {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),

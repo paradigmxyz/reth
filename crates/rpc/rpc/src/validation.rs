@@ -7,17 +7,19 @@ use alloy_rpc_types_beacon::relay::{
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
 };
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, PayloadError,
+    BlobsBundleV1, CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
     PraguePayloadFields,
 };
 use async_trait::async_trait;
+use core::fmt;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
-use reth_engine_primitives::{ExecutionData, PayloadValidator};
+use reth_consensus::{Consensus, FullConsensus};
+use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_metrics::{metrics, metrics::Gauge, Metrics};
+use reth_node_api::NewPayloadError;
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{
     constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock, SealedHeaderFor,
@@ -139,14 +141,23 @@ where
         let latest_header =
             self.provider.latest_header()?.ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
 
-        let parent_header = self
-            .provider
-            .sealed_header_by_hash(block.parent_hash())?
-            .ok_or_else(|| ValidationApiError::MissingParentBlock)?;
+        let parent_header = if block.parent_hash() == latest_header.hash() {
+            latest_header
+        } else {
+            // parent is not the latest header so we need to fetch it and ensure it's not too old
+            let parent_header = self
+                .provider
+                .sealed_header_by_hash(block.parent_hash())?
+                .ok_or_else(|| ValidationApiError::MissingParentBlock)?;
 
-        if latest_header.number().saturating_sub(parent_header.number()) > self.validation_window {
-            return Err(ValidationApiError::BlockTooOld)
-        }
+            if latest_header.number().saturating_sub(parent_header.number()) >
+                self.validation_window
+            {
+                return Err(ValidationApiError::BlockTooOld)
+            }
+            parent_header
+        };
+
         self.consensus.validate_header_against_parent(block.sealed_header(), &parent_header)?;
         self.validate_gas_limit(registered_gas_limit, &parent_header, block.sealed_header())?;
         let parent_header_hash = parent_header.hash();
@@ -175,10 +186,7 @@ where
             return Err(ValidationApiError::Blacklist(account))
         }
 
-        self.consensus.validate_block_post_execution(
-            &block,
-            PostExecutionInput::new(&output.receipts, &output.requests),
-        )?;
+        self.consensus.validate_block_post_execution(&block, &output)?;
 
         self.ensure_payment(&block, &output, &message)?;
 
@@ -349,17 +357,13 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> Result<(), ValidationApiError> {
-        let block = self
-            .payload_validator
-            .ensure_well_formed_payload(ExecutionData {
-                payload: ExecutionPayload::V3(request.request.execution_payload),
-                sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                    parent_beacon_block_root: request.parent_beacon_block_root,
-                    versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
-                }),
-            })?
-            .try_recover()
-            .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
+        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+            payload: ExecutionPayload::V3(request.request.execution_payload),
+            sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                parent_beacon_block_root: request.parent_beacon_block_root,
+                versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
+            }),
+        })?;
 
         self.validate_message_against_block(
             block,
@@ -374,25 +378,20 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> Result<(), ValidationApiError> {
-        let block = self
-            .payload_validator
-            .ensure_well_formed_payload(ExecutionData {
-                payload: ExecutionPayload::V3(request.request.execution_payload),
-                sidecar: ExecutionPayloadSidecar::v4(
-                    CancunPayloadFields {
-                        parent_beacon_block_root: request.parent_beacon_block_root,
-                        versioned_hashes: self
-                            .validate_blobs_bundle(request.request.blobs_bundle)?,
-                    },
-                    PraguePayloadFields {
-                        requests: RequestsOrHash::Requests(
-                            request.request.execution_requests.to_requests(),
-                        ),
-                    },
-                ),
-            })?
-            .try_recover()
-            .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
+        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+            payload: ExecutionPayload::V3(request.request.execution_payload),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
+                },
+                PraguePayloadFields {
+                    requests: RequestsOrHash::Requests(
+                        request.request.execution_requests.to_requests(),
+                    ),
+                },
+            ),
+        })?;
 
         self.validate_message_against_block(
             block,
@@ -464,7 +463,6 @@ where
     }
 }
 
-#[derive(Debug)]
 pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     /// The provider that can interact with the chain.
     provider: Provider,
@@ -492,6 +490,12 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     task_spawner: Box<dyn TaskSpawner>,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+impl<Provider, E: BlockExecutorProvider> fmt::Debug for ValidationApiInner<Provider, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ValidationApiInner").finish_non_exhaustive()
+    }
 }
 
 /// Configuration for validation API.
@@ -549,7 +553,7 @@ pub enum ValidationApiError {
     #[error(transparent)]
     Execution(#[from] BlockExecutionError),
     #[error(transparent)]
-    Payload(#[from] PayloadError),
+    Payload(#[from] NewPayloadError),
 }
 
 /// Metrics for the validation endpoint.

@@ -211,6 +211,19 @@ impl InMemorySize for OpReceipt {
 
 impl reth_primitives_traits::Receipt for OpReceipt {}
 
+#[cfg(feature = "serde-bincode-compat")]
+impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for OpReceipt {
+    type BincodeRepr<'a> = Self;
+
+    fn as_repr(&self) -> Self::BincodeRepr<'_> {
+        self.clone()
+    }
+
+    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+        repr
+    }
+}
+
 /// Trait for deposit receipt.
 pub trait DepositReceipt: reth_primitives_traits::Receipt {
     /// Returns deposit receipt if it is a deposit transaction.
@@ -241,6 +254,7 @@ mod compact {
         tx_type: OpTxType,
         success: bool,
         cumulative_gas_used: u64,
+        #[allow(clippy::owned_cow)]
         logs: Cow<'a, Vec<Log>>,
         deposit_nonce: Option<u64>,
         deposit_receipt_version: Option<u64>,

@@ -19,7 +19,8 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams,
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
+    eip7840::BlobParams,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
@@ -591,7 +592,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     ///  - EIP-4844
     pub fn new(client: Client) -> Self {
         Self {
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT.into(),
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
             client,
             minimum_priority_fee: None,
             additional_tasks: 1,
@@ -884,7 +885,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
     fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
-    use revm_primitives::SpecId;
+    use revm_specification::hardfork::SpecId;
     let spec_id = if fork_tracker.is_prague_activated() {
         SpecId::PRAGUE
     } else if fork_tracker.is_shanghai_activated() {
@@ -897,8 +898,12 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         spec_id,
         transaction.input(),
         transaction.is_create(),
-        transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
-        transaction.authorization_list().map(|l| l.len()).unwrap_or(0) as u64,
+        transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
+        transaction
+            .access_list()
+            .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
+            .unwrap_or_default() as u64,
+        transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
     );
 
     let gas_limit = transaction.gas_limit();
@@ -919,7 +924,7 @@ mod tests {
     use alloy_consensus::Transaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, PooledTransaction};
+    use reth_primitives::{transaction::SignedTransaction, PooledTransaction};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

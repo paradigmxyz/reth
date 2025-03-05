@@ -22,11 +22,13 @@ use reth_db::{
         iter_static_files, BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask,
         ReceiptMask, StaticFileCursor, TDWithHashMask, TransactionMask,
     },
-    table::{Decompress, Value},
-    tables,
 };
 use reth_db_api::{
-    cursor::DbCursorRO, models::StoredBlockBodyIndices, table::Table, transaction::DbTx,
+    cursor::DbCursorRO,
+    models::StoredBlockBodyIndices,
+    table::{Decompress, Table, Value},
+    tables,
+    transaction::DbTx,
 };
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
@@ -155,7 +157,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // We only care about modified data events
                         if !matches!(
                             event.kind,
-                            notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
+                            notify::EventKind::Modify(_) |
+                                notify::EventKind::Create(_) |
+                                notify::EventKind::Remove(_)
                         ) {
                             continue
                         }
@@ -303,8 +307,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn report_metrics(&self) -> ProviderResult<()> {
         let Some(metrics) = &self.metrics else { return Ok(()) };
 
-        let static_files =
-            iter_static_files(&self.path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
         for (segment, ranges) in static_files {
             let mut entries = 0;
             let mut size = 0;
@@ -429,10 +432,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             jar.jar
         } else {
             NippyJar::<SegmentHeader>::load(&self.path.join(segment.filename(&fixed_block_range)))
-                .map_err(|e| ProviderError::NippyJar(e.to_string()))?
+                .map_err(ProviderError::other)?
         };
 
-        jar.delete().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        jar.delete().map_err(ProviderError::other)?;
 
         let mut segment_max_block = None;
         if fixed_block_range.start() > 0 {
@@ -461,7 +464,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         } else {
             trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
             let path = self.path.join(segment.filename(fixed_block_range));
-            let jar = NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+            let jar = NippyJar::load(&path).map_err(ProviderError::other)?;
             self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
         };
 
@@ -535,7 +538,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 let jar = NippyJar::<SegmentHeader>::load(
                     &self.path.join(segment.filename(&fixed_range)),
                 )
-                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+                .map_err(ProviderError::other)?;
 
                 // Updates the tx index by first removing all entries which have a higher
                 // block_start than our current static file.
@@ -600,9 +603,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         max_block.clear();
         tx_index.clear();
 
-        for (segment, ranges) in
-            iter_static_files(&self.path).map_err(|e| ProviderError::NippyJar(e.to_string()))?
-        {
+        for (segment, ranges) in iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update last block for each segment
             if let Some((block_range, _)) = ranges.last() {
                 max_block.insert(segment, block_range.end());
@@ -662,6 +663,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<Option<PipelineTarget>>
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
+        N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
     {
         // OVM historical import is broken and does not work with this check. It's importing
         // duplicated receipts resulting in having more receipts than the expected transaction
@@ -775,25 +777,27 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
 
             if let Some(unwind) = match segment {
-                StaticFileSegment::Headers => self.ensure_invariants::<_, tables::Headers>(
-                    provider,
-                    segment,
-                    highest_block,
-                    highest_block,
-                )?,
+                StaticFileSegment::Headers => self
+                    .ensure_invariants::<_, tables::Headers<N::BlockHeader>>(
+                        provider,
+                        segment,
+                        highest_block,
+                        highest_block,
+                    )?,
                 StaticFileSegment::Transactions => self
-                    .ensure_invariants::<_, tables::Transactions>(
+                    .ensure_invariants::<_, tables::Transactions<N::SignedTx>>(
                         provider,
                         segment,
                         highest_tx,
                         highest_block,
                     )?,
-                StaticFileSegment::Receipts => self.ensure_invariants::<_, tables::Receipts>(
-                    provider,
-                    segment,
-                    highest_tx,
-                    highest_block,
-                )?,
+                StaticFileSegment::Receipts => self
+                    .ensure_invariants::<_, tables::Receipts<N::Receipt>>(
+                        provider,
+                        segment,
+                        highest_tx,
+                        highest_block,
+                    )?,
                 StaticFileSegment::BlockMeta => self
                     .ensure_invariants::<_, tables::BlockBodyIndices>(
                         provider,
@@ -816,12 +820,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let file_path =
                 self.directory().join(segment.filename(&self.find_fixed_range(latest_block)));
 
-            let jar = NippyJar::<SegmentHeader>::load(&file_path)
-                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+            let jar = NippyJar::<SegmentHeader>::load(&file_path).map_err(ProviderError::other)?;
 
-            NippyJarChecker::new(jar)
-                .check_consistency()
-                .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+            NippyJarChecker::new(jar).check_consistency().map_err(ProviderError::other)?;
         }
         Ok(())
     }

@@ -95,7 +95,7 @@ pub use transaction::{
 pub mod block;
 pub use block::{
     body::{BlockBody, FullBlockBody},
-    header::{BlockHeader, FullBlockHeader},
+    header::{AlloyBlockHeader, BlockHeader, FullBlockHeader},
     Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
@@ -138,7 +138,7 @@ pub use size::InMemorySize;
 
 /// Node traits
 pub mod node;
-pub use node::{BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy};
+pub use node::{BlockTy, BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy, TxTy};
 
 /// Helper trait that requires de-/serialize implementation since `serde` feature is enabled.
 #[cfg(feature = "serde")]
