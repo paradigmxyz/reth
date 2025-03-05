@@ -144,13 +144,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         self.with_runner(CliRunner::try_default_runtime()?, launcher)
     }
 
-    /// Execute the configured cli command on a provided tokio [Runtime](tokio::runtime::Runtime).
+    /// Execute the configured cli command with the provided [`CliRunner`].
     ///
     ///
     /// # Example
     ///
     /// ```no_run
     /// use reth::cli::Cli;
+    /// use reth_cli_runner::CliRunner;
     /// use reth_node_ethereum::EthereumNode;
     ///
     /// let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -159,29 +160,16 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     ///     .enable_all()
     ///     .build()
     ///     .unwrap();
+    /// let runner = CliRunner::from_runtime(runtime);
     ///
     /// Cli::parse_args()
-    ///     .with_runtime(runtime, |builder, _| async move {
+    ///     .with_runner(runner, |builder, _| async move {
     ///         let handle = builder.launch_node(EthereumNode::default()).await?;
-    ///
     ///         handle.wait_for_node_exit().await
     ///     })
     ///     .unwrap();
     /// ```
-    pub fn with_runtime<L, Fut>(
-        self,
-        runtime: tokio::runtime::Runtime,
-        launcher: L,
-    ) -> eyre::Result<()>
-    where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
-        Fut: Future<Output = eyre::Result<()>>,
-    {
-        self.with_runner(CliRunner::from_runtime(runtime), launcher)
-    }
-
-    /// Execute the configured cli command with the provided [`CliRunner`].
-    fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
+    pub fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,

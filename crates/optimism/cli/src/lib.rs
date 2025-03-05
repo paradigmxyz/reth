@@ -137,22 +137,8 @@ where
         self.with_runner(CliRunner::try_default_runtime()?, launcher)
     }
 
-    /// Execute the configured cli command on the provided tokio
-    /// [`Runtime`](tokio::runtime::Runtime).
-    pub fn with_runtime<L, Fut>(
-        self,
-        runtime: tokio::runtime::Runtime,
-        launcher: L,
-    ) -> eyre::Result<()>
-    where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
-        Fut: Future<Output = eyre::Result<()>>,
-    {
-        self.with_runner(CliRunner::from_runtime(runtime), launcher)
-    }
-
     /// Execute the configured cli command with the provided [`CliRunner`].
-    fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
+    pub fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
