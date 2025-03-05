@@ -7,9 +7,17 @@ use reth_eth_wire::{
 };
 use reth_network::protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler};
 use reth_network_api::{test_utils::PeersHandle, Direction, PeerId};
-use std::{fmt, net::SocketAddr};
+use std::{
+    fmt,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::*;
 
 /// The events that can be emitted by our custom protocol.
 #[derive(Debug)]
@@ -30,6 +38,15 @@ pub enum ProtocolEvent {
 pub struct ProtocolState {
     /// Protocol event sender.
     pub events_sender: mpsc::UnboundedSender<ProtocolEvent>,
+    /// The number of active connections.
+    pub active_connections: Arc<AtomicU64>,
+}
+
+impl ProtocolState {
+    /// Create new protocol state.
+    pub fn new(events_sender: mpsc::UnboundedSender<ProtocolEvent>) -> Self {
+        Self { events_sender, active_connections: Arc::default() }
+    }
 }
 
 /// The protocol handler takes care of incoming and outgoing connections.
@@ -41,6 +58,8 @@ pub struct RessProtocolHandler<P> {
     pub node_type: NodeType,
     /// Peers handle.
     pub peers_handle: PeersHandle,
+    /// The maximum number of active connections.
+    pub max_active_connections: u64,
     /// Current state of the protocol.
     pub state: ProtocolState,
 }
@@ -50,6 +69,7 @@ impl<P> fmt::Debug for RessProtocolHandler<P> {
         f.debug_struct("RessProtocolHandler")
             .field("node_type", &self.node_type)
             .field("peers_handle", &self.peers_handle)
+            .field("max_active_connections", &self.max_active_connections)
             .field("state", &self.state)
             .finish_non_exhaustive()
     }
@@ -61,16 +81,46 @@ where
 {
     type ConnectionHandler = Self;
 
-    fn on_incoming(&self, _socket_addr: SocketAddr) -> Option<Self::ConnectionHandler> {
-        Some(self.clone())
+    fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Self::ConnectionHandler> {
+        let num_connections = self.state.active_connections.load(Ordering::Relaxed);
+        trace!(
+            target: "ress::net",
+            num_connections, max_connections = self.max_active_connections, %socket_addr,
+            "COMPARING"
+        );
+        if num_connections >= self.max_active_connections {
+            trace!(
+                target: "ress::net",
+                num_connections, max_connections = self.max_active_connections, %socket_addr,
+                "ignoring incoming connection, max active reached"
+            );
+            None
+        } else {
+            Some(self.clone())
+        }
     }
 
     fn on_outgoing(
         &self,
-        _socket_addr: SocketAddr,
-        _peer_id: PeerId,
+        socket_addr: SocketAddr,
+        peer_id: PeerId,
     ) -> Option<Self::ConnectionHandler> {
-        Some(self.clone())
+        let num_connections = self.state.active_connections.load(Ordering::Relaxed);
+        trace!(
+            target: "ress::net",
+            num_connections, max_connections = self.max_active_connections, %socket_addr, %peer_id,
+            "COMPARING"
+        );
+        if num_connections >= self.max_active_connections {
+            trace!(
+                target: "ress::net",
+                num_connections, max_connections = self.max_active_connections, %socket_addr, %peer_id,
+                "ignoring outgoing connection, max active reached"
+            );
+            None
+        } else {
+            Some(self.clone())
+        }
     }
 }
 
@@ -110,6 +160,9 @@ where
             .send(ProtocolEvent::Established { direction, peer_id, to_connection: tx })
             .ok();
 
+        let active_connections = self.state.active_connections.clone();
+        active_connections.fetch_add(1, Ordering::Relaxed);
+
         RessProtocolConnection::new(
             self.provider.clone(),
             self.node_type,
@@ -117,6 +170,7 @@ where
             peer_id,
             conn,
             UnboundedReceiverStream::from(rx),
+            self.state.active_connections.clone(),
         )
     }
 }

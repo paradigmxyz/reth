@@ -711,6 +711,7 @@ impl NetworkEventStream {
     /// Awaits the next event for an established session
     pub async fn next_session_established(&mut self) -> Option<PeerId> {
         while let Some(ev) = self.inner.next().await {
+            tracing::trace!(target: "ress::net", ?ev, "next"); // TODO:
             match ev {
                 NetworkEvent::ActivePeerSession { info, .. } |
                 NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
@@ -729,6 +730,7 @@ impl NetworkEventStream {
         }
         let mut peers = Vec::with_capacity(num);
         while let Some(ev) = self.inner.next().await {
+            tracing::trace!(target: "ress::net", ?ev, "next"); // TODO:
             if let NetworkEvent::ActivePeerSession { info: SessionInfo { peer_id, .. }, .. } = ev {
                 peers.push(peer_id);
                 num -= 1;
