@@ -43,6 +43,9 @@ alloy-rlp.workspace = true
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
 discv5.workspace = true
 
+# reth-ethereum
+reth-ethereum-primitives.workspace = true
+
 # async/futures
 futures.workspace = true
 pin-project.workspace = true
@@ -137,6 +140,7 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
+    "reth-ethereum-primitives/test-utils",
 ]
 
 [[bench]]
