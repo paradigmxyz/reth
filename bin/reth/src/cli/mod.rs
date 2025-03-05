@@ -133,7 +133,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
     ///     .run(async move |builder, my_args: MyArgs|
     ///         // launch the node
-    ///     
+    ///
     ///         Ok(()))
     ///     .unwrap();
     /// ````
@@ -181,7 +181,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         self.with_runner(CliRunner::from_runtime(runtime), launcher)
     }
 
-    /// Execute the configured cli command with the provided [`CliRunner`](CliRunner).
+    /// Execute the configured cli command with the provided [`CliRunner`].
     fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
