@@ -598,51 +598,62 @@ where
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) =
-            hashed_state_update.clone().partition_by_targets(&self.fetched_proof_targets);
+            hashed_state_update.partition_by_targets(&self.fetched_proof_targets);
 
         let mut state_updates = 0;
         // Send the state update with already fetched proof targets as one update.
         if !fetched_state_update.is_empty() {
             let _ = self.tx.send(MultiProofMessage::EmptyProof {
                 sequence_number: self.proof_sequencer.next_sequence(),
-                state: fetched_state_update.clone(),
+                state: fetched_state_update,
             });
             state_updates += 1;
         }
 
-        // Process state updates in chunks.
-        let mut chunks = 0;
-        let mut spawned_proof_targets = MultiProofTargets::default();
-        let mut combined_state_update = fetched_state_update;
-        for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-            combined_state_update.extend(chunk.clone());
-            let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
-            spawned_proof_targets.extend_ref(&proof_targets);
+        let proof_targets =
+            get_proof_targets(&not_fetched_state_update, &self.fetched_proof_targets);
+        self.fetched_proof_targets.extend_ref(&proof_targets);
 
-            self.multiproof_manager.spawn_or_queue(MultiproofInput {
-                config: self.config.clone(),
-                source: Some(source),
-                hashed_state_update: chunk,
-                proof_targets,
-                proof_sequence_number: self.proof_sequencer.next_sequence(),
-                state_root_message_sender: self.tx.clone(),
-            });
-            chunks += 1;
-        }
+        self.multiproof_manager.spawn_or_queue(MultiproofInput {
+            config: self.config.clone(),
+            source: Some(source),
+            hashed_state_update: not_fetched_state_update,
+            proof_targets,
+            proof_sequence_number: self.proof_sequencer.next_sequence(),
+            state_root_message_sender: self.tx.clone(),
+        });
+        //
+        // // Process state updates in chunks.
+        // let mut chunks = 0;
+        // let mut spawned_proof_targets = MultiProofTargets::default();
+        // let mut combined_state_update = fetched_state_update;
+        // for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+        //     combined_state_update.extend(chunk.clone());
+        //     let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
+        //     spawned_proof_targets.extend_ref(&proof_targets);
+        //
+        //     self.multiproof_manager.spawn_or_queue(MultiproofInput {
+        //         config: self.config.clone(),
+        //         source: Some(source),
+        //         hashed_state_update: chunk,
+        //         proof_targets,
+        //         proof_sequence_number: self.proof_sequencer.next_sequence(),
+        //         state_root_message_sender: self.tx.clone(),
+        //     });
+        //     chunks += 1;
+        // }
+        //
+        // assert_eq!(combined_state_update, hashed_state_update);
+        //
+        // self.metrics
+        //     .state_update_proof_targets_accounts_histogram
+        //     .record(spawned_proof_targets.len() as f64);
+        // self.metrics
+        //     .state_update_proof_targets_storages_histogram
+        //     .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+        // self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
 
-        assert_eq!(combined_state_update, hashed_state_update);
-
-        self.metrics
-            .state_update_proof_targets_accounts_histogram
-            .record(spawned_proof_targets.len() as f64);
-        self.metrics
-            .state_update_proof_targets_storages_histogram
-            .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
-        self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
-
-        self.fetched_proof_targets.extend(spawned_proof_targets);
-
-        state_updates + chunks
+        state_updates + 1
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
