@@ -224,7 +224,11 @@ impl HashedPostState {
                     false
                 });
 
-                if !storage_not_in_targets.storage.is_empty() {
+                if storage.storage.is_empty() {
+                    storage_not_in_targets.wiped = storage.wiped;
+                }
+
+                if !storage_not_in_targets.is_empty() {
                     state_updates_not_in_targets.storages.insert(address, storage_not_in_targets);
                 }
 
