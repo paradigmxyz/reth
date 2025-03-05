@@ -636,6 +636,8 @@ where
             .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
         self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
 
+        self.fetched_proof_targets.extend(spawned_proof_targets);
+
         state_updates + chunks
     }
 

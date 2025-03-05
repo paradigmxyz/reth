@@ -473,8 +473,10 @@ impl HashedStorageSorted {
 /// An iterator that yields chunks of the state updates of at most `size` account and storage
 /// targets.
 ///
-/// CAUTION: Chunks are expected to be applied in order, because of storage wipes. If applied out of
-/// order, it's possible to wipe more storage than in the original state update.
+/// # Notes
+/// 1. Chunks are expected to be applied in order, because of storage wipes. If applied out of
+///    order, it's possible to wipe more storage than in the original state update.
+/// 2. Storage updates come first, followed by account updates.
 #[derive(Debug)]
 pub struct ChunkedHashedPostState {
     flattened: alloc::vec::IntoIter<(B256, FlattenedHashedPostStateItem)>,
