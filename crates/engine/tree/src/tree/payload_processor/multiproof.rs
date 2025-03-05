@@ -598,14 +598,14 @@ where
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) =
-            hashed_state_update.partition_by_targets(&self.fetched_proof_targets);
+            hashed_state_update.clone().partition_by_targets(&self.fetched_proof_targets);
 
         let mut state_updates = 0;
         // Send the state update with already fetched proof targets as one update.
         if !fetched_state_update.is_empty() {
             let _ = self.tx.send(MultiProofMessage::EmptyProof {
                 sequence_number: self.proof_sequencer.next_sequence(),
-                state: fetched_state_update,
+                state: fetched_state_update.clone(),
             });
             state_updates += 1;
         }
@@ -613,7 +613,9 @@ where
         // Process state updates in chunks.
         let mut chunks = 0;
         let mut spawned_proof_targets = MultiProofTargets::default();
+        let mut combined_state_update = fetched_state_update;
         for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+            combined_state_update.extend(chunk.clone());
             let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
             spawned_proof_targets.extend_ref(&proof_targets);
 
@@ -627,6 +629,8 @@ where
             });
             chunks += 1;
         }
+
+        assert_eq!(combined_state_update, hashed_state_update);
 
         self.metrics
             .state_update_proof_targets_accounts_histogram
