@@ -2430,6 +2430,7 @@ where
             if self.config.use_state_root_task() {
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
+                        info!(target: "engine::tree", ?state_root, "State root task finished");
                         // we double check the state root here for good measure
                         if state_root == block.header().state_root() {
                             maybe_state_root =
