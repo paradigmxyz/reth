@@ -8076,6 +8076,7 @@ dependencies = [
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
+ "reth-ethereum-primitives",
  "reth-fs-util",
  "reth-metrics",
  "reth-net-banlist",
