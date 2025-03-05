@@ -26,4 +26,4 @@ revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "6d
 revm-specification = { git = "https://github.com/bluealloy/revm", rev = "6d51b47d" }
 op-revm = { git = "https://github.com/bluealloy/revm", rev = "6d51b47d" }
 
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "74b6aa4" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "237f5b5" }
