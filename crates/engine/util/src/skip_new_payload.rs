@@ -21,7 +21,7 @@ pub struct EngineSkipNewPayload<S> {
 }
 
 impl<S> EngineSkipNewPayload<S> {
-    /// Creates new [`EngineSkipNewPayload`] stream wrapper.
+    /// Creates a new [`EngineSkipNewPayload`] stream wrapper.
     pub const fn new(stream: S, threshold: usize) -> Self {
         Self { stream, threshold, skipped: 0 }
     }
