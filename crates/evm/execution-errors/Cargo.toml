@@ -17,7 +17,6 @@ reth-storage-errors.workspace = true
 alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-eips.workspace = true
 nybbles.workspace = true
 
 revm-database-interface.workspace = true
@@ -27,7 +26,6 @@ thiserror.workspace = true
 [features]
 default = ["std"]
 std = [
-    "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-rlp/std",
     "thiserror/std",
