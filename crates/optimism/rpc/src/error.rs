@@ -114,7 +114,7 @@ pub enum TxConditionalErr {
     KnownAccountsNotFound,
     /// Known accounts mismatch
     #[error("known accounts mismatch")]
-    KnownAccountMismatch,
+    KnownAccountsMismatch,
 }
 
 impl From<TxConditionalErr> for jsonrpsee_types::error::ErrorObject<'static> {

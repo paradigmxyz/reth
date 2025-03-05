@@ -3,7 +3,7 @@
 use crate::{error::TxConditionalErr, OpEthApiError, SequencerClient};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::{Bytes, B256, StorageKey};
+use alloy_primitives::{Bytes, FixedBytes, StorageKey, Uint, B256, U256};
 use alloy_rpc_types_eth::erc4337::{ TransactionConditional, AccountStorage };
 use jsonrpsee_core::RpcResult;
 use reth_optimism_txpool::conditional::MaybeConditionalTransaction;
@@ -86,10 +86,9 @@ where
         self.inner.provider()
     }
 
-    async fn validate_known_accounts<T: BlockHeader>(
+    async fn validate_known_accounts(
         &self,
-        condition: &TransactionConditional,
-        header: &T
+        condition: &TransactionConditional
     ) -> Result<(), TxConditionalErr> {
         if condition.known_accounts.is_empty() {
             return Ok(());
@@ -104,7 +103,7 @@ where
     
         let state = self
             .provider()
-            .state_by_block_number_or_tag(BlockNumberOrTag::Number(header.number()))
+            .state_by_block_number_or_tag(BlockNumberOrTag::Latest)
             .map_err(|_| TxConditionalErr::StateAccessError)?;
     
         for (address, storage) in &condition.known_accounts {
@@ -115,8 +114,8 @@ where
                             .storage(*address, StorageKey::from(*slot))
                             .map_err(|_| TxConditionalErr::StateAccessError)?;
                         
-                        if current.is_none() || current.unwrap() != Into::<alloy_primitives::Uint<256, 4>>::into(alloy_primitives::FixedBytes::<32>::from(expected_value.0)) {
-                            return Err(TxConditionalErr::KnownAccountsNotFound);
+                        if current.is_none() || current != Some(U256::from_be_bytes(expected_value.0)) {
+                            return Err(TxConditionalErr::KnownAccountsMismatch);
                         }
                     }
                 }
@@ -126,7 +125,7 @@ where
                         .map_err(|_| TxConditionalErr::StateAccessError)?;
                     
                     if *expected_root != actual_root {
-                        return Err(TxConditionalErr::KnownAccountMismatch);
+                        return Err(TxConditionalErr::KnownAccountsMismatch);
                     }
                 }
             }
@@ -179,7 +178,7 @@ where
         }
 
         // Validate Account
-        self.validate_known_accounts(&condition, header.header()).await
+        self.validate_known_accounts(&condition).await
         .map_err(|e| OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::ValidateKnownAccountsError(e.to_string())))?;
 
         if let Some(sequencer) = self.sequencer_client() {
