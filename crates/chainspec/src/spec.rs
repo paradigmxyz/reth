@@ -539,8 +539,7 @@ impl ChainSpec {
             // ensure we only get timestamp forks activated __after__ the genesis block
             cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
         }) {
-            let cond = ForkCondition::Timestamp(timestamp);
-            if head.timestamp >= *timestamp {
+            if head.timestamp >= timestamp {
                 // skip duplicated hardfork activated at the same timestamp
                 if timestamp != current_applied {
                     forkhash += timestamp;
