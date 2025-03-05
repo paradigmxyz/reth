@@ -610,49 +610,33 @@ where
         //     state_updates += 1;
         // }
 
-        let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
-        self.fetched_proof_targets.extend_ref(&proof_targets);
+        // Process state updates in chunks.
+        let mut chunks = 0;
+        let mut spawned_proof_targets = MultiProofTargets::default();
+        for chunk in hashed_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+            let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
+            spawned_proof_targets.extend_ref(&proof_targets);
 
-        self.multiproof_manager.spawn_or_queue(MultiproofInput {
-            config: self.config.clone(),
-            source: Some(source),
-            hashed_state_update,
-            proof_targets,
-            proof_sequence_number: self.proof_sequencer.next_sequence(),
-            state_root_message_sender: self.tx.clone(),
-        });
-        //
-        // // Process state updates in chunks.
-        // let mut chunks = 0;
-        // let mut spawned_proof_targets = MultiProofTargets::default();
-        // let mut combined_state_update = fetched_state_update;
-        // for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-        //     combined_state_update.extend(chunk.clone());
-        //     let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
-        //     spawned_proof_targets.extend_ref(&proof_targets);
-        //
-        //     self.multiproof_manager.spawn_or_queue(MultiproofInput {
-        //         config: self.config.clone(),
-        //         source: Some(source),
-        //         hashed_state_update: chunk,
-        //         proof_targets,
-        //         proof_sequence_number: self.proof_sequencer.next_sequence(),
-        //         state_root_message_sender: self.tx.clone(),
-        //     });
-        //     chunks += 1;
-        // }
-        //
-        // assert_eq!(combined_state_update, hashed_state_update);
-        //
-        // self.metrics
-        //     .state_update_proof_targets_accounts_histogram
-        //     .record(spawned_proof_targets.len() as f64);
-        // self.metrics
-        //     .state_update_proof_targets_storages_histogram
-        //     .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as
-        // f64); self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
+            self.multiproof_manager.spawn_or_queue(MultiproofInput {
+                config: self.config.clone(),
+                source: Some(source),
+                hashed_state_update: chunk,
+                proof_targets,
+                proof_sequence_number: self.proof_sequencer.next_sequence(),
+                state_root_message_sender: self.tx.clone(),
+            });
+            chunks += 1;
+        }
 
-        1
+        self.metrics
+            .state_update_proof_targets_accounts_histogram
+            .record(spawned_proof_targets.len() as f64);
+        self.metrics
+            .state_update_proof_targets_storages_histogram
+            .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+        self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
+
+        chunks
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
