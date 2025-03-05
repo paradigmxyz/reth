@@ -1027,7 +1027,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }) {
             let handler = extra_handlers.remove(pos);
             if handler.on_unsupported_by_peer(
-                &p2p_stream.shared_capabilities(),
+                p2p_stream.shared_capabilities(),
                 direction,
                 their_hello.id,
             ) == OnNotSupported::Disconnect
