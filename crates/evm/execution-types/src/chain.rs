@@ -1,12 +1,11 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
+use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
-use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, NodePrimitives, RecoveredBlock,
     SealedHeader,
@@ -272,15 +271,14 @@ impl<N: NodePrimitives> Chain<N> {
     /// Merge two chains by appending the given chain into the current one.
     ///
     /// The state of accounts for this chain is set to the state of the newest chain.
-    pub fn append_chain(&mut self, other: Self) -> Result<(), BlockExecutionError> {
+    ///
+    /// Returns the passed `other` chain in [`Result::Err`] variant if the chains could not be
+    /// connected.
+    pub fn append_chain(&mut self, other: Self) -> Result<(), Self> {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
         if chain_tip.hash() != other_fork_block.hash {
-            return Err(InternalBlockExecutionError::AppendChainDoesntConnect {
-                chain_tip: Box::new(chain_tip.num_hash()),
-                other_chain_fork: Box::new(other_fork_block),
-            }
-            .into())
+            return Err(other)
         }
 
         // Insert blocks from other chain

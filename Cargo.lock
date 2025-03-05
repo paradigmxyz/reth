@@ -7823,7 +7823,6 @@ dependencies = [
 name = "reth-execution-errors"
 version = "1.2.2"
 dependencies = [
- "alloy-eips",
  "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
@@ -7845,7 +7844,6 @@ dependencies = [
  "derive_more 2.0.1",
  "rand 0.8.5",
  "reth-ethereum-primitives",
- "reth-execution-errors",
  "reth-primitives-traits",
  "reth-trie-common",
  "revm",
