@@ -73,7 +73,7 @@ where
             ctx,
             in_progress: 0,
             // TODO settings
-            max_concurrency: 4,
+            max_concurrency: 100,
             to_multi_proof,
             actions_rx,
             actions_tx,
