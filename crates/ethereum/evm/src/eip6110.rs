@@ -40,16 +40,20 @@ pub fn accumulate_deposits_from_logs<'a>(
     logs: impl IntoIterator<Item = &'a Log>,
     out: &mut Vec<u8>,
 ) -> Result<(), BlockValidationError> {
-    logs.into_iter().filter(|log| log.address == address).try_for_each(|log| {
-        // We assume that the log is valid because it was emitted by the
-        // deposit contract.
-        let decoded_log =
-            DepositEvent::decode_log(log, false).map_err(|err: alloy_sol_types::Error| {
-                BlockValidationError::DepositRequestDecode(err.to_string())
-            })?;
-        accumulate_deposit_from_log(&decoded_log, out);
-        Ok(())
-    })
+    logs.into_iter()
+        .filter(|log| {
+            log.address == address && log.topics().first() == Some(&DepositEvent::SIGNATURE_HASH)
+        })
+        .try_for_each(|log| {
+            // We assume that the log is valid because it was emitted by the
+            // deposit contract.
+            let decoded_log =
+                DepositEvent::decode_log(log, false).map_err(|err: alloy_sol_types::Error| {
+                    BlockValidationError::DepositRequestDecode(err.to_string())
+                })?;
+            accumulate_deposit_from_log(&decoded_log, out);
+            Ok(())
+        })
 }
 
 /// Accumulate deposits from a receipt. Iterates over the logs in the receipt
