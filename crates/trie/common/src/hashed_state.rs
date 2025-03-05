@@ -480,7 +480,7 @@ pub struct ChunkedHashedPostState {
     size: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum FlattenedHashedPostStateItem {
     Account(Option<Account>),
     StorageWipe,
@@ -512,8 +512,7 @@ impl ChunkedHashedPostState {
                     ),
                 )
             }))
-            // We use a stable sort to not reorder the first storage wipe items.
-            .sorted_by_key(|(address, _)| *address);
+            .sorted();
 
         Self { flattened, size }
     }
