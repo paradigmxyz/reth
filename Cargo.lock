@@ -285,7 +285,7 @@ dependencies = [
 [[package]]
 name = "alloy-hardforks"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/hardforks?rev=1297bf5#1297bf5e4c6c8641479d39934000cfe6a4ec2869"
+source = "git+https://github.com/alloy-rs/hardforks?rev=c577698#c577698563a10311d6cdcc09c2f271542a7ee69b"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -393,7 +393,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-hardforks"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/hardforks?rev=1297bf5#1297bf5e4c6c8641479d39934000cfe6a4ec2869"
+source = "git+https://github.com/alloy-rs/hardforks?rev=c577698#c577698563a10311d6cdcc09c2f271542a7ee69b"
 dependencies = [
  "alloy-hardforks",
  "auto_impl",
