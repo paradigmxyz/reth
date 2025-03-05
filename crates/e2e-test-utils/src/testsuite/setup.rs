@@ -4,6 +4,7 @@ use crate::{setup_engine, testsuite::Environment, Adapter, TmpDB, TmpNodeAdapter
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::{eyre, Result};
+use jsonrpsee::http_client::HttpClientBuilder;
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
@@ -20,6 +21,7 @@ use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use revm::state::EvmState;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, error};
 
 /// Configuration for setting up a test environment
 #[derive(Debug)]
@@ -172,24 +174,39 @@ impl Setup {
 
         match result {
             Ok((nodes, _tasks, _wallet)) => {
-                use jsonrpsee::http_client::HttpClientBuilder;
-
-                // create HTTP clients for each node's RPC endpoint
-                let mut clients = Vec::with_capacity(nodes.len());
+                // create HTTP clients for each node's RPC and Engine API endpoints
+                let mut node_clients = Vec::with_capacity(nodes.len());
                 for node in &nodes {
-                    let url = node.rpc_url().to_string();
-                    match HttpClientBuilder::default().build(&url) {
-                        Ok(client) => clients.push(client),
+                    let rpc_url = node.rpc_url();
+                    let engine_url = node.engine_api_url();
+                    debug!("rpc_url: {rpc_url}, engine_url: {engine_url}");
+
+                    let rpc_client = match HttpClientBuilder::default().build(&rpc_url) {
+                        Ok(client) => client,
                         Err(e) => {
-                            tracing::error!("Failed to create HTTP client for {}: {}", url, e);
+                            error!("Failed to create RPC client for {}: {}", rpc_url, e);
                             let _ = clients_tx.send(Vec::new());
-                            return Err(eyre!("Failed to create HTTP client: {}", e));
+                            return Err(eyre!("Failed to create RPC client: {}", e));
                         }
-                    }
+                    };
+
+                    let engine_client = match HttpClientBuilder::default().build(&engine_url) {
+                        Ok(client) => client,
+                        Err(e) => {
+                            error!("Failed to create Engine API client for {}: {}", engine_url, e);
+                            let _ = clients_tx.send(Vec::new());
+                            return Err(eyre!("Failed to create Engine API client: {}", e));
+                        }
+                    };
+
+                    node_clients.push(crate::testsuite::NodeClient {
+                        rpc: rpc_client,
+                        engine: engine_client,
+                    });
                 }
 
                 // send the clients back through the channel
-                let _ = clients_tx.send(clients);
+                let _ = clients_tx.send(node_clients);
 
                 // spawn a separate task just to handle the shutdown
                 tokio::spawn(async move {
@@ -202,20 +219,20 @@ impl Setup {
             }
             Err(e) => {
                 let _ = clients_tx.send(Vec::new());
-                tracing::error!("Failed to setup nodes: {}", e);
+                error!("Failed to setup nodes: {}", e);
                 return Err(eyre!("Failed to setup nodes: {}", e));
             }
         }
 
         // wait for the clients to be created
-        let clients =
+        let node_clients =
             clients_rx.await.map_err(|_| eyre!("Failed to receive clients from setup task"))?;
 
-        if clients.is_empty() {
+        if node_clients.is_empty() {
             return Err(eyre!("No nodes were created"));
         }
 
-        env.clients = clients;
+        env.node_clients = node_clients;
 
         // TODO: For each block in self.blocks, replay it on the node
 

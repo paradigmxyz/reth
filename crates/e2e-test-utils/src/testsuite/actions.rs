@@ -2,11 +2,14 @@
 
 use crate::testsuite::Environment;
 use alloy_eips::BlockId;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, Bytes, B256};
 use alloy_rpc_types_engine::{ExecutionPayload, PayloadAttributes};
+use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
 use futures_util::future::BoxFuture;
+use reth_rpc_api::clients::EthApiClient;
 use std::future::Future;
+use tracing::debug;
 
 /// An action that can be performed on an instance.
 ///
@@ -76,32 +79,37 @@ pub struct AssertMineBlock {
     /// The node index to mine
     pub node_idx: usize,
     /// Transactions to include in the block
-    pub transactions: Vec<Vec<u8>>,
+    pub transactions: Vec<Bytes>,
     /// Expected block hash (optional)
     pub expected_hash: Option<B256>,
 }
 
 impl Action for AssertMineBlock {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+    fn execute<'a>(&'a mut self, env: &'a Environment) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            // 1. Create a new payload with the given transactions
-            // 2. Execute forkchoiceUpdated with the new payload
-            // 3. Verify the block was created successfully
-            // 4. If expected_hash is provided, verify the block hash matches
-
-            /*
-             * Example assertion code (would actually fetch the real hash):
-            if let Some(expected_hash) = self.expected_hash {
-                let actual_hash = B256::ZERO;
-                if actual_hash != expected_hash {
-                    return Err(eyre!(
-                        "Block hash mismatch: expected {}, got {}",
-                        expected_hash,
-                        actual_hash
-                    ));
-                }
+            if self.node_idx >= env.node_clients.len() {
+                return Err(eyre::eyre!("Node index out of bounds: {}", self.node_idx));
             }
-            */
+
+            let node_client = &env.node_clients[self.node_idx];
+            let rpc_client = &node_client.rpc;
+            let _engine_client = &node_client.engine;
+
+            let _pre_block_number =
+                EthApiClient::<Transaction, Block, Receipt, Header>::block_number(rpc_client)
+                    .await?;
+
+            // ===== Engine API sequence to mine a block =====
+
+            let latest_block =
+                EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+                    rpc_client,
+                    alloy_eips::BlockNumberOrTag::Latest,
+                    false,
+                )
+                .await?;
+
+            let _latest_block_hash = latest_block.unwrap().header.hash;
 
             Ok(())
         })
@@ -114,12 +122,30 @@ pub struct SubmitTransaction {
     /// The node index to submit to
     pub node_idx: usize,
     /// The raw transaction bytes
-    pub raw_tx: Vec<u8>,
+    pub raw_tx: Bytes,
 }
 
 impl Action for SubmitTransaction {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move { Ok(()) })
+    fn execute<'a>(&'a mut self, env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            if self.node_idx >= env.node_clients.len() {
+                return Err(eyre::eyre!("Node index out of bounds: {}", self.node_idx));
+            }
+
+            let node_client = &env.node_clients[self.node_idx];
+            let rpc_client = &node_client.rpc;
+
+            let tx_hash =
+                EthApiClient::<Transaction, Block, Receipt, Header>::send_raw_transaction(
+                    rpc_client,
+                    self.raw_tx.clone(),
+                )
+                .await?;
+
+            debug!("Transaction submitted with hash: {}", tx_hash);
+
+            Ok(())
+        })
     }
 }
 
