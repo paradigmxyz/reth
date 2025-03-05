@@ -262,6 +262,8 @@ pub struct MultiproofManager<Factory> {
     pending: VecDeque<MultiproofInput<Factory>>,
     /// Executor for tassks
     executor: WorkloadExecutor,
+    /// Metrics
+    metrics: MultiProofTaskMetrics,
 }
 
 impl<Factory> MultiproofManager<Factory>
@@ -270,13 +272,14 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(executor: WorkloadExecutor) -> Self {
+    fn new(executor: WorkloadExecutor, metrics: MultiProofTaskMetrics) -> Self {
         let max_concurrent = executor.rayon_pool().current_num_threads();
         Self {
             pending: VecDeque::with_capacity(max_concurrent),
             max_concurrent,
             executor,
             inflight: 0,
+            metrics,
         }
     }
 
@@ -298,6 +301,7 @@ where
 
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
+            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
             return;
         }
 
@@ -308,8 +312,10 @@ where
     /// spawn a new calculation if needed.
     fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
+        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
 
         if let Some(input) = self.pending.pop_front() {
+            self.metrics.pending_multiproofs_histogram.record(self.pending.len() as f64);
             self.spawn_multiproof(input);
         }
     }
@@ -384,12 +390,18 @@ where
         });
 
         self.inflight += 1;
+        self.metrics.inflight_multiproofs_histogram.record(self.inflight as f64);
     }
 }
 
 #[derive(Metrics, Clone)]
 #[metrics(scope = "tree.root")]
 pub(crate) struct MultiProofTaskMetrics {
+    /// Histogram of inflight multiproofs.
+    pub inflight_multiproofs_histogram: Histogram,
+    /// Histogram of pending multiproofs.
+    pub pending_multiproofs_histogram: Histogram,
+
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
     /// Histogram of proof calculation account targets.
@@ -451,6 +463,7 @@ where
         to_sparse_trie: Sender<SparseTrieEvent>,
     ) -> Self {
         let (tx, rx) = channel();
+        let metrics = MultiProofTaskMetrics::default();
         Self {
             config,
             rx,
@@ -458,8 +471,8 @@ where
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::default(),
-            multiproof_manager: MultiproofManager::new(executor),
-            metrics: MultiProofTaskMetrics::default(),
+            multiproof_manager: MultiproofManager::new(executor, metrics.clone()),
+            metrics,
         }
     }
 
