@@ -88,11 +88,20 @@ impl Runner {
     }
 }
 
+/// Client handles for both regular RPC and Engine API endpoints
+#[derive(Debug)]
+pub struct NodeClient {
+    /// Regular JSON-RPC client
+    pub rpc: HttpClient,
+    /// Engine API client
+    pub engine: HttpClient,
+}
+
 /// Represents a test environment.
 #[derive(Debug, Default)]
 pub struct Environment {
-    /// JSON-RPC clients for interacting with the nodes.
-    pub clients: Vec<HttpClient>,
+    /// Combined clients with both RPC and Engine API endpoints
+    pub node_clients: Vec<NodeClient>,
 }
 
 /// Builder for creating test scenarios

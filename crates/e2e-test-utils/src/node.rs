@@ -293,4 +293,10 @@ where
         let addr = self.inner.rpc_server_handle().http_local_addr().unwrap();
         format!("http://{}", addr).parse().unwrap()
     }
+
+    /// Returns the engine API URL.
+    pub fn engine_api_url(&self) -> Url {
+        let addr = self.inner.auth_server_handle().local_addr();
+        format!("http://{}", addr).parse().unwrap()
+    }
 }
