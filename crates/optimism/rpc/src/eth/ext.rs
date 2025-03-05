@@ -116,7 +116,7 @@ where
                         
                         match current {
                             Some(current) => {
-                                if FixedBytes::<32>::from_slice(&current.to_be_bytes::<32>()) != *expected_value {
+                                if current != U256::from_be_bytes(expected_value.0) {
                                     return Err(TxConditionalErr::KnownAccountsMismatch);
                                 }
                             }
