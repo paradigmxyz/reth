@@ -41,7 +41,7 @@ reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 # `test-utils` feature
-triehash = { version = "0.8", optional = true }
+triehash = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -53,7 +53,7 @@ reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 revm-state.workspace = true
 
 # trie
-triehash = "0.8"
+triehash.workspace = true
 
 # misc
 proptest.workspace = true

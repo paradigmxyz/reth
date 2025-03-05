@@ -1,6 +1,6 @@
 //! This example shows how to implement a node with a custom EVM
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_genesis::Genesis;
@@ -46,13 +46,14 @@ use std::sync::OnceLock;
 #[non_exhaustive]
 pub struct MyEvmFactory;
 
-impl EvmFactory<EvmEnv> for MyEvmFactory {
+impl EvmFactory for MyEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
         EthEvm<DB, I, CustomPrecompiles<EthEvmContext<DB>>>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
+    type Spec = SpecId;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         let evm = Context::mainnet()

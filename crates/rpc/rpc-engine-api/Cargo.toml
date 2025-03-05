@@ -53,5 +53,6 @@ reth-primitives-traits.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-rlp.workspace = true
+reth-node-ethereum.workspace = true
 
 assert_matches.workspace = true

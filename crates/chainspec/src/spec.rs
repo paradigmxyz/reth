@@ -26,8 +26,7 @@ use reth_ethereum_forks::{
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::{
-    base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
-    sepolia_nodes, NodeRecord,
+    holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes, NodeRecord,
 };
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
@@ -438,17 +437,6 @@ impl ChainSpec {
         self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
     }
 
-    /// Returns the final total difficulty if the given block number is after the Paris hardfork.
-    ///
-    /// Note: technically this would also be valid for the block before the paris upgrade, but this
-    /// edge case is omitted here.
-    #[inline]
-    pub fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
-        self.paris_block_and_final_difficulty.and_then(|(activated_at, final_difficulty)| {
-            (block_number >= activated_at).then_some(final_difficulty)
-        })
-    }
-
     /// Get the fork filter for the given hardfork
     pub fn hardfork_fork_filter<H: Hardfork + Clone>(&self, fork: H) -> Option<ForkFilter> {
         match self.hardforks.fork(fork.clone()) {
@@ -530,7 +518,7 @@ impl ChainSpec {
             if let ForkCondition::Block(block) |
             ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
-                if cond.active_at_head(head) {
+                if head.number >= block {
                     // skip duplicated hardforks: hardforks enabled at genesis block
                     if block != current_applied {
                         forkhash += block;
@@ -551,8 +539,7 @@ impl ChainSpec {
             // ensure we only get timestamp forks activated __after__ the genesis block
             cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
         }) {
-            let cond = ForkCondition::Timestamp(timestamp);
-            if cond.active_at_head(head) {
+            if head.timestamp >= timestamp {
                 // skip duplicated hardfork activated at the same timestamp
                 if timestamp != current_applied {
                     forkhash += timestamp;
@@ -582,9 +569,11 @@ impl ChainSpec {
                     ..Default::default()
                 }
             }
-            ForkCondition::TTD { total_difficulty, .. } => {
-                Head { total_difficulty, ..Default::default() }
-            }
+            ForkCondition::TTD { total_difficulty, fork_block, .. } => Head {
+                total_difficulty,
+                number: fork_block.unwrap_or_default(),
+                ..Default::default()
+            },
             ForkCondition::Never => unreachable!(),
         }
     }
@@ -636,15 +625,20 @@ impl ChainSpec {
     /// Returns the known bootnode records for the given chain.
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         use NamedChain as C;
-        let chain = self.chain;
-        match chain.try_into().ok()? {
+
+        match self.chain.try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
-            C::Base => Some(base_nodes()),
-            C::Optimism => Some(op_nodes()),
-            C::BaseGoerli | C::BaseSepolia => Some(base_testnet_nodes()),
-            C::OptimismSepolia | C::OptimismGoerli | C::OptimismKovan => Some(op_testnet_nodes()),
+            // opstack uses the same bootnodes for all chains: <https://github.com/paradigmxyz/reth/issues/14603>
+            C::Base | C::Optimism | C::Unichain | C::World => Some(op_nodes()),
+            C::OptimismSepolia | C::BaseSepolia | C::UnichainSepolia | C::WorldSepolia => {
+                Some(op_testnet_nodes())
+            }
+
+            // fallback for optimism chains
+            chain if chain.is_optimism() && chain.is_testnet() => Some(op_testnet_nodes()),
+            chain if chain.is_optimism() => Some(op_nodes()),
             _ => None,
         }
     }
@@ -780,14 +774,6 @@ impl Hardforks for ChainSpec {
 impl EthereumHardforks for ChainSpec {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
         self.fork(fork)
-    }
-
-    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
-        self.get_final_paris_total_difficulty()
-    }
-
-    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
-        self.final_paris_total_difficulty(block_number)
     }
 }
 

@@ -26,8 +26,7 @@ reth-trie-common.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-chainspec.workspace = true
 # remove this after feature cleanup
-reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
-reth-optimism-storage.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
 alloy-eips.workspace = true
@@ -66,7 +65,6 @@ std = [
     "reth-storage-api/std",
     "reth-storage-errors/std",
     "reth-trie-common/std",
-    "reth-optimism-storage/std",
     "alloy-chains/std",
     "alloy-eips/std",
     "alloy-primitives/std",

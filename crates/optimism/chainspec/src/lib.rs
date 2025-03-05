@@ -35,7 +35,7 @@ use reth_chainspec::{
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
-use reth_optimism_forks::{OpHardfork, OpHardforks};
+use reth_optimism_forks::{OpHardfork, OpHardforks, OP_MAINNET_HARDFORKS};
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
@@ -173,7 +173,11 @@ impl OpChainSpecBuilder {
     /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
     /// [`Self::genesis`])
     pub fn build(self) -> OpChainSpec {
-        OpChainSpec { inner: self.inner.build() }
+        let mut inner = self.inner.build();
+        inner.genesis_header =
+            SealedHeader::seal_slow(make_op_genesis_header(&inner.genesis, &inner.hardforks));
+
+        OpChainSpec { inner }
     }
 }
 
@@ -241,6 +245,10 @@ impl EthChainSpec for OpChainSpec {
     fn is_optimism(&self) -> bool {
         true
     }
+
+    fn final_paris_total_difficulty(&self) -> Option<U256> {
+        self.inner.final_paris_total_difficulty()
+    }
 }
 
 impl Hardforks for OpChainSpec {
@@ -268,14 +276,6 @@ impl Hardforks for OpChainSpec {
 impl EthereumHardforks for OpChainSpec {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
         self.fork(fork)
-    }
-
-    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
-        self.inner.get_final_paris_total_difficulty()
-    }
-
-    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
-        self.inner.final_paris_total_difficulty(block_number)
     }
 }
 
@@ -336,7 +336,7 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Granite.boxed(), genesis_info.granite_time),
             (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
             (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
-            // (OpHardfork::Interop.boxed(), genesis_info.interop_time),
+            (OpHardfork::Interop.boxed(), genesis_info.interop_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -349,7 +349,7 @@ impl From<Genesis> for OpChainSpec {
         block_hardforks.append(&mut time_hardforks);
 
         // Ordered Hardforks
-        let mainnet_hardforks = OpHardfork::op_mainnet();
+        let mainnet_hardforks = OP_MAINNET_HARDFORKS.clone();
         let mainnet_order = mainnet_hardforks.forks_iter();
 
         let mut ordered_hardforks = Vec::with_capacity(block_hardforks.len());
@@ -363,13 +363,12 @@ impl From<Genesis> for OpChainSpec {
         ordered_hardforks.append(&mut block_hardforks);
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
+        let genesis_header = SealedHeader::seal_slow(make_genesis_header(&genesis, &hardforks));
 
         Self {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
-                genesis_header: SealedHeader::new_unhashed(make_genesis_header(
-                    &genesis, &hardforks,
-                )),
+                genesis_header,
                 genesis,
                 hardforks,
                 // We assume no OP network merges, and set the paris block and total difficulty to

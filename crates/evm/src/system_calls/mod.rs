@@ -18,7 +18,7 @@ mod eip7002;
 mod eip7251;
 
 /// A hook that is called after each state change.
-pub trait OnStateHook {
+pub trait OnStateHook: Send + 'static {
     /// Invoked with the source of the change and the state after each system call.
     fn on_state(&mut self, source: StateChangeSource, state: &EvmState);
 }
@@ -58,7 +58,7 @@ pub enum StateChangePostBlockSource {
 
 impl<F> OnStateHook for F
 where
-    F: FnMut(StateChangeSource, &EvmState),
+    F: FnMut(StateChangeSource, &EvmState) + Send + 'static,
 {
     fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
         self(source, state)

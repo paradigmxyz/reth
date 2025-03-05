@@ -28,6 +28,7 @@ use reth_trie::{
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{sync::Arc, time::Instant};
+use tokio::runtime::Handle;
 use tracing::{debug, trace};
 
 /// Parallel proof calculator.
@@ -49,8 +50,8 @@ pub struct ParallelProof<Factory> {
     pub prefix_sets: Arc<TriePrefixSetsMut>,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
-    /// Thread pool for local tasks
-    thread_pool: Arc<rayon::ThreadPool>,
+    /// Handle to spawn blocking tasks to fetch data.
+    executor: Handle,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -62,7 +63,7 @@ impl<Factory> ParallelProof<Factory> {
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        thread_pool: Arc<rayon::ThreadPool>,
+        executor: Handle,
     ) -> Self {
         Self {
             view,
@@ -70,7 +71,7 @@ impl<Factory> ParallelProof<Factory> {
             state_sorted,
             prefix_sets,
             collect_branch_node_masks: false,
-            thread_pool,
+            executor,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
@@ -101,7 +102,7 @@ where
             account_prefix_set: PrefixSetMut::from(targets.keys().copied().map(Nibbles::unpack)),
             storage_prefix_sets: targets
                 .iter()
-                .filter(|&(_hashed_address, slots)| (!slots.is_empty()))
+                .filter(|&(_hashed_address, slots)| !slots.is_empty())
                 .map(|(hashed_address, slots)| {
                     (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
                 })
@@ -125,6 +126,8 @@ where
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
+        // stores the receiver for the storage proof outcome for the hashed addresses
+        // this way we can lazily await the outcome when we iterate over the map
         let mut storage_proofs =
             B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
 
@@ -139,7 +142,8 @@ where
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
-            self.thread_pool.spawn_fifo(move || {
+            // spawn the task as blocking and send the the result through the channel
+            self.executor.spawn_blocking(move || {
                 debug!(
                     target: "trie::parallel_proof",
                     ?hashed_address,
@@ -210,6 +214,9 @@ where
                     );
                 }
             });
+
+            // store the receiver for that result with the hashed address so we can await this in
+            // place when we iterate over the trie
             storage_proofs.insert(hashed_address, rx);
         }
 
@@ -346,6 +353,7 @@ mod tests {
     use reth_primitives::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::proof::Proof;
+    use tokio::runtime::Runtime;
 
     #[test]
     fn random_parallel_proof() {
@@ -410,14 +418,7 @@ mod tests {
         let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
-        let num_threads =
-            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(1));
-
-        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .thread_name(|i| format!("proof-worker-{}", i))
-            .build()
-            .expect("Failed to create proof worker thread pool");
+        let rt = Runtime::new().unwrap();
 
         assert_eq!(
             ParallelProof::new(
@@ -425,7 +426,7 @@ mod tests {
                 Default::default(),
                 Default::default(),
                 Default::default(),
-                Arc::new(state_root_task_pool)
+                rt.handle().clone()
             )
             .multiproof(targets.clone())
             .unwrap(),

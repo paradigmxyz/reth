@@ -17,15 +17,19 @@ crates_to_check=(
     reth-execution-types
     reth-db-models
     reth-evm
+    reth-storage-api
 
     ## ethereum
+    reth-evm-ethereum
     reth-ethereum-forks
     reth-ethereum-primitives
 
     ## optimism
     reth-optimism-chainspec
     reth-optimism-forks
+    reth-optimism-consensus
     reth-optimism-primitives
+    reth-optimism-evm
 )
 
 # Array to hold the results
