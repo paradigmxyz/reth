@@ -475,6 +475,8 @@ where
     }
 
     /// Handles request for proof prefetch.
+    ///
+    /// Returns a number of proofs that were spawned.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
@@ -577,7 +579,7 @@ where
 
     /// Handles state updates.
     ///
-    /// Returns proof targets derived from the state update.
+    /// Returns a number of proofs that were spawned.
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
         // Split the state update into already fetched and not fetched according to the proof
