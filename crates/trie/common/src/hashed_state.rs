@@ -202,6 +202,8 @@ impl HashedPostState {
     /// - First with accounts and storages slots that are present in the provided targets.
     /// - Second with all other.
     pub fn partition_by_targets(mut self, targets: &MultiProofTargets) -> (Self, Self) {
+        let original = self.clone();
+
         let mut state_updates_not_in_targets = Self::default();
 
         self.accounts.retain(|&address, account| {
@@ -239,6 +241,10 @@ impl HashedPostState {
                 false
             }
         });
+
+        let mut combined = self.clone();
+        combined.extend(state_updates_not_in_targets.clone());
+        assert_eq!(combined, original);
 
         (self, state_updates_not_in_targets)
     }
