@@ -203,6 +203,9 @@ impl HashedPostState {
     /// Partition the state update into two state updates:
     /// - First with accounts and storages slots that are present in the provided targets.
     /// - Second with all other.
+    ///
+    /// CAUTION: The state updates are expected to be applied in order, so that the storage wipes
+    /// are done correctly.
     pub fn partition_by_targets(mut self, targets: &MultiProofTargets) -> (Self, Self) {
         let mut state_updates_not_in_targets = Self::default();
 
@@ -219,12 +222,20 @@ impl HashedPostState {
                         false
                     });
 
-                    if storage.storage.is_empty() {
+                    // We do not check the wiped flag here, because targets only contain addresses
+                    // and storage slots. So if there are no storage slots left, the storage update
+                    // can be fully removed.
+                    let retain = !storage.storage.is_empty();
+
+                    // Since state updates are expected to be applied in order, we can only set the
+                    // wiped flag in the second storage update if the first storage update is empty
+                    // and will not be retained.
+                    if !retain {
                         storage_not_in_targets.wiped = storage.wiped;
                     }
 
                     (
-                        !storage.storage.is_empty(),
+                        retain,
                         storage_not_in_targets.is_empty().not().then_some(storage_not_in_targets),
                     )
                 }
