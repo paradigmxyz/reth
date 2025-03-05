@@ -772,7 +772,7 @@ pub enum PendingSessionHandshakeError {
     #[error("authentication timed out")]
     Timeout,
     /// Thrown when the remote lacks the required capability
-    #[error("Mandatory capabilit unsupported")]
+    #[error("Mandatory extra capability unsupported")]
     UnsupportedExtraCapability,
 }
 
