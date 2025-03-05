@@ -14,6 +14,7 @@ pub mod noop;
 pub use self::{in_memory::*, subnode::CursorSubNode};
 
 /// Factory for creating trie cursors.
+#[auto_impl::auto_impl(&)]
 pub trait TrieCursorFactory {
     /// The account trie cursor type.
     type AccountTrieCursor: TrieCursor;
