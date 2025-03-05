@@ -41,4 +41,5 @@ serde = [
     "alloy-chains/serde",
     "alloy-primitives/serde",
     "reth-ethereum-forks/serde",
+    "alloy-op-hardforks/serde",
 ]

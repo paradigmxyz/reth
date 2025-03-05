@@ -38,6 +38,7 @@ arbitrary = [
 serde = [
     "alloy-primitives/serde",
     "alloy-eip2124/serde",
+    "alloy-hardforks/serde",
 ]
 std = [
     "alloy-primitives/std",

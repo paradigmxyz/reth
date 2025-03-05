@@ -292,6 +292,7 @@ dependencies = [
  "alloy-primitives",
  "auto_impl",
  "dyn-clone",
+ "serde",
 ]
 
 [[package]]
@@ -396,6 +397,7 @@ source = "git+https://github.com/alloy-rs/hardforks?rev=1297bf5#1297bf5e4c6c8641
 dependencies = [
  "alloy-hardforks",
  "auto_impl",
+ "serde",
 ]
 
 [[package]]
