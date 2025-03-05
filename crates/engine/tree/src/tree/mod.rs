@@ -2435,6 +2435,13 @@ where
                         if state_root == block.header().state_root() {
                             maybe_state_root =
                                 Some((state_root, trie_updates, execution_finish.elapsed()))
+                        } else {
+                            warn!(
+                                target: "engine::tree",
+                                ?state_root,
+                                block_state_root = ?block.header().state_root(),
+                                "State root task returned incorrect state root"
+                            );
                         }
                     }
                     Err(error) => {
