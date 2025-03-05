@@ -600,25 +600,6 @@ where
         let (fetched_state_update, not_fetched_state_update) =
             hashed_state_update.partition_by_targets(&self.fetched_proof_targets);
 
-        for &hashed_address in not_fetched_state_update.accounts.keys() {
-            self.fetched_proof_targets.entry(hashed_address).or_default();
-        }
-        for (hashed_address, storage) in &not_fetched_state_update.storages {
-            let fetched = self.fetched_proof_targets.get(hashed_address).cloned();
-            let mut changed_slots = storage
-                .storage
-                .keys()
-                .filter(|slot| !fetched.as_ref().is_some_and(|f| f.contains(*slot)))
-                .peekable();
-
-            if changed_slots.peek().is_some() {
-                self.fetched_proof_targets
-                    .entry(*hashed_address)
-                    .or_default()
-                    .extend(changed_slots);
-            }
-        }
-
         let mut state_updates = 0;
         // Send the state update with already fetched proof targets as one update.
         if !fetched_state_update.is_empty() {
@@ -631,12 +612,10 @@ where
 
         // Process state updates in chunks.
         let mut chunks = 0;
-        let mut account_targets_total = 0;
-        let mut storage_targets_total = 0;
+        let mut spawned_proof_targets = MultiProofTargets::default();
         for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-            let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets.clone());
-            account_targets_total += proof_targets.len();
-            storage_targets_total += proof_targets.values().map(|slots| slots.len()).sum::<usize>();
+            let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
+            spawned_proof_targets.extend_ref(&proof_targets);
 
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
                 config: self.config.clone(),
@@ -651,11 +630,13 @@ where
 
         self.metrics
             .state_update_proof_targets_accounts_histogram
-            .record(account_targets_total as f64);
+            .record(spawned_proof_targets.len() as f64);
         self.metrics
             .state_update_proof_targets_storages_histogram
-            .record(storage_targets_total as f64);
+            .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
         self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
+
+        self.fetched_proof_targets.extend(spawned_proof_targets);
 
         state_updates + chunks
     }
