@@ -10008,6 +10008,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "rayon",
+ "reth-db-api",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
