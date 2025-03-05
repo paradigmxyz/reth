@@ -530,7 +530,7 @@ pub(super) mod serde_bincode_compat {
         serde_bincode_compat::{self, SerdeBincodeCompat},
         Block,
     };
-    use alloc::{borrow::Cow, vec, Vec};
+    use alloc::{borrow::Cow, vec::Vec};
     use alloy_primitives::Address;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
