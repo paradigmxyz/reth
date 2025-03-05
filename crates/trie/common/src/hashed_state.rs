@@ -491,10 +491,9 @@ enum FlattenedHashedPostStateItem {
 impl ChunkedHashedPostState {
     fn new(hashed_post_state: HashedPostState, size: usize) -> Self {
         let flattened = hashed_post_state
-            .accounts
+            .storages
             .into_iter()
-            .map(|(address, account)| (address, FlattenedHashedPostStateItem::Account(account)))
-            .chain(hashed_post_state.storages.into_iter().flat_map(|(address, storage)| {
+            .flat_map(|(address, storage)| {
                 let storage_wipe = if storage.wiped {
                     itertools::Either::Left(core::iter::once((
                         address,
@@ -512,6 +511,9 @@ impl ChunkedHashedPostState {
                         },
                     ),
                 )
+            })
+            .chain(hashed_post_state.accounts.into_iter().map(|(address, account)| {
+                (address, FlattenedHashedPostStateItem::Account(account))
             }))
             .sorted_by_key(|(address, _)| *address);
 
