@@ -1,10 +1,8 @@
-use alloy_primitives::U256;
-
 use crate::{EthereumHardfork, ForkCondition};
 
 /// Helper methods for Ethereum forks.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait EthereumHardforks: Clone {
+pub trait EthereumHardforks {
     /// Retrieves [`ForkCondition`] by an [`EthereumHardfork`]. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition;
@@ -82,13 +80,4 @@ pub trait EthereumHardforks: Clone {
             _ => false,
         }
     }
-
-    /// Returns the final total difficulty if the Paris hardfork is known.
-    fn get_final_paris_total_difficulty(&self) -> Option<U256>;
-
-    /// Returns the final total difficulty if the given block number is after the Paris hardfork.
-    ///
-    /// Note: technically this would also be valid for the block before the paris upgrade, but this
-    /// edge case is omitted here.
-    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256>;
 }
