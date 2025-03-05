@@ -146,11 +146,7 @@ where
         }
 
         // Validate Account
-        self.validate_known_accounts(&condition).await.map_err(|e| {
-            OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::ValidateKnownAccountsError(
-                e.to_string(),
-            ))
-        })?;
+        self.validate_known_accounts(&condition).await?;
 
         if let Some(sequencer) = self.sequencer_client() {
             // If we have a sequencer client, forward the transaction
