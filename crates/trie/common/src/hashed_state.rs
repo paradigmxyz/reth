@@ -958,13 +958,16 @@ mod tests {
                 (addr1, Some(Default::default())),
                 (addr2, Some(Default::default())),
             ]),
-            storages: B256Map::from_iter([(
-                addr1,
-                HashedStorage {
-                    wiped: true,
-                    storage: B256Map::from_iter([(slot1, U256::ZERO), (slot2, U256::from(1))]),
-                },
-            )]),
+            storages: B256Map::from_iter([
+                (
+                    addr1,
+                    HashedStorage {
+                        wiped: true,
+                        storage: B256Map::from_iter([(slot1, U256::ZERO), (slot2, U256::from(1))]),
+                    },
+                ),
+                (addr2, HashedStorage::new(true)),
+            ]),
         };
 
         let mut chunks = state.chunks(2);
@@ -972,11 +975,18 @@ mod tests {
             chunks.next(),
             Some(HashedPostState {
                 accounts: B256Map::from_iter([(addr1, Some(Default::default()))]),
+                storages: B256Map::from_iter([(addr1, HashedStorage::new(true))])
+            })
+        );
+        assert_eq!(
+            chunks.next(),
+            Some(HashedPostState {
+                accounts: B256Map::default(),
                 storages: B256Map::from_iter([(
                     addr1,
                     HashedStorage {
-                        wiped: true,
-                        storage: B256Map::from_iter([(slot1, U256::ZERO)]),
+                        wiped: false,
+                        storage: B256Map::from_iter([(slot1, U256::ZERO), (slot2, U256::from(1))]),
                     },
                 )])
             })
@@ -985,14 +995,9 @@ mod tests {
             chunks.next(),
             Some(HashedPostState {
                 accounts: B256Map::from_iter([(addr2, Some(Default::default()))]),
-                storages: B256Map::from_iter([(
-                    addr1,
-                    HashedStorage {
-                        wiped: false,
-                        storage: B256Map::from_iter([(slot2, U256::from(1))]),
-                    },
-                )])
+                storages: B256Map::from_iter([(addr2, HashedStorage::new(true),)])
             })
         );
+        assert_eq!(chunks.next(), None);
     }
 }
