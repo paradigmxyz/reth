@@ -34,6 +34,11 @@ impl WorkloadExecutor {
         }
     }
 
+    /// Returns the handle to the tokio runtime
+    pub(super) fn handle(&self) -> &Handle {
+        &self.inner.handle
+    }
+
     /// Shorthand for [`Runtime::spawn_blocking`]
     #[track_caller]
     pub(super) fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
