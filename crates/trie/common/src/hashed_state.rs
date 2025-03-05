@@ -204,14 +204,6 @@ impl HashedPostState {
     pub fn partition_by_targets(mut self, targets: &MultiProofTargets) -> (Self, Self) {
         let mut state_updates_not_in_targets = Self::default();
 
-        self.accounts.retain(|&address, account| {
-            if targets.contains_key(&address) {
-                return true
-            }
-
-            state_updates_not_in_targets.accounts.insert(address, *account);
-            false
-        });
         self.storages.retain(|&address, storage| match targets.get(&address) {
             Some(storage_in_targets) => {
                 let mut storage_not_in_targets = HashedStorage::default();
@@ -230,14 +222,29 @@ impl HashedPostState {
 
                 if !storage_not_in_targets.is_empty() {
                     state_updates_not_in_targets.storages.insert(address, storage_not_in_targets);
+                    if let Some(account) = self.accounts.remove(&address) {
+                        state_updates_not_in_targets.accounts.insert(address, account);
+                    }
                 }
 
                 !storage.storage.is_empty()
             }
             None => {
                 state_updates_not_in_targets.storages.insert(address, core::mem::take(storage));
+                if let Some(account) = self.accounts.remove(&address) {
+                    state_updates_not_in_targets.accounts.insert(address, account);
+                }
+
                 false
             }
+        });
+        self.accounts.retain(|&address, account| {
+            if targets.contains_key(&address) {
+                return true
+            }
+
+            state_updates_not_in_targets.accounts.insert(address, *account);
+            false
         });
 
         (self, state_updates_not_in_targets)
