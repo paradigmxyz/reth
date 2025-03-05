@@ -8,9 +8,12 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 // Re-export alloy-op-hardforks types.
 pub use alloy_op_hardforks::{OpHardfork, OpHardforks};
 
+use alloc::vec;
 use alloy_primitives::U256;
 use once_cell::sync::Lazy as LazyLock;
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
