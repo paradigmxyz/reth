@@ -404,6 +404,13 @@ pub struct UnsupportedCapabilityError {
     capability: Capability,
 }
 
+impl UnsupportedCapabilityError {
+    /// Creates a new error with the given capability
+    pub const fn new(capability: Capability) -> Self {
+        Self { capability }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

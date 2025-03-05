@@ -53,7 +53,7 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     /// Invoked when the `RLPx` connection has been established by the peer does not share the
     /// protocol.
     fn on_unsupported_by_peer(
-        &self,
+        self,
         supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
@@ -147,7 +147,7 @@ impl RlpxSubProtocols {
 
 /// A set of additional RLPx-based sub-protocol connection handlers.
 #[derive(Default)]
-pub(crate) struct RlpxSubProtocolHandlers(Vec<Box<dyn DynConnectionHandler>>);
+pub(crate) struct RlpxSubProtocolHandlers(pub(crate) Vec<Box<dyn DynConnectionHandler>>);
 
 impl RlpxSubProtocolHandlers {
     /// Returns all handlers.
@@ -201,7 +201,7 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
     fn protocol(&self) -> Protocol;
 
     fn on_unsupported_by_peer(
-        &self,
+        self: Box<Self>,
         supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
@@ -221,12 +221,12 @@ impl<T: ConnectionHandler> DynConnectionHandler for T {
     }
 
     fn on_unsupported_by_peer(
-        &self,
+        self: Box<Self>,
         supported: &SharedCapabilities,
         direction: Direction,
         peer_id: PeerId,
     ) -> OnNotSupported {
-        T::on_unsupported_by_peer(self, supported, direction, peer_id)
+        T::on_unsupported_by_peer(*self, supported, direction, peer_id)
     }
 
     fn into_connection(

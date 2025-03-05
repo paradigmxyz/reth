@@ -197,7 +197,7 @@ impl ConnectionHandler for PingPongConnectionHandler {
     }
 
     fn on_unsupported_by_peer(
-        &self,
+        self,
         _supported: &SharedCapabilities,
         _direction: Direction,
         _peer_id: PeerId,
