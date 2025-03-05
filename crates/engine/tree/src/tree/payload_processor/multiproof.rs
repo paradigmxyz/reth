@@ -597,27 +597,26 @@ where
         let hashed_state_update = evm_state_to_hashed_post_state(update);
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
-        let (fetched_state_update, not_fetched_state_update) =
-            hashed_state_update.partition_by_targets(&self.fetched_proof_targets);
+        // let (fetched_state_update, not_fetched_state_update) =
+        //     hashed_state_update.partition_by_targets(&self.fetched_proof_targets);
+        //
+        // let mut state_updates = 0;
+        // // Send the state update with already fetched proof targets as one update.
+        // if !fetched_state_update.is_empty() {
+        //     let _ = self.tx.send(MultiProofMessage::EmptyProof {
+        //         sequence_number: self.proof_sequencer.next_sequence(),
+        //         state: fetched_state_update,
+        //     });
+        //     state_updates += 1;
+        // }
 
-        let mut state_updates = 0;
-        // Send the state update with already fetched proof targets as one update.
-        if !fetched_state_update.is_empty() {
-            let _ = self.tx.send(MultiProofMessage::EmptyProof {
-                sequence_number: self.proof_sequencer.next_sequence(),
-                state: fetched_state_update,
-            });
-            state_updates += 1;
-        }
-
-        let proof_targets =
-            get_proof_targets(&not_fetched_state_update, &self.fetched_proof_targets);
+        let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
             source: Some(source),
-            hashed_state_update: not_fetched_state_update,
+            hashed_state_update,
             proof_targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
@@ -650,10 +649,10 @@ where
         //     .record(spawned_proof_targets.len() as f64);
         // self.metrics
         //     .state_update_proof_targets_storages_histogram
-        //     .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
-        // self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
+        //     .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as
+        // f64); self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
 
-        state_updates + 1
+        1
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
