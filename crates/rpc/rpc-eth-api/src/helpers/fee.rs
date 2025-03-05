@@ -60,6 +60,13 @@ pub trait EthFees: LoadFee {
                 return Ok(FeeHistory::default())
             }
 
+            // ensure the given reward percentiles aren't excessive
+            if reward_percentiles.as_ref().map(|perc| perc.len() as u64) >
+                Some(self.gas_oracle().config().max_reward_percentile_count)
+            {
+                return Err(EthApiError::InvalidRewardPercentiles.into())
+            }
+
             // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
             let max_fee_history = if reward_percentiles.is_none() {
                 self.gas_oracle().config().max_header_history

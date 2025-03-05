@@ -1,6 +1,7 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
 
+use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
 use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
@@ -12,7 +13,7 @@ use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
         DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
-        DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, SAMPLE_NUMBER,
+        DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
 use reth_storage_api::{BlockReader, BlockReaderIdExt};
@@ -21,8 +22,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
 use tokio::sync::Mutex;
 use tracing::warn;
-
-use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
 
 /// The default gas limit for `eth_call` and adjacent calls. See
 /// [`RPC_DEFAULT_GAS_CAP`](constants::gas_oracle::RPC_DEFAULT_GAS_CAP).
@@ -44,6 +43,12 @@ pub struct GasPriceOracleConfig {
     /// The maximum number of blocks for estimating gas price
     pub max_block_history: u64,
 
+    /// The maximum number for reward percentiles.
+    ///
+    /// This effectively limits how many transactions and receipts are fetched to compute the
+    /// reward percentile.
+    pub max_reward_percentile_count: u64,
+
     /// The default gas price to use if there are no blocks to use
     pub default: Option<U256>,
 
@@ -61,6 +66,7 @@ impl Default for GasPriceOracleConfig {
             percentile: DEFAULT_GAS_PRICE_PERCENTILE,
             max_header_history: MAX_HEADER_HISTORY,
             max_block_history: MAX_HEADER_HISTORY,
+            max_reward_percentile_count: MAX_REWARD_PERCENTILE_COUNT,
             default: None,
             max_price: Some(DEFAULT_MAX_GAS_PRICE),
             ignore_price: Some(DEFAULT_IGNORE_GAS_PRICE),

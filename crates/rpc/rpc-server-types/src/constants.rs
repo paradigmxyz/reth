@@ -65,6 +65,9 @@ pub mod gas_oracle {
     /// The default maximum number of blocks to use for the gas price oracle.
     pub const MAX_HEADER_HISTORY: u64 = 1024;
 
+    /// The default maximum nunber of allowed reward percentiles
+    pub const MAX_REWARD_PERCENTILE_COUNT: u64 = 100;
+
     /// Number of recent blocks to check for gas price
     pub const DEFAULT_GAS_PRICE_BLOCKS: u32 = 20;
 
