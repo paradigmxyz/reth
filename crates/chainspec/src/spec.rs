@@ -518,7 +518,7 @@ impl ChainSpec {
             if let ForkCondition::Block(block) |
             ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
-                if cond.active_at_head(head) {
+                if head.number >= block {
                     // skip duplicated hardforks: hardforks enabled at genesis block
                     if block != current_applied {
                         forkhash += block;
@@ -539,8 +539,7 @@ impl ChainSpec {
             // ensure we only get timestamp forks activated __after__ the genesis block
             cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
         }) {
-            let cond = ForkCondition::Timestamp(timestamp);
-            if cond.active_at_head(head) {
+            if head.timestamp >= timestamp {
                 // skip duplicated hardfork activated at the same timestamp
                 if timestamp != current_applied {
                     forkhash += timestamp;
@@ -570,9 +569,11 @@ impl ChainSpec {
                     ..Default::default()
                 }
             }
-            ForkCondition::TTD { total_difficulty, .. } => {
-                Head { total_difficulty, ..Default::default() }
-            }
+            ForkCondition::TTD { total_difficulty, fork_block, .. } => Head {
+                total_difficulty,
+                number: fork_block.unwrap_or_default(),
+                ..Default::default()
+            },
             ForkCondition::Never => unreachable!(),
         }
     }
