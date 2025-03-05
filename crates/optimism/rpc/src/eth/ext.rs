@@ -114,10 +114,17 @@ where
                             .storage(*address, StorageKey::from(*slot))
                             .map_err(|_| TxConditionalErr::StateAccessError)?;
                         
-                        if current.is_none() || current != Some(U256::from_be_bytes(expected_value.0)) {
-                            return Err(TxConditionalErr::KnownAccountsMismatch);
+                        match current {
+                            Some(current) => {
+                                if FixedBytes::<32>::from_slice(&current.to_be_bytes::<32>()) != *expected_value {
+                                    return Err(TxConditionalErr::KnownAccountsMismatch);
+                                }
+                            }
+                            None => {
+                                return Err(TxConditionalErr::KnownAccountsNotFound);
+                            }
                         }
-                    }
+                   }
                 }
                 AccountStorage::RootHash(expected_root) => {
                     let actual_root = state
