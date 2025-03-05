@@ -1193,7 +1193,7 @@ Post-merge hard forks (timestamp based):
             happy_path_head, happy_path_expected,
             "expected satisfy() to return {happy_path_expected:#?}, but got {happy_path_head:#?} "
         );
-        // multiple timestamp test case (i.e Shanghai -> Cancun)
+        // multiple timestamp test case (i.e. Shanghai -> Cancun)
         let multiple_timestamp_fork_case = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis.clone())
