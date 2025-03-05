@@ -212,31 +212,28 @@ impl HashedPostState {
             state_updates_not_in_targets.accounts.insert(address, *account);
             false
         });
-        self.storages.retain(|&address, storage| {
-            match targets.get(&address) {
-                Some(storage_in_targets) => {
-                    let mut storage_not_in_targets = HashedStorage::default();
-                    storage.storage.retain(|&slot, value| {
-                        if storage_in_targets.contains(&slot) {
-                            return true
-                        }
-
-                        storage_not_in_targets.storage.insert(slot, *value);
-                        false
-                    });
-
-                    if !storage_not_in_targets.storage.is_empty() {
-                        state_updates_not_in_targets
-                            .storages
-                            .insert(address, storage_not_in_targets);
+        self.storages.retain(|&address, storage| match targets.get(&address) {
+            Some(storage_in_targets) => {
+                let mut storage_not_in_targets = HashedStorage::default();
+                storage.storage.retain(|&slot, value| {
+                    if storage_in_targets.contains(&slot) {
+                        return true
                     }
-                }
-                None => {
-                    state_updates_not_in_targets.storages.insert(address, core::mem::take(storage));
-                }
-            }
 
-            storage.wiped || !storage.storage.is_empty()
+                    storage_not_in_targets.storage.insert(slot, *value);
+                    false
+                });
+
+                if !storage_not_in_targets.storage.is_empty() {
+                    state_updates_not_in_targets.storages.insert(address, storage_not_in_targets);
+                }
+
+                !storage.storage.is_empty()
+            }
+            None => {
+                state_updates_not_in_targets.storages.insert(address, core::mem::take(storage));
+                false
+            }
         });
 
         (self, state_updates_not_in_targets)
