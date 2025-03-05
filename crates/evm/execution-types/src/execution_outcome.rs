@@ -427,7 +427,6 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    #[expect(clippy::owned_cow)]
     pub struct ExecutionOutcome<'a, T>
     where
         T: SerdeBincodeCompat + core::fmt::Debug,
@@ -435,7 +434,7 @@ pub(super) mod serde_bincode_compat {
         bundle: Cow<'a, BundleState>,
         receipts: Vec<Vec<T::BincodeRepr<'a>>>,
         first_block: BlockNumber,
-        #[allow(clippy::owned_cow)]
+        #[expect(clippy::owned_cow)]
         requests: Cow<'a, Vec<Requests>>,
     }
 
