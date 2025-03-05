@@ -24,7 +24,7 @@ use alloy_primitives::B256;
 use parking_lot::{RwLock, RwLockReadGuard};
 use reth_exex_types::ExExNotification;
 use reth_tracing::tracing::{debug, instrument};
-
+use alloy_primitives::private::serde;
 /// WAL is a write-ahead log (WAL) that stores the notifications sent to ExExes.
 ///
 /// WAL is backed by a directory of binary files represented by [`Storage`] and a block cache
@@ -42,7 +42,7 @@ pub struct Wal<N: NodePrimitives = EthPrimitives> {
 
 impl<N> Wal<N>
 where
-    N: NodePrimitives,
+    N: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Creates a new instance of [`Wal`].
     pub fn new(directory: impl AsRef<Path>) -> WalResult<Self> {
@@ -93,7 +93,7 @@ struct WalInner<N: NodePrimitives> {
 
 impl<N> WalInner<N>
 where
-    N: NodePrimitives,
+    N: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned,
 {
     fn new(directory: impl AsRef<Path>) -> WalResult<Self> {
         let mut wal = Self {
@@ -214,7 +214,7 @@ pub struct WalHandle<N: NodePrimitives> {
 
 impl<N> WalHandle<N>
 where
-    N: NodePrimitives,
+    N: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Returns the notification for the given committed block hash if it exists.
     pub fn get_committed_notification_by_block_hash(

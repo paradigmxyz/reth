@@ -25,5 +25,5 @@ pub enum WalError {
     FileNotFound(u32),
     /// Decode error
     #[error("failed to decode notification {0} from {1}: {2}")]
-    Decode(u32, PathBuf, rmp_serde::decode::Error),
+    Decode(u32, PathBuf, #[source] Box<dyn std::error::Error + Send + Sync>),
 }

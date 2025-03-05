@@ -30,7 +30,7 @@ use tokio::sync::{
     watch,
 };
 use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
-
+use alloy_primitives::private::serde;
 /// Default max size of the internal state notifications buffer.
 ///
 /// 1024 notifications in the buffer is 3.5 hours of mainnet blocks,
@@ -348,7 +348,7 @@ where
 impl<P, N> ExExManager<P, N>
 where
     P: HeaderProvider,
-    N: NodePrimitives,
+    N: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Finalizes the WAL according to the passed finalized header.
     ///
@@ -422,7 +422,7 @@ where
 impl<P, N> Future for ExExManager<P, N>
 where
     P: HeaderProvider + Unpin + 'static,
-    N: NodePrimitives,
+    N: NodePrimitives + serde::Serialize + serde::de::DeserializeOwned,
 {
     type Output = eyre::Result<()>;
 

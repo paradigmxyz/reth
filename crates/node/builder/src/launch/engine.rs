@@ -32,7 +32,7 @@ use reth_tracing::tracing::{debug, error, info};
 use std::sync::Arc;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
+use alloy_primitives::private::serde;
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
@@ -88,6 +88,7 @@ where
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
+    <Types as reth_node_api::NodeTypes>::Primitives: serde::Serialize + serde::de::DeserializeOwned,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
