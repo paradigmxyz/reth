@@ -203,7 +203,8 @@ pub trait OverrideBlockHashes {
 
 impl<DB> OverrideBlockHashes for CacheDB<DB> {
     fn override_block_hashes(&mut self, block_hashes: BTreeMap<u64, B256>) {
-        self.block_hashes
+        self.cache
+            .block_hashes
             .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
     }
 }

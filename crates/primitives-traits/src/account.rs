@@ -173,13 +173,11 @@ impl reth_codecs::Compact for Bytecode {
             REMOVED_BYTECODE_ID => {
                 unreachable!("Junk data in database: checked Bytecode variant was removed")
             }
-            LEGACY_ANALYZED_BYTECODE_ID => Self(unsafe {
-                RevmBytecode::new_analyzed(
-                    bytes,
-                    buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
-                    revm_bytecode::JumpTable::from_slice(buf),
-                )
-            }),
+            LEGACY_ANALYZED_BYTECODE_ID => Self(RevmBytecode::new_analyzed(
+                bytes,
+                buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
+                revm_bytecode::JumpTable::from_slice(buf),
+            )),
             EOF_BYTECODE_ID | EIP7702_BYTECODE_ID => {
                 // EOF and EIP-7702 bytecode objects will be decoded from the raw bytecode
                 Self(RevmBytecode::new_raw(bytes))
