@@ -471,6 +471,9 @@ impl HashedStorageSorted {
 
 /// An iterator that yields chunks of the state updates of at most `size` account and storage
 /// targets.
+///
+/// CAUTION: Chunks are expected to be applied in order, because of storage wipes. If applied out of
+/// order, it's possible to wipe more storage than in the original state update.
 #[derive(Debug)]
 pub struct ChunkedHashedPostState {
     flattened: alloc::vec::IntoIter<(B256, FlattenedHashedPostStateItem)>,
@@ -480,7 +483,8 @@ pub struct ChunkedHashedPostState {
 #[derive(Debug)]
 enum FlattenedHashedPostStateItem {
     Account(Option<Account>),
-    Storage { wiped: bool, slot: B256, value: U256 },
+    StorageWipe,
+    StorageUpdate { slot: B256, value: U256 },
 }
 
 impl ChunkedHashedPostState {
@@ -489,18 +493,26 @@ impl ChunkedHashedPostState {
             .accounts
             .into_iter()
             .map(|(address, account)| (address, FlattenedHashedPostStateItem::Account(account)))
-            .chain(hashed_post_state.storages.into_iter().flat_map(|(address, mut storage)| {
-                storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot).map(
-                    move |(slot, value)| {
-                        let wiped = storage.wiped;
-                        // Ensure that the `wiped` flag is set only on the first item with a storage
-                        // update, so that we don't wipe the storage multiple times.
-                        storage.wiped = false;
-                        (address, FlattenedHashedPostStateItem::Storage { wiped, slot, value })
-                    },
+            .chain(hashed_post_state.storages.into_iter().flat_map(|(address, storage)| {
+                let storage_wipe = if storage.wiped {
+                    itertools::Either::Left(core::iter::once((
+                        address,
+                        FlattenedHashedPostStateItem::StorageWipe,
+                    )))
+                } else {
+                    itertools::Either::Right(core::iter::empty())
+                };
+
+                // Storage wipes should go first
+                storage_wipe.chain(
+                    storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot).map(
+                        move |(slot, value)| {
+                            (address, FlattenedHashedPostStateItem::StorageUpdate { slot, value })
+                        },
+                    ),
                 )
             }))
-            // We use a stable sort to not reorder the first storage wipes.
+            // We use a stable sort to not reorder the first storage wipe items.
             .sorted_by_key(|(address, _)| *address);
 
         Self { flattened, size }
@@ -521,10 +533,11 @@ impl Iterator for ChunkedHashedPostState {
                 FlattenedHashedPostStateItem::Account(account) => {
                     chunk.accounts.insert(address, account);
                 }
-                FlattenedHashedPostStateItem::Storage { wiped, slot, value } => {
-                    let entry = chunk.storages.entry(address).or_default();
-                    entry.wiped = wiped;
-                    entry.storage.insert(slot, value);
+                FlattenedHashedPostStateItem::StorageWipe => {
+                    chunk.storages.entry(address).or_default().wiped = true;
+                }
+                FlattenedHashedPostStateItem::StorageUpdate { slot, value } => {
+                    chunk.storages.entry(address).or_default().storage.insert(slot, value);
                 }
             }
 
