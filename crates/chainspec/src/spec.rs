@@ -569,9 +569,11 @@ impl ChainSpec {
                     ..Default::default()
                 }
             }
-            ForkCondition::TTD { total_difficulty, .. } => {
-                Head { total_difficulty, ..Default::default() }
-            }
+            ForkCondition::TTD { total_difficulty, fork_block, .. } => Head {
+                total_difficulty,
+                number: fork_block.unwrap_or_default(),
+                ..Default::default()
+            },
             ForkCondition::Never => unreachable!(),
         }
     }
