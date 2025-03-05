@@ -2279,6 +2279,9 @@ mod tests {
         }
     }
 
+    // Ensure that when the remote peer only returns part of the requested transactions, the
+    // replied transactions are removed from the `tx_fetcher`, while the unresponsive ones are
+    // re-buffered.
     #[tokio::test]
     async fn test_partially_tx_response() {
         reth_tracing::init_test_tracing();
