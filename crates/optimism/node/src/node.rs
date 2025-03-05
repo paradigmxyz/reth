@@ -29,7 +29,7 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{BasicOpReceiptBuilder, OpEvmConfig, OpNextBlockEnvAttributes};
+use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -299,7 +299,6 @@ where
             ctx.node.pool().clone(),
             ctx.node.provider().clone(),
             ctx.node.evm_config().clone(),
-            BasicOpReceiptBuilder::default(),
         );
         // install additional OP specific rpc methods
         let debug_ext = OpDebugWitnessApi::new(
@@ -572,7 +571,10 @@ where
                     pool.clone(),
                     chain_events,
                     ctx.task_executor().clone(),
-                    Default::default(),
+                    reth_transaction_pool::maintain::MaintainPoolConfig {
+                        max_tx_lifetime: pool.config().max_queued_lifetime,
+                        ..Default::default()
+                    },
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");
@@ -639,21 +641,12 @@ impl<Txs> OpPayloadBuilder<Txs> {
 
     /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
     /// given EVM config.
-    #[expect(clippy::type_complexity)]
     pub fn build<Node, Evm, Pool>(
         self,
         evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<
-        reth_optimism_payload_builder::OpPayloadBuilder<
-            Pool,
-            Node::Provider,
-            Evm,
-            PrimitivesTy<Node::Types>,
-            Txs,
-        >,
-    >
+    ) -> eyre::Result<reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, Evm, Txs>>
     where
         Node: FullNodeTypes<
             Types: NodeTypesWithEngine<
@@ -672,7 +665,6 @@ impl<Txs> OpPayloadBuilder<Txs> {
             pool,
             ctx.provider().clone(),
             evm_config,
-            BasicOpReceiptBuilder::default(),
             OpBuilderConfig { da_config: self.da_config.clone() },
         )
         .with_transactions(self.best_transactions.clone())
@@ -695,13 +687,8 @@ where
         + 'static,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
-    type PayloadBuilder = reth_optimism_payload_builder::OpPayloadBuilder<
-        Pool,
-        Node::Provider,
-        OpEvmConfig,
-        PrimitivesTy<Node::Types>,
-        Txs,
-    >;
+    type PayloadBuilder =
+        reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, OpEvmConfig, Txs>;
 
     async fn build_payload_builder(
         self,

@@ -41,7 +41,6 @@ use reth::{
     rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
-    version::default_extra_data_bytes,
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
 use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
@@ -367,7 +366,7 @@ where
                 ctx.provider().clone(),
                 pool,
                 EthEvmConfig::new(ctx.provider().chain_spec().clone()),
-                EthereumBuilderConfig::new(default_extra_data_bytes()),
+                EthereumBuilderConfig::new(),
             ),
         };
         Ok(payload_builder)

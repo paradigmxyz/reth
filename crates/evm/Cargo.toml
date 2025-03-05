@@ -19,7 +19,9 @@ reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
 
 revm.workspace = true
 revm-database.workspace = true
@@ -65,6 +67,8 @@ std = [
     "reth-storage-errors/std",
     "futures-util/std",
     "derive_more/std",
+    "reth-storage-api/std",
+    "reth-trie-common/std",
 ]
 metrics = [
     "std",
@@ -78,6 +82,7 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "revm/test-utils",
+    "reth-trie-common/test-utils",
 ]
 op = [
     "revm-optimism",

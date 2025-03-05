@@ -21,7 +21,7 @@ use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
 use alloy_evm::{EthEvmFactory, FromRecoveredTx};
-use alloy_primitives::U256;
+use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_evm::{
@@ -41,6 +41,9 @@ use reth_ethereum_forks::EthereumHardfork;
 
 pub mod execute;
 
+mod build;
+pub use build::EthBlockAssembler;
+
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;
 
@@ -52,6 +55,7 @@ pub mod eip6110;
 pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {
     chain_spec: Arc<ChainSpec>,
     evm_factory: EvmFactory,
+    block_assembler: EthBlockAssembler<ChainSpec>,
 }
 
 impl EthEvmConfig {
@@ -74,18 +78,28 @@ impl EthEvmConfig {
 impl<EvmFactory> EthEvmConfig<EvmFactory> {
     /// Creates a new Ethereum EVM configuration with the given chain spec and EVM factory.
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
-        Self { chain_spec, evm_factory }
+        Self {
+            block_assembler: EthBlockAssembler::new(chain_spec.clone()),
+            chain_spec,
+            evm_factory,
+        }
     }
 
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
     }
+
+    /// Sets the extra data for the block assembler.
+    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
+        self.block_assembler.extra_data = extra_data;
+        self
+    }
 }
 
 impl<EvmF> ConfigureEvmEnv for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
+    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
         + Send
         + Sync
         + Unpin
@@ -185,7 +199,7 @@ where
 
 impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
+    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
         + Send
         + Sync
         + Unpin

@@ -2,7 +2,7 @@
 
 use crate::{
     dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
-    EthEvmConfig,
+    EthBlockAssembler, EthEvmConfig,
 };
 use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Header, Transaction};
@@ -17,7 +17,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, StateChangePostBlockSource, StateChangeSource, SystemCaller},
-    Database, Evm, EvmEnv, EvmFactory, EvmFor, InspectorFor, TransactionEnv,
+    Database, Evm, EvmFactory, EvmFor, InspectorFor, TransactionEnv,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives::{
@@ -30,7 +30,7 @@ use revm::{
 
 impl<EvmF> BlockExecutionStrategyFactory for EthEvmConfig<EvmF>
 where
-    EvmF: EvmFactory<EvmEnv<SpecId>, Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>>
+    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
         + Send
         + Sync
         + Unpin
@@ -38,9 +38,14 @@ where
         + 'static,
 {
     type Primitives = EthPrimitives;
-    type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
         EthExecutionStrategy<'a, EvmFor<Self, &'a mut State<DB>, I>>;
+    type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
+    type BlockAssembler = EthBlockAssembler<ChainSpec>;
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assembler
+    }
 
     fn context_for_block<'a>(&self, block: &'a SealedBlock) -> Self::ExecutionCtx<'a> {
         EthBlockExecutionCtx {
@@ -97,7 +102,7 @@ pub struct EthExecutionStrategy<'a, Evm> {
     chain_spec: &'a ChainSpec,
 
     /// Context for block execution.
-    ctx: EthBlockExecutionCtx<'a>,
+    pub ctx: EthBlockExecutionCtx<'a>,
     /// The EVM used by strategy.
     evm: Evm,
     /// Utility to call system smart contracts.
@@ -128,11 +133,11 @@ where
     DB: Database + 'db,
     E: Evm<DB = &'db mut State<DB>, Tx: FromRecoveredTx<TransactionSigned>>,
 {
-    type Error = BlockExecutionError;
-    type Primitives = EthPrimitives;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
     type Evm = E;
 
-    fn apply_pre_execution_changes(&mut self) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
             self.chain_spec.is_spurious_dragon_active_at_block(self.evm.block().number);
@@ -148,7 +153,7 @@ where
         &mut self,
         tx: Recovered<&TransactionSigned>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, Self::Error> {
+    ) -> Result<u64, BlockExecutionError> {
         // The sum of the transaction's gas limit, Tg, and the gas utilized in this block prior,
         // must be no greater than the block's gasLimit.
         let block_available_gas = self.evm.block().gas_limit - self.gas_used;
@@ -190,9 +195,7 @@ where
         Ok(gas_used)
     }
 
-    fn apply_post_execution_changes(
-        mut self,
-    ) -> Result<BlockExecutionResult<Receipt>, Self::Error> {
+    fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {
         let requests = if self.chain_spec.is_prague_active_at_timestamp(self.evm.block().timestamp)
         {
             // Collect all EIP-6110 deposits
@@ -246,7 +249,7 @@ where
         );
 
         let gas_used = self.receipts.last().map(|r| r.cumulative_gas_used).unwrap_or_default();
-        Ok(BlockExecutionResult { receipts: self.receipts, requests, gas_used })
+        Ok((self.evm, BlockExecutionResult { receipts: self.receipts, requests, gas_used }))
     }
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {

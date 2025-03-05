@@ -1,6 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
-use alloy_consensus::{BlockHeader, Header, TxReceipt};
+use alloy_consensus::BlockHeader;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
@@ -10,18 +10,12 @@ use reth_engine_primitives::{
     OnForkChoiceUpdated, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
-use reth_evm::execute::{BlockExecutionStrategy, BlockExecutionStrategyFactory};
+use reth_evm::execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionStrategyFactory};
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
-use reth_primitives::{BlockBody, NodePrimitives, SealedBlock};
-use reth_primitives_traits::{block::Block as _, proofs, BlockBody as _, SignedTransaction};
-use reth_provider::{
-    BlockExecutionResult, BlockReader, ChainSpecProvider, ExecutionOutcome, ProviderError,
-    StateProviderFactory,
-};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{states::bundle_state::BundleRetention, State},
-};
+use reth_primitives::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{block::Block as _, BlockBody as _, SignedTransaction};
+use reth_provider::{BlockReader, ChainSpecProvider, ProviderError, StateProviderFactory};
+use reth_revm::{database::StateProviderDatabase, db::State};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -267,8 +261,6 @@ where
     Evm: BlockExecutionStrategyFactory<Primitives = N>,
     Validator: PayloadValidator<Block = N::Block>,
 {
-    let chain_spec = provider.chain_spec();
-
     // Ensure next payload is valid.
     let next_block =
         payload_validator.ensure_well_formed_payload(next_payload).map_err(RethError::msg)?;
@@ -291,7 +283,7 @@ where
         }
     };
     let reorg_target_parent = provider
-        .block_by_hash(reorg_target.header().parent_hash)?
+        .sealed_header_by_hash(reorg_target.header().parent_hash)?
         .ok_or_else(|| ProviderError::HeaderNotFound(reorg_target.header().parent_hash.into()))?;
 
     debug!(target: "engine::stream::reorg", number = reorg_target.header().number, hash = %previous_hash, "Selected reorg target");
@@ -303,13 +295,13 @@ where
         .with_bundle_update()
         .build();
 
-    let mut strategy = evm_config.strategy_for_block(&mut state, &reorg_target);
+    let ctx = evm_config.context_for_block(&reorg_target);
+    let evm = evm_config.evm_for_block(&mut state, &reorg_target);
+    let mut builder = evm_config.create_block_builder(evm, &reorg_target_parent, ctx);
 
-    strategy.apply_pre_execution_changes()?;
+    builder.apply_pre_execution_changes()?;
 
     let mut cumulative_gas_used = 0;
-    let mut sum_blob_gas_used = 0;
-    let mut transactions = Vec::new();
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit {
@@ -318,7 +310,7 @@ where
 
         let tx_recovered =
             tx.try_clone_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
-        let gas_used = match strategy.execute_transaction(tx_recovered.as_recovered_ref()) {
+        let gas_used = match builder.execute_transaction(tx_recovered) {
             Ok(gas_used) => gas_used,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 hash,
@@ -331,74 +323,10 @@ where
             Err(error) => return Err(RethError::Execution(error)),
         };
 
-        if tx.is_eip4844() {
-            sum_blob_gas_used += tx.blob_gas_used().unwrap_or_default();
-        }
-
         cumulative_gas_used += gas_used;
-
-        // append transaction to the list of executed transactions
-        transactions.push(tx);
     }
 
-    let BlockExecutionResult { receipts, .. } = strategy.apply_post_execution_changes()?;
+    let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider)?;
 
-    // merge all transitions into bundle state, this would apply the withdrawal balance changes
-    // and 4788 contract call
-    state.merge_transitions(BundleRetention::PlainState);
-
-    let outcome = ExecutionOutcome::new(
-        state.take_bundle(),
-        vec![receipts],
-        reorg_target.number,
-        Default::default(),
-    );
-    let hashed_state = state_provider.hashed_post_state(outcome.state());
-
-    let (blob_gas_used, excess_blob_gas) =
-        if let Some(blob_params) = chain_spec.blob_params_at_timestamp(reorg_target.timestamp) {
-            (
-                Some(sum_blob_gas_used),
-                reorg_target_parent.header().next_block_excess_blob_gas(blob_params),
-            )
-        } else {
-            (None, None)
-        };
-
-    let (header, body) = reorg_target.split_header_body();
-
-    let reorg_block = N::Block::new(
-        Header {
-            // Set same fields as the reorg target
-            parent_hash: header.parent_hash,
-            ommers_hash: header.ommers_hash,
-            beneficiary: header.beneficiary,
-            difficulty: header.difficulty,
-            number: header.number,
-            gas_limit: header.gas_limit,
-            timestamp: header.timestamp,
-            extra_data: header.extra_data,
-            mix_hash: header.mix_hash,
-            nonce: header.nonce,
-            base_fee_per_gas: header.base_fee_per_gas,
-            parent_beacon_block_root: header.parent_beacon_block_root,
-            withdrawals_root: header.withdrawals_root,
-
-            // Compute or add new fields
-            transactions_root: proofs::calculate_transaction_root(&transactions),
-            receipts_root: proofs::calculate_receipt_root(
-                &outcome.receipts()[0].iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>(),
-            ),
-            logs_bloom: outcome.block_logs_bloom(header.number).unwrap(),
-            gas_used: cumulative_gas_used,
-            blob_gas_used,
-            excess_blob_gas,
-            state_root: state_provider.state_root(hashed_state)?,
-            requests_hash: None, // TODO(prague)
-        },
-        BlockBody { transactions, ommers: body.ommers, withdrawals: body.withdrawals },
-    )
-    .seal_slow();
-
-    Ok(reorg_block)
+    Ok(block.into_sealed_block())
 }
