@@ -12,11 +12,14 @@ use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
 
 #[tokio::test]
-#[ignore = "empty testsuite impls"]
 async fn test_testsuite_submit_transaction_and_advance_block() -> Result<()> {
     let setup = Setup::default()
         .with_chain_spec(Arc::new(
-            ChainSpecBuilder::default().chain(MAINNET.chain).cancun_activated().build(),
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("./assets/genesis.json")).unwrap())
+                .cancun_activated()
+                .build(),
         ))
         .with_network(NetworkSetup::single_node());
 
