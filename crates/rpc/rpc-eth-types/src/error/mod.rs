@@ -151,6 +151,9 @@ pub enum EthApiError {
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
+    /// Validate Known Accounts error
+    #[error("Validate known accounts error: {0}")]
+    ValidateKnownAccountsError(String),
 }
 
 impl EthApiError {
@@ -197,6 +200,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
+            EthApiError::ValidateKnownAccountsError(msg) => invalid_params_rpc_err(msg),
             // TODO(onbjerg): We rewrite the error message here because op-node does string matching
             // on the error message.
             //

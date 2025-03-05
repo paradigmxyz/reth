@@ -103,6 +103,18 @@ pub enum TxConditionalErr {
     /// Invalid conditional parameters
     #[error("invalid conditional parameters")]
     InvalidCondition,
+    /// Internal error
+    #[error("internal error")]
+    Internal,
+    /// Invalid State Access
+    #[error("invalid state access")]
+    StateAccessError,
+    /// Known accounts not found
+    #[error("known accounts not found")]
+    KnownAccountsNotFound,
+    /// Known accounts mismatch
+    #[error("known accounts mismatch")]
+    KnownAccountMismatch,
 }
 
 impl From<TxConditionalErr> for jsonrpsee_types::error::ErrorObject<'static> {

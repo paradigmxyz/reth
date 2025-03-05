@@ -3,8 +3,8 @@
 use crate::{error::TxConditionalErr, OpEthApiError, SequencerClient};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types_eth::erc4337::TransactionConditional;
+use alloy_primitives::{Bytes, B256, StorageKey};
+use alloy_rpc_types_eth::erc4337::{ TransactionConditional, AccountStorage };
 use jsonrpsee_core::RpcResult;
 use reth_optimism_txpool::conditional::MaybeConditionalTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
@@ -12,9 +12,12 @@ use reth_rpc_eth_api::L2EthApiExtServer;
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 /// Maximum execution const for conditional transactions.
 const MAX_CONDITIONAL_EXECUTION_COST: u64 = 5000;
+
+const MAX_CONCURRENT_CONDITIONAL_VALIDATIONS: usize = 10;
 
 #[derive(Debug)]
 struct OpEthExtApiInner<Pool, Provider> {
@@ -22,11 +25,17 @@ struct OpEthExtApiInner<Pool, Provider> {
     pool: Pool,
     /// The provider type used to interact with the node.
     provider: Provider,
+    /// The semaphore used to limit the number of concurrent conditional validations.
+    validation_semaphore: Semaphore,
 }
 
 impl<Pool, Provider> OpEthExtApiInner<Pool, Provider> {
     fn new(pool: Pool, provider: Provider) -> Self {
-        Self { pool, provider }
+        Self { 
+            pool, 
+            provider,
+            validation_semaphore: Semaphore::new(MAX_CONCURRENT_CONDITIONAL_VALIDATIONS) 
+        }
     }
 
     #[inline]
@@ -54,7 +63,7 @@ pub struct OpEthExtApi<Pool, Provider> {
 
 impl<Pool, Provider> OpEthExtApi<Pool, Provider>
 where
-    Provider: BlockReaderIdExt + Clone + 'static,
+    Provider: BlockReaderIdExt + StateProviderFactory + Clone + 'static,
 {
     /// Creates a new [`OpEthExtApi`].
     pub fn new(sequencer_client: Option<SequencerClient>, pool: Pool, provider: Provider) -> Self {
@@ -75,6 +84,55 @@ where
     #[inline]
     fn provider(&self) -> &Provider {
         self.inner.provider()
+    }
+
+    async fn validate_known_accounts<T: BlockHeader>(
+        &self,
+        condition: &TransactionConditional,
+        header: &T
+    ) -> Result<(), TxConditionalErr> {
+        if condition.known_accounts.is_empty() {
+            return Ok(());
+        }
+    
+        let _permit = self
+            .inner
+            .validation_semaphore
+            .acquire()
+            .await
+            .map_err(|_| TxConditionalErr::Internal)?;
+    
+        let state = self
+            .provider()
+            .state_by_block_number_or_tag(BlockNumberOrTag::Number(header.number()))
+            .map_err(|_| TxConditionalErr::StateAccessError)?;
+    
+        for (address, storage) in &condition.known_accounts {
+            match storage {
+                AccountStorage::Slots(slots) => {
+                    for (slot, expected_value) in slots {
+                        let current = state
+                            .storage(*address, StorageKey::from(*slot))
+                            .map_err(|_| TxConditionalErr::StateAccessError)?;
+                        
+                        if current.is_none() || current.unwrap() != Into::<alloy_primitives::Uint<256, 4>>::into(alloy_primitives::FixedBytes::<32>::from(expected_value.0)) {
+                            return Err(TxConditionalErr::KnownAccountsNotFound);
+                        }
+                    }
+                }
+                AccountStorage::RootHash(expected_root) => {
+                    let actual_root = state
+                        .storage_root(*address, Default::default())
+                        .map_err(|_| TxConditionalErr::StateAccessError)?;
+                    
+                    if *expected_root != actual_root {
+                        return Err(TxConditionalErr::KnownAccountMismatch);
+                    }
+                }
+            }
+        }
+    
+        Ok(())
     }
 }
 
@@ -120,7 +178,9 @@ where
             return Err(TxConditionalErr::InvalidCondition.into());
         }
 
-        // TODO: check condition against state
+        // Validate Account
+        self.validate_known_accounts(&condition, header.header()).await
+        .map_err(|e| OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::ValidateKnownAccountsError(e.to_string())))?;
 
         if let Some(sequencer) = self.sequencer_client() {
             // If we have a sequencer client, forward the transaction
