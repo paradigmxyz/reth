@@ -133,7 +133,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
     ///     .run(async move |builder, my_args: MyArgs|
     ///         // launch the node
-    ///
     ///         Ok(()))
     ///     .unwrap();
     /// ````
