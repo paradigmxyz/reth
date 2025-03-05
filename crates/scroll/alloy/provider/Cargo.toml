@@ -63,13 +63,5 @@ std = [
     "reth-primitives/std",
     "reth-primitives-traits/std",
     "reth-scroll-payload/std",
-]
-scroll = [
-    "reth-scroll-node/scroll",
-    "reth-scroll-engine-primitives/scroll",
-]
-optimism = [
-    "reth-scroll-engine-primitives/optimism",
-    "reth-scroll-node/optimism",
-    "reth-scroll-payload/optimism",
+    "futures-util/std",
 ]

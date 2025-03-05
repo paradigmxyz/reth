@@ -19,13 +19,13 @@ use reth_consensus_common::calc::{base_block_reward_pre_merge, block_reward, omm
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::db::{CacheDB, DatabaseCommit};
+use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
@@ -114,7 +114,7 @@ where
             .map_transaction(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
-        let tx_env = self.eth_api().evm_config().tx_env(tx.tx(), tx.signer());
+        let tx_env = self.eth_api().evm_config().tx_env(tx);
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 

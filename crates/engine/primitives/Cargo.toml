@@ -50,7 +50,3 @@ std = [
     "thiserror/std",
     "alloy-eips/std",
 ]
-scroll = [
-    "reth-execution-types/scroll",
-    "reth-trie/scroll",
-]

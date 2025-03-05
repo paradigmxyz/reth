@@ -13,12 +13,10 @@ workspace = true
 
 [dependencies]
 # reth
-reth-db.workspace = true
-reth-consensus.workspace = true
-reth-engine-local.workspace = true
+reth-chainspec.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-eth-wire-types.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["scroll-alloy-traits"] }
 reth-network.workspace = true
 reth-node-api.workspace = true
 reth-node-types.workspace = true
@@ -40,12 +38,15 @@ alloy-rpc-types-engine.workspace = true
 
 # scroll
 reth-scroll-chainspec.workspace = true
+reth-scroll-consensus.workspace = true
 reth-scroll-engine-primitives.workspace = true
 reth-scroll-evm.workspace = true
+reth-scroll-forks.workspace = true
 reth-scroll-payload.workspace = true
-reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 reth-scroll-rpc.workspace = true
 scroll-alloy-consensus.workspace = true
+scroll-alloy-evm.workspace = true
 scroll-alloy-rpc-types-engine.workspace = true
 
 # alloy
@@ -58,27 +59,6 @@ tokio.workspace = true
 
 [features]
 default = ["reth-codec"]
-optimism = [
-    "reth-db/optimism",
-    "reth-scroll-evm/optimism",
-    "reth-scroll-rpc/optimism",
-    "reth-scroll-engine-primitives/optimism",
-    "reth-scroll-payload/optimism",
-    "revm/optimism",
-]
-scroll = [
-    "reth-db/scroll",
-    "reth-node-builder/scroll",
-    "reth-provider/scroll",
-    "reth-evm/scroll",
-    "reth-scroll-evm/scroll",
-    "reth-scroll-rpc/scroll",
-    "reth-scroll-primitives/scroll",
-    "reth-primitives-traits/scroll",
-    "reth-engine-local/scroll-alloy-traits",
-    "reth-scroll-engine-primitives/scroll",
-    "reth-scroll-payload/scroll",
-]
 reth-codec = [
     "reth-primitives/reth-codec",
     "reth-primitives-traits/reth-codec",

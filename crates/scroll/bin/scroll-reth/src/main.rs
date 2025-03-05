@@ -3,7 +3,6 @@
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
-#[cfg(all(feature = "scroll", not(feature = "optimism")))]
 fn main() {
     use clap::Parser;
     use reth_scroll_cli::{Cli, ScrollChainSpecParser, ScrollRollupArgs};
@@ -27,10 +26,4 @@ fn main() {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }
-}
-
-#[cfg(any(feature = "optimism", not(feature = "scroll")))]
-fn main() {
-    eprintln!("Scroll feature is not enabled");
-    std::process::exit(1);
 }

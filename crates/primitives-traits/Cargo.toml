@@ -19,12 +19,14 @@ reth-codecs = { workspace = true, optional = true }
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["k256"] }
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
 
-# revm-primitives
+# revm
 revm-primitives = { workspace = true, default-features = false }
+revm-bytecode.workspace = true
+revm-state.workspace = true
 
 # scroll
 scroll-alloy-consensus = { workspace = true, optional = true }
@@ -95,6 +97,8 @@ std = [
     "op-alloy-consensus?/std",
     "serde_json/std",
     "reth-chainspec/std",
+    "revm-bytecode/std",
+    "revm-state/std",
 ]
 secp256k1 = ["dep:secp256k1"]
 test-utils = [
@@ -141,6 +145,8 @@ serde = [
     "k256/serde",
     "secp256k1?/serde",
     "alloy-trie/serde",
+    "revm-bytecode/serde",
+    "revm-state/serde",
     "scroll-alloy-consensus?/serde",
 ]
 reth-codec = [
@@ -154,7 +160,6 @@ op = [
     "reth-codecs?/op",
 ]
 scroll-alloy-traits = ["scroll-alloy-consensus"]
-scroll = ["revm-primitives/scroll"]
 rayon = [
     "dep:rayon",
 ]

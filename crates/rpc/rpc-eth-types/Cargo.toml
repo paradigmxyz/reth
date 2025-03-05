@@ -34,8 +34,9 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-sol-types.workspace = true
 alloy-rpc-types-eth.workspace = true
+revm-database.workspace = true
 revm-inspectors.workspace = true
-revm-primitives = { workspace = true, features = ["dev"] }
+revm-primitives.workspace = true
 
 # scroll
 revm.workspace = true
@@ -66,9 +67,3 @@ serde_json.workspace = true
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer"]
-scroll = [
-    "revm/scroll",
-    "reth-execution-types/scroll",
-    "reth-revm/scroll",
-    "reth-trie/scroll",
-]

@@ -27,27 +27,27 @@ jobs:
       matrix:
         include:
           - type: ethereum
-            args: --features "asm-keccak ethereum" --locked --workspace --exclude ef-tests
+            args: --features "asm-keccak ethereum" --locked
             partition: 1
             total_partitions: 2
           - type: ethereum
-            args: --features "asm-keccak ethereum" --locked --workspace --exclude ef-tests
+            args: --features "asm-keccak ethereum" --locked
             partition: 2
             total_partitions: 2
           - type: optimism
-            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum" --workspace --exclude ef-tests
+            args: --features "asm-keccak" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
             partition: 1
             total_partitions: 2
           - type: optimism
-            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum" --workspace --exclude ef-tests
+            args: --features "asm-keccak" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
             partition: 2
             total_partitions: 2
           - type: scroll
-            args: -p "reth-scroll-*" -p "scroll-alloy-*" --locked --features "scroll"
+            args: -p "reth-scroll-*" -p "scroll-alloy-*" --locked
             partition: 1
             total_partitions: 1
           - type: book
-            args: --manifest-path book/sources/Cargo.toml --workspace --exclude ef-tests
+            args: --manifest-path book/sources/Cargo.toml
             partition: 1
             total_partitions: 1
     timeout-minutes: 30
@@ -68,9 +68,9 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            ${{ matrix.args }} \
-            --no-tests=warn \
-            --partition hash:${{ matrix.partition }}/${{ matrix.total_partitions }} \
+            ${{ matrix.args }} --workspace \
+            --exclude ef-tests --no-tests=warn \
+            --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"
 
   state:
@@ -101,14 +101,11 @@ jobs:
       - run: cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
 
   doc:
-    name: doc tests (${{ matrix.network }})
+    name: doc tests
     runs-on: ubuntu-latest
     env:
       RUST_BACKTRACE: 1
     timeout-minutes: 30
-    strategy:
-      matrix:
-        network: ["ethereum", "optimism"]
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
@@ -117,7 +114,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Run doctests
-        run: cargo test --doc --workspace --features "${{ matrix.network }}"
+        run: cargo test --doc --workspace --all-features
 
   unit-success:
     name: unit success

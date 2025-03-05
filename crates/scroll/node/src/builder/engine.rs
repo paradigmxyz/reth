@@ -1,14 +1,13 @@
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{ExecutionData, PayloadError};
-use reth_node_api::PayloadValidator;
+use reth_node_api::{NewPayloadError, PayloadValidator};
 use reth_node_builder::{
     rpc::EngineValidatorBuilder, AddOnsContext, EngineApiMessageVersion,
     EngineObjectValidationError, EngineTypes, EngineValidator, FullNodeComponents,
     PayloadOrAttributes,
 };
 use reth_node_types::NodeTypesWithEngine;
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::{try_into_block, ScrollEngineTypes};
 use reth_scroll_primitives::{ScrollBlock, ScrollPrimitives};
@@ -82,7 +81,7 @@ impl PayloadValidator for ScrollEngineValidator {
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let expected_hash = payload.payload.block_hash();
 
         // First parse the block
@@ -92,16 +91,23 @@ impl PayloadValidator for ScrollEngineValidator {
         block.header.difficulty = CLIQUE_IN_TURN_DIFFICULTY;
         let block_hash_in_turn = block.hash_slow();
         if block_hash_in_turn == expected_hash {
-            return Ok(block.seal_unchecked(block_hash_in_turn));
+            return block
+                .seal_unchecked(block_hash_in_turn)
+                .try_recover()
+                .map_err(|err| NewPayloadError::Other(err.into()));
         }
 
         // Seal the block with the no-turn difficulty and return if hashes match
         block.header.difficulty = CLIQUE_NO_TURN_DIFFICULTY;
         let block_hash_no_turn = block.hash_slow();
         if block_hash_no_turn == expected_hash {
-            return Ok(block.seal_unchecked(block_hash_no_turn));
+            return block
+                .seal_unchecked(block_hash_no_turn)
+                .try_recover()
+                .map_err(|err| NewPayloadError::Other(err.into()));
         }
 
-        Err(PayloadError::BlockHash { execution: block_hash_no_turn, consensus: expected_hash })
+        Err(PayloadError::BlockHash { execution: block_hash_no_turn, consensus: expected_hash }
+            .into())
     }
 }

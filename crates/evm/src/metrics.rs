@@ -11,8 +11,9 @@ use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives::{NodePrimitives, RecoveredBlock};
-use revm_primitives::EvmState;
+use reth_primitives::RecoveredBlock;
+use reth_primitives_traits::NodePrimitives;
+use revm::state::EvmState;
 use std::time::Instant;
 
 /// Wrapper struct that combines metrics and state hook
@@ -144,13 +145,15 @@ mod tests {
     #![allow(clippy::needless_update)]
     use super::*;
     use alloy_eips::eip7685::Requests;
+    use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use reth_execution_types::BlockExecutionResult;
     use reth_primitives::EthPrimitives;
-    use revm::db::{EmptyDB, State};
-    use revm_primitives::{
-        Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot, B256, U256,
+    use revm::{
+        database_interface::EmptyDB,
+        state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
     };
+    use revm_database::State;
     use std::sync::mpsc;
 
     /// A mock executor that simulates state changes
@@ -192,7 +195,7 @@ mod tests {
             })
         }
 
-        fn into_state(self) -> revm::db::State<DB> {
+        fn into_state(self) -> revm_database::State<DB> {
             State::builder().with_database(Default::default()).build()
         }
 

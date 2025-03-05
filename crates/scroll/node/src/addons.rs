@@ -11,7 +11,8 @@ use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::ScrollEngineTypes;
 use reth_scroll_primitives::ScrollPrimitives;
 use reth_scroll_rpc::{ScrollEthApi, ScrollEthApiError};
-use revm::primitives::TxEnv;
+use revm::context::TxEnv;
+use scroll_alloy_evm::ScrollTransactionIntoTxEnv;
 
 /// Add-ons for the Scroll follower node.
 #[derive(Debug)]
@@ -45,7 +46,7 @@ where
             Storage = ScrollStorage,
             Engine = ScrollEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
+        Evm: ConfigureEvmEnv<TxEnv = ScrollTransactionIntoTxEnv<TxEnv>>,
     >,
     ScrollEthApiError: FromEvmError<N::Evm>,
 {
@@ -69,7 +70,7 @@ where
             Storage = ScrollStorage,
             Engine = ScrollEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv>,
+        Evm: ConfigureEvm<TxEnv = ScrollTransactionIntoTxEnv<TxEnv>>,
     >,
     ScrollEthApiError: FromEvmError<N::Evm>,
 {

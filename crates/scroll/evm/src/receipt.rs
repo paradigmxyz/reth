@@ -1,18 +1,17 @@
-use alloy_consensus::{Eip658Value, Header, Receipt};
+use alloy_consensus::{Eip658Value, Receipt};
 use core::fmt;
 use reth_scroll_primitives::{ScrollReceipt, ScrollTransactionSigned};
-use revm_primitives::{ExecutionResult, U256};
+use revm::context::result::ExecutionResult;
+use revm_primitives::U256;
 use scroll_alloy_consensus::{ScrollTransactionReceipt, ScrollTxType};
 
 /// Context for building a receipt.
 #[derive(Debug)]
-pub struct ReceiptBuilderCtx<'a, T> {
-    /// Block header.
-    pub header: &'a Header,
+pub struct ReceiptBuilderCtx<'a, T, Halt> {
     /// Transaction
     pub tx: &'a T,
     /// Result of transaction execution.
-    pub result: ExecutionResult,
+    pub result: ExecutionResult<Halt>,
     /// Cumulative gas used.
     pub cumulative_gas_used: u64,
     /// L1 fee.
@@ -20,12 +19,12 @@ pub struct ReceiptBuilderCtx<'a, T> {
 }
 
 /// Type that knows how to build a receipt based on execution result.
-pub trait ScrollReceiptBuilder<T>: fmt::Debug + Send + Sync + Unpin + 'static {
+pub trait ScrollReceiptBuilder<T, Halt>: fmt::Debug + Send + Sync + Unpin + 'static {
     /// Receipt type.
     type Receipt: Send + Sync + Clone + Unpin + 'static;
 
     /// Builds a receipt given a transaction and the result of the execution.
-    fn build_receipt(&self, ctx: ReceiptBuilderCtx<'_, T>) -> Self::Receipt;
+    fn build_receipt(&self, ctx: ReceiptBuilderCtx<'_, T, Halt>) -> Self::Receipt;
 }
 
 /// Basic builder for receipts of [`ScrollTransactionSigned`].
@@ -33,10 +32,13 @@ pub trait ScrollReceiptBuilder<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 #[non_exhaustive]
 pub struct BasicScrollReceiptBuilder;
 
-impl ScrollReceiptBuilder<ScrollTransactionSigned> for BasicScrollReceiptBuilder {
+impl<Halt> ScrollReceiptBuilder<ScrollTransactionSigned, Halt> for BasicScrollReceiptBuilder {
     type Receipt = ScrollReceipt;
 
-    fn build_receipt(&self, ctx: ReceiptBuilderCtx<'_, ScrollTransactionSigned>) -> Self::Receipt {
+    fn build_receipt(
+        &self,
+        ctx: ReceiptBuilderCtx<'_, ScrollTransactionSigned, Halt>,
+    ) -> Self::Receipt {
         let inner = Receipt {
             // Success flag was added in `EIP-658: Embedding transaction status code in
             // receipts`.

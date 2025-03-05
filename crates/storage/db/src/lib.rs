@@ -20,7 +20,6 @@ pub mod lockfile;
 #[cfg(feature = "mdbx")]
 mod metrics;
 pub mod static_file;
-pub mod tables;
 #[cfg(feature = "mdbx")]
 mod utils;
 pub mod version;
@@ -29,7 +28,6 @@ pub mod version;
 pub mod mdbx;
 
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
-pub use tables::*;
 #[cfg(feature = "mdbx")]
 pub use utils::is_database_empty;
 

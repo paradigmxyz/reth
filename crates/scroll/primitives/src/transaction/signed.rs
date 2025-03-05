@@ -11,6 +11,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
+use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{
     keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
 };
@@ -31,7 +32,11 @@ use reth_primitives_traits::{
     transaction::{error::TryFromRecoveredTransactionError, signed::RecoveryError},
     InMemorySize, SignedTransaction,
 };
-use scroll_alloy_consensus::{ScrollPooledTransaction, ScrollTypedTransaction, TxL1Message};
+use revm_context::TxEnv;
+use scroll_alloy_consensus::{
+    ScrollPooledTransaction, ScrollTypedTransaction, TxL1Message, L1_MESSAGE_TRANSACTION_TYPE,
+};
+use std::ops::Deref;
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
 
@@ -122,81 +127,6 @@ impl SignedTransaction for ScrollTransactionSigned {
 
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
-    }
-}
-
-#[cfg(feature = "scroll")]
-impl reth_primitives_traits::FillTxEnv for ScrollTransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut revm_primitives::TxEnv, sender: Address) {
-        let envelope = self.encoded_2718();
-
-        tx_env.caller = sender;
-        match &self.transaction {
-            ScrollTypedTransaction::Legacy(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = tx.chain_id;
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clear();
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list = None;
-            }
-            ScrollTypedTransaction::Eip2930(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clone_from(&tx.access_list.0);
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list = None;
-            }
-            ScrollTypedTransaction::Eip1559(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee =
-                    Some(alloy_primitives::U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clone_from(&tx.access_list.0);
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list = None;
-            }
-            ScrollTypedTransaction::L1Message(tx) => {
-                tx_env.access_list.clear();
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::ZERO;
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = TxKind::Call(tx.to);
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = None;
-                tx_env.nonce = None;
-                tx_env.authorization_list = None;
-
-                tx_env.scroll = revm_primitives::ScrollFields {
-                    is_l1_msg: true,
-                    rlp_bytes: Some(envelope.into()),
-                };
-                return
-            }
-        }
-
-        tx_env.scroll =
-            revm_primitives::ScrollFields { is_l1_msg: false, rlp_bytes: Some(envelope.into()) }
     }
 }
 
@@ -558,6 +488,81 @@ impl From<ScrollPooledTransaction> for ScrollTransactionSigned {
             ScrollPooledTransaction::Eip2930(tx) => tx.into(),
             ScrollPooledTransaction::Eip1559(tx) => tx.into(),
         }
+    }
+}
+
+impl FromRecoveredTx<ScrollTransactionSigned> for revm_scroll::ScrollTransaction<TxEnv> {
+    fn from_recovered_tx(tx: &ScrollTransactionSigned, sender: Address) -> Self {
+        let envelope = tx.encoded_2718();
+
+        let base = match &tx.transaction {
+            ScrollTypedTransaction::Legacy(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.gas_price,
+                gas_priority_fee: None,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: tx.chain_id,
+                nonce: tx.nonce,
+                access_list: Default::default(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 0,
+                caller: sender,
+            },
+            ScrollTypedTransaction::Eip2930(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.gas_price,
+                gas_priority_fee: None,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx.access_list.clone(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 1,
+                caller: sender,
+            },
+            ScrollTypedTransaction::Eip1559(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.max_fee_per_gas,
+                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx.access_list.clone(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 2,
+                caller: sender,
+            },
+            ScrollTypedTransaction::L1Message(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: 0,
+                gas_priority_fee: None,
+                kind: TxKind::Call(tx.to),
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: None,
+                nonce: 0,
+                access_list: Default::default(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: 0,
+                authorization_list: vec![],
+                tx_type: L1_MESSAGE_TRANSACTION_TYPE,
+                caller: sender,
+            },
+        };
+
+        Self { base, rlp_bytes: (!tx.is_l1_message()).then_some(envelope.into()) }
     }
 }
 

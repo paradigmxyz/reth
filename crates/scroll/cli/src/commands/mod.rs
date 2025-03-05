@@ -12,6 +12,7 @@ use std::fmt;
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Commands<
     Spec: ChainSpecParser = ScrollChainSpecParser,
     Ext: clap::Args + fmt::Debug = NoArgs,

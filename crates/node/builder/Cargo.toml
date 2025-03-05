@@ -68,7 +68,7 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 tokio-stream.workspace = true
 
 ## crypto
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 
 ## misc
 aquamarine.workspace = true
@@ -102,19 +102,6 @@ test-utils = [
     "reth-db-api/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
-]
-scroll = [
-    "reth-db-api/scroll",
-    "reth-evm/scroll",
-    "reth-provider/scroll",
-    "reth-db?/scroll",
-    "reth-rpc/scroll",
-    "reth-node-core/scroll",
-    "reth-node-api/scroll",
-    "reth-exex/scroll",
-    "reth-rpc-eth-types/scroll",
-    "reth-stages/scroll",
-    "reth-invalid-block-hooks/scroll",
 ]
 skip-state-root-validation = [
     "reth-stages/skip-state-root-validation",

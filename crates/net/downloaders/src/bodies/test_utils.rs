@@ -4,8 +4,8 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
-use reth_db::{tables, DatabaseEnv};
-use reth_db_api::{database::Database, transaction::DbTxMut};
+use reth_db::DatabaseEnv;
+use reth_db_api::{database::Database, tables, transaction::DbTxMut};
 use reth_network_p2p::bodies::response::BlockResponse;
 use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
 use reth_primitives_traits::Block;

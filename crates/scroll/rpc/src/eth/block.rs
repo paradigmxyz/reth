@@ -1,29 +1,28 @@
 //! Loads and formats Scroll block RPC response.
 
+use crate::{eth::ScrollNodeCore, ScrollEthApi, ScrollEthApiError, ScrollReceiptBuilder};
+
 use alloy_consensus::BlockHeader;
 use alloy_rpc_types_eth::BlockId;
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::BlockBody;
 use reth_primitives::TransactionMeta;
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
+    types::RpcTypes,
     RpcReceipt,
 };
-use scroll_alloy_network::Network;
-
-use reth_primitives_traits::SignedTransaction;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_primitives::{ScrollReceipt, ScrollTransactionSigned};
 use scroll_alloy_rpc_types::ScrollTransactionReceipt;
-
-use crate::{eth::ScrollNodeCore, ScrollEthApi, ScrollEthApiError, ScrollReceiptBuilder};
 
 impl<N> EthBlocks for ScrollEthApi<N>
 where
     Self: LoadBlock<
         Error = ScrollEthApiError,
-        NetworkTypes: Network<ReceiptResponse = ScrollTransactionReceipt>,
+        NetworkTypes: RpcTypes<Receipt = ScrollTransactionReceipt>,
         Provider: BlockReader<Receipt = ScrollReceipt, Transaction = ScrollTransactionSigned>,
     >,
     N: ScrollNodeCore<Provider: ChainSpecProvider<ChainSpec = ScrollChainSpec> + HeaderProvider>,

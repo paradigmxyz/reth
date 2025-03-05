@@ -4,10 +4,8 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
-use revm::{
-    db::{states::BundleState, BundleAccount},
-    primitives::AccountInfo,
-};
+use revm::state::AccountInfo;
+use revm_database::{states::BundleState, BundleAccount};
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -774,22 +772,10 @@ mod tests {
         let address3 = Address::random();
 
         // Set up account info with some changes
-        let account_info1 = AccountInfo {
-            nonce: 1,
-            balance: U256::from(100),
-            code_hash: B256::ZERO,
-            code: None,
-            #[cfg(feature = "scroll")]
-            code_size: 0,
-        };
-        let account_info2 = AccountInfo {
-            nonce: 2,
-            balance: U256::from(200),
-            code_hash: B256::ZERO,
-            code: None,
-            #[cfg(feature = "scroll")]
-            code_size: 0,
-        };
+        let account_info1 =
+            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
+        let account_info2 =
+            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
 
         // Set up the bundle state with these accounts
         let mut bundle_state = BundleState::default();

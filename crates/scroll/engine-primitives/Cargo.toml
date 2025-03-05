@@ -59,9 +59,3 @@ std = [
     "serde/std",
     "sha2/std",
 ]
-scroll = [
-    "reth-engine-primitives/scroll",
-    "reth-primitives-traits/scroll",
-    "reth-scroll-primitives/scroll",
-]
-optimism = []

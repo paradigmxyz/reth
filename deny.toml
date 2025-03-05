@@ -10,6 +10,8 @@ ignore = [
     "RUSTSEC-2024-0384",
     # https://rustsec.org/advisories/RUSTSEC-2024-0388 used by ssz, will be removed https://github.com/sigp/ethereum_ssz/pull/34
     "RUSTSEC-2024-0388",
+    # https://rustsec.org/advisories/RUSTSEC-2025-0007 *ring* is unmaintained, used by jsonwebtoken
+    "RUSTSEC-2025-0007",
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -74,6 +76,7 @@ ignore-sources = [
     "https://github.com/scroll-tech/poseidon-bn254",
     "https://github.com/scroll-tech/bn254",
     "https://github.com/scroll-tech/zktrie.git",
+    "https://github.com/scroll-tech/scroll-revm.git",
 ]
 
 [[licenses.clarify]]
@@ -102,13 +105,9 @@ allow-git = [
     "https://github.com/foundry-rs/block-explorers",
     "https://github.com/bluealloy/revm",
     "https://github.com/paradigmxyz/revm-inspectors",
+    "https://github.com/alloy-rs/evm",
     "https://github.com/scroll-tech/bn254",
     "https://github.com/scroll-tech/sp1-intrinsics",
     "https://github.com/scroll-tech/poseidon-bn254",
-    "https://github.com/scroll-tech/zktrie.git",
-    "https://github.com/scroll-tech/gobuild.git",
-    "https://github.com/scroll-tech/alloy-eips",
-    "https://github.com/scroll-tech/ff",
-    "https://github.com/scroll-tech/revm.git",
-    "https://github.com/scroll-tech/alloy-core.git",
+    "https://github.com/scroll-tech/scroll-revm.git",
 ]

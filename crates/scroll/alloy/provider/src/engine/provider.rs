@@ -90,7 +90,7 @@ impl ScrollEngineApi<scroll_alloy_network::Scroll> for ScrollAuthEngineApiProvid
     }
 }
 
-#[cfg(all(test, feature = "scroll", not(feature = "optimism")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::ScrollEngineApi;

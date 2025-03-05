@@ -1,5 +1,4 @@
 //! Node specific implementations for Scroll.
-#![cfg(all(feature = "scroll", not(feature = "optimism")))]
 
 use crate::{
     ScrollAddOns, ScrollConsensusBuilder, ScrollExecutorBuilder, ScrollNetworkBuilder,

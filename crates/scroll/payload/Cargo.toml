@@ -31,11 +31,6 @@ std = [
     "reth-primitives-traits/std",
     "reth-scroll-engine-primitives/std",
 ]
-scroll = [
-    "reth-primitives-traits/scroll",
-    "reth-scroll-engine-primitives/scroll",
-]
-optimism = ["reth-scroll-engine-primitives/optimism"]
 test-utils = [
     "dep:futures-util",
     "dep:reth-payload-builder",

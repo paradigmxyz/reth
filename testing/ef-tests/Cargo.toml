@@ -18,12 +18,6 @@ asm-keccak = [
     "alloy-primitives/asm-keccak",
     "revm/asm-keccak",
 ]
-scroll = [
-    "reth-revm/scroll",
-    "reth-provider/scroll",
-    "reth-db/scroll",
-    "reth-stages/scroll",
-]
 
 [dependencies]
 reth-chainspec.workspace = true

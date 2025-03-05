@@ -20,7 +20,7 @@ reth-consensus.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
 reth-etl.workspace = true
-reth-evm.workspace = true
+reth-evm = { workspace = true, features = ["metrics"] }
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-network-p2p.workspace = true
@@ -115,17 +115,6 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-trie/test-utils",
     "reth-prune-types/test-utils",
-]
-scroll = [
-    "reth-testing-utils?/scroll",
-    "reth-trie/scroll",
-    "reth-provider/scroll",
-    "reth-evm/scroll",
-    "reth-execution-types/scroll",
-    "reth-trie-db/scroll",
-    "reth-db/scroll",
-    "reth-evm-ethereum/scroll",
-    "reth-exex/scroll",
 ]
 skip-state-root-validation = []
 

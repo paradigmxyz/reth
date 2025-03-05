@@ -13,7 +13,7 @@ use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_consensus::ConsensusError;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives::{gas_spent_by_transactions, GotExpected};
+use reth_primitives_traits::{receipt::gas_spent_by_transactions, GotExpected};
 
 /// Validate a block with regard to execution results:
 ///

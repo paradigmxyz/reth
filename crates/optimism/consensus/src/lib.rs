@@ -7,9 +7,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(all(feature = "optimism", not(feature = "scroll")))]
 
 extern crate alloc;
 
@@ -28,8 +25,10 @@ use reth_consensus_common::validation::{
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{Block, BlockBody, BlockHeader, SealedBlock};
+use reth_primitives_traits::{
+    Block, BlockBody, BlockHeader, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader,
+};
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;

@@ -28,7 +28,6 @@ exclude_crates=(
   reth-ethereum-cli
   reth-ethereum-payload-builder
   reth-etl
-  reth-evm
   reth-exex
   reth-exex-test-utils
   reth-ipc
@@ -45,6 +44,8 @@ exclude_crates=(
   reth-optimism-payload-builder
   reth-optimism-rpc
   reth-optimism-chain-registry
+  reth-optimism-consensus
+  reth-optimism-evm
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -75,10 +76,12 @@ exclude_crates=(
   reth-scroll # tokio
   reth-scroll-state-commitment # tokio
   reth-scroll-chainspec # tokio
+  reth-scroll-consensus # c-kzg
   reth-scroll-evm # tokio
   reth-scroll-rpc #tokio
   reth-scroll-engine-primitives # proptest
   reth-scroll-payload # c-kzg
+  reth-scroll-primitives # c-kzg
 )
 
 # Array to hold the results

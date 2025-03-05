@@ -61,7 +61,7 @@ shellexpand.workspace = true
 tracing.workspace = true
 
 # crypto
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 
 # async
 futures.workspace = true
@@ -72,14 +72,9 @@ proptest.workspace = true
 tokio.workspace = true
 
 [features]
-optimism = ["reth-db/optimism"]
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
-scroll = [
-    "reth-db/scroll",
-    "reth-rpc-eth-types/scroll",
-]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

@@ -1,0 +1,201 @@
+//! Alloy Evm API for Scroll.
+
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+mod tx;
+pub use tx::ScrollTransactionIntoTxEnv;
+
+extern crate alloc;
+
+use alloc::vec::Vec;
+use alloy_evm::{Database, Evm, EvmEnv, EvmFactory};
+use alloy_primitives::{Address, Bytes, TxKind, U256};
+use core::{
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
+use revm::{
+    context::{result::HaltReason, setters::ContextSetters, BlockEnv, TxEnv},
+    context_interface::result::{EVMError, ResultAndState},
+    inspector::NoOpInspector,
+    interpreter::interpreter::EthInterpreter,
+    Context, ExecuteEvm, InspectEvm, Inspector,
+};
+use revm_scroll::{
+    builder::{DefaultScrollContext, ScrollBuilder, ScrollContext},
+    instructions::ScrollInstructions,
+    ScrollSpecId, ScrollTransaction,
+};
+
+/// Scroll EVM implementation.
+#[allow(missing_debug_implementations)]
+pub struct ScrollEvm<DB: Database, I> {
+    inner: revm_scroll::ScrollEvm<
+        ScrollContext<DB>,
+        I,
+        ScrollInstructions<EthInterpreter, ScrollContext<DB>>,
+    >,
+    inspect: bool,
+}
+
+impl<DB: Database, I> ScrollEvm<DB, I> {
+    /// Provides a reference to the EVM context.
+    pub const fn ctx(&self) -> &ScrollContext<DB> {
+        &self.inner.0.data.ctx
+    }
+
+    /// Provides a mutable reference to the EVM context.
+    pub fn ctx_mut(&mut self) -> &mut ScrollContext<DB> {
+        &mut self.inner.0.data.ctx
+    }
+}
+
+impl<DB: Database, I> Deref for ScrollEvm<DB, I> {
+    type Target = ScrollContext<DB>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.ctx()
+    }
+}
+
+impl<DB: Database, I> DerefMut for ScrollEvm<DB, I> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.ctx_mut()
+    }
+}
+
+impl<DB, I> Evm for ScrollEvm<DB, I>
+where
+    DB: Database,
+    I: Inspector<ScrollContext<DB>>,
+{
+    type DB = DB;
+    type Tx = ScrollTransactionIntoTxEnv<TxEnv>;
+    type Error = EVMError<DB::Error>;
+    type HaltReason = HaltReason;
+
+    fn block(&self) -> &BlockEnv {
+        &self.block
+    }
+
+    fn transact_raw(
+        &mut self,
+        tx: Self::Tx,
+    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        if self.inspect {
+            self.inner.set_tx(tx.into());
+            self.inner.inspect_previous()
+        } else {
+            self.inner.transact(tx.into())
+        }
+    }
+
+    fn transact_system_call(
+        &mut self,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        let tx = ScrollTransaction {
+            base: TxEnv {
+                caller,
+                kind: TxKind::Call(contract),
+                // Explicitly set nonce to 0 so revm does not do any nonce checks
+                nonce: 0,
+                gas_limit: 30_000_000,
+                value: U256::ZERO,
+                data,
+                // Setting the gas price to zero enforces that no value is transferred as part of
+                // the call, and that the call will not count against the block's
+                // gas limit
+                gas_price: 0,
+                // The chain ID check is not relevant here and is disabled if set to None
+                chain_id: None,
+                // Setting the gas priority fee to None ensures the effective gas price is derived
+                // from the `gas_price` field, which we need to be zero
+                gas_priority_fee: None,
+                access_list: Default::default(),
+                // blob fields can be None for this tx
+                blob_hashes: Vec::new(),
+                max_fee_per_blob_gas: 0,
+                tx_type: 0,
+                authorization_list: Default::default(),
+            },
+            rlp_bytes: Some(Default::default()),
+        };
+
+        let mut gas_limit = tx.base.gas_limit;
+        let mut basefee = 0;
+        let mut disable_nonce_check = true;
+
+        // ensure the block gas limit is >= the tx
+        core::mem::swap(&mut self.block.gas_limit, &mut gas_limit);
+        // disable the base fee check for this call by setting the base fee to zero
+        core::mem::swap(&mut self.block.basefee, &mut basefee);
+        // disable the nonce check
+        core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
+
+        let res = self.transact(ScrollTransactionIntoTxEnv::from(tx));
+
+        // swap back to the previous gas limit
+        core::mem::swap(&mut self.block.gas_limit, &mut gas_limit);
+        // swap back to the previous base fee
+        core::mem::swap(&mut self.block.basefee, &mut basefee);
+        // swap back to the previous nonce check flag
+        core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
+
+        res
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        &mut self.journaled_state.database
+    }
+}
+
+/// Factory producing [`ScrollEvm`]s.
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct ScrollEvmFactory;
+
+impl EvmFactory<EvmEnv<ScrollSpecId>> for ScrollEvmFactory {
+    type Evm<DB: Database, I: Inspector<ScrollContext<DB>>> = ScrollEvm<DB, I>;
+    type Context<DB: Database> = ScrollContext<DB>;
+    type Tx = ScrollTransactionIntoTxEnv<TxEnv>;
+    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
+
+    fn create_evm<DB: Database>(
+        &self,
+        db: DB,
+        input: EvmEnv<ScrollSpecId>,
+    ) -> Self::Evm<DB, NoOpInspector> {
+        ScrollEvm {
+            inner: Context::scroll()
+                .with_db(db)
+                .with_block(input.block_env)
+                .with_cfg(input.cfg_env)
+                .build_scroll_with_inspector(NoOpInspector {}),
+            inspect: false,
+        }
+    }
+
+    fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
+        &self,
+        db: DB,
+        input: EvmEnv<ScrollSpecId>,
+        inspector: I,
+    ) -> Self::Evm<DB, I> {
+        ScrollEvm {
+            inner: Context::scroll()
+                .with_db(db)
+                .with_block(input.block_env)
+                .with_cfg(input.cfg_env)
+                .build_scroll_with_inspector(inspector),
+            inspect: true,
+        }
+    }
+}

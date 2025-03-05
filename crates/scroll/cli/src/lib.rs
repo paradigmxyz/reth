@@ -1,6 +1,4 @@
 //! Scroll CLI implementation.
-#![cfg(all(feature = "scroll", not(feature = "optimism")))]
-
 mod args;
 pub use args::ScrollRollupArgs;
 
