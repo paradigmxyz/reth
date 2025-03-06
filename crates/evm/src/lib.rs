@@ -260,7 +260,7 @@ impl TransactionEnv for TxEnv {
 }
 
 #[cfg(feature = "op")]
-impl<T: TransactionEnv> TransactionEnv for revm_optimism::OpTransaction<T> {
+impl<T: TransactionEnv> TransactionEnv for op_revm::OpTransaction<T> {
     fn set_gas_limit(&mut self, gas_limit: u64) {
         self.base.set_gas_limit(gas_limit);
     }

@@ -619,7 +619,9 @@ mod tests {
     fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
         let mut db = CacheDB::new(Default::default());
         for block_number in 0..=latest_block {
-            db.block_hashes.insert(U256::from(block_number), keccak256(block_number.to_string()));
+            db.cache
+                .block_hashes
+                .insert(U256::from(block_number), keccak256(block_number.to_string()));
         }
 
         let blockhashes_contract_account = AccountInfo {
