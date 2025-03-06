@@ -8799,6 +8799,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "arbitrary",
+ "bincode",
  "bytes",
  "derive_more 2.0.1",
  "modular-bitfield",
@@ -8815,6 +8816,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
+ "serde_with",
 ]
 
 [[package]]
