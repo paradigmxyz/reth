@@ -889,13 +889,13 @@ mod tests {
         let mut bytes = [0u8; 1024];
         rng.fill(bytes.as_mut_slice());
 
-        let slot_1 = b256!("1000000000000000000000000000000000000000000000000000000000000000");
+        let slot_1 = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let slot_path_1 = Nibbles::unpack(slot_1);
         let value_1 = U256::from(rng.gen::<u64>());
-        let slot_2 = b256!("1100000000000000000000000000000000000000000000000000000000000000");
+        let slot_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
         let slot_path_2 = Nibbles::unpack(slot_2);
         let value_2 = U256::from(rng.gen::<u64>());
-        let slot_3 = b256!("2000000000000000000000000000000000000000000000000000000000000000");
+        let slot_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let slot_path_3 = Nibbles::unpack(slot_3);
         let value_3 = U256::from(rng.gen::<u64>());
 
@@ -914,11 +914,11 @@ mod tests {
             (Nibbles::from_nibbles([0x1]), TrieMask::new(0b11)),
         ]);
 
-        let address_1 = b256!("1000000000000000000000000000000000000000000000000000000000000000");
+        let address_1 = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let address_path_1 = Nibbles::unpack(address_1);
         let account_1 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
         let mut trie_account_1 = account_1.into_trie_account(storage_root);
-        let address_2 = b256!("1100000000000000000000000000000000000000000000000000000000000000");
+        let address_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
         let address_path_2 = Nibbles::unpack(address_2);
         let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
         let mut trie_account_2 = account_2.into_trie_account(EMPTY_ROOT_HASH);
@@ -968,7 +968,7 @@ mod tests {
 
         assert_eq!(sparse.root().unwrap(), root);
 
-        let address_3 = b256!("2000000000000000000000000000000000000000000000000000000000000000");
+        let address_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let address_path_3 = Nibbles::unpack(address_3);
         let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
         let trie_account_3 = account_3.into_trie_account(EMPTY_ROOT_HASH);
@@ -992,7 +992,7 @@ mod tests {
             TrieUpdates {
                 account_nodes: HashMap::default(),
                 storage_tries: HashMap::from_iter([(
-                    b256!("1100000000000000000000000000000000000000000000000000000000000000"),
+                    b256!("0x1100000000000000000000000000000000000000000000000000000000000000"),
                     StorageTrieUpdates {
                         is_deleted: true,
                         storage_nodes: HashMap::default(),
