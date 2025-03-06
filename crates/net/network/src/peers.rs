@@ -15,9 +15,7 @@ use reth_network_types::{
     peers::{
         config::PeerBackoffDurations,
         reputation::{DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE},
-    },
-    ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
-    ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
+    }, BackoffKind, ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig, ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -910,7 +908,8 @@ impl PeersManager {
                             }
                             Err(err) => {
                                 warn!(target: "net::peers", ?peer_id, ?trusted_peer, ?err, "Failed to re-resolve trusted peer, backing off");
-                                self.backoff_peer_until(peer_id, std::time::Instant::now() + self.refill_slots_interval.period());
+                                let backoff_counter = peer.severe_backoff_counter;
+                                self.backoff_peer_until(peer_id, self.backoff_durations.backoff_until(BackoffKind::Low, backoff_counter));
                                 continue;
                             }
                         }
