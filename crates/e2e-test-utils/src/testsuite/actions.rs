@@ -118,13 +118,6 @@ where
             let rpc_client = &node_client.rpc;
             let engine_client = &node_client.engine;
 
-            // get current block number before mining
-            let pre_block_number =
-                EthApiClient::<Transaction, Block, Receipt, Header>::block_number(rpc_client)
-                    .await?;
-
-            debug!("Current block number: {pre_block_number}");
-
             // get the latest block to use as parent
             let latest_block =
                 EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(

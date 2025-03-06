@@ -1,6 +1,7 @@
 //! Test setup utilities for configuring the initial state.
 
 use crate::{setup_engine, testsuite::Environment, Adapter, TmpDB, TmpNodeAdapter};
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction};
@@ -28,7 +29,7 @@ use tokio::{
 };
 use tracing::{debug, error};
 
-/// Configuration for setting up a test environment
+/// Configuration for setting upa test environment
 #[derive(Debug)]
 pub struct Setup {
     /// Chain specification to use
@@ -244,8 +245,10 @@ impl Setup {
             let mut last_error = None;
 
             while retry_count < MAX_RETRIES {
-                match EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_number(
+                match EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_by_number(
                     &client.rpc,
+                    BlockNumberOrTag::Latest,
+                    false,
                 )
                 .await
                 {
@@ -259,7 +262,7 @@ impl Setup {
                         debug!(
                             "Node {idx} RPC endpoint not ready, retry {retry_count}/{MAX_RETRIES}"
                         );
-                        sleep(Duration::from_millis(100)).await;
+                        sleep(Duration::from_millis(500)).await;
                     }
                 }
             }
