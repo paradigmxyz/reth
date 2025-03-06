@@ -37,7 +37,7 @@
 //!
 //! async fn my_indexer<N: FullNodeComponents>(
 //!     mut ctx: ExExContext<N>,
-//! ) -> Result<(), Box<dyn std::error::Error>> {
+//! ) -> Result<(), Box<dyn core::error::Error>> {
 //!     // Subscribe to canonical state notifications
 //!
 //!     while let Some(Ok(notification)) = ctx.notifications.next().await {
