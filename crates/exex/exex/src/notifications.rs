@@ -116,7 +116,7 @@ where
         self.inner = ExExNotificationsInner::WithoutHead(match current {
             ExExNotificationsInner::WithoutHead(notifications) => notifications,
             ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithoutHead::new(
-                notifications.node_head,
+                notifications.initial_local_head,
                 notifications.provider,
                 notifications.executor,
                 notifications.notifications,
@@ -133,7 +133,7 @@ where
                 notifications.with_head(exex_head)
             }
             ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithHead::new(
-                notifications.node_head,
+                notifications.initial_local_head,
                 notifications.provider,
                 notifications.executor,
                 notifications.notifications,
@@ -256,12 +256,15 @@ pub struct ExExNotificationsWithHead<P, E>
 where
     E: BlockExecutorProvider,
 {
-    node_head: BlockNumHash,
+    /// The node's local head at launch.
+    initial_local_head: BlockNumHash,
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification<E::Primitives>>,
     wal_handle: WalHandle<E::Primitives>,
-    exex_head: ExExHead,
+    /// The exex head at launch
+    initial_exex_head: ExExHead,
+
     /// If true, then we need to check if the ExEx head is on the canonical chain and if not,
     /// revert its head.
     pending_check_canonical: bool,
@@ -286,12 +289,12 @@ where
         exex_head: ExExHead,
     ) -> Self {
         Self {
-            node_head,
+            initial_local_head: node_head,
             provider,
             executor,
             notifications,
             wal_handle,
-            exex_head,
+            initial_exex_head: exex_head,
             pending_check_canonical: true,
             pending_check_backfill: true,
             backfill_job: None,
@@ -313,9 +316,10 @@ where
     /// we're not on the canonical chain and we need to revert the notification with the ExEx
     /// head block.
     fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification<E::Primitives>>> {
-        if self.provider.is_known(&self.exex_head.block.hash)? &&
-            self.exex_head.block.number <= self.node_head.number
+        if self.provider.is_known(&self.initial_exex_head.block.hash)? &&
+            self.initial_exex_head.block.number <= self.initial_local_head.number
         {
+            // we have the targeted block and that block is below the current head
             debug!(target: "exex::notifications", "ExEx head is on the canonical chain");
             return Ok(None)
         }
@@ -324,12 +328,19 @@ where
         // chain.
 
         // Get the committed notification for the head block from the WAL.
-        let Some(notification) =
-            self.wal_handle.get_committed_notification_by_block_hash(&self.exex_head.block.hash)?
+        let Some(notification) = self
+            .wal_handle
+            .get_committed_notification_by_block_hash(&self.initial_exex_head.block.hash)?
         else {
+            // it's possible that the exex head is further ahead
+            if self.initial_exex_head.block.number > self.initial_local_head.number {
+                debug!(target: "exex::notifications", "ExEx head is ahead of the canonical chain");
+                return Ok(None);
+            }
+
             return Err(eyre::eyre!(
                 "Could not find notification for block hash {:?} in the WAL",
-                self.exex_head.block.hash
+                self.initial_exex_head.block.hash
             ))
         };
 
@@ -337,8 +348,8 @@ where
         let committed_chain = notification.committed_chain().unwrap();
         let new_exex_head =
             (committed_chain.first().parent_hash(), committed_chain.first().number() - 1).into();
-        debug!(target: "exex::notifications", old_exex_head = ?self.exex_head.block, new_exex_head = ?new_exex_head, "ExEx head updated");
-        self.exex_head.block = new_exex_head;
+        debug!(target: "exex::notifications", old_exex_head = ?self.initial_exex_head.block, new_exex_head = ?new_exex_head, "ExEx head updated");
+        self.initial_exex_head.block = new_exex_head;
 
         // Return an inverted notification. See the documentation for
         // `ExExNotification::into_inverted`.
@@ -358,12 +369,14 @@ where
     fn check_backfill(&mut self) -> eyre::Result<()> {
         let backfill_job_factory =
             BackfillJobFactory::new(self.executor.clone(), self.provider.clone());
-        match self.exex_head.block.number.cmp(&self.node_head.number) {
+        match self.initial_exex_head.block.number.cmp(&self.initial_local_head.number) {
             std::cmp::Ordering::Less => {
                 // ExEx is behind the node head, start backfill
                 debug!(target: "exex::notifications", "ExEx is behind the node head and on the canonical chain, starting backfill");
                 let backfill = backfill_job_factory
-                    .backfill(self.exex_head.block.number + 1..=self.node_head.number)
+                    .backfill(
+                        self.initial_exex_head.block.number + 1..=self.initial_local_head.number,
+                    )
                     .into_stream();
                 self.backfill_job = Some(backfill);
             }
@@ -371,7 +384,7 @@ where
                 debug!(target: "exex::notifications", "ExEx is at the node head");
             }
             std::cmp::Ordering::Greater => {
-                return Err(eyre::eyre!("ExEx is ahead of the node head"))
+                debug!(target: "exex::notifications", "ExEx is ahead of the node head");
             }
         };
 
@@ -392,6 +405,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        // 1. Check once whether we need to retrieve a notifiaction gap from the WAL.
         if this.pending_check_canonical {
             if let Some(canonical_notification) = this.check_canonical()? {
                 return Poll::Ready(Some(Ok(canonical_notification)))
@@ -401,11 +415,13 @@ where
             this.pending_check_canonical = false;
         }
 
+        // 2. Check once whether we need to trigger backfill sync
         if this.pending_check_backfill {
             this.check_backfill()?;
             this.pending_check_backfill = false;
         }
 
+        // 3. If backfill is in progress yield new notifications
         if let Some(backfill_job) = &mut this.backfill_job {
             debug!(target: "exex::notifications", "Polling backfill job");
             if let Some(chain) = ready!(backfill_job.poll_next_unpin(cx)).transpose()? {
@@ -419,18 +435,22 @@ where
             this.backfill_job = None;
         }
 
-        let Some(notification) = ready!(this.notifications.poll_recv(cx)) else {
-            return Poll::Ready(None)
-        };
+        // 4. Otherwise advance the regular event stream
+        loop {
+            let Some(notification) = ready!(this.notifications.poll_recv(cx)) else {
+                return Poll::Ready(None)
+            };
 
-        if let Some(committed_chain) = notification.committed_chain() {
-            this.exex_head.block = committed_chain.tip().num_hash();
-        } else if let Some(reverted_chain) = notification.reverted_chain() {
-            let first_block = reverted_chain.first();
-            this.exex_head.block = (first_block.parent_hash(), first_block.number() - 1).into();
+            // 5. In case the exex is ahead of the new tip, we must skip it
+            if let Some(committed) = notification.committed_chain() {
+                // inclusive check because we should start with `exex.head + 1`
+                if this.initial_exex_head.block.number >= committed.tip().number() {
+                    continue
+                }
+            }
+
+            return Poll::Ready(Some(Ok(notification)))
         }
-
-        Poll::Ready(Some(Ok(notification)))
     }
 }
 
