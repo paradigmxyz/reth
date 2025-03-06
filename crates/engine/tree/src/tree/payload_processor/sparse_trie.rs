@@ -130,7 +130,7 @@ pub(super) type SparseTrieEvent = SparseTrieUpdate;
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 pub(crate) fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
-    SparseTrieUpdate { state, multiproof }: SparseTrieUpdate,
+    SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,
@@ -178,12 +178,24 @@ where
         })
         .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
     drop(tx);
+
+    // Update account storage roots
     for result in rx {
         let (address, storage_trie) = result?;
         trie.insert_storage_trie(address, storage_trie);
+
+        // If the account itself has an update, remove it from the state update and update in one
+        // go instead of doing it down below.
+        if let Some(account) = state.accounts.remove(&address) {
+            trace!(target: "engine::root::sparse", ?address, "Updating account and its storage root");
+            trie.update_account(address, account.unwrap_or_default())?;
+        } else {
+            trace!(target: "engine::root::sparse", ?address, "Updating account storage root");
+            trie.update_account_storage_root(address)?;
+        }
     }
 
-    // Update accounts with new values
+    // Update accounts
     for (address, account) in state.accounts {
         trace!(target: "engine::root::sparse", ?address, "Updating account");
         trie.update_account(address, account.unwrap_or_default())?;
