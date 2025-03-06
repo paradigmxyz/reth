@@ -14,10 +14,12 @@ use reth_eth_wire::{
 };
 use reth_network::{
     protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
-    test_utils::Testnet,
+    test_utils::{NetworkEventStream, Testnet},
+    NetworkConfigBuilder, NetworkEventListenerProvider, NetworkManager,
 };
-use reth_network_api::{Direction, PeerId};
-use reth_provider::test_utils::MockEthProvider;
+use reth_network_api::{Direction, NetworkInfo, PeerId, Peers};
+use reth_provider::{noop::NoopProvider, test_utils::MockEthProvider};
+use secp256k1::SecretKey;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -200,7 +202,7 @@ impl ConnectionHandler for PingPongConnectionHandler {
         _direction: Direction,
         _peer_id: PeerId,
     ) -> OnNotSupported {
-        OnNotSupported::KeepAlive
+        OnNotSupported::Disconnect
     }
 
     fn into_connection(
@@ -273,6 +275,47 @@ impl Stream for PingPongProtoConnection {
             return Poll::Pending
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connect_to_non_multiplex_peer() {
+    reth_tracing::init_test_tracing();
+
+    let net = Testnet::create(1).await;
+
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .build(NoopProvider::default());
+
+    let mut network = NetworkManager::new(config).await.unwrap();
+
+    let (tx, _) = mpsc::unbounded_channel();
+    network.add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    // create networkeventstream to get the next session event easily.
+    let events = handle.event_listener();
+    let mut event_stream = NetworkEventStream::new(events);
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    drop(handles);
+
+    let _handle = net.spawn();
+
+    handle.add_peer(*handle0.peer_id(), handle0.local_addr());
+
+    let added_peer_id = event_stream.peer_added().await.unwrap();
+    assert_eq!(added_peer_id, *handle0.peer_id());
+
+    // peer with mismatched capability version should fail to connect and be removed.
+    let removed_peer_id = event_stream.peer_removed().await.unwrap();
+    assert_eq!(removed_peer_id, *handle0.peer_id());
 }
 
 #[tokio::test(flavor = "multi_thread")]

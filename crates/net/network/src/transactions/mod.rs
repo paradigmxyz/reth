@@ -1910,10 +1910,13 @@ struct TxManagerPollDurations {
 mod tests {
     use super::*;
     use crate::{test_utils::Testnet, NetworkConfigBuilder, NetworkManager};
-    use alloy_primitives::hex;
+    use alloy_consensus::{transaction::PooledTransaction, TxEip1559, TxLegacy};
+    use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::Decodable;
     use constants::tx_fetcher::DEFAULT_MAX_COUNT_FALLBACK_PEERS;
     use futures::FutureExt;
+    use reth_chainspec::MIN_TRANSACTION_GAS;
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_network_api::NetworkInfo;
     use reth_network_p2p::{
         error::{RequestError, RequestResult},
@@ -1929,6 +1932,7 @@ mod tests {
         future::poll_fn,
         hash,
         net::{IpAddr, Ipv4Addr, SocketAddr},
+        str::FromStr,
     };
     use tests::fetcher::TxFetchMetadata;
     use tracing::error;
@@ -2273,6 +2277,134 @@ mod tests {
                 panic!("error: {e:?}");
             }
         }
+    }
+
+    // Ensure that when the remote peer only returns part of the requested transactions, the
+    // replied transactions are removed from the `tx_fetcher`, while the unresponsive ones are
+    // re-buffered.
+    #[tokio::test]
+    async fn test_partially_tx_response() {
+        reth_tracing::init_test_tracing();
+
+        let mut tx_manager = new_tx_manager().await.0;
+        let tx_fetcher = &mut tx_manager.transaction_fetcher;
+
+        let peer_id_1 = PeerId::new([1; 64]);
+        let eth_version = EthVersion::Eth66;
+
+        let txs = vec![
+            TransactionSigned::new_unhashed(
+                Transaction::Legacy(TxLegacy {
+                    chain_id: Some(4),
+                    nonce: 15u64,
+                    gas_price: 2200000000,
+                    gas_limit: 34811,
+                    to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                    value: U256::from(1234u64),
+                    input: Default::default(),
+                }),
+                Signature::new(
+                    U256::from_str(
+                        "0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981",
+                    )
+                    .unwrap(),
+                    U256::from_str(
+                        "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
+                    )
+                    .unwrap(),
+                    true,
+                ),
+            ),
+            TransactionSigned::new_unhashed(
+                Transaction::Eip1559(TxEip1559 {
+                    chain_id: 4,
+                    nonce: 26u64,
+                    max_priority_fee_per_gas: 1500000000,
+                    max_fee_per_gas: 1500000013,
+                    gas_limit: MIN_TRANSACTION_GAS,
+                    to: TxKind::Call(hex!("61815774383099e24810ab832a5b2a5425c154d5").into()),
+                    value: U256::from(3000000000000000000u64),
+                    input: Default::default(),
+                    access_list: Default::default(),
+                }),
+                Signature::new(
+                    U256::from_str(
+                        "0x59e6b67f48fb32e7e570dfb11e042b5ad2e55e3ce3ce9cd989c7e06e07feeafd",
+                    )
+                    .unwrap(),
+                    U256::from_str(
+                        "0x016b83f4f980694ed2eee4d10667242b1f40dc406901b34125b008d334d47469",
+                    )
+                    .unwrap(),
+                    true,
+                ),
+            ),
+        ];
+
+        let txs_hashes: Vec<B256> = txs.iter().map(|tx| *tx.hash()).collect();
+
+        let (mut peer_1, mut to_mock_session_rx) = new_mock_session(peer_id_1, eth_version);
+        // mark hashes as seen by peer so it can fish them out from the cache for hashes pending
+        // fetch
+        peer_1.seen_transactions.insert(txs_hashes[0]);
+        peer_1.seen_transactions.insert(txs_hashes[1]);
+        tx_manager.peers.insert(peer_id_1, peer_1);
+
+        let mut backups = default_cache();
+        backups.insert(peer_id_1);
+
+        let mut backups1 = default_cache();
+        backups1.insert(peer_id_1);
+
+        tx_fetcher
+            .hashes_fetch_inflight_and_pending_fetch
+            .insert(txs_hashes[0], TxFetchMetadata::new(1, backups, None));
+        tx_fetcher
+            .hashes_fetch_inflight_and_pending_fetch
+            .insert(txs_hashes[1], TxFetchMetadata::new(1, backups1, None));
+        tx_fetcher.hashes_pending_fetch.insert(txs_hashes[0]);
+        tx_fetcher.hashes_pending_fetch.insert(txs_hashes[1]);
+
+        // peer_1 is idle
+        assert!(tx_fetcher.is_idle(&peer_id_1));
+        assert_eq!(tx_fetcher.active_peers.len(), 0);
+
+        // sends requests for buffered hashes to peer_1
+        tx_fetcher.on_fetch_pending_hashes(&tx_manager.peers, |_| true);
+
+        assert!(tx_fetcher.hashes_pending_fetch.is_empty());
+        // as long as request is in flight peer_1 is not idle
+        assert!(!tx_fetcher.is_idle(&peer_id_1));
+        assert_eq!(tx_fetcher.active_peers.len(), 1);
+
+        // mock session of peer_1 receives request
+        let req = to_mock_session_rx
+            .recv()
+            .await
+            .expect("peer_1 session should receive request with buffered hashes");
+        let PeerRequest::GetPooledTransactions { response, .. } = req else { unreachable!() };
+
+        let message: Vec<PooledTransaction> = txs
+            .into_iter()
+            .take(1)
+            .map(|tx| {
+                PooledTransaction::try_from(tx)
+                    .expect("Failed to convert MockTransaction to PooledTransaction")
+            })
+            .collect();
+        // response partial request
+        response
+            .send(Ok(reth_eth_wire::PooledTransactions(message)))
+            .expect("should send peer_1 response to tx manager");
+        let Some(FetchEvent::TransactionsFetched { peer_id, .. }) = tx_fetcher.next().await else {
+            unreachable!()
+        };
+
+        // request has resolved, peer_1 is idle again
+        assert!(tx_fetcher.is_idle(&peer_id));
+        assert_eq!(tx_fetcher.active_peers.len(), 0);
+        // failing peer_1's request buffers requested hashes for retry.
+        assert_eq!(tx_fetcher.hashes_pending_fetch.len(), 1);
     }
 
     #[tokio::test]

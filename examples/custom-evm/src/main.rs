@@ -20,7 +20,9 @@ use reth::{
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
         interpreter::{interpreter::EthInterpreter, InterpreterResult},
-        precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
+        precompile::{
+            PrecompileError, PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles,
+        },
         specification::hardfork::SpecId,
         MainBuilder, MainContext,
     },
@@ -46,13 +48,14 @@ use std::sync::OnceLock;
 #[non_exhaustive]
 pub struct MyEvmFactory;
 
-impl EvmFactory<EvmEnv> for MyEvmFactory {
+impl EvmFactory for MyEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
         EthEvm<DB, I, CustomPrecompiles<EthEvmContext<DB>>>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
     type Context<DB: Database> = EthEvmContext<DB>;
+    type Spec = SpecId;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
         let evm = Context::mainnet()
@@ -155,7 +158,7 @@ pub fn prague_custom() -> &'static Precompiles {
         let mut precompiles = Precompiles::prague().clone();
         // Custom precompile.
         precompiles.extend([(
-            address!("0000000000000000000000000000000000000999"),
+            address!("0x0000000000000000000000000000000000000999"),
             |_, _| -> PrecompileResult {
                 PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
             } as PrecompileFn,
@@ -184,7 +187,7 @@ impl<CTX: ContextTr> PrecompileProvider for CustomPrecompiles<CTX> {
         address: &Address,
         bytes: &Bytes,
         gas_limit: u64,
-    ) -> Result<Option<Self::Output>, reth::revm::precompile::PrecompileErrors> {
+    ) -> Result<Option<Self::Output>, PrecompileError> {
         self.precompiles.run(context, address, bytes, gas_limit)
     }
 

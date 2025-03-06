@@ -1,3 +1,5 @@
+use core::ops::Not;
+
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     KeyHasher, MultiProofTargets, Nibbles,
@@ -196,6 +198,78 @@ impl HashedPostState {
             }
         }
         targets
+    }
+
+    /// Partition the state update into two state updates:
+    /// - First with accounts and storages slots that are present in the provided targets.
+    /// - Second with all other.
+    ///
+    /// CAUTION: The state updates are expected to be applied in order, so that the storage wipes
+    /// are done correctly.
+    pub fn partition_by_targets(mut self, targets: &MultiProofTargets) -> (Self, Self) {
+        let mut state_updates_not_in_targets = Self::default();
+
+        self.storages.retain(|&address, storage| {
+            let (retain, storage_not_in_targets) = match targets.get(&address) {
+                Some(storage_in_targets) => {
+                    let mut storage_not_in_targets = HashedStorage::default();
+                    storage.storage.retain(|&slot, value| {
+                        if storage_in_targets.contains(&slot) {
+                            return true
+                        }
+
+                        storage_not_in_targets.storage.insert(slot, *value);
+                        false
+                    });
+
+                    // We do not check the wiped flag here, because targets only contain addresses
+                    // and storage slots. So if there are no storage slots left, the storage update
+                    // can be fully removed.
+                    let retain = !storage.storage.is_empty();
+
+                    // Since state updates are expected to be applied in order, we can only set the
+                    // wiped flag in the second storage update if the first storage update is empty
+                    // and will not be retained.
+                    if !retain {
+                        storage_not_in_targets.wiped = storage.wiped;
+                    }
+
+                    (
+                        retain,
+                        storage_not_in_targets.is_empty().not().then_some(storage_not_in_targets),
+                    )
+                }
+                None => (false, Some(core::mem::take(storage))),
+            };
+
+            if let Some(storage_not_in_targets) = storage_not_in_targets {
+                state_updates_not_in_targets.storages.insert(address, storage_not_in_targets);
+
+                // Storage update should have an associated account, if it exists.
+                if let Some(account) = self.accounts.remove(&address) {
+                    state_updates_not_in_targets.accounts.insert(address, account);
+                }
+            }
+
+            retain
+        });
+        self.accounts.retain(|&address, account| {
+            if targets.contains_key(&address) {
+                return true
+            }
+
+            state_updates_not_in_targets.accounts.insert(address, *account);
+            false
+        });
+
+        (self, state_updates_not_in_targets)
+    }
+
+    /// Returns an iterator that yields chunks of the specified size.
+    ///
+    /// See [`ChunkedHashedPostState`] for more information.
+    pub fn chunks(self, size: usize) -> ChunkedHashedPostState {
+        ChunkedHashedPostState::new(self, size)
     }
 
     /// Extend this hashed post state with contents of another.
@@ -415,6 +489,93 @@ impl HashedStorageSorted {
             .map(|(hashed_slot, value)| (*hashed_slot, *value))
             .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
             .sorted_by_key(|entry| *entry.0)
+    }
+}
+
+/// An iterator that yields chunks of the state updates of at most `size` account and storage
+/// targets.
+///
+/// # Notes
+/// 1. Chunks are expected to be applied in order, because of storage wipes. If applied out of
+///    order, it's possible to wipe more storage than in the original state update.
+/// 2. For each account, chunks with storage updates come first, followed by account updates.
+#[derive(Debug)]
+pub struct ChunkedHashedPostState {
+    flattened: alloc::vec::IntoIter<(B256, FlattenedHashedPostStateItem)>,
+    size: usize,
+}
+
+#[derive(Debug)]
+enum FlattenedHashedPostStateItem {
+    Account(Option<Account>),
+    StorageWipe,
+    StorageUpdate { slot: B256, value: U256 },
+}
+
+impl ChunkedHashedPostState {
+    fn new(hashed_post_state: HashedPostState, size: usize) -> Self {
+        let flattened = hashed_post_state
+            .storages
+            .into_iter()
+            .flat_map(|(address, storage)| {
+                // Storage wipes should go first
+                Some((address, FlattenedHashedPostStateItem::StorageWipe))
+                    .filter(|_| storage.wiped)
+                    .into_iter()
+                    .chain(
+                        storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot).map(
+                            move |(slot, value)| {
+                                (
+                                    address,
+                                    FlattenedHashedPostStateItem::StorageUpdate { slot, value },
+                                )
+                            },
+                        ),
+                    )
+            })
+            .chain(hashed_post_state.accounts.into_iter().map(|(address, account)| {
+                (address, FlattenedHashedPostStateItem::Account(account))
+            }))
+            // We need stable sort here to preserve the order for each address:
+            // 1. Storage wipes
+            // 2. Storage updates
+            // 3. Account update
+            .sorted_by_key(|(address, _)| *address);
+
+        Self { flattened, size }
+    }
+}
+
+impl Iterator for ChunkedHashedPostState {
+    type Item = HashedPostState;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut chunk = HashedPostState::default();
+
+        let mut current_size = 0;
+        while current_size < self.size {
+            let Some((address, item)) = self.flattened.next() else { break };
+
+            match item {
+                FlattenedHashedPostStateItem::Account(account) => {
+                    chunk.accounts.insert(address, account);
+                }
+                FlattenedHashedPostStateItem::StorageWipe => {
+                    chunk.storages.entry(address).or_default().wiped = true;
+                }
+                FlattenedHashedPostStateItem::StorageUpdate { slot, value } => {
+                    chunk.storages.entry(address).or_default().storage.insert(slot, value);
+                }
+            }
+
+            current_size += 1;
+        }
+
+        if chunk.is_empty() {
+            None
+        } else {
+            Some(chunk)
+        }
     }
 }
 
@@ -758,5 +919,112 @@ mod tests {
         assert_eq!(target_slots.len(), 2);
         assert!(target_slots.contains(&slot1));
         assert!(target_slots.contains(&slot2));
+    }
+
+    #[test]
+    fn test_partition_by_targets() {
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        let state = HashedPostState {
+            accounts: B256Map::from_iter([
+                (addr1, Some(Default::default())),
+                (addr2, Some(Default::default())),
+            ]),
+            storages: B256Map::from_iter([(
+                addr1,
+                HashedStorage {
+                    wiped: true,
+                    storage: B256Map::from_iter([(slot1, U256::ZERO), (slot2, U256::from(1))]),
+                },
+            )]),
+        };
+        let targets = MultiProofTargets::from_iter([(addr1, HashSet::from_iter([slot1]))]);
+
+        let (with_targets, without_targets) = state.partition_by_targets(&targets);
+
+        assert_eq!(
+            with_targets,
+            HashedPostState {
+                accounts: B256Map::default(),
+                storages: B256Map::from_iter([(
+                    addr1,
+                    HashedStorage {
+                        wiped: true,
+                        storage: B256Map::from_iter([(slot1, U256::ZERO)])
+                    }
+                )]),
+            }
+        );
+        assert_eq!(
+            without_targets,
+            HashedPostState {
+                accounts: B256Map::from_iter([
+                    (addr1, Some(Default::default())),
+                    (addr2, Some(Default::default()))
+                ]),
+                storages: B256Map::from_iter([(
+                    addr1,
+                    HashedStorage {
+                        wiped: false,
+                        storage: B256Map::from_iter([(slot2, U256::from(1))])
+                    }
+                )]),
+            }
+        );
+    }
+
+    #[test]
+    fn test_chunks() {
+        let addr1 = B256::from([1; 32]);
+        let addr2 = B256::from([2; 32]);
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+
+        let state = HashedPostState {
+            accounts: B256Map::from_iter([
+                (addr1, Some(Default::default())),
+                (addr2, Some(Default::default())),
+            ]),
+            storages: B256Map::from_iter([(
+                addr2,
+                HashedStorage {
+                    wiped: true,
+                    storage: B256Map::from_iter([(slot1, U256::ZERO), (slot2, U256::from(1))]),
+                },
+            )]),
+        };
+
+        let mut chunks = state.chunks(2);
+        assert_eq!(
+            chunks.next(),
+            Some(HashedPostState {
+                accounts: B256Map::from_iter([(addr1, Some(Default::default()))]),
+                storages: B256Map::from_iter([(addr2, HashedStorage::new(true)),])
+            })
+        );
+        assert_eq!(
+            chunks.next(),
+            Some(HashedPostState {
+                accounts: B256Map::default(),
+                storages: B256Map::from_iter([(
+                    addr2,
+                    HashedStorage {
+                        wiped: false,
+                        storage: B256Map::from_iter([(slot1, U256::ZERO), (slot2, U256::from(1))]),
+                    },
+                )])
+            })
+        );
+        assert_eq!(
+            chunks.next(),
+            Some(HashedPostState {
+                accounts: B256Map::from_iter([(addr2, Some(Default::default()))]),
+                storages: B256Map::default()
+            })
+        );
+        assert_eq!(chunks.next(), None);
     }
 }

@@ -991,12 +991,18 @@ impl<L, R> Attached<L, R> {
 
 /// Helper container type to bundle the initial [`NodeConfig`] and the loaded settings from the
 /// reth.toml config
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WithConfigs<ChainSpec> {
     /// The configured, usually derived from the CLI.
     pub config: NodeConfig<ChainSpec>,
     /// The loaded reth.toml config.
     pub toml_config: reth_config::Config,
+}
+
+impl<ChainSpec> Clone for WithConfigs<ChainSpec> {
+    fn clone(&self) -> Self {
+        Self { config: self.config.clone(), toml_config: self.toml_config.clone() }
+    }
 }
 
 /// Helper container type to bundle the [`ProviderFactory`] and the metrics

@@ -113,7 +113,7 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| {
                 .unwrap(),
                 false,
             ),
-            b256!("3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397"),
+            b256!("0x3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397"),
         )],
             ..Default::default()
         },
@@ -224,7 +224,7 @@ fn block1(number: BlockNumber) -> (RecoveredBlock<reth_primitives::Block>, Execu
     let state_root = bundle_state_root(&execution_outcome);
     assert_eq!(
         state_root,
-        b256!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd")
+        b256!("0x5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd")
     );
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
@@ -280,7 +280,7 @@ fn block2(
     let state_root = bundle_state_root(&extended);
     assert_eq!(
         state_root,
-        b256!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8")
+        b256!("0x90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8")
     );
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();

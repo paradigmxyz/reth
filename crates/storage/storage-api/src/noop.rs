@@ -28,9 +28,9 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{
+use reth_trie_common::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -208,7 +208,7 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         Ok(Vec::new())
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
@@ -405,8 +405,8 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
         _address: Address,
         slot: B256,
         _hashed_storage: HashedStorage,
-    ) -> ProviderResult<reth_trie::StorageProof> {
-        Ok(reth_trie::StorageProof::new(slot))
+    ) -> ProviderResult<StorageProof> {
+        Ok(StorageProof::new(slot))
     }
 
     fn storage_multiproof(
@@ -414,8 +414,8 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
         _address: Address,
         _slots: &[B256],
         _hashed_storage: HashedStorage,
-    ) -> ProviderResult<reth_trie::StorageMultiProof> {
-        Ok(reth_trie::StorageMultiProof::empty())
+    ) -> ProviderResult<StorageMultiProof> {
+        Ok(StorageMultiProof::empty())
     }
 }
 

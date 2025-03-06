@@ -32,7 +32,6 @@ reth-rpc-engine-api.workspace = true
 
 # op-reth
 reth-optimism-chainspec.workspace = true
-reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-txpool.workspace = true
@@ -53,7 +52,7 @@ op-alloy-rpc-types-engine.workspace = true
 op-alloy-rpc-jsonrpsee.workspace = true
 op-alloy-consensus.workspace = true
 revm.workspace = true
-revm-optimism.workspace = true
+op-revm.workspace = true
 
 # async
 parking_lot.workspace = true

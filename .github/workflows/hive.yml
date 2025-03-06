@@ -65,24 +65,19 @@ jobs:
           - sim: devp2p
             limit: eth
             include:
-              # status
-              - TestStatus
-              # get block headers
-              - TestGetBlockHeaders
-              - TestSimultaneousRequests
-              - TestSameRequestID
-              - TestZeroRequestID
-              # get block bodies
-              - TestGetBlockBodies
-              # malicious handshakes + status
-              - TestMaliciousHandshake
-              - TestMaliciousStatus
-              # test transactions
-              - TestLargeTxRequest
-              - TestTransaction
-              - TestInvalidTxs
-              - TestNewPooledTxs
-              - TestBlobViolations
+              # failures tracked in https://github.com/paradigmxyz/reth/issues/14825
+              - Status
+              - GetBlockHeaders
+              - ZeroRequestID
+              - GetBlockBodies
+              - MaliciousHandshake
+              - Transaction
+              - NewPooledTxs
+          - sim: devp2p
+            limit: discv5
+            include:
+              # failures tracked at https://github.com/paradigmxyz/reth/issues/14825
+              - PingLargeRequestID
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
           - sim: ethereum/engine

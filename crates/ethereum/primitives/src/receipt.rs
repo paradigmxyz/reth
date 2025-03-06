@@ -243,10 +243,10 @@ mod tests {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log::new_unchecked(
-                    address!("0000000000000000000000000000000000000011"),
+                    address!("0x0000000000000000000000000000000000000011"),
                     vec![
-                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
-                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
+                        b256!("0x000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("0x000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
                     bytes!("0100ff"),
                 )],
@@ -273,10 +273,10 @@ mod tests {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 0x1u64,
                 logs: vec![Log::new_unchecked(
-                    address!("0000000000000000000000000000000000000011"),
+                    address!("0x0000000000000000000000000000000000000011"),
                     vec![
-                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
-                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
+                        b256!("0x000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("0x000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
                     bytes!("0100ff"),
                 )],
@@ -297,13 +297,17 @@ mod tests {
             tx_type: TxType::Legacy,
             logs: vec![
                 Log::new_unchecked(
-                    address!("4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
-                    vec![b256!("c69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9")],
+                    address!("0x4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
+                    vec![b256!(
+                        "0xc69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9"
+                    )],
                     Bytes::from(vec![1; 0xffffff]),
                 ),
                 Log::new_unchecked(
-                    address!("faca325c86bf9c2d5b413cd7b90b209be92229c2"),
-                    vec![b256!("8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2")],
+                    address!("0xfaca325c86bf9c2d5b413cd7b90b209be92229c2"),
+                    vec![b256!(
+                        "0x8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2"
+                    )],
                     Bytes::from(vec![1; 0xffffff]),
                 ),
             ],
@@ -405,6 +409,9 @@ mod tests {
         };
         let receipt = vec![receipt];
         let root = calculate_receipt_root(&receipt);
-        assert_eq!(root, b256!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"));
+        assert_eq!(
+            root,
+            b256!("0xfe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0")
+        );
     }
 }

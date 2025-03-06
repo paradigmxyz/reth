@@ -224,7 +224,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             blockchain_db.clone(),
             transaction_pool,
             EthEvmConfig::new(provider_factory.chain_spec()),
-            EthereumBuilderConfig::new(Default::default()),
+            EthereumBuilderConfig::new(),
         );
 
         match payload_builder.try_build(args)? {
