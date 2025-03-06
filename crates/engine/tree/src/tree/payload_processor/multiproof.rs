@@ -1,7 +1,7 @@
 //! Multiproof task related functionality.
 
 use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::SparseTrieEvent};
-use alloy_primitives::map::HashSet;
+use alloy_primitives::{keccak256, map::HashSet, B256};
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
@@ -16,7 +16,6 @@ use reth_trie::{
     HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
 };
 use reth_trie_parallel::proof::ParallelProof;
-use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
@@ -27,6 +26,9 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, error, trace};
+
+/// The size of proof targets chunk to spawn in one calculation.
+const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -95,7 +97,10 @@ pub(super) enum MultiProofMessage {
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution with its source
     StateUpdate(StateChangeSource, EvmState),
-    /// Empty proof for a specific state update
+    /// State update that can be applied to the sparse trie without any new proofs.
+    ///
+    /// It can be the case when all accounts and storage slots from the state update were already
+    /// fetched and revealed.
     EmptyProof {
         /// The index of this proof in the sequence of state updates
         sequence_number: u64,
@@ -120,10 +125,6 @@ pub(super) struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
-    /// Total number of account targets
-    account_targets: usize,
-    /// Total number of storage slot targets
-    storage_targets: usize,
     /// The time taken to calculate the proof.
     elapsed: Duration,
 }
@@ -336,7 +337,7 @@ where
 
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
-            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum();
+            let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
             trace!(
                 target: "engine::root",
@@ -376,8 +377,6 @@ where
                                 state: hashed_state_update,
                                 multiproof: proof,
                             },
-                            account_targets,
-                            storage_targets,
                             elapsed,
                         }),
                     ));
@@ -402,12 +401,22 @@ pub(crate) struct MultiProofTaskMetrics {
     /// Histogram of pending multiproofs.
     pub pending_multiproofs_histogram: Histogram,
 
+    /// Histogram of the number of prefetch proof target accounts.
+    pub prefetch_proof_targets_accounts_histogram: Histogram,
+    /// Histogram of the number of prefetch proof target storages.
+    pub prefetch_proof_targets_storages_histogram: Histogram,
+    /// Histogram of the number of prefetch proof target chunks.
+    pub prefetch_proof_chunks_histogram: Histogram,
+
+    /// Histogram of the number of state update proof target accounts.
+    pub state_update_proof_targets_accounts_histogram: Histogram,
+    /// Histogram of the number of state update proof target storages.
+    pub state_update_proof_targets_storages_histogram: Histogram,
+    /// Histogram of the number of state update proof target chunks.
+    pub state_update_proof_chunks_histogram: Histogram,
+
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
-    /// Histogram of proof calculation account targets.
-    pub proof_calculation_account_targets_histogram: Histogram,
-    /// Histogram of proof calculation storage targets.
-    pub proof_calculation_storage_targets_histogram: Histogram,
 
     /// Histogram of sparse trie update durations.
     pub sparse_trie_update_duration_histogram: Histogram,
@@ -482,40 +491,56 @@ where
     }
 
     /// Handles request for proof prefetch.
-    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
+    ///
+    /// Returns a number of proofs that were spawned.
+    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
         let proof_targets = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
 
-        self.multiproof_manager.spawn_or_queue(MultiproofInput {
-            config: self.config.clone(),
-            source: None,
-            hashed_state_update: Default::default(),
-            proof_targets,
-            proof_sequence_number: self.proof_sequencer.next_sequence(),
-            state_root_message_sender: self.tx.clone(),
-        });
+        self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
+        self.metrics
+            .prefetch_proof_targets_storages_histogram
+            .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+
+        // Process proof targets in chunks.
+        let mut chunks = 0;
+        for proof_targets_chunk in proof_targets.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+            self.multiproof_manager.spawn_or_queue(MultiproofInput {
+                config: self.config.clone(),
+                source: None,
+                hashed_state_update: Default::default(),
+                proof_targets: proof_targets_chunk,
+                proof_sequence_number: self.proof_sequencer.next_sequence(),
+                state_root_message_sender: self.tx.clone(),
+            });
+            chunks += 1;
+        }
+        self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
+
+        chunks
     }
 
     // Returns true if all state updates finished and all proofs processed.
     fn is_done(
         &self,
         proofs_processed: u64,
-        updates_received: u64,
-        prefetch_proofs_received: u64,
+        state_update_proofs_requested: u64,
+        prefetch_proofs_requested: u64,
         updates_finished: bool,
     ) -> bool {
-        let all_proofs_received = proofs_processed >= updates_received + prefetch_proofs_received;
+        let all_proofs_processed =
+            proofs_processed >= state_update_proofs_requested + prefetch_proofs_requested;
         let no_pending = !self.proof_sequencer.has_pending();
         debug!(
             target: "engine::root",
             proofs_processed,
-            updates_received,
-            prefetch_proofs_received,
+            state_update_proofs_requested,
+            prefetch_proofs_requested,
             no_pending,
             updates_finished,
             "Checking end condition"
         );
-        all_proofs_received && no_pending && updates_finished
+        all_proofs_processed && no_pending && updates_finished
     }
 
     /// Calls `get_proof_targets` with existing proof targets for prefetching.
@@ -570,25 +595,54 @@ where
 
     /// Handles state updates.
     ///
-    /// Returns proof targets derived from the state update.
-    fn on_state_update(
-        &mut self,
-        source: StateChangeSource,
-        update: EvmState,
-        proof_sequence_number: u64,
-    ) {
+    /// Returns a number of proofs that were spawned.
+    fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
-        let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
-        self.fetched_proof_targets.extend_ref(&proof_targets);
+        // Split the state update into already fetched and not fetched according to the proof
+        // targets.
+        let (fetched_state_update, not_fetched_state_update) =
+            hashed_state_update.partition_by_targets(&self.fetched_proof_targets);
 
-        self.multiproof_manager.spawn_or_queue(MultiproofInput {
-            config: self.config.clone(),
-            source: Some(source),
-            hashed_state_update,
-            proof_targets,
-            proof_sequence_number,
-            state_root_message_sender: self.tx.clone(),
-        });
+        let mut state_updates = 0;
+        // If there are any accounts or storage slots that we already fetched the proofs for,
+        // send them immediately, as they don't require spawning any additional multiproofs.
+        if !fetched_state_update.is_empty() {
+            let _ = self.tx.send(MultiProofMessage::EmptyProof {
+                sequence_number: self.proof_sequencer.next_sequence(),
+                state: fetched_state_update,
+            });
+            state_updates += 1;
+        }
+
+        // Process state updates in chunks.
+        let mut chunks = 0;
+        let mut spawned_proof_targets = MultiProofTargets::default();
+        for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
+            let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
+            spawned_proof_targets.extend_ref(&proof_targets);
+
+            self.multiproof_manager.spawn_or_queue(MultiproofInput {
+                config: self.config.clone(),
+                source: Some(source),
+                hashed_state_update: chunk,
+                proof_targets,
+                proof_sequence_number: self.proof_sequencer.next_sequence(),
+                state_root_message_sender: self.tx.clone(),
+            });
+            chunks += 1;
+        }
+
+        self.metrics
+            .state_update_proof_targets_accounts_histogram
+            .record(spawned_proof_targets.len() as f64);
+        self.metrics
+            .state_update_proof_targets_storages_histogram
+            .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+        self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
+
+        self.fetched_proof_targets.extend(spawned_proof_targets);
+
+        state_updates + chunks
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -646,8 +700,8 @@ where
     /// 6. This task exits after all pending proofs are processed.
     pub(crate) fn run(mut self) {
         // TODO convert those into fields
-        let mut prefetch_proofs_received = 0;
-        let mut updates_received = 0;
+        let mut prefetch_proofs_requested = 0;
+        let mut state_update_proofs_requested = 0;
         let mut proofs_processed = 0;
 
         let mut updates_finished = false;
@@ -663,44 +717,45 @@ where
                 Ok(message) => match message {
                     MultiProofMessage::PrefetchProofs(targets) => {
                         trace!(target: "engine::root", "processing MultiProofMessage::PrefetchProofs");
-                        prefetch_proofs_received += 1;
+
+                        let account_targets = targets.len();
+                        let storage_targets =
+                            targets.values().map(|slots| slots.len()).sum::<usize>();
+                        prefetch_proofs_requested += self.on_prefetch_proof(targets);
                         debug!(
                             target: "engine::root",
-                            targets = targets.len(),
-                            storage_targets = targets.values().map(|slots|
-                            slots.len()).sum::<usize>(),
-                            total_prefetches = prefetch_proofs_received,
+                            account_targets,
+                            storage_targets,
+                            prefetch_proofs_requested,
                             "Prefetching proofs"
                         );
-                        self.on_prefetch_proof(targets);
                     }
                     MultiProofMessage::StateUpdate(source, update) => {
                         trace!(target: "engine::root", "processing
         MultiProofMessage::StateUpdate");
-                        if updates_received == 0 {
+                        if state_update_proofs_requested == 0 {
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
                         last_update_time = Some(Instant::now());
 
-                        updates_received += 1;
+                        let len = update.len();
+                        state_update_proofs_requested += self.on_state_update(source, update);
                         debug!(
                             target: "engine::root",
                             ?source,
-                            len = update.len(),
-                            total_updates = updates_received,
+                            len,
+                            ?state_update_proofs_requested,
                             "Received new state update"
                         );
-                        let next_sequence = self.proof_sequencer.next_sequence();
-                        self.on_state_update(source, update, next_sequence);
                     }
                     MultiProofMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing MultiProofMessage::FinishedStateUpdates");
                         updates_finished = true;
                         if self.is_done(
                             proofs_processed,
-                            updates_received,
-                            prefetch_proofs_received,
+                            state_update_proofs_requested,
+                            prefetch_proofs_requested,
                             updates_finished,
                         ) {
                             debug!(
@@ -724,8 +779,8 @@ where
 
                         if self.is_done(
                             proofs_processed,
-                            updates_received,
-                            prefetch_proofs_received,
+                            state_update_proofs_requested,
+                            prefetch_proofs_requested,
                             updates_finished,
                         ) {
                             debug!(
@@ -746,12 +801,6 @@ where
                         self.metrics
                             .proof_calculation_duration_histogram
                             .record(proof_calculated.elapsed);
-                        self.metrics
-                            .proof_calculation_account_targets_histogram
-                            .record(proof_calculated.account_targets as f64);
-                        self.metrics
-                            .proof_calculation_storage_targets_histogram
-                            .record(proof_calculated.storage_targets as f64);
 
                         debug!(
                             target: "engine::root",
@@ -770,8 +819,8 @@ where
 
                         if self.is_done(
                             proofs_processed,
-                            updates_received,
-                            prefetch_proofs_received,
+                            state_update_proofs_requested,
+                            prefetch_proofs_requested,
                             updates_finished,
                         ) {
                             debug!(
@@ -802,7 +851,7 @@ where
 
         debug!(
             target: "engine::root",
-            total_updates = updates_received,
+            total_updates = state_update_proofs_requested,
             total_proofs = proofs_processed,
             total_time =? first_update_time.map(|t|t.elapsed()),
             time_from_last_update =?last_update_time.map(|t|t.elapsed()),
@@ -810,7 +859,7 @@ where
         );
 
         // update total metrics on finish
-        self.metrics.state_updates_received_histogram.record(updates_received as f64);
+        self.metrics.state_updates_received_histogram.record(state_update_proofs_requested as f64);
         self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
     }
 }
