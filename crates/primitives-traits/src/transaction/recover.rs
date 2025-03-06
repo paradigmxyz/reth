@@ -49,7 +49,7 @@ mod iter {
     pub fn recover_signers<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
-        I: IntoIterator<Item = &'a T> + IntoIterator<Item = &'a T>,
+        I: IntoIterator<Item = &'a T>,
     {
         txes.into_iter().map(|tx| tx.recover_signer()).collect()
     }
@@ -61,7 +61,7 @@ mod iter {
     pub fn recover_signers_unchecked<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
-        I: IntoIterator<Item = &'a T> + IntoIterator<Item = &'a T>,
+        I: IntoIterator<Item = &'a T>,
     {
         txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
     }
