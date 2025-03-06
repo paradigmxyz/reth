@@ -488,12 +488,12 @@ alloy-transport-ws = { version = "0.11.1", default-features = false }
 # op
 alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "7b49e05", default-features = false }
 alloy-op-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "42a3427" }
-op-alloy-rpc-types = { version = "0.10.7", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.10.7", default-features = false }
-op-alloy-network = { version = "0.10.7", default-features = false }
-op-alloy-consensus = { version = "0.10.7", default-features = false }
-op-alloy-flz = { version = "0.10.7", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.10.7", default-features = false }
+op-alloy-rpc-types = { version = "0.10.8", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.10.8", default-features = false }
+op-alloy-network = { version = "0.10.8", default-features = false }
+op-alloy-consensus = { version = "0.10.8", default-features = false }
+op-alloy-flz = { version = "0.10.8", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.10.8", default-features = false }
 
 # misc
 aquamarine = "0.6"
