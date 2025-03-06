@@ -7828,7 +7828,6 @@ dependencies = [
  "alloy-rlp",
  "nybbles",
  "reth-storage-errors",
- "revm-database-interface",
  "thiserror 2.0.11",
 ]
 

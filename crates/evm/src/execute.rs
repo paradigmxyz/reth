@@ -700,7 +700,7 @@ mod tests {
     use core::marker::PhantomData;
     use reth_primitives::EthPrimitives;
     use revm::state::AccountInfo;
-    use revm_database::{CacheDB, EmptyDBTyped};
+    use revm_database::{CacheDB, EmptyDB};
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     fn test_provider() {
         let provider = TestExecutorProvider;
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = CacheDB::<EmptyDB>::default();
         let executor = provider.executor(db);
         let _ = executor.execute(&Default::default());
     }
@@ -763,8 +763,8 @@ mod tests {
         addr: Address,
         balance: u128,
         nonce: u64,
-    ) -> State<CacheDB<EmptyDBTyped<BlockExecutionError>>> {
-        let db = CacheDB::<EmptyDBTyped<BlockExecutionError>>::default();
+    ) -> State<CacheDB<EmptyDB>> {
+        let db = CacheDB::<EmptyDB>::default();
         let mut state = State::builder().with_database(db).with_bundle_update().build();
 
         let account_info = AccountInfo {
@@ -792,7 +792,7 @@ mod tests {
     #[test]
     fn test_balance_increment_state_empty_increments_map() {
         let mut state = State::builder()
-            .with_database(CacheDB::<EmptyDBTyped<BlockExecutionError>>::default())
+            .with_database(CacheDB::<EmptyDB>::default())
             .with_bundle_update()
             .build();
 
