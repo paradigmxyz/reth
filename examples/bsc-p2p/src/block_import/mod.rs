@@ -16,6 +16,8 @@ use std::{
     task::{Context, Poll},
 };
 
+mod service;
+
 type BlockImportFuture<Block> = Pin<
     Box<
         dyn Future<
