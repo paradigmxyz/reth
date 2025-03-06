@@ -2,8 +2,7 @@
 
 use crate::{
     execute::{BlockExecutorProvider, Executor},
-    system_calls::OnStateHook,
-    Database,
+    Database, OnStateHook,
 };
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult;

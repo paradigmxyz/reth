@@ -10,15 +10,13 @@ use crate::tree::{
     StateProviderBuilder, TreeConfig,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{
-    system_calls::{OnStateHook, StateChangeSource},
-    ConfigureEvm, ConfigureEvmEnvFor,
-};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnvFor, OnStateHook};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -392,10 +390,11 @@ mod tests {
         },
         StateProviderBuilder, TreeConfig,
     };
+    use alloy_evm::block::StateChangeSource;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_evm::system_calls::{OnStateHook, StateChangeSource};
+    use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{

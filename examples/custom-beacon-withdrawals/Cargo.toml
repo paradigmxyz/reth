@@ -13,6 +13,7 @@ reth-chainspec.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
 
+alloy-evm.workspace = true
 alloy-sol-macro.workspace = true
 alloy-sol-types.workspace = true
 alloy-eips.workspace = true
