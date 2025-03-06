@@ -179,7 +179,7 @@ impl Setup {
         .await;
 
         match result {
-            Ok((nodes, _tasks, _wallet)) => {
+            Ok((nodes, tasks, _wallet)) => {
                 // create HTTP clients for each node's RPC and Engine API endpoints
                 let mut node_clients = Vec::with_capacity(nodes.len());
                 for node in &nodes {
@@ -216,8 +216,9 @@ impl Setup {
 
                 // spawn a separate task just to handle the shutdown
                 tokio::spawn(async move {
-                    // keep nodes in scope to ensure they're not dropped
+                    // keep nodes and tasks in scope to ensure they're not dropped
                     let _nodes = nodes;
+                    let _tasks = tasks;
                     // Wait for shutdown signal
                     let _ = shutdown_rx.recv().await;
                     // nodes will be dropped here when the task completes
