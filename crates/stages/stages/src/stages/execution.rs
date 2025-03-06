@@ -328,7 +328,7 @@ where
 
             // we need the block's transactions but we don't need the transaction hashes
             let block = provider
-                .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
+                .recovered_block(block_number.into(), TransactionVariant::NoHash)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
             fetch_block_duration += fetch_block_start.elapsed();

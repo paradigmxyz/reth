@@ -199,7 +199,7 @@ where
 
         let ((evm_env, _), block) = futures::try_join!(
             self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().block_with_senders(block_hash.into()),
+            self.eth_api().recovered_block(block_hash.into()),
         )?;
 
         let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -496,7 +496,7 @@ where
         let target_block = block_number.unwrap_or_default();
         let ((mut evm_env, _), block) = futures::try_join!(
             self.eth_api().evm_env_at(target_block),
-            self.eth_api().block_with_senders(target_block),
+            self.eth_api().recovered_block(target_block),
         )?;
 
         let opts = opts.unwrap_or_default();
@@ -600,7 +600,7 @@ where
         let this = self.clone();
         let block = this
             .eth_api()
-            .block_with_senders(hash.into())
+            .recovered_block(hash.into())
             .await?
             .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
 
@@ -618,7 +618,7 @@ where
         let this = self.clone();
         let block = this
             .eth_api()
-            .block_with_senders(block_id.into())
+            .recovered_block(block_id.into())
             .await?
             .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 

@@ -374,7 +374,7 @@ where
             },
         );
 
-        let block = self.eth_api().block_with_senders(block_id);
+        let block = self.eth_api().recovered_block(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
@@ -472,9 +472,7 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.eth_api().block_with_senders(block_id).await? else {
-            return Ok(None)
-        };
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),

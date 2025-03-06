@@ -300,7 +300,7 @@ pub trait Trace:
                 if block.is_some() {
                     return Ok(block)
                 }
-                self.block_with_senders(block_id).await
+                self.recovered_block(block_id).await
             };
 
             let ((evm_env, _), block) = futures::try_join!(self.evm_env_at(block_id), block)?;

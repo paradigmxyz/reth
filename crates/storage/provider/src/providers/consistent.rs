@@ -844,14 +844,14 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.get_in_memory_or_storage_by_block(
             id,
-            |db_provider| db_provider.block_with_senders(id, transaction_kind),
+            |db_provider| db_provider.recovered_block(id, transaction_kind),
             |block_state| Ok(Some(block_state.block().recovered_block().clone())),
         )
     }
