@@ -514,7 +514,7 @@ where
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
             // Get the blocks for the unwound range.
-            let blocks = provider.sealed_block_with_senders_range(range.clone())?;
+            let blocks = provider.recovered_block_range(range.clone())?;
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,
