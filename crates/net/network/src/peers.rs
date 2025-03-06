@@ -33,7 +33,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{error, trace, warn};
+use tracing::{trace, warn};
 
 /// Maintains the state of _all_ the peers known to the network.
 ///
@@ -920,10 +920,6 @@ impl PeersManager {
                                 continue;
                             }
                         }
-                    } else {
-                        error!(target: "net::peers", ?peer_id, "Trusted peer info is missing for a trusted peer, banning peer");
-                        self.ban_peer(peer_id);
-                        continue;
                     }
                 }
 
