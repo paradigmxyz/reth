@@ -536,7 +536,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pow_hash_with_empty_execution() {
+    async fn bitfinity_test_pow_hash_with_empty_execution() {
         let (block_validator, genesis_block) = setup_test_block_validator(None);
 
         let block1 = {
@@ -580,7 +580,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pow_hash_basic_validation() {
+    async fn bitfinity_test_pow_hash_basic_validation() {
         let (block_validator, genesis_block) = setup_test_block_validator(None);
 
         let mut block_builder = TestBlockBuilder::eth();
@@ -599,7 +599,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pow_hash_deterministic() {
+    async fn bitfinity_test_pow_hash_deterministic() {
         let (block_validator, genesis_block) = setup_test_block_validator(None);
         let mut block_builder = TestBlockBuilder::eth();
         let block = block_builder
@@ -618,7 +618,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pow_hash_state_independence() {
+    async fn bitfinity_test_pow_hash_state_independence() {
         let (block_validator, genesis_block) = setup_test_block_validator(None);
         let mut block_builder = TestBlockBuilder::eth();
         let block = block_builder
@@ -652,7 +652,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pow_hash_deterministic_with_empty_blocks() {
+    async fn bitfinity_test_pow_hash_deterministic_with_empty_blocks() {
         // Expected final PoW hash
         let expected_pow_hash = did::H256::from_hex_str(
             "0xe66caa3a5bf8a22c38c33e5fb4cab1bd1b34e9734526a8723c615e9d36ccc45b",
@@ -716,7 +716,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pow_hash_deterministic_with_transactions() {
+    async fn bitfinity_test_pow_hash_deterministic_with_transactions() {
         // Expected final PoW hash
         let expected_pow_hash = did::H256::from_hex_str(
             "0xa349b3ca25925decd1c225b8bc3a133c436f3989eb8048e93ee1389c78a1d6a4",
