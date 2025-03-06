@@ -15,7 +15,7 @@ use reth_evm_ethereum::{
 };
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{Block, BlockWithSenders};
-use reth_provider::StateRootProvider;
+
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider as _, ExecutionOutcome, ProviderFactory,
 };
@@ -26,7 +26,8 @@ use reth_revm::{batch::BlockBatchRecord, database::StateProviderDatabase};
 use reth_revm::{DatabaseCommit, StateBuilder};
 use reth_rpc_eth_types::cache::db::StateProviderTraitObjWrapper;
 use reth_rpc_eth_types::StateCacheDb;
-use reth_trie::{HashedPostState, KeccakKeyHasher};
+use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
+use reth_trie_db::DatabaseStateRoot;
 
 use std::collections::HashSet;
 
@@ -156,15 +157,16 @@ where
         block: &Block,
         execution_result: ExecutionOutcome,
     ) -> eyre::Result<did::hash::Hash<alloy_primitives::FixedBytes<32>>> {
-        let state = execution_result.bundle;
-        let state_provider = self.provider_factory.latest().expect("no latest provider");
+        let exec_state = execution_result.bundle;
+
+        let state_provider = self.provider_factory.latest()?;
         let cache = StateCacheDb::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(
             &state_provider,
         )));
 
         let mut state = StateBuilder::new()
             .with_database_ref(&cache)
-            .with_bundle_prestate(state)
+            .with_bundle_prestate(exec_state)
             .with_bundle_update()
             .build();
 
@@ -194,7 +196,6 @@ where
             gas_price: pow_tx.gas_price.unwrap_or_default().0,
             transact_to: to,
             value: pow_tx.value.0,
-            nonce: Some(pow_tx.nonce.0.to()),
             ..Default::default()
         };
 
@@ -207,8 +208,9 @@ where
 
             let res = evm.transact()?;
 
+            eyre::ensure!(res.result.is_success(), "POW transaction failed: {:?}", res.result);
+
             evm.db_mut().commit(res.state);
-            assert!(res.result.is_success());
         }
         state.merge_transitions(BundleRetention::PlainState);
         let bundle = state.take_bundle();
@@ -216,7 +218,8 @@ where
         let post_hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state());
 
-        let state_root = cache.db.state_root(post_hashed_state)?;
+        let state_root =
+            StateRoot::overlay_root(self.provider_factory.provider()?.tx_ref(), post_hashed_state)?;
 
         Ok(state_root.into())
     }
@@ -224,40 +227,46 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloy_consensus::constants::ETH_TO_WEI;
-    use alloy_consensus::{Block, Header, SignableTransaction, TxEip2930};
+
+    use alloy_consensus::{Block, BlockHeader, Header, SignableTransaction, TxEip2930};
     use alloy_genesis::{Genesis, GenesisAccount};
+
     use alloy_network::TxSignerSync;
-    use alloy_primitives::{b256, Address};
-    use alloy_signer::k256::ecdsa::signature::Keypair;
-    use alloy_signer::k256::Secp256k1;
+    use alloy_primitives::hex::FromHex;
+    use alloy_primitives::Address;
+
     use alloy_signer::Signer;
+    use did::constant::EIP1559_INITIAL_BASE_FEE;
     use did::U256;
-    use eyre::OptionExt;
+
     use jsonrpc_core::{Output, Request, Response, Success, Version};
     use reth_chain_state::test_utils::TestBlockBuilder;
-    use reth_chainspec::{Chain, ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
+    use reth_chainspec::{
+        BaseFeeParams, ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS,
+    };
     use reth_db::test_utils::TempDatabase;
     use reth_db::DatabaseEnv;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_engine_primitives::EthEngineTypes;
-    use std::collections::BTreeMap;
+    use reth_evm::execute::{BlockExecutorProvider, Executor};
+    use reth_evm_ethereum::execute::EthExecutorProvider;
+
     use std::future::Future;
     use std::sync::Arc;
 
     use super::*;
-    use alloy_network::TxSigner;
-    use reth_node_types::{AnyNodeTypesWithEngine, NodeTypesWithDBAdapter};
+
+    use reth_node_types::{AnyNodeTypesWithEngine, FullNodePrimitives, NodeTypesWithDBAdapter};
     use reth_primitives::{
-        BlockBody, BlockExt, EthPrimitives, SealedBlockWithSenders, Transaction, TransactionSigned,
+        BlockBody, BlockExt, EthPrimitives, Receipt, SealedBlockWithSenders, TransactionSigned,
     };
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use reth_provider::{
-        BlockReader, BlockWriter, DatabaseProviderFactory, EthStorage, StorageLocation,
-        TransactionVariant,
+        BlockExecutionOutput, BlockReader, BlockWriter, DatabaseProviderFactory, EthStorage,
+        HashedPostStateProvider, LatestStateProviderRef, StorageLocation, TransactionVariant,
     };
     use reth_revm::primitives::KECCAK_EMPTY;
-    use reth_testing_utils::generators::{self, random_block, sign_tx_with_key_pair, BlockParams};
+
     use reth_trie::StateRoot;
     use reth_trie_db::{DatabaseStateRoot, MerklePatriciaTrie};
 
@@ -294,53 +303,155 @@ mod tests {
     fn make_block<DB>(
         block_number: u64,
         parent_hash: did::H256,
-        provider_factory: ProviderFactory<DB>,
-    ) -> BlockWithSenders
+        provider_factory: &ProviderFactory<DB>,
+        gas_used: u64,
+        transactions: Vec<TransactionSigned>,
+    ) -> eyre::Result<BlockWithSenders>
     where
         DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
     {
+        use reth_primitives_traits::Block as _;
+        let parent_block = provider_factory
+            .provider()
+            .unwrap()
+            .block_by_hash(parent_hash.clone().into())
+            .unwrap()
+            .unwrap();
+
+        let header = parent_block.header();
+
+        let base_fee_per_gas = header.next_block_base_fee(BaseFeeParams::ethereum());
+        let state_root =
+            StateRoot::from_tx(provider_factory.provider().unwrap().tx_ref()).root().unwrap();
+
         let chain_spec = provider_factory.chain_spec();
-        let mut signer =
-            alloy_signer_local::PrivateKeySigner::from_slice(&[1; 32]).expect("valid keypair");
-        signer.set_chain_id(Some(chain_spec.chain.id()));
-
-        let tx = TxEip2930 {
-            chain_id: chain_spec.chain.id(),
-            nonce: 0,
-            gas_limit: MIN_TRANSACTION_GAS,
-            gas_price: 1_500_000_000,
-            to: TxKind::Call(Address::ZERO),
-            value: alloy_primitives::U256::from(0.1 * ETH_TO_WEI as f64).into(),
-            ..Default::default()
-        };
-
-        let signed_tx = signer.sign_transaction_sync(&mut tx.clone()).expect("valid signature");
-        let tx = tx.into_signed(signed_tx);
-        let transaction_signed = TransactionSigned::from(tx);
-
-        // First block has a transaction that transfers some ETH to zero address
-        let block1 = Block {
+        let block = Block {
             header: Header {
-                parent_hash: chain_spec.genesis_hash(),
-                receipts_root: b256!(
-                    "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
-                ),
+                parent_hash: parent_hash.into(),
+                state_root,
                 difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
-                number: 1,
-                gas_limit: MIN_TRANSACTION_GAS,
-                gas_used: MIN_TRANSACTION_GAS,
+                number: block_number,
+                gas_limit: 8_000_000,
+                gas_used,
+                base_fee_per_gas,
                 ..Default::default()
             },
-
-            body: BlockBody { transactions: vec![transaction_signed], ..Default::default() },
+            body: BlockBody { transactions, ..Default::default() },
         }
         .with_recovered_senders()
         .expect("failed to recover senders");
 
-        block1
+        Ok(block)
     }
-    // Common test setup function to initialize the test environment.
-    fn setup_test_block_validator() -> (
+
+    /// Creates an empty block without transactions
+    fn make_empty_block<DB>(
+        block_number: u64,
+        parent_hash: did::H256,
+        provider_factory: &ProviderFactory<DB>,
+    ) -> eyre::Result<BlockWithSenders>
+    where
+        DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
+    {
+        make_block(block_number, parent_hash, provider_factory, 0, vec![])
+    }
+
+    /// Creates a block with a single transaction
+    fn make_block_with_transaction<DB>(
+        block_number: u64,
+        parent_hash: did::H256,
+        provider_factory: &ProviderFactory<DB>,
+        nonce: u64,
+    ) -> eyre::Result<BlockWithSenders>
+    where
+        DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
+    {
+        let chain_spec = provider_factory.chain_spec();
+        let mut signer = alloy_signer_local::PrivateKeySigner::from_slice(&[1; 32])?;
+        signer.set_chain_id(Some(chain_spec.chain.id()));
+
+        let tx = TxEip2930 {
+            chain_id: chain_spec.chain.id(),
+            nonce,
+            gas_limit: MIN_TRANSACTION_GAS,
+            gas_price: EIP1559_INITIAL_BASE_FEE,
+            to: TxKind::Call(Address::ZERO),
+            value: alloy_primitives::U256::from(1.0 as f64).into(),
+            ..Default::default()
+        };
+
+        let signed_tx = signer.sign_transaction_sync(&mut tx.clone())?;
+        let tx = tx.into_signed(signed_tx);
+        let transaction_signed = TransactionSigned::from(tx);
+
+        make_block(block_number, parent_hash, provider_factory, 21_000, vec![transaction_signed])
+    }
+
+    /// Converts block execution output to execution outcome for testing
+    fn to_execution_outcome(
+        block_number: u64,
+        block_execution_output: &BlockExecutionOutput<Receipt>,
+    ) -> ExecutionOutcome {
+        ExecutionOutcome {
+            bundle: block_execution_output.state.clone(),
+            receipts: block_execution_output.receipts.clone().into(),
+            first_block: block_number,
+            requests: vec![block_execution_output.requests.clone()],
+        }
+    }
+
+    /// Executes a block and commits it to the test database
+    fn execute_block_and_commit_to_database<N>(
+        provider_factory: &ProviderFactory<N>,
+        chain_spec: Arc<ChainSpec>,
+        block: &BlockWithSenders,
+    ) -> eyre::Result<BlockExecutionOutput<Receipt>>
+    where
+        N: ProviderNodeTypes<
+            Primitives: FullNodePrimitives<
+                Block = reth_primitives::Block,
+                BlockBody = reth_primitives::BlockBody,
+                Receipt = reth_primitives::Receipt,
+            >,
+        >,
+    {
+        let provider = provider_factory.provider()?;
+
+        // Execute the block to produce a block execution output
+        let mut block_execution_output = EthExecutorProvider::ethereum(chain_spec)
+            .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)))
+            .execute(block)?;
+        block_execution_output.state.reverts.sort();
+
+        // Convert the block execution output to an execution outcome for committing to the database
+        let execution_outcome = to_execution_outcome(block.number, &block_execution_output);
+
+        let hashed_post_state = provider_factory.hashed_post_state(execution_outcome.state());
+
+        let hashed_state_sorted = hashed_post_state.clone().into_sorted();
+
+        let (_, trie_updates) = StateRoot::overlay_root_with_updates(
+            provider_factory.provider()?.tx_ref(),
+            hashed_post_state,
+        )?;
+
+        // Commit the block's execution outcome to the database
+        let provider_rw = provider_factory.provider_rw()?;
+        let block = block.clone().seal_slow();
+        provider_rw.append_blocks_with_state(
+            vec![block],
+            execution_outcome,
+            hashed_state_sorted,
+            trie_updates,
+        )?;
+        provider_rw.commit()?;
+
+        Ok(block_execution_output)
+    }
+
+    fn setup_test_block_validator(
+        extended_genesis: Option<(Address, did::U256)>,
+    ) -> (
         BitfinityBlockConfirmation<
             MockClient,
             NodeTypesWithDBAdapter<
@@ -356,17 +467,45 @@ mod tests {
         >,
         SealedBlockWithSenders,
     ) {
-        let chain_spec = Arc::new(ChainSpec {
-            chain: Chain::from_id(1),
-            genesis: Genesis {
-                alloc: BTreeMap::from([(
-                    Address::ZERO,
-                    GenesisAccount { balance: U256::max_value().into(), ..Default::default() },
-                )]),
-                ..Default::default()
-            },
-            ..(**reth_chainspec::MAINNET).clone()
-        });
+        // EVM genesis accounts
+        let mut genesis_accounts = vec![
+            (
+                Address::from_hex("0x756f45e3fa69347a9a973a725e3c98bc4db0b5a0").unwrap(),
+                GenesisAccount {
+                    balance: U256::from_hex_str("0xad78ebc5ac6200000").unwrap().into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                Address::from_hex("0xf42f905231c770f0a406f2b768877fb49eee0f21").unwrap(),
+                GenesisAccount {
+                    balance: U256::from_hex_str("0xaadec983fcff40000").unwrap().into(),
+                    ..Default::default()
+                },
+            ),
+        ];
+
+        if let Some((address, balance)) = extended_genesis {
+            genesis_accounts.push((
+                address.into(),
+                GenesisAccount { balance: balance.into(), ..Default::default() },
+            ));
+        }
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(Genesis {
+                    alloc: genesis_accounts
+                        .clone()
+                        .iter()
+                        .map(|(address, account)| (*address, account.clone()))
+                        .collect(),
+                    ..MAINNET.genesis.clone()
+                })
+                .paris_activated()
+                .build(),
+        );
 
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
 
@@ -383,8 +522,13 @@ mod tests {
         provider_rw.insert_block(genesis_block.clone(), StorageLocation::Database).unwrap();
         provider_rw.commit().unwrap();
 
-        let canister_client =
-            EthJsonRpcClient::new(MockClient::new(vec![(did::H160::zero(), U256::from(u64::MAX))]));
+        // genesis_accounts.reverse();
+        let mut genesis = vec![];
+        for (address, account) in genesis_accounts {
+            genesis.push((address.into(), account.balance.into()));
+        }
+
+        let canister_client = EthJsonRpcClient::new(MockClient::new(genesis));
 
         let block_validator =
             BitfinityBlockConfirmation::new(canister_client, provider_factory.clone());
@@ -393,26 +537,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_execute_and_calculate_pow_with_empty_execution() {
-        let mut rng = generators::rng();
-        let (block_validator, genesis_block) = setup_test_block_validator();
+    async fn test_pow_hash_with_empty_execution() {
+        let (block_validator, genesis_block) = setup_test_block_validator(None);
 
         let block1 = {
             // Create a test block based on genesis.
-            let test_block = random_block(
-                &mut rng,
+            let test_block = make_empty_block(
                 genesis_block.number + 1,
-                BlockParams {
-                    parent: Some(genesis_block.hash_slow()),
-                    tx_count: Some(10),
-                    ..Default::default()
-                },
+                genesis_block.hash_slow().into(),
+                &block_validator.provider_factory,
             )
-            .seal_with_senders::<reth_primitives::Block>()
-            .unwrap()
-            .unseal();
+            .unwrap();
 
-            //Insert the test block into the database.
+            // Insert the test block into the database.
             let provider_rw = block_validator.provider_factory.database_provider_rw().unwrap();
             provider_rw
                 .insert_block(test_block.clone().seal_slow(), StorageLocation::Database)
@@ -444,8 +581,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pow_hash_with_execution_outcome() {
-        let (block_validator, genesis_block) = setup_test_block_validator();
+    async fn test_pow_hash_basic_validation() {
+        let (block_validator, genesis_block) = setup_test_block_validator(None);
 
         let mut block_builder = TestBlockBuilder::eth();
         let block = block_builder
@@ -464,7 +601,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pow_hash_deterministic() {
-        let (block_validator, genesis_block) = setup_test_block_validator();
+        let (block_validator, genesis_block) = setup_test_block_validator(None);
         let mut block_builder = TestBlockBuilder::eth();
         let block = block_builder
             .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
@@ -483,7 +620,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_pow_hash_state_independence() {
-        let (block_validator, genesis_block) = setup_test_block_validator();
+        let (block_validator, genesis_block) = setup_test_block_validator(None);
         let mut block_builder = TestBlockBuilder::eth();
         let block = block_builder
             .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
@@ -516,33 +653,140 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pow_hash_deterministic_with_different_blocks() {
-        let (block_validator, genesis_block) = setup_test_block_validator();
-        // let mut block_builder = TestBlockBuilder::eth();
-        // let block1 = block_builder
-        //     .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
-        // let block2 = block_builder
-        //     .get_executed_block_with_number(genesis_block.number + 2, genesis_block.hash_slow());
+    async fn test_pow_hash_deterministic_with_empty_blocks() {
+        // Expected final PoW hash
+        let expected_pow_hash = did::H256::from_hex_str(
+            "0xe66caa3a5bf8a22c38c33e5fb4cab1bd1b34e9734526a8723c615e9d36ccc45b",
+        )
+        .unwrap();
 
-        // let outcome1 = block1.execution_outcome();
-        // let outcome2 = block2.execution_outcome();
+        let (block_validator, genesis_block) = setup_test_block_validator(None);
 
-        // let block1 =
-        //     block1.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
-        // let block2 =
-        //     block2.block().clone().seal_with_senders::<reth_primitives::Block>().unwrap().unseal();
+        let block1 = {
+            let block = make_empty_block(
+                1,
+                genesis_block.hash_slow().into(),
+                &block_validator.provider_factory,
+            )
+            .unwrap();
+            execute_block_and_commit_to_database(
+                &block_validator.provider_factory,
+                block_validator.provider_factory.chain_spec().clone(),
+                &block,
+            )
+            .unwrap();
 
-        // // Compute POW hash for two different blocks
-        // let pow1 = block_validator.compute_pow_hash(&block1.block, outcome1.clone()).await.unwrap();
-        // let pow2 = block_validator.compute_pow_hash(&block2.block, outcome2.clone()).await.unwrap();
+            block
+        };
 
-        // // Results should be deterministic for each block
-        // assert_eq!(pow1, pow1, "POW hash computation should be deterministic");
-        // assert_eq!(pow2, pow2, "POW hash computation should be deterministic");
+        let block2 = {
+            let block =
+                make_empty_block(2, block1.hash_slow().into(), &block_validator.provider_factory)
+                    .unwrap();
 
-        // // Results should be different for different blocks
-        // assert_ne!(pow1, pow2, "POW hash should differ for different blocks");
+            execute_block_and_commit_to_database(
+                &block_validator.provider_factory,
+                block_validator.provider_factory.chain_spec().clone(),
+                &block,
+            )
+            .unwrap();
 
-        // Create dummy blocks
+            block
+        };
+
+        let block =
+            make_empty_block(3, block2.hash_slow().into(), &block_validator.provider_factory)
+                .unwrap();
+
+        let block_output = execute_block_and_commit_to_database(
+            &block_validator.provider_factory,
+            block_validator.provider_factory.chain_spec().clone(),
+            &block,
+        )
+        .unwrap();
+        let outcome = to_execution_outcome(block.number, &block_output);
+
+        // Compute POW hash for two different blocks
+        let computed_pow =
+            block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
+
+        assert_eq!(
+            expected_pow_hash, computed_pow,
+            "POW hash should be deterministic given the same state"
+        )
+    }
+
+    #[tokio::test]
+    async fn test_pow_hash_deterministic_with_transactions() {
+        // Expected final PoW hash
+        let expected_pow_hash = did::H256::from_hex_str(
+            "0xe9b9e2ac5360f0cffe8711037c8f7c11b5944b5b5105f24dd51c65b2b785a42e",
+        )
+        .unwrap();
+
+        let signer = alloy_signer_local::PrivateKeySigner::from_slice(&[1; 32]).unwrap();
+
+        let (block_validator, genesis_block) =
+            setup_test_block_validator(Some((signer.address(), U256::max_value())));
+
+        let block1 = {
+            let block = make_block_with_transaction(
+                1,
+                genesis_block.hash_slow().into(),
+                &block_validator.provider_factory,
+                0,
+            )
+            .unwrap();
+            execute_block_and_commit_to_database(
+                &block_validator.provider_factory,
+                block_validator.provider_factory.chain_spec().clone(),
+                &block,
+            )
+            .unwrap();
+            block
+        };
+
+        let block2 = {
+            let block = make_block_with_transaction(
+                2,
+                block1.hash_slow().into(),
+                &block_validator.provider_factory,
+                1,
+            )
+            .unwrap();
+            let out = execute_block_and_commit_to_database(
+                &block_validator.provider_factory,
+                block_validator.provider_factory.chain_spec().clone(),
+                &block,
+            )
+            .unwrap();
+
+            to_execution_outcome(block.number, &out);
+            block
+        };
+
+        let block = make_block_with_transaction(
+            3,
+            block2.hash_slow().into(),
+            &block_validator.provider_factory,
+            2,
+        )
+        .unwrap();
+        let block_output = execute_block_and_commit_to_database(
+            &block_validator.provider_factory,
+            block_validator.provider_factory.chain_spec().clone(),
+            &block,
+        )
+        .unwrap();
+
+        let outcome = to_execution_outcome(block.number, &block_output);
+
+        let computed_pow =
+            block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
+
+        assert_eq!(
+            expected_pow_hash, computed_pow,
+            "POW hash should be deterministic given the same state"
+        );
     }
 }
