@@ -1,3 +1,5 @@
+# syntax=docker.io/docker/dockerfile:1.7-labs
+
 # 
 # We'll use cargo-chef to speed up the build
 # 
@@ -14,7 +16,7 @@ FROM chef AS planner
 
 ARG CARGO_BIN
 
-COPY . .
+COPY --exclude=.git --exclude=dist . .
 RUN cargo chef prepare --recipe-path recipe.json --bin ${CARGO_BIN}
 
 # 
