@@ -232,6 +232,40 @@ impl Setup {
             return Err(eyre!("No nodes were created"));
         }
 
+        // wait for all nodes to be ready to accept RPC requests before proceeding
+        for (idx, client) in node_clients.iter().enumerate() {
+            let mut retry_count = 0;
+            const MAX_RETRIES: usize = 5;
+            let mut last_error = None;
+
+            while retry_count < MAX_RETRIES {
+                match reth_rpc_api::clients::EthApiClient::<
+                    alloy_rpc_types_eth::Transaction,
+                    alloy_rpc_types_eth::Block,
+                    alloy_rpc_types_eth::Receipt,
+                    alloy_rpc_types_eth::Header,
+                >::block_number(&client.rpc)
+                .await
+                {
+                    Ok(_) => {
+                        debug!("Node {idx} RPC endpoint is ready");
+                        break;
+                    }
+                    Err(e) => {
+                        last_error = Some(e);
+                        retry_count += 1;
+                        debug!(
+                            "Node {idx} RPC endpoint not ready, retry {retry_count}/{MAX_RETRIES}"
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    }
+                }
+            }
+            if retry_count == MAX_RETRIES {
+                return Err(eyre!("Failed to connect to node {idx} RPC endpoint after {MAX_RETRIES} retries: {:?}", last_error));
+            }
+        }
+
         env.node_clients = node_clients;
 
         // TODO: For each block in self.blocks, replay it on the node
