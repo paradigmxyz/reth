@@ -49,9 +49,9 @@ pub trait BlockBody:
     /// - Withdrawals
     /// - Ommers
     ///
-    /// Note: It is not expected that this `Body` is the same as [`alloy_consensus::BlockBody`] only
-    /// that it can be converted into it which is useful for the `eth_` RPC namespace (e.g. RPC
-    /// block).
+    /// Note: This conversion can be incomplete. It is not expected that this `Body` is the same as
+    /// [`alloy_consensus::BlockBody`] only that it can be converted into it which is useful for
+    /// the `eth_` RPC namespace (e.g. RPC block).
     fn into_ethereum_body(self)
         -> alloy_consensus::BlockBody<Self::Transaction, Self::OmmerHeader>;
 
