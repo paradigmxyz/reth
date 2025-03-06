@@ -629,7 +629,7 @@ impl<T: SignedTransaction, ChainSpec: EthChainSpec> BlockReader for MockEthProvi
         Ok(vec![])
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {

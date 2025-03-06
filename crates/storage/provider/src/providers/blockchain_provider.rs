@@ -343,11 +343,11 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         self.consistent_provider()?.block_with_senders_range(range)
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        self.consistent_provider()?.sealed_block_with_senders_range(range)
+        self.consistent_provider()?.recovered_block_range(range)
     }
 }
 
@@ -2358,10 +2358,7 @@ mod tests {
             (sealed_headers_range, |block: &SealedBlock| block.clone_sealed_header()),
             (block_range, |block: &SealedBlock| block.clone().into_block()),
             (block_with_senders_range, |block: &SealedBlock| block.clone().try_recover().unwrap()),
-            (sealed_block_with_senders_range, |block: &SealedBlock| block
-                .clone()
-                .try_recover()
-                .unwrap()),
+            (recovered_block_range, |block: &SealedBlock| block.clone().try_recover().unwrap()),
             (transactions_by_block_range, |block: &SealedBlock| block.body().transactions.clone()),
         ]);
 
