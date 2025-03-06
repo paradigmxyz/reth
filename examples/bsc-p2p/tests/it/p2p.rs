@@ -9,6 +9,7 @@ use reth_network::{
 };
 use reth_provider::noop::NoopProvider;
 use secp256k1::{rand, SecretKey};
+use rand::thread_rng;
 use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
