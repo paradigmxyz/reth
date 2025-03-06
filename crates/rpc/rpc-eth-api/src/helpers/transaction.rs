@@ -87,7 +87,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             self.cache()
-                .get_recovered(block)
+                .get_recovered_block(block)
                 .await
                 .map(|b| b.map(|b| b.body().transactions().to_vec()))
                 .map_err(Self::Error::from_eth_err)
