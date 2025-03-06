@@ -80,11 +80,21 @@ impl Runner {
             From<reth_payload_builder::EthPayloadBuilderAttributes>,
         N::ChainSpec: From<ChainSpec> + Clone,
     {
+        // keep the setup object in scope for the entire function
+        let mut setup_instance = None;
+
         if let Some(mut setup) = setup {
             setup.apply::<N>(&mut self.env).await?;
+            setup_instance = Some(setup);
         }
 
-        self.run_actions(actions).await
+        let result = self.run_actions(actions).await;
+
+        // explicitly drop the setup_instance to shutdown the nodes
+        // after all actions have completed
+        drop(setup_instance);
+
+        result
     }
 }
 
