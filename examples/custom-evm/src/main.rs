@@ -20,7 +20,9 @@ use reth::{
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
         interpreter::{interpreter::EthInterpreter, InterpreterResult},
-        precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
+        precompile::{
+            PrecompileError, PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles,
+        },
         specification::hardfork::SpecId,
         MainBuilder, MainContext,
     },
@@ -185,7 +187,7 @@ impl<CTX: ContextTr> PrecompileProvider for CustomPrecompiles<CTX> {
         address: &Address,
         bytes: &Bytes,
         gas_limit: u64,
-    ) -> Result<Option<Self::Output>, reth::revm::precompile::PrecompileErrors> {
+    ) -> Result<Option<Self::Output>, PrecompileError> {
         self.precompiles.run(context, address, bytes, gas_limit)
     }
 
