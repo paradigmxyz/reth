@@ -112,7 +112,7 @@ fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> Option<RethAccoun
 fn setup_provider(
     factory: &ProviderFactory<MockNodeTypesWithDB>,
     state_updates: &[EvmState],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn core::error::Error>> {
     for update in state_updates {
         let provider_rw = factory.provider_rw()?;
 
