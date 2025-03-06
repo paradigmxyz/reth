@@ -467,8 +467,8 @@ mod tests {
         >,
         SealedBlockWithSenders,
     ) {
-        // EVM genesis accounts
-        let mut genesis_accounts = vec![
+        // EVM genesis accounts (similar to the test genesis in EVM)
+        let mut original_genesis = vec![
             (
                 Address::from_hex("0x756f45e3fa69347a9a973a725e3c98bc4db0b5a0").unwrap(),
                 GenesisAccount {
@@ -486,17 +486,15 @@ mod tests {
         ];
 
         if let Some((address, balance)) = extended_genesis {
-            genesis_accounts.push((
-                address.into(),
-                GenesisAccount { balance: balance.into(), ..Default::default() },
-            ));
+            original_genesis
+                .push((address, GenesisAccount { balance: balance.into(), ..Default::default() }));
         }
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
                 .genesis(Genesis {
-                    alloc: genesis_accounts
+                    alloc: original_genesis
                         .clone()
                         .iter()
                         .map(|(address, account)| (*address, account.clone()))
@@ -522,9 +520,10 @@ mod tests {
         provider_rw.insert_block(genesis_block.clone(), StorageLocation::Database).unwrap();
         provider_rw.commit().unwrap();
 
-        // genesis_accounts.reverse();
+        {}
+
         let mut genesis = vec![];
-        for (address, account) in genesis_accounts {
+        for (address, account) in original_genesis {
             genesis.push((address.into(), account.balance.into()));
         }
 
@@ -720,7 +719,7 @@ mod tests {
     async fn test_pow_hash_deterministic_with_transactions() {
         // Expected final PoW hash
         let expected_pow_hash = did::H256::from_hex_str(
-            "0xe9b9e2ac5360f0cffe8711037c8f7c11b5944b5b5105f24dd51c65b2b785a42e",
+            "0xa349b3ca25925decd1c225b8bc3a133c436f3989eb8048e93ee1389c78a1d6a4",
         )
         .unwrap();
 
@@ -743,6 +742,7 @@ mod tests {
                 &block,
             )
             .unwrap();
+
             block
         };
 
