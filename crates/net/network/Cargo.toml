@@ -35,7 +35,6 @@ reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types.workspace = true
 
-
 # ethereum
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
