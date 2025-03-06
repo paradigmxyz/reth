@@ -705,10 +705,10 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = PendingPool::new(MockOrdering::default());
 
-        let a_sender = address!("000000000000000000000000000000000000000a");
-        let b_sender = address!("000000000000000000000000000000000000000b");
-        let c_sender = address!("000000000000000000000000000000000000000c");
-        let d_sender = address!("000000000000000000000000000000000000000d");
+        let a_sender = address!("0x000000000000000000000000000000000000000a");
+        let b_sender = address!("0x000000000000000000000000000000000000000b");
+        let c_sender = address!("0x000000000000000000000000000000000000000c");
+        let d_sender = address!("0x000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
         let mut tx_set =
@@ -758,10 +758,10 @@ mod tests {
         let mut pool = PendingPool::new(MockOrdering::default());
 
         // Addresses for simulated senders A, B, C, and D.
-        let a = address!("000000000000000000000000000000000000000a");
-        let b = address!("000000000000000000000000000000000000000b");
-        let c = address!("000000000000000000000000000000000000000c");
-        let d = address!("000000000000000000000000000000000000000d");
+        let a = address!("0x000000000000000000000000000000000000000a");
+        let b = address!("0x000000000000000000000000000000000000000b");
+        let c = address!("0x000000000000000000000000000000000000000c");
+        let d = address!("0x000000000000000000000000000000000000000d");
 
         // Create transaction chains for senders A, B, C, and D.
         let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 4, TxType::Eip1559);
@@ -986,9 +986,9 @@ mod tests {
         let mut pool = PendingPool::new(MockOrdering::default());
 
         // Addresses for simulated senders A, B, C
-        let a = address!("000000000000000000000000000000000000000a");
-        let b = address!("000000000000000000000000000000000000000b");
-        let c = address!("000000000000000000000000000000000000000c");
+        let a = address!("0x000000000000000000000000000000000000000a");
+        let b = address!("0x000000000000000000000000000000000000000b");
+        let c = address!("0x000000000000000000000000000000000000000c");
 
         // sender A (local) - 11+ transactions (large enough to keep limit exceeded)
         // sender B (external) - 2 transactions

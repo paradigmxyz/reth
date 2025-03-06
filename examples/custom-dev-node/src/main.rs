@@ -43,7 +43,7 @@ async fn main() -> eyre::Result<()> {
 
     let hash = eth_api.send_raw_transaction(raw_tx.into()).await?;
 
-    let expected = b256!("b1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398");
+    let expected = b256!("0xb1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398");
 
     assert_eq!(hash, expected);
     println!("submitted transaction: {hash}");

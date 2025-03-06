@@ -158,7 +158,7 @@ pub fn prague_custom() -> &'static Precompiles {
         let mut precompiles = Precompiles::prague().clone();
         // Custom precompile.
         precompiles.extend([(
-            address!("0000000000000000000000000000000000000999"),
+            address!("0x0000000000000000000000000000000000000999"),
             |_, _| -> PrecompileResult {
                 PrecompileResult::Ok(PrecompileOutput::new(0, Bytes::new()))
             } as PrecompileFn,

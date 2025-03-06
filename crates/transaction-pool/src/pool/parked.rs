@@ -586,10 +586,10 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
 
-        let a_sender = address!("000000000000000000000000000000000000000a");
-        let b_sender = address!("000000000000000000000000000000000000000b");
-        let c_sender = address!("000000000000000000000000000000000000000c");
-        let d_sender = address!("000000000000000000000000000000000000000d");
+        let a_sender = address!("0x000000000000000000000000000000000000000a");
+        let b_sender = address!("0x000000000000000000000000000000000000000b");
+        let c_sender = address!("0x000000000000000000000000000000000000000c");
+        let d_sender = address!("0x000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
         let mut tx_set = MockTransactionSet::dependent(a_sender, 0, 4, TxType::Eip1559);
@@ -663,7 +663,7 @@ mod tests {
 
         // create a chain of transactions by sender A
         // make sure they are all one over half the limit
-        let a_sender = address!("000000000000000000000000000000000000000a");
+        let a_sender = address!("0x000000000000000000000000000000000000000a");
 
         // 2 txs, that should put the pool over the size limit but not max txs
         let a_txs = MockTransactionSet::dependent(a_sender, 0, 2, TxType::Eip1559)
@@ -690,10 +690,10 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = ParkedPool::<BasefeeOrd<_>>::default();
 
-        let a_sender = address!("000000000000000000000000000000000000000a");
-        let b_sender = address!("000000000000000000000000000000000000000b");
-        let c_sender = address!("000000000000000000000000000000000000000c");
-        let d_sender = address!("000000000000000000000000000000000000000d");
+        let a_sender = address!("0x000000000000000000000000000000000000000a");
+        let b_sender = address!("0x000000000000000000000000000000000000000b");
+        let c_sender = address!("0x000000000000000000000000000000000000000c");
+        let d_sender = address!("0x000000000000000000000000000000000000000d");
 
         // create a chain of transactions by sender A, B, C
         let mut tx_set =

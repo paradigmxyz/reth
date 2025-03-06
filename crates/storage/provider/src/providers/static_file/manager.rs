@@ -676,7 +676,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         {
             // check whether we have the first OVM block: <https://optimistic.etherscan.io/block/0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453>
             const OVM_HEADER_1_HASH: B256 =
-                b256!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
+                b256!("0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
             if provider.block_number(OVM_HEADER_1_HASH)?.is_some() {
                 info!(target: "reth::cli",
                     "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
