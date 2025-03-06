@@ -39,7 +39,7 @@ RUN cargo chef cook \
     ${MANIFEST_PATH:+--manifest-path $MANIFEST_PATH}  \
     --recipe-path recipe.json
 
-COPY . .
+COPY --exclude=.git --exclude=dist . .
 RUN cargo build \
     --profile $BUILD_PROFILE \
     --bin $CARGO_BIN \
