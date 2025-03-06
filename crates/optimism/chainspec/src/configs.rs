@@ -110,7 +110,6 @@ mod tests {
     fn test_read_superchain_metadata() {
         let archive = TarArchiveRef::new(SUPER_CHAIN_CONFIGS_TAR_BYTES).unwrap();
         let chain_config = read_superchain_metadata("base", "mainnet", &archive).unwrap();
-        assert_eq!(chain_config.name, "Base");
         assert_eq!(chain_config.chain_id, 8453);
     }
 

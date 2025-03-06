@@ -9,6 +9,27 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// About the provided chain specs like `BASE_MAINNET`:
+// The provided `OpChainSpec` structs are built from config files read from
+// `superchain-configs.tar`. This `superchain-configs.tar` file contains the chain configs and
+// genesis files for all chains. It is created by the `fetch_superchain_config.sh` script in
+// the `res` directory. Where all configs are where initial loaded from
+// <https://github.com/ethereum-optimism/superchain-registry>. See the script for more details.
+//
+// The file is a tar archive containing the following files:
+// - `genesis/<environment>/<chain_name>.json.zz`: The genesis file compressed with deflate. It
+//   contains the initial accounts, etc.
+// - `configs/<environment>/<chain_name>.json`: The chain metadata file containing the chain id,
+//   hard forks, etc.
+//
+// For example, for `BASE_MAINNET`, the `genesis/mainnet/base.json.zz` and
+// `configs/mainnet/base.json` is loaded and combined into the `OpChainSpec` struct.
+// See `read_superchain_genesis` in `configs.rs` for more details.
+//
+// To update the chain specs, run the `fetch_superchain_config.sh` script in the `res` directory.
+// This will fetch the latest chain configs from the superchain registry and create a new
+// `superchain-configs.tar` file. See the script for more details.
+
 extern crate alloc;
 
 mod available_chains;
