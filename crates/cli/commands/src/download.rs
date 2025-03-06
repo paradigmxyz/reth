@@ -170,7 +170,6 @@ fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     archive.unpack(target_dir)?;
 
     info!(target: "reth::cli", "Extraction complete.");
-    println!("\nExtraction complete.");
     Ok(())
 }
 
