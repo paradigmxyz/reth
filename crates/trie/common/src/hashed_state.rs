@@ -518,27 +518,28 @@ impl ChunkedHashedPostState {
             .storages
             .into_iter()
             .flat_map(|(address, storage)| {
-                let storage_wipe = if storage.wiped {
-                    itertools::Either::Left(core::iter::once((
-                        address,
-                        FlattenedHashedPostStateItem::StorageWipe,
-                    )))
-                } else {
-                    itertools::Either::Right(core::iter::empty())
-                };
-
                 // Storage wipes should go first
-                storage_wipe.chain(
-                    storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot).map(
-                        move |(slot, value)| {
-                            (address, FlattenedHashedPostStateItem::StorageUpdate { slot, value })
-                        },
-                    ),
-                )
+                Some((address, FlattenedHashedPostStateItem::StorageWipe))
+                    .filter(|_| storage.wiped)
+                    .into_iter()
+                    .chain(
+                        storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot).map(
+                            move |(slot, value)| {
+                                (
+                                    address,
+                                    FlattenedHashedPostStateItem::StorageUpdate { slot, value },
+                                )
+                            },
+                        ),
+                    )
             })
             .chain(hashed_post_state.accounts.into_iter().map(|(address, account)| {
                 (address, FlattenedHashedPostStateItem::Account(account))
             }))
+            // We need stable sort here to preserve the order for each address:
+            // 1. Storage wipes
+            // 2. Storage updates
+            // 3. Account update
             .sorted_by_key(|(address, _)| *address);
 
         Self { flattened, size }
