@@ -3,6 +3,7 @@
 use crate::{setup_engine, testsuite::Environment, Adapter, TmpDB, TmpNodeAdapter};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadAttributes;
+use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction};
 use eyre::{eyre, Result};
 use jsonrpsee::http_client::HttpClientBuilder;
 use reth_chainspec::ChainSpec;
@@ -18,9 +19,13 @@ use reth_node_builder::{
 use reth_node_core::primitives::RecoveredBlock;
 use reth_primitives::Block;
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_rpc_api::clients::EthApiClient;
 use revm::state::EvmState;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::{sleep, Duration},
+};
 use tracing::{debug, error};
 
 /// Configuration for setting up a test environment
@@ -239,12 +244,9 @@ impl Setup {
             let mut last_error = None;
 
             while retry_count < MAX_RETRIES {
-                match reth_rpc_api::clients::EthApiClient::<
-                    alloy_rpc_types_eth::Transaction,
-                    alloy_rpc_types_eth::Block,
-                    alloy_rpc_types_eth::Receipt,
-                    alloy_rpc_types_eth::Header,
-                >::block_number(&client.rpc)
+                match EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_number(
+                    &client.rpc,
+                )
                 .await
                 {
                     Ok(_) => {
@@ -257,7 +259,7 @@ impl Setup {
                         debug!(
                             "Node {idx} RPC endpoint not ready, retry {retry_count}/{MAX_RETRIES}"
                         );
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        sleep(Duration::from_millis(100)).await;
                     }
                 }
             }
