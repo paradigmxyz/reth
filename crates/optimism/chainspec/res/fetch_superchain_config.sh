@@ -72,7 +72,8 @@ find "$GENESIS_SRC_DIR" -type f -name "*.json.zst" | while read -r file; do
 done
 
 # Save revision
-git rev-parse HEAD > "$TARGET_PATH/COMMIT"
+git rev-parse HEAD > "$TARGET_PATH/superchain_registry_commit"
+git rev-parse HEAD > "$SCRIPT_DIR/superchain_registry_commit"
 
 # Copy the LICENSE file
 cp "$TEMP_DIR/LICENSE" "$TARGET_PATH/LICENSE"
@@ -129,7 +130,7 @@ done
 echo "$(printf '%s\n' "${RESULTS[@]}" | jq -c -s 'sort_by(.name, .environment)')" > "$SCRIPT_DIR/available-chains.json"
 
 # Write chain_specs.rs
-echo -e "$RESULT_RS" > "$SCRIPT_DIR/../src/chain_specs.rs"
+echo -e "$RESULT_RS" | sed '${/^$/d;}' > "$SCRIPT_DIR/../src/chain_specs.rs"
 
 # Clean up
 # shellcheck disable=SC2164
