@@ -25,11 +25,11 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
         ))
         .with_network(NetworkSetup::single_node());
 
-    let test = TestBuilder::new().with_setup(setup).with_action(AssertMineBlock {
-        node_idx: 0,
-        transactions: vec![],
-        expected_hash: Some(B256::ZERO),
-    });
+    let test = TestBuilder::new().with_setup(setup).with_action(AssertMineBlock::new(
+        0,
+        vec![],
+        Some(B256::ZERO),
+    ));
 
     test.run::<EthereumNode>().await?;
 
