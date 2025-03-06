@@ -2892,7 +2892,7 @@ mod tests {
 
         // create a chain of transactions by sender A
         // make sure they are all one over half the limit
-        let a_sender = address!("000000000000000000000000000000000000000a");
+        let a_sender = address!("0x000000000000000000000000000000000000000a");
 
         // set the base fee of the pool
         let mut block_info = pool.block_info();
@@ -2934,7 +2934,7 @@ mod tests {
 
         // create a chain of transactions by sender A
         // make sure they are all one over half the limit
-        let a_sender = address!("000000000000000000000000000000000000000a");
+        let a_sender = address!("0x000000000000000000000000000000000000000a");
 
         // set the base fee of the pool
         let pool_base_fee = 100;

@@ -1076,7 +1076,7 @@ mod tests {
                 .build(),
         );
 
-        let withdrawal_recipient = address!("1000000000000000000000000000000000000000");
+        let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
 
         let mut db = CacheDB::new(EmptyDB::default());
         let initial_balance = 100;

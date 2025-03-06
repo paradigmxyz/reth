@@ -375,7 +375,7 @@ mod tests {
             payload_attributes: PayloadAttributes {
                 timestamp: 1728933301,
                 prev_randao: b256!("0x9158595abbdab2c90635087619aa7042bbebe47642dfab3c9bfb934f6b082765"),
-                suggested_fee_recipient: address!("4200000000000000000000000000000000000011"),
+                suggested_fee_recipient: address!("0x4200000000000000000000000000000000000011"),
                 withdrawals: Some([].into()),
                 parent_beacon_block_root: b256!("0x8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into(),
             },

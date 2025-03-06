@@ -872,8 +872,8 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let db_tx = provider.tx_ref();
-        let acc1 = address!("1000000000000000000000000000000000000000");
-        let acc2 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+        let acc1 = address!("0x1000000000000000000000000000000000000000");
+        let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
         let code = hex!("5a465a905090036002900360015500");
         let balance = U256::from(0x3635c9adc5dea00000u128);
         let code_hash = keccak256(code);
@@ -937,16 +937,16 @@ mod tests {
             let provider = factory.provider().unwrap();
 
             // check post state
-            let account1 = address!("1000000000000000000000000000000000000000");
+            let account1 = address!("0x1000000000000000000000000000000000000000");
             let account1_info =
                 Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
-            let account2 = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
+            let account2 = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
             let account2_info = Account {
                 balance: U256::from(0x1bc16d674ece94bau128),
                 nonce: 0x00,
                 bytecode_hash: None,
             };
-            let account3 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+            let account3 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
             let account3_info = Account {
                 balance: U256::from(0x3635c9adc5de996b46u128),
                 nonce: 0x01,
@@ -1018,9 +1018,9 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let db_tx = provider.tx_ref();
-        let acc1 = address!("1000000000000000000000000000000000000000");
+        let acc1 = address!("0x1000000000000000000000000000000000000000");
         let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
-        let acc2 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+        let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
         let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
 
         db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
@@ -1085,7 +1085,7 @@ mod tests {
             assert!(matches!(provider.basic_account(&acc1), Ok(Some(acc)) if acc == acc1_info));
             assert!(matches!(provider.basic_account(&acc2), Ok(Some(acc)) if acc == acc2_info));
 
-            let miner_acc = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
+            let miner_acc = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
             assert!(matches!(provider.basic_account(&miner_acc), Ok(None)));
 
             assert!(matches!(provider.receipt(0), Ok(None)));
@@ -1119,9 +1119,9 @@ mod tests {
         provider.commit().unwrap();
 
         // variables
-        let caller_address = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
-        let destroyed_address = address!("095e7baea6a6c7c4c2dfeb977efac326af552d87");
-        let beneficiary_address = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
+        let caller_address = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+        let destroyed_address = address!("0x095e7baea6a6c7c4c2dfeb977efac326af552d87");
+        let beneficiary_address = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
 
         let code = hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00");
         let balance = U256::from(0x0de0b6b3a7640000u64);

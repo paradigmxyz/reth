@@ -145,7 +145,7 @@ mod tests {
     const HOLESKY_BLOCK: Header = Header {
         parent_hash: b256!("0x8605e0c46689f66b3deed82598e43d5002b71a929023b665228728f0c6e62a95"),
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
-        beneficiary: address!("c6e2459991bfe27cca6d86722f35da23a1e4cb97"),
+        beneficiary: address!("0xc6e2459991bfe27cca6d86722f35da23a1e4cb97"),
         state_root: b256!("0xedad188ca5647d62f4cca417c11a1afbadebce30d23260767f6f587e9b3b9993"),
         transactions_root: b256!("0x4daf25dc08a841aa22aa0d3cb3e1f159d4dcaf6a6063d4d36bfac11d3fdb63ee"),
         receipts_root: b256!("0x1a1500328e8ade2592bbea1e04f9a9fd8c0142d3175d6e8420984ee159abd0ed"),

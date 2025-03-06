@@ -1149,12 +1149,12 @@ mod tests {
 
         assert_eq!(
             decoded.recover_signer().ok(),
-            Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2"))
+            Some(address!("0xA83C816D4f9b2783761a22BA6FADB0eB0606D7B2"))
         );
 
         let tx = decoded.transaction;
 
-        assert_eq!(tx.to(), Some(address!("11E9CA82A3a762b4B5bd264d4173a242e7a77064")));
+        assert_eq!(tx.to(), Some(address!("0x11E9CA82A3a762b4B5bd264d4173a242e7a77064")));
 
         assert_eq!(
             tx.blob_versioned_hashes(),
@@ -1360,7 +1360,7 @@ mod tests {
         let tx = TransactionSigned::fallback_decode(&mut data.as_slice()).unwrap();
         assert_eq!(tx.ty(), LEGACY_TX_TYPE_ID);
         let sender = tx.recover_signer().unwrap();
-        assert_eq!(sender, address!("a12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
+        assert_eq!(sender, address!("0xa12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
     }
 
     // <https://github.com/alloy-rs/alloy/issues/141>
@@ -1370,8 +1370,8 @@ mod tests {
         let data = hex!("02f86f0102843b9aca0085029e7822d68298f094d9e1459a7a482635700cbc20bbaf52d495ab9c9680841b55ba3ac080a0c199674fcb29f353693dd779c017823b954b3c69dffa3cd6b2a6ff7888798039a028ca912de909e7e6cdef9cdcaf24c54dd8c1032946dfa1d85c206b32a9064fe8");
         let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer().unwrap();
-        assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
-        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
+        assert_eq!(sender, address!("0x001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
+        assert_eq!(tx.to(), Some(address!("0xD9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
         assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.encoded_2718();
         assert_eq!(encoded.as_ref(), data.to_vec());
@@ -1387,7 +1387,7 @@ mod tests {
         assert!(sender.is_err());
         let sender = tx.recover_signer_unchecked().unwrap();
 
-        assert_eq!(sender, address!("7e9e359edf0dbacf96a9952fa63092d919b0842b"));
+        assert_eq!(sender, address!("0x7e9e359edf0dbacf96a9952fa63092d919b0842b"));
     }
 
     #[test]

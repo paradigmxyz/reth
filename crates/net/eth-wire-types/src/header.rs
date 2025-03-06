@@ -124,7 +124,7 @@ mod tests {
         let header = Header {
             parent_hash: b256!("0xe0a94a7a3c9617401586b1a27025d2d9671332d22d540e0af72b069170380f2a"),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: address!("ba5e000000000000000000000000000000000000"),
+            beneficiary: address!("0xba5e000000000000000000000000000000000000"),
             state_root: b256!("0xec3c94b18b8a1cff7d60f8d258ec723312932928626b4c9355eb4ab3568ec7f7"),
             transactions_root: b256!("0x50f738580ed699f0469702c7ccc63ed2e51bc034be9479b7bff4e68dee84accf"),
             receipts_root: b256!("0x29b0562f7140574dd0d50dee8a271b22e1a0a7b78fca58f7c60370d8317ba2a9"),
@@ -277,7 +277,7 @@ mod tests {
             )
             .unwrap(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: address!("f97e180c050e5ab072211ad2c213eb5aee4df134"),
+            beneficiary: address!("0xf97e180c050e5ab072211ad2c213eb5aee4df134"),
             state_root: b256!("0xec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068a"),
             transactions_root: EMPTY_ROOT_HASH,
             receipts_root: EMPTY_ROOT_HASH,

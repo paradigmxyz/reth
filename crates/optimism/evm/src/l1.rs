@@ -11,7 +11,7 @@ use revm::{primitives::HashMap, state::Bytecode, DatabaseCommit};
 use tracing::trace;
 
 /// The address of the create2 deployer
-const CREATE_2_DEPLOYER_ADDR: Address = address!("13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
+const CREATE_2_DEPLOYER_ADDR: Address = address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
 
 /// The codehash of the create2 deployer contract.
 const CREATE_2_DEPLOYER_CODEHASH: B256 =

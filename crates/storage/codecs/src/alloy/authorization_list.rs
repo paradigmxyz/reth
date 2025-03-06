@@ -81,7 +81,7 @@ mod tests {
     fn test_roundtrip_compact_authorization_list_item() {
         let authorization = AlloyAuthorization {
             chain_id: U256::from(1),
-            address: address!("dac17f958d2ee523a2206206994597c13d831ec7"),
+            address: address!("0xdac17f958d2ee523a2206206994597c13d831ec7"),
             nonce: 1,
         }
         .into_signed(alloy_primitives::PrimitiveSignature::new(

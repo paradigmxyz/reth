@@ -81,7 +81,7 @@ pub const BEDROCK_HEADER: Header = Header {
     timestamp: 1686068903,
     transactions_root: EMPTY_ROOT_HASH,
     ommers_hash: EMPTY_OMMER_ROOT_HASH,
-    beneficiary: address!("4200000000000000000000000000000000000011"),
+    beneficiary: address!("0x4200000000000000000000000000000000000011"),
     withdrawals_root: None,
     mix_hash: B256::ZERO,
     base_fee_per_gas: Some(0x3b9aca00),
