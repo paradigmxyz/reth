@@ -37,9 +37,6 @@ pub enum BlockValidationError {
     /// Error when incrementing balance in post execution
     #[error("incrementing balance in post execution failed")]
     IncrementBalanceFailed,
-    /// Error when the state root does not match the expected value.
-    #[error(transparent)]
-    StateRoot(#[from] StateRootError),
     /// Error when transaction gas limit exceeds available block gas
     #[error(
         "transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}"
@@ -137,11 +134,6 @@ impl BlockExecutionError {
         }
     }
 
-    /// Returns `true` if the error is a state root error.
-    pub const fn is_state_root_error(&self) -> bool {
-        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
-    }
-
     /// Handles an EVM error occurred when executing a transaction.
     ///
     /// If an error matches [`EvmError::InvalidTransaction`], it will be wrapped into
@@ -163,8 +155,6 @@ impl From<ProviderError> for BlockExecutionError {
         Self::other(error)
     }
 }
-
-impl revm_database_interface::DBErrorMarker for BlockExecutionError {}
 
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
 #[derive(Error, Debug)]
