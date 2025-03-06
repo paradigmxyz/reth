@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
