@@ -33,7 +33,7 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook \
     --profile $BUILD_PROFILE \
     --features "$FEATURES" \
-    ${MANIFEST_PATH:+"--manifest-path $MANIFEST_PATH"} \
+    ${MANIFEST_PATH:+"--manifest-path"} "$MANIFEST_PATH" \
     --recipe-path recipe.json \
     --locked
 
