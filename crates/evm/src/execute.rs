@@ -779,7 +779,7 @@ mod tests {
 
     #[test]
     fn test_balance_increment_state_zero() {
-        let addr = address!("1000000000000000000000000000000000000000");
+        let addr = address!("0x1000000000000000000000000000000000000000");
         let mut state = setup_state_with_account(addr, 100, 1);
 
         let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
@@ -803,8 +803,8 @@ mod tests {
 
     #[test]
     fn test_balance_increment_state_multiple_valid_increments() {
-        let addr1 = address!("1000000000000000000000000000000000000000");
-        let addr2 = address!("2000000000000000000000000000000000000000");
+        let addr1 = address!("0x1000000000000000000000000000000000000000");
+        let addr2 = address!("0x2000000000000000000000000000000000000000");
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
@@ -825,8 +825,8 @@ mod tests {
 
     #[test]
     fn test_balance_increment_state_mixed_zero_and_nonzero_increments() {
-        let addr1 = address!("1000000000000000000000000000000000000000");
-        let addr2 = address!("2000000000000000000000000000000000000000");
+        let addr1 = address!("0x1000000000000000000000000000000000000000");
+        let addr2 = address!("0x2000000000000000000000000000000000000000");
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
