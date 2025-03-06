@@ -97,7 +97,10 @@ pub(super) enum MultiProofMessage {
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution with its source
     StateUpdate(StateChangeSource, EvmState),
-    /// Empty proof for a specific state update
+    /// State update that can be applied to the sparse trie without any new proofs.
+    ///
+    /// It can be the case when all accounts and storage slots from the state update were already
+    /// fetched and revealed.
     EmptyProof {
         /// The index of this proof in the sequence of state updates
         sequence_number: u64,
@@ -601,7 +604,8 @@ where
             hashed_state_update.partition_by_targets(&self.fetched_proof_targets);
 
         let mut state_updates = 0;
-        // Send the state update with already fetched proof targets as one update.
+        // If there are any accounts or storage slots that we already fetched the proofs for,
+        // send them immediately, as they don't require spawning any additional multiproofs.
         if !fetched_state_update.is_empty() {
             let _ = self.tx.send(MultiProofMessage::EmptyProof {
                 sequence_number: self.proof_sequencer.next_sequence(),
