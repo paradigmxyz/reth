@@ -93,7 +93,7 @@ pub trait EthBlocks: LoadBlock {
 
             Ok(self
                 .cache()
-                .get_sealed_block_with_senders(block_hash)
+                .get_recovered_block(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
                 .map(|b| b.body().transaction_count()))
@@ -241,10 +241,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 None => return Ok(None),
             };
 
-            self.cache()
-                .get_sealed_block_with_senders(block_hash)
-                .await
-                .map_err(Self::Error::from_eth_err)
+            self.cache().get_recovered_block(block_hash).await.map_err(Self::Error::from_eth_err)
         }
     }
 }
