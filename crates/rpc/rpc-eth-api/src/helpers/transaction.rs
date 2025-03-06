@@ -87,7 +87,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             self.cache()
-                .get_sealed_block_with_senders(block)
+                .get_recovered_block(block)
                 .await
                 .map(|b| b.map(|b| b.body().transactions().to_vec()))
                 .map_err(Self::Error::from_eth_err)
@@ -562,7 +562,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
             };
             let block = self
                 .cache()
-                .get_sealed_block_with_senders(block_hash)
+                .get_recovered_block(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?;
             Ok(block.map(|block| (transaction, block)))

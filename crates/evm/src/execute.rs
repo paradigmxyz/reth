@@ -700,7 +700,7 @@ mod tests {
     use core::marker::PhantomData;
     use reth_primitives::EthPrimitives;
     use revm::state::AccountInfo;
-    use revm_database::{CacheDB, EmptyDBTyped};
+    use revm_database::{CacheDB, EmptyDB};
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     fn test_provider() {
         let provider = TestExecutorProvider;
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = CacheDB::<EmptyDB>::default();
         let executor = provider.executor(db);
         let _ = executor.execute(&Default::default());
     }
@@ -763,8 +763,8 @@ mod tests {
         addr: Address,
         balance: u128,
         nonce: u64,
-    ) -> State<CacheDB<EmptyDBTyped<BlockExecutionError>>> {
-        let db = CacheDB::<EmptyDBTyped<BlockExecutionError>>::default();
+    ) -> State<CacheDB<EmptyDB>> {
+        let db = CacheDB::<EmptyDB>::default();
         let mut state = State::builder().with_database(db).with_bundle_update().build();
 
         let account_info = AccountInfo {
@@ -779,7 +779,7 @@ mod tests {
 
     #[test]
     fn test_balance_increment_state_zero() {
-        let addr = address!("1000000000000000000000000000000000000000");
+        let addr = address!("0x1000000000000000000000000000000000000000");
         let mut state = setup_state_with_account(addr, 100, 1);
 
         let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
@@ -792,7 +792,7 @@ mod tests {
     #[test]
     fn test_balance_increment_state_empty_increments_map() {
         let mut state = State::builder()
-            .with_database(CacheDB::<EmptyDBTyped<BlockExecutionError>>::default())
+            .with_database(CacheDB::<EmptyDB>::default())
             .with_bundle_update()
             .build();
 
@@ -803,8 +803,8 @@ mod tests {
 
     #[test]
     fn test_balance_increment_state_multiple_valid_increments() {
-        let addr1 = address!("1000000000000000000000000000000000000000");
-        let addr2 = address!("2000000000000000000000000000000000000000");
+        let addr1 = address!("0x1000000000000000000000000000000000000000");
+        let addr2 = address!("0x2000000000000000000000000000000000000000");
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
@@ -825,8 +825,8 @@ mod tests {
 
     #[test]
     fn test_balance_increment_state_mixed_zero_and_nonzero_increments() {
-        let addr1 = address!("1000000000000000000000000000000000000000");
-        let addr2 = address!("2000000000000000000000000000000000000000");
+        let addr1 = address!("0x1000000000000000000000000000000000000000");
+        let addr2 = address!("0x2000000000000000000000000000000000000000");
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 

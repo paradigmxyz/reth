@@ -17,7 +17,7 @@ use reth::{
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
         interpreter::{interpreter::EthInterpreter, InterpreterResult},
-        precompile::PrecompileErrors,
+        precompile::PrecompileError,
         specification::hardfork::SpecId,
         MainBuilder, MainContext,
     },
@@ -36,7 +36,7 @@ use schnellru::{ByLength, LruMap};
 use std::{collections::HashMap, sync::Arc};
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
-type PrecompileLRUCache = LruMap<(SpecId, Bytes, u64), Result<InterpreterResult, PrecompileErrors>>;
+type PrecompileLRUCache = LruMap<(SpecId, Bytes, u64), Result<InterpreterResult, PrecompileError>>;
 
 type WrappedEthEvm<DB, I> = EthEvm<DB, I, WrappedPrecompile<EthPrecompiles<EthEvmContext<DB>>>>;
 
@@ -127,7 +127,7 @@ impl<P: PrecompileProvider<Output = InterpreterResult>> PrecompileProvider
         address: &Address,
         bytes: &Bytes,
         gas_limit: u64,
-    ) -> Result<Option<Self::Output>, reth::revm::precompile::PrecompileErrors> {
+    ) -> Result<Option<Self::Output>, PrecompileError> {
         let mut cache = self.cache.write();
         let key = (self.spec, bytes.clone(), gas_limit);
 

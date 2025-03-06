@@ -1158,22 +1158,22 @@ mod tests {
 
         assert_eq!(
             decoded.recover_signer().ok(),
-            Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2"))
+            Some(address!("0xA83C816D4f9b2783761a22BA6FADB0eB0606D7B2"))
         );
 
         let tx = decoded.transaction;
 
-        assert_eq!(tx.to(), Some(address!("11E9CA82A3a762b4B5bd264d4173a242e7a77064")));
+        assert_eq!(tx.to(), Some(address!("0x11E9CA82A3a762b4B5bd264d4173a242e7a77064")));
 
         assert_eq!(
             tx.blob_versioned_hashes(),
             Some(
                 &[
-                    b256!("012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921a"),
-                    b256!("0152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4"),
-                    b256!("013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7"),
-                    b256!("01148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1"),
-                    b256!("011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e6549"),
+                    b256!("0x012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921a"),
+                    b256!("0x0152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4"),
+                    b256!("0x013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7"),
+                    b256!("0x01148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1"),
+                    b256!("0x011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e6549"),
                 ][..]
             )
         );
@@ -1214,7 +1214,7 @@ mod tests {
                 .unwrap(),
             false,
         );
-        let hash = b256!("a517b206d2223278f860ea017d3626cacad4f52ff51030dc9a96b432f17f8d34");
+        let hash = b256!("0xa517b206d2223278f860ea017d3626cacad4f52ff51030dc9a96b432f17f8d34");
         test_decode_and_encode(&bytes, transaction, signature, Some(hash));
 
         let bytes = hex!(
@@ -1393,7 +1393,7 @@ mod tests {
         let tx = TransactionSigned::fallback_decode(&mut data.as_slice()).unwrap();
         assert_eq!(tx.ty(), LEGACY_TX_TYPE_ID);
         let sender = tx.recover_signer().unwrap();
-        assert_eq!(sender, address!("a12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
+        assert_eq!(sender, address!("0xa12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
     }
 
     // <https://github.com/alloy-rs/alloy/issues/141>
@@ -1405,8 +1405,8 @@ mod tests {
         );
         let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer().unwrap();
-        assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
-        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
+        assert_eq!(sender, address!("0x001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
+        assert_eq!(tx.to(), Some(address!("0xD9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
         assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.encoded_2718();
         assert_eq!(encoded.as_ref(), data.to_vec());
@@ -1424,7 +1424,7 @@ mod tests {
         assert!(sender.is_err());
         let sender = tx.recover_signer_unchecked().unwrap();
 
-        assert_eq!(sender, address!("7e9e359edf0dbacf96a9952fa63092d919b0842b"));
+        assert_eq!(sender, address!("0x7e9e359edf0dbacf96a9952fa63092d919b0842b"));
     }
 
     #[test]

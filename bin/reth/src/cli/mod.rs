@@ -98,6 +98,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](node::NodeCommand).
     ///
+    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    ///
     ///
     /// # Example
     ///
@@ -131,11 +133,43 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
     ///     .run(async move |builder, my_args: MyArgs|
     ///         // launch the node
-    ///     
     ///         Ok(()))
     ///     .unwrap();
     /// ````
-    pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
+    pub fn run<L, Fut>(self, launcher: L) -> eyre::Result<()>
+    where
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
+        self.with_runner(CliRunner::try_default_runtime()?, launcher)
+    }
+
+    /// Execute the configured cli command with the provided [`CliRunner`].
+    ///
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use reth::cli::Cli;
+    /// use reth_cli_runner::CliRunner;
+    /// use reth_node_ethereum::EthereumNode;
+    ///
+    /// let runtime = tokio::runtime::Builder::new_multi_thread()
+    ///     .worker_threads(4)
+    ///     .max_blocking_threads(256)
+    ///     .enable_all()
+    ///     .build()
+    ///     .unwrap();
+    /// let runner = CliRunner::from_runtime(runtime);
+    ///
+    /// Cli::parse_args()
+    ///     .with_runner(runner, |builder, _| async move {
+    ///         let handle = builder.launch_node(EthereumNode::default()).await?;
+    ///         handle.wait_for_node_exit().await
+    ///     })
+    ///     .unwrap();
+    /// ```
+    pub fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
@@ -150,7 +184,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        let runner = CliRunner::default();
         let components = |spec: Arc<C::ChainSpec>| {
             (EthExecutorProvider::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
         };

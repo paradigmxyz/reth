@@ -619,7 +619,9 @@ mod tests {
     fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
         let mut db = CacheDB::new(Default::default());
         for block_number in 0..=latest_block {
-            db.block_hashes.insert(U256::from(block_number), keccak256(block_number.to_string()));
+            db.cache
+                .block_hashes
+                .insert(U256::from(block_number), keccak256(block_number.to_string()));
         }
 
         let blockhashes_contract_account = AccountInfo {
@@ -949,7 +951,7 @@ mod tests {
         // measured
         header.gas_used = 135_856;
         header.receipts_root =
-            b256!("b31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
+            b256!("0xb31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
 
         let tx = sign_tx_with_key_pair(
             sender_key_pair,
@@ -1026,7 +1028,7 @@ mod tests {
         header.gas_limit = 1_500_000;
         header.gas_used = 134_807;
         header.receipts_root =
-            b256!("b31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
+            b256!("0xb31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
 
         // Create a transaction with a gas limit higher than the block gas limit
         let tx = sign_tx_with_key_pair(
@@ -1075,7 +1077,7 @@ mod tests {
                 .build(),
         );
 
-        let withdrawal_recipient = address!("1000000000000000000000000000000000000000");
+        let withdrawal_recipient = address!("0x1000000000000000000000000000000000000000");
 
         let mut db = CacheDB::new(EmptyDB::default());
         let initial_balance = 100;

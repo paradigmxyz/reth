@@ -3,19 +3,19 @@
 use crate::{error::L1BlockInfoError, OpBlockExecutionError};
 use alloy_consensus::Transaction;
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
+use op_revm::{L1BlockInfo, OpSpecId};
 use reth_execution_errors::BlockExecutionError;
 use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::BlockBody;
 use revm::{primitives::HashMap, state::Bytecode, DatabaseCommit};
-use revm_optimism::{L1BlockInfo, OpSpecId};
 use tracing::trace;
 
 /// The address of the create2 deployer
-const CREATE_2_DEPLOYER_ADDR: Address = address!("13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
+const CREATE_2_DEPLOYER_ADDR: Address = address!("0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2");
 
 /// The codehash of the create2 deployer contract.
 const CREATE_2_DEPLOYER_CODEHASH: B256 =
-    b256!("b0550b5b431e30d38000efb7107aaa0ade03d48a7198a140edda9d27134468b2");
+    b256!("0xb0550b5b431e30d38000efb7107aaa0ade03d48a7198a140edda9d27134468b2");
 
 /// The raw bytecode of the create2 deployer contract.
 const CREATE_2_DEPLOYER_BYTECODE: [u8; 1584] = hex!(

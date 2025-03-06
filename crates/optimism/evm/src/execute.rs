@@ -42,7 +42,7 @@ where
         BlockHeader = Header,
         BlockBody = alloy_consensus::BlockBody<T>,
     >,
-    revm_optimism::OpTransaction<TxEnv>: FromRecoveredTx<T>,
+    op_revm::OpTransaction<TxEnv>: FromRecoveredTx<T>,
 {
     type Primitives = N;
     type Strategy<'a, DB: Database + 'a, I: InspectorFor<&'a mut State<DB>, Self> + 'a> =
@@ -129,7 +129,7 @@ pub struct OpExecutionStrategy<'a, E: Evm, Tx, R, ChainSpec> {
 impl<'a, E, Tx, R, ChainSpec> OpExecutionStrategy<'a, E, Tx, R, ChainSpec>
 where
     E: Evm,
-    ChainSpec: OpHardforks,
+    ChainSpec: OpHardforks + Clone,
 {
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(
@@ -178,12 +178,8 @@ where
         // blocks will always have at least a single transaction in them (the L1 info transaction),
         // so we can safely assume that this will always be triggered upon the transition and that
         // the above check for empty blocks will never be hit on OP chains.
-        ensure_create2_deployer(
-            self.chain_spec.clone(),
-            self.evm.block().timestamp,
-            self.evm.db_mut(),
-        )
-        .map_err(|_| OpBlockExecutionError::ForceCreate2DeployerFail)?;
+        ensure_create2_deployer(&self.chain_spec, self.evm.block().timestamp, self.evm.db_mut())
+            .map_err(|_| OpBlockExecutionError::ForceCreate2DeployerFail)?;
 
         Ok(())
     }
@@ -279,12 +275,8 @@ where
     }
 
     fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<R>), BlockExecutionError> {
-        let balance_increments = post_block_balance_increments::<Header>(
-            &self.chain_spec.clone(),
-            self.evm.block(),
-            &[],
-            None,
-        );
+        let balance_increments =
+            post_block_balance_increments::<Header>(&self.chain_spec, self.evm.block(), &[], None);
         // increment balances
         self.evm
             .db_mut()
@@ -340,13 +332,13 @@ mod tests {
         b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256,
     };
     use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
+    use op_revm::constants::L1_BLOCK_CONTRACT;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::{Account, RecoveredBlock};
     use reth_revm::{database::StateProviderDatabase, test_utils::StateProviderTest};
-    use revm_optimism::constants::L1_BLOCK_CONTRACT;
     use std::{collections::HashMap, str::FromStr};
 
     fn create_op_state_provider() -> StateProviderTest {

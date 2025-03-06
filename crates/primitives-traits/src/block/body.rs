@@ -42,6 +42,19 @@ pub trait BlockBody:
     /// Returns reference to transactions in the block.
     fn transactions(&self) -> &[Self::Transaction];
 
+    /// A Convenience function to convert this type into the regular ethereum block body that
+    /// consists of:
+    ///
+    /// - Transactions
+    /// - Withdrawals
+    /// - Ommers
+    ///
+    /// Note: This conversion can be incomplete. It is not expected that this `Body` is the same as
+    /// [`alloy_consensus::BlockBody`] only that it can be converted into it which is useful for
+    /// the `eth_` RPC namespace (e.g. RPC block).
+    fn into_ethereum_body(self)
+        -> alloy_consensus::BlockBody<Self::Transaction, Self::OmmerHeader>;
+
     /// Returns an iterator over the transactions in the block.
     fn transactions_iter(&self) -> impl Iterator<Item = &Self::Transaction> + '_ {
         self.transactions().iter()
@@ -187,6 +200,10 @@ where
 
     fn transactions(&self) -> &[Self::Transaction] {
         &self.transactions
+    }
+
+    fn into_ethereum_body(self) -> Self {
+        self
     }
 
     fn into_transactions(self) -> Vec<Self::Transaction> {
