@@ -35,8 +35,7 @@ RUN cargo chef cook \
     --bin $CARGO_BIN \
     --features "$FEATURES" \
     ${MANIFEST_PATH:+--manifest-path} "$MANIFEST_PATH" \
-    --recipe-path recipe.json \
-    --locked
+    --recipe-path recipe.json
 
 COPY . .
 RUN cargo build \
