@@ -8,8 +8,8 @@ pub use config::{ConnectionsConfig, PeersConfig};
 pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, ReputationChangeWeights};
 
 use alloy_eip2124::ForkId;
-use tracing::trace;
 use reth_network_peers::TrustedPeer;
+use tracing::trace;
 
 use crate::{
     is_banned_reputation, PeerAddr, PeerConnectionState, PeerKind, ReputationChangeOutcome,
@@ -36,7 +36,8 @@ pub struct Peer {
     /// Counts number of times the peer was backed off due to a severe
     /// [`BackoffKind`](crate::BackoffKind).
     pub severe_backoff_counter: u8,
-    /// Original TrustedPeer information for DNS-based peers, set only for local trusted peers, `admin_addTrustedPeer` does not support hostname for node address
+    /// Original [`TrustedPeer`] information for hostname-based peers, set only for local trusted
+    /// peers, `admin_addTrustedPeer` does not support hostname for node address
     pub trusted_peer_info: Option<TrustedPeer>,
 }
 
@@ -50,11 +51,7 @@ impl Peer {
 
     /// Returns a new trusted peer for given [`PeerAddr`].
     pub fn trusted(addr: PeerAddr, trusted_peer: TrustedPeer) -> Self {
-        Self { 
-            kind: PeerKind::Trusted, 
-            trusted_peer_info: Some(trusted_peer),
-            ..Self::new(addr) 
-        }
+        Self { kind: PeerKind::Trusted, trusted_peer_info: Some(trusted_peer), ..Self::new(addr) }
     }
 
     /// Returns the reputation of the peer

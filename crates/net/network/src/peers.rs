@@ -15,7 +15,9 @@ use reth_network_types::{
     peers::{
         config::PeerBackoffDurations,
         reputation::{DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE},
-    }, BackoffKind, ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig, ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights
+    },
+    BackoffKind, ConnectionsConfig, Peer, PeerAddr, PeerConnectionState, PeerKind, PeersConfig,
+    ReputationChangeKind, ReputationChangeOutcome, ReputationChangeWeights,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
@@ -31,7 +33,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{trace, warn, error};
+use tracing::{error, trace, warn};
 
 /// Maintains the state of _all_ the peers known to the network.
 ///
@@ -116,7 +118,7 @@ impl PeersManager {
                     peers.entry(id).or_insert_with(|| {
                         Peer::trusted(
                             PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)),
-                            trusted_peer.clone()
+                            trusted_peer.clone(),
                         )
                     });
                 }
@@ -899,17 +901,22 @@ impl PeersManager {
                 // For trusted peers, use the stored TrustedPeer for resolution
                 if peer.is_trusted() {
                     trace!(target: "net::peers", ?peer_id, "Resolving trusted peer information");
-                    
+
                     if let Some(trusted_peer) = &peer.trusted_peer_info {
                         match trusted_peer.resolve_blocking() {
                             Ok(NodeRecord { address, tcp_port, udp_port, id: _ }) => {
                                 // Update the peer's address with the newly resolved one
-                                peer.addr = PeerAddr::new_with_ports(address, tcp_port, Some(udp_port));
+                                peer.addr =
+                                    PeerAddr::new_with_ports(address, tcp_port, Some(udp_port));
                             }
                             Err(err) => {
                                 warn!(target: "net::peers", ?peer_id, ?trusted_peer, ?err, "Failed to re-resolve trusted peer, backing off");
                                 let backoff_counter = peer.severe_backoff_counter;
-                                self.backoff_peer_until(peer_id, self.backoff_durations.backoff_until(BackoffKind::Low, backoff_counter));
+                                self.backoff_peer_until(
+                                    peer_id,
+                                    self.backoff_durations
+                                        .backoff_until(BackoffKind::Low, backoff_counter),
+                                );
                                 continue;
                             }
                         }
