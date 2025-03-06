@@ -596,7 +596,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         Ok(())
     }
 
-    /// Update or remove trie account based on new account info.
+    /// Update or remove trie account based on new account info. This method will either recompute
+    /// the storage root based on update storage trie or look it up from existing leaf value.
     ///
     /// If the new account info and storage trie are empty, the account leaf will be removed.
     pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
@@ -621,15 +622,13 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
             trace!(target: "trie::sparse", ?address, "Removing account");
-            self.remove_account_leaf(&nibbles)?;
+            self.remove_account_leaf(&nibbles)
         } else {
             trace!(target: "trie::sparse", ?address, "Updating account");
             self.account_rlp_buf.clear();
             account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-            self.update_account_leaf(nibbles, self.account_rlp_buf.clone())?;
+            self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
         }
-
-        Ok(())
     }
 
     /// Update the account storage root.
@@ -639,10 +638,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// If the new storage root is empty, and the account info was already empty, the account leaf
     /// will be removed.
     pub fn update_account_storage_root(&mut self, address: B256) -> SparseStateTrieResult<()> {
+        // Nothing to update if the account isn't revealed or doesn't exist in the trie.
         if !self.is_account_revealed(address) {
             return Ok(())
         }
-
         let Some(mut trie_account) = self
             .get_account_value(&address)
             .map(|v| TrieAccount::decode(&mut &v[..]))
@@ -651,6 +650,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             return Ok(())
         };
 
+        // Calculate the new storage root. If the storage trie doesn't exist, the storage root will
+        // be empty.
         let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
             storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
@@ -658,13 +659,16 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             EMPTY_ROOT_HASH
         };
 
+        // Update the account with the new storage root.
         trie_account.storage_root = storage_root;
 
         let nibbles = Nibbles::unpack(address);
         if trie_account == TrieAccount::default() {
+            // If the account is empty, remove it.
             trace!(target: "trie::sparse", ?address, "Removing account because the storage root is empty");
             self.remove_account_leaf(&nibbles)?;
         } else {
+            // Otherwise, update the account leaf.
             trace!(target: "trie::sparse", ?address, "Updating account with the new storage root");
             self.account_rlp_buf.clear();
             trie_account.encode(&mut self.account_rlp_buf);
