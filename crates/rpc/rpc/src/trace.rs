@@ -267,7 +267,7 @@ where
         // fetch all blocks in that range
         let blocks = self
             .provider()
-            .sealed_block_with_senders_range(start..=end)
+            .recovered_block_range(start..=end)
             .map_err(Eth::Error::from_eth_err)?
             .into_iter()
             .map(Arc::new)
