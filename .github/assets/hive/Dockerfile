@@ -32,13 +32,19 @@ COPY --from=planner /app/recipe.json recipe.json
 
 RUN cargo chef cook \
     --profile $BUILD_PROFILE \
+    --bin $CARGO_BIN \
     --features "$FEATURES" \
-    ${MANIFEST_PATH:+"--manifest-path"} "$MANIFEST_PATH" \
+    ${MANIFEST_PATH:+--manifest-path} "$MANIFEST_PATH" \
     --recipe-path recipe.json \
     --locked
 
 COPY . .
-RUN cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin $CARGO_BIN
+RUN cargo build \
+    --profile $BUILD_PROFILE \
+    --bin $CARGO_BIN \
+    --features "$FEATURES" \
+    ${MANIFEST_PATH:+--manifest-path} "$MANIFEST_PATH" \
+    --locked
 
 # 
 # The runtime will then just use the build artifact without building anything
