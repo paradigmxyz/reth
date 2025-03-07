@@ -8,6 +8,10 @@ use tokio_util::codec::{Decoder, FramedRead};
 use tracing::{trace, warn};
 
 use crate::{DecodedFileChunk, FileClientError};
+use alloy_primitives::{
+    bytes::{Buf, BytesMut},
+    hex, address, Address, Bytes, Log, LogData, B256,
+};
 
 /// Helper trait implemented for [`Decoder`] that decodes the receipt type.
 pub trait ReceiptDecoder: Decoder<Item = Option<ReceiptWithBlockNumber<Self::Receipt>>> {
@@ -216,7 +220,7 @@ pub struct ReceiptWithBlockNumber<R = Receipt> {
 mod test {
     use alloy_primitives::{
         bytes::{Buf, BytesMut},
-        hex, Address, Bytes, Log, LogData, B256,
+        hex, address, Address, Bytes, Log, LogData, B256,
     };
     use alloy_rlp::{Decodable, RlpDecodable};
     use reth_primitives::{Receipt, TxType};
@@ -326,7 +330,7 @@ mod test {
 
     fn receipt_block_1() -> ReceiptWithBlockNumber {
         let log_1 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -347,7 +351,7 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -369,7 +373,7 @@ mod test {
         };
 
         let log_3 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -398,7 +402,7 @@ mod test {
 
     fn receipt_block_2() -> ReceiptWithBlockNumber {
         let log_1 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -420,7 +424,7 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -448,7 +452,7 @@ mod test {
 
     fn receipt_block_3() -> ReceiptWithBlockNumber {
         let log_1 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -470,7 +474,7 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
