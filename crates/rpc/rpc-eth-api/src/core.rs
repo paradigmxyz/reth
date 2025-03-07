@@ -51,6 +51,11 @@ impl<T> FullEthApiServer for T where
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
+    /// Bitfinity LB api extension
+    /// Handler for: `eth_lbLagCheck`
+    #[method(name = "lbLagCheck")]
+    async fn lb_lag_check(&self, accepted_lag: Option<U64>) -> RpcResult<String>;
+
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -386,6 +391,38 @@ where
     T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
+    /// Handler for: `eth_lbLagCheck`
+    async fn lb_lag_check(&self, accepted_lag: Option<U64>) -> RpcResult<String> {
+        const LAG_STATUS_BAD: &str = "LAGGING";
+        const LAG_STATUS_OK: &str = "ACCEPTABLE_LAG";
+        let network_block = match BitfinityEvmRpc::network_block_number(self).await {
+            Ok(block) => block,
+            Err(e) => {
+                // Must not fail if rpc-url/evmc is not responding
+                // or it could've disable all nodes under LB
+                tracing::error!(target: "rpc::eth", "Failed to get block number from the network. {}", e);
+                return Ok(format!("{}: NO_SOURCE", LAG_STATUS_OK));
+            }
+        };
+
+        let accepted_lag = match accepted_lag {
+            Some(lag) => U256::from(lag),
+            // Assuming that lag behind for 3 block is ok
+            None => U256::from(3),
+        };
+
+        let node_block = self.block_number()?;
+        let lag = network_block.saturating_sub(node_block);
+
+        let status = if lag > accepted_lag { LAG_STATUS_BAD } else { LAG_STATUS_OK };
+
+        // Better to respond with string that add structure, import serde and stuff
+        let response =
+            format!("{}: lag: {} node: {} network: {}", status, lag, node_block, network_block);
+
+        Ok(response)
+    }
+
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {
         trace!(target: "rpc::eth", "Serving eth_protocolVersion");

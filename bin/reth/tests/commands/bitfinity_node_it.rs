@@ -50,6 +50,85 @@ async fn bitfinity_test_should_start_local_reth_node() {
 }
 
 #[tokio::test]
+async fn bitfinity_test_lb_lag_check() {
+    // Arrange
+    let _log = init_logs();
+
+    let eth_server = EthImpl::new();
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+
+    // Try `eth_lbLagCheck`
+    let result: String = reth_client
+        .single_request(
+            "eth_lbLagCheck".to_owned(),
+            ethereum_json_rpc_client::Params::Array(vec![10.into()]),
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    assert!(result.contains("ACCEPTABLE_LAG"), "{result:?}");
+
+    // Need time to generate extra blocks at `eth_server`
+    // Assuming `EthImpl` ticks 100ms for the each next block
+    let mut lag_check_ok = false;
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(50));
+    for _ in 0..100 {
+        interval.tick().await;
+
+        let result = reth_client
+            .single_request::<String>(
+                "eth_lbLagCheck".to_owned(),
+                ethereum_json_rpc_client::Params::Array(vec![5.into()]),
+                ethereum_json_rpc_client::Id::Num(1),
+            )
+            .await;
+        if let Ok(message) = result {
+            if message.contains("LAGGING") {
+                lag_check_ok = true;
+                break;
+            }
+        }
+    }
+
+    assert!(lag_check_ok);
+
+    // And should not lag with bigger acceptable delta
+    let result: String = reth_client
+        .single_request(
+            "eth_lbLagCheck".to_owned(),
+            ethereum_json_rpc_client::Params::Array(vec![1000.into()]),
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    assert!(result.contains("ACCEPTABLE_LAG"), "{result:?}");
+}
+
+#[tokio::test]
+async fn bitfinity_test_lb_lag_check_fail_safe() {
+    let (reth_client, _reth_node) =
+        start_reth_node(Some("http://local_host:11".to_string()), None).await;
+
+    let message: String = reth_client
+        .single_request(
+            "eth_lbLagCheck".to_owned(),
+            ethereum_json_rpc_client::Params::Array(vec![1000.into()]),
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    // Response should be OK to do not break LB if source temporary not available
+    assert!(message.contains("ACCEPTABLE_LAG"), "{message}");
+    assert!(message.contains("NO_SOURCE"), "{message}");
+}
+
+#[tokio::test]
 async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     // Arrange
     let _log = init_logs();
