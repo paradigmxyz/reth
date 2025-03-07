@@ -10,7 +10,6 @@ use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::EngineTypes;
-use reth_node_ethereum::EthEngineTypes;
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::{future::Future, marker::PhantomData};
 use tracing::debug;
@@ -20,26 +19,23 @@ use tracing::debug;
 /// Actions execute operations and potentially make assertions in a single step.
 /// The action name indicates what it does (e.g., `AssertMineBlock` would both
 /// mine a block and assert it worked).
-pub trait Action<Engine = EthEngineTypes>: Send + 'static
-where
-    Engine: EngineTypes,
-{
+pub trait Action<I>: Send + 'static {
     /// Executes the action
-    fn execute<'a>(&'a mut self, env: &'a Environment) -> BoxFuture<'a, Result<()>>;
+    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>>;
 }
 
 /// Simplified action container for storage in tests
 #[allow(missing_debug_implementations)]
-pub struct ActionBox(Box<dyn Action>);
+pub struct ActionBox<I>(Box<dyn Action<I>>);
 
-impl ActionBox {
+impl<I: 'static> ActionBox<I> {
     /// Constructor for [`ActionBox`].
-    pub fn new<A: Action>(action: A) -> Self {
+    pub fn new<A: Action<I>>(action: A) -> Self {
         Self(Box::new(action))
     }
 
     /// Executes an [`ActionBox`] with the given [`Environment`] reference.
-    pub async fn execute(mut self, env: &Environment) -> Result<()> {
+    pub async fn execute(mut self, env: &Environment<I>) -> Result<()> {
         self.0.execute(env).await
     }
 }
@@ -48,12 +44,12 @@ impl ActionBox {
 /// reference and returns a Future resolving to Result<()>.
 ///
 /// This allows using closures directly as actions with `.with_action(async move |env| {...})`.
-impl<F, Fut> Action for F
+impl<I, F, Fut> Action<I> for F
 where
-    F: FnMut(&Environment) -> Fut + Send + 'static,
+    F: FnMut(&Environment<I>) -> Fut + Send + 'static,
     Fut: Future<Output = Result<()>> + Send + 'static,
 {
-    fn execute<'a>(&'a mut self, env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(self(env))
     }
 }
@@ -67,8 +63,8 @@ pub struct MineBlock {
     pub transactions: Vec<Vec<u8>>,
 }
 
-impl Action for MineBlock {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I> Action<I> for MineBlock {
+    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // 1. Create a new payload with the given transactions
             // 2. Execute forkchoiceUpdated with the new payload
@@ -82,7 +78,7 @@ impl Action for MineBlock {
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.
 #[derive(Debug)]
-pub struct AssertMineBlock<Engine = EthEngineTypes> {
+pub struct AssertMineBlock<Engine> {
     /// The node index to mine
     pub node_idx: usize,
     /// Transactions to include in the block
@@ -93,22 +89,19 @@ pub struct AssertMineBlock<Engine = EthEngineTypes> {
     _phantom: PhantomData<Engine>,
 }
 
-impl<Engine> AssertMineBlock<Engine>
-where
-    Engine: EngineTypes,
-{
+impl<Engine> AssertMineBlock<Engine> {
     /// Create a new `AssertMineBlock` action
     pub fn new(node_idx: usize, transactions: Vec<Bytes>, expected_hash: Option<B256>) -> Self {
-        Self { node_idx, transactions, expected_hash, _phantom: PhantomData }
+        Self { node_idx, transactions, expected_hash, _phantom: Default::default() }
     }
 }
 
 impl<Engine> Action<Engine> for AssertMineBlock<Engine>
 where
-    Engine: EngineTypes + Send + Sync + 'static,
+    Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes>,
 {
-    fn execute<'a>(&'a mut self, env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+    fn execute<'a>(&'a mut self, env: &'a Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             if self.node_idx >= env.node_clients.len() {
                 return Err(eyre::eyre!("Node index out of bounds: {}", self.node_idx));
@@ -194,8 +187,8 @@ pub struct SubmitTransaction {
     pub raw_tx: Bytes,
 }
 
-impl Action for SubmitTransaction {
-    fn execute<'a>(&'a mut self, env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I: Sync> Action<I> for SubmitTransaction {
+    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             if self.node_idx >= env.node_clients.len() {
                 return Err(eyre::eyre!("Node index out of bounds: {}", self.node_idx));
@@ -227,8 +220,8 @@ pub struct CreatePayload {
     pub attributes: PayloadAttributes,
 }
 
-impl Action for CreatePayload {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I> Action<I> for CreatePayload {
+    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -242,8 +235,8 @@ pub struct NewPayload {
     pub payload: ExecutionPayload,
 }
 
-impl Action for NewPayload {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I> Action<I> for NewPayload {
+    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -259,8 +252,8 @@ pub struct GetBlock {
     pub block_hash: Option<B256>,
 }
 
-impl Action for GetBlock {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I> Action<I> for GetBlock {
+    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -276,8 +269,8 @@ pub struct GetTransactionCount {
     pub block_id: BlockId,
 }
 
-impl Action for GetTransactionCount {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I> Action<I> for GetTransactionCount {
+    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -295,8 +288,8 @@ pub struct GetStorageAt {
     pub block_id: BlockId,
 }
 
-impl Action for GetStorageAt {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I> Action<I> for GetStorageAt {
+    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -312,8 +305,8 @@ pub struct Call {
     pub block_id: BlockId,
 }
 
-impl Action for Call {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I> Action<I> for Call {
+    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -327,8 +320,8 @@ pub struct WaitForBlocks {
     pub blocks: u64,
 }
 
-impl Action for WaitForBlocks {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I> Action<I> for WaitForBlocks {
+    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move { Ok(()) })
     }
 }
@@ -344,8 +337,8 @@ pub struct ChainReorg {
     pub new_blocks: Vec<Vec<u8>>,
 }
 
-impl Action for ChainReorg {
-    fn execute<'a>(&'a mut self, _env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I> Action<I> for ChainReorg {
+    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // 1. Reorg the chain to the specified depth
             // 2. Add the new blocks
@@ -357,20 +350,20 @@ impl Action for ChainReorg {
 
 /// Run a sequence of actions in series.
 #[allow(missing_debug_implementations)]
-pub struct Sequence {
+pub struct Sequence<I> {
     /// Actions to execute in sequence
-    pub actions: Vec<Box<dyn Action>>,
+    pub actions: Vec<Box<dyn Action<I>>>,
 }
 
-impl Sequence {
+impl<I> Sequence<I> {
     /// Create a new sequence of actions
-    pub fn new(actions: Vec<Box<dyn Action>>) -> Self {
+    pub fn new(actions: Vec<Box<dyn Action<I>>>) -> Self {
         Self { actions }
     }
 }
 
-impl Action for Sequence {
-    fn execute<'a>(&'a mut self, env: &'a Environment) -> BoxFuture<'a, Result<()>> {
+impl<I: Sync + 'static> Action<I> for Sequence<I> {
+    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // Execute each action in sequence
             futures_util::future::try_join_all(

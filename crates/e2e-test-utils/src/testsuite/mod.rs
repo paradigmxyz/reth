@@ -1,5 +1,7 @@
 //! Utilities for running e2e tests against a node or a network of nodes.
 
+use std::marker::PhantomData;
+
 use crate::{Adapter, TmpDB, TmpNodeAdapter};
 use actions::{Action, ActionBox};
 use eyre::Result;
@@ -26,24 +28,24 @@ mod examples;
 
 /// A runner performs operations on an environment.
 #[derive(Debug, Default)]
-pub struct Runner {
+pub struct Runner<I> {
     /// The environment containing the node(s) to test
-    env: Environment,
+    env: Environment<I>,
 }
 
-impl Runner {
+impl<I: 'static> Runner<I> {
     /// Create a new test runner with an empty environment
     pub fn new() -> Self {
         Self { env: Environment::default() }
     }
 
     /// Execute an action
-    pub async fn execute(&mut self, action: ActionBox) -> Result<()> {
+    pub async fn execute(&mut self, action: ActionBox<I>) -> Result<()> {
         action.execute(&self.env).await
     }
 
     /// Execute a sequence of actions
-    pub async fn run_actions(&mut self, actions: Vec<ActionBox>) -> Result<()> {
+    pub async fn run_actions(&mut self, actions: Vec<ActionBox<I>>) -> Result<()> {
         for action in actions {
             self.execute(action).await?;
         }
@@ -53,8 +55,8 @@ impl Runner {
     /// Run a complete test scenario with setup and actions
     pub async fn run_scenario<N>(
         &mut self,
-        setup: Option<Setup>,
-        actions: Vec<ActionBox>,
+        setup: Option<Setup<I>>,
+        actions: Vec<ActionBox<I>>,
     ) -> Result<()>
     where
         N: Default
@@ -109,28 +111,36 @@ pub struct NodeClient {
 }
 
 /// Represents a test environment.
-#[derive(Debug, Default)]
-pub struct Environment {
+#[derive(Debug)]
+pub struct Environment<I> {
     /// Combined clients with both RPC and Engine API endpoints
     pub node_clients: Vec<NodeClient>,
+    /// Tracks instance generic.
+    _phantom: PhantomData<I>,
+}
+
+impl<I> Default for Environment<I> {
+    fn default() -> Self {
+        Self { node_clients: vec![], _phantom: Default::default() }
+    }
 }
 
 /// Builder for creating test scenarios
 #[allow(missing_debug_implementations)]
 #[derive(Default)]
-pub struct TestBuilder {
-    setup: Option<Setup>,
-    actions: Vec<ActionBox>,
+pub struct TestBuilder<I> {
+    setup: Option<Setup<I>>,
+    actions: Vec<ActionBox<I>>,
 }
 
-impl TestBuilder {
+impl<I: 'static> TestBuilder<I> {
     /// Create a new test builder
     pub fn new() -> Self {
         Self { setup: None, actions: Vec::new() }
     }
 
     /// Set the test setup
-    pub fn with_setup(mut self, setup: Setup) -> Self {
+    pub fn with_setup(mut self, setup: Setup<I>) -> Self {
         self.setup = Some(setup);
         self
     }
@@ -138,17 +148,17 @@ impl TestBuilder {
     /// Add an action to the test
     pub fn with_action<A>(mut self, action: A) -> Self
     where
-        A: Action,
+        A: Action<I>,
     {
-        self.actions.push(ActionBox::new(action));
+        self.actions.push(ActionBox::<I>::new(action));
         self
     }
 
     /// Add multiple actions to the test
-    pub fn with_actions<I, A>(mut self, actions: I) -> Self
+    pub fn with_actions<II, A>(mut self, actions: II) -> Self
     where
-        I: IntoIterator<Item = A>,
-        A: Action,
+        II: IntoIterator<Item = A>,
+        A: Action<I>,
     {
         self.actions.extend(actions.into_iter().map(ActionBox::new));
         self
