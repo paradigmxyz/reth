@@ -1,5 +1,8 @@
 use crate::{
-    metrics::ParallelTrieMetrics, root::ParallelStateRootError, stats::ParallelTrieTracker,
+    metrics::ParallelTrieMetrics,
+    proof_task::{ProofTaskCtx, ProofTaskManager, ProofTaskMessage, StorageProofInput},
+    root::ParallelStateRootError,
+    stats::ParallelTrieTracker,
     StorageRootTargets,
 };
 use alloy_primitives::{
@@ -8,6 +11,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
+use reth_db_api::Database;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
@@ -131,17 +135,34 @@ where
         let mut storage_proofs =
             B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
 
+        let task_ctx = ProofTaskCtx::new(self.nodes_sorted.clone(), self.state_sorted.clone());
+
+        // TODO: keep something like this around for the entire lifetime of state root
+        let (proof_task_sender, receiver) = std::sync::mpsc::channel();
+        let proof_task =
+            ProofTaskManager::<<<Factory as DatabaseProviderFactory>::DB as Database>::TX>::new(
+                self.executor.clone(),
+                self.view.clone(),
+                task_ctx,
+                // TODO: tune
+                10,
+                receiver,
+            )?;
+
+        // spawn the proof task
+        self.executor.spawn_blocking(move || {
+            proof_task.run();
+        });
+
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
-            let view = self.view.clone();
             let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
-            let trie_nodes_sorted = self.nodes_sorted.clone();
-            let hashed_state_sorted = self.state_sorted.clone();
-            let collect_masks = self.collect_branch_node_masks;
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            let proof_task_sender = proof_task_sender.clone();
 
+            // TODO: get rid of this whole block and just insert the receiver
             // spawn the task as blocking and send the the result through the channel
             self.executor.spawn_blocking(move || {
                 debug!(
@@ -150,56 +171,24 @@ where
                     "Starting proof calculation"
                 );
 
-                let task_start = Instant::now();
-                let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider_start = Instant::now();
-                    let provider_ro = view.provider_ro()?;
-                    trace!(
-                        target: "trie::parallel_proof",
-                        ?hashed_address,
-                        provider_time = ?provider_start.elapsed(),
-                        "Got provider"
-                    );
+                let proof_start = Instant::now();
+                let prefix_set_len = prefix_set.len();
+                let target_slots_len = target_slots.len();
 
-                    let cursor_start = Instant::now();
-                    let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                        &trie_nodes_sorted,
-                    );
-                    let hashed_cursor_factory = HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                        &hashed_state_sorted,
-                    );
-                    trace!(
-                        target: "trie::parallel_proof",
-                        ?hashed_address,
-                        cursor_time = ?cursor_start.elapsed(),
-                        "Created cursors"
-                    );
+                let input = StorageProofInput::new(hashed_address, prefix_set, target_slots);
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let _ = proof_task_sender.send(ProofTaskMessage::StorageProof((input, sender)));
 
-                    let target_slots_len = target_slots.len();
-                    let proof_start = Instant::now();
-                    let proof_result = StorageProof::new_hashed(
-                        trie_cursor_factory,
-                        hashed_cursor_factory,
-                        hashed_address,
-                    )
-                    .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().cloned()))
-                    .with_branch_node_masks(collect_masks)
-                    .storage_multiproof(target_slots)
-                    .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+                let result = receiver.recv().unwrap();
 
-                    trace!(
-                        target: "trie::parallel_proof",
-                        ?hashed_address,
-                        prefix_set = ?prefix_set.len(),
-                        target_slots = ?target_slots_len,
-                        proof_time = ?proof_start.elapsed(),
-                        "Completed proof calculation"
-                    );
-
-                    proof_result
-                })();
+                trace!(
+                    target: "trie::parallel_proof",
+                    ?hashed_address,
+                    prefix_set = ?prefix_set_len,
+                    target_slots = ?target_slots_len,
+                    proof_time = ?proof_start.elapsed(),
+                    "Completed proof calculation"
+                );
 
                 // We can have the receiver dropped before we send, because we still calculate
                 // storage proofs for deleted accounts, but do not actually walk over them in
@@ -209,7 +198,7 @@ where
                         target: "trie::parallel_proof",
                         ?hashed_address,
                         error = ?e,
-                        task_time = ?task_start.elapsed(),
+                        task_time = ?proof_start.elapsed(),
                         "Failed to send proof result"
                     );
                 }
