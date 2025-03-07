@@ -379,7 +379,7 @@ mod tests {
         );
         assert_eq!(
             system_decoded.hash,
-            B256::from(hex!("e20b11349681dd049f8df32f5cdbb4c68d46b537685defcd86c7fa42cfe75b9e"))
+            B256::from(address!("0xe20b11349681dd049f8df32f5cdbb4c68d46b537685defcd86c7fa42cfe75b9e"))
         );
     }
 }
