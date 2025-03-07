@@ -15,13 +15,13 @@ use alloy_eips::{
     },
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{
-    transaction::{error::TransactionConversionError, signed::SignedTransactionIntoRecoveredExt},
+    transaction::{error::TransactionConversionError},
     Block, InMemorySize, Recovered, SealedBlock, SignedTransaction,
 };
 #[cfg(feature = "serde")]
@@ -1286,7 +1286,7 @@ impl<T: alloy_consensus::Transaction> alloy_consensus::Transaction for EthPooled
         self.transaction.value()
     }
 
-    fn input(&self) -> &revm_primitives::Bytes {
+    fn input(&self) -> &Bytes {
         self.transaction.input()
     }
 

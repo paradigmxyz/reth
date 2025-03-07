@@ -1,7 +1,8 @@
 //! Trait for specifying `eth` network dependent API types.
 
 use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
-use alloy_network::Network;
+use alloy_json_rpc::RpcObject;
+use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
 use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_types_compat::TransactionCompat;
@@ -10,6 +11,27 @@ use std::{
     error::Error,
     fmt::{self},
 };
+
+/// RPC types used by the `eth_` RPC API.
+///
+/// This is a subset of [`alloy_network::Network`] trait with only RPC response types kept.
+pub trait RpcTypes {
+    /// Header response type.
+    type Header: RpcObject;
+    /// Receipt response type.
+    type Receipt: RpcObject + ReceiptResponse;
+    /// Transaction response type.
+    type Transaction: RpcObject + TransactionResponse;
+}
+
+impl<T> RpcTypes for T
+where
+    T: Network,
+{
+    type Header = T::HeaderResponse;
+    type Receipt = T::ReceiptResponse;
+    type Transaction = T::TransactionResponse;
+}
 
 /// Network specific `eth` API types.
 ///
@@ -28,7 +50,7 @@ pub trait EthApiTypes: Send + Sync + Clone {
         + Send
         + Sync;
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
-    type NetworkTypes: Network;
+    type NetworkTypes: RpcTypes;
     /// Conversion methods for transaction RPC type.
     type TransactionCompat: Send + Sync + Clone + fmt::Debug;
 
@@ -37,16 +59,16 @@ pub trait EthApiTypes: Send + Sync + Clone {
 }
 
 /// Adapter for network specific transaction type.
-pub type RpcTransaction<T> = <T as Network>::TransactionResponse;
+pub type RpcTransaction<T> = <T as RpcTypes>::Transaction;
 
 /// Adapter for network specific block type.
-pub type RpcBlock<T> = Block<RpcTransaction<T>, <T as Network>::HeaderResponse>;
+pub type RpcBlock<T> = Block<RpcTransaction<T>, RpcHeader<T>>;
 
 /// Adapter for network specific receipt type.
-pub type RpcReceipt<T> = <T as Network>::ReceiptResponse;
+pub type RpcReceipt<T> = <T as RpcTypes>::Receipt;
 
 /// Adapter for network specific header type.
-pub type RpcHeader<T> = <T as Network>::HeaderResponse;
+pub type RpcHeader<T> = <T as RpcTypes>::Header;
 
 /// Adapter for network specific error type.
 pub type RpcError<T> = <T as EthApiTypes>::Error;

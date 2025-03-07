@@ -5,7 +5,6 @@ use alloc::string::ToString;
 use alloy_consensus::TxEnvelope;
 use alloy_network::{AnyRpcTransaction, AnyTxEnvelope};
 use alloy_rpc_types_eth::Transaction as AlloyRpcTransaction;
-use alloy_serde::WithOtherFields;
 
 impl TryFrom<AnyRpcTransaction> for TransactionSigned {
     type Error = alloy_rpc_types_eth::ConversionError;
@@ -13,9 +12,9 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
     fn try_from(tx: AnyRpcTransaction) -> Result<Self, Self::Error> {
         use alloy_rpc_types_eth::ConversionError;
 
-        let WithOtherFields { inner: tx, other: _ } = tx;
+        let tx = tx.into_inner();
 
-        let (transaction, signature, hash) = match tx.inner {
+        let (transaction, signature, hash) = match tx.inner.into_inner() {
             AnyTxEnvelope::Ethereum(TxEnvelope::Legacy(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();
                 (Transaction::Legacy(tx), signature, hash)
@@ -48,6 +47,6 @@ where
     Self: From<T>,
 {
     fn from(value: AlloyRpcTransaction<T>) -> Self {
-        value.inner.into()
+        value.inner.into_inner().into()
     }
 }

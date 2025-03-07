@@ -6,7 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use core::ops::RangeInclusive;
-use reth_primitives::{RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 
 /// A helper enum that represents the origin of the requested block.
@@ -148,7 +148,7 @@ pub trait BlockReader:
 
     /// Returns a range of sealed blocks from the database, along with the senders of each
     /// transaction in the blocks.
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>>;
@@ -207,11 +207,11 @@ impl<T: BlockReader> BlockReader for Arc<T> {
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::block_with_senders_range(self, range)
     }
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        T::sealed_block_with_senders_range(self, range)
+        T::recovered_block_range(self, range)
     }
 }
 
@@ -268,11 +268,11 @@ impl<T: BlockReader> BlockReader for &T {
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::block_with_senders_range(self, range)
     }
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        T::sealed_block_with_senders_range(self, range)
+        T::recovered_block_range(self, range)
     }
 }
 

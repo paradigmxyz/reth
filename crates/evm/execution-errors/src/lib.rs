@@ -15,9 +15,8 @@ use alloc::{
     boxed::Box,
     string::{String, ToString},
 };
-use alloy_eips::BlockNumHash;
+use alloy_evm::{EvmError, InvalidTxError};
 use alloy_primitives::B256;
-use reth_consensus::ConsensusError;
 use reth_storage_errors::provider::ProviderError;
 use thiserror::Error;
 
@@ -29,18 +28,15 @@ pub use trie::*;
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
-    EVM {
+    InvalidTx {
         /// The hash of the transaction
         hash: B256,
         /// The EVM error.
-        error: Box<dyn core::error::Error + Send + Sync>,
+        error: Box<dyn InvalidTxError>,
     },
     /// Error when incrementing balance in post execution
     #[error("incrementing balance in post execution failed")]
     IncrementBalanceFailed,
-    /// Error when the state root does not match the expected value.
-    #[error(transparent)]
-    StateRoot(#[from] StateRootError),
     /// Error when transaction gas limit exceeds available block gas
     #[error(
         "transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}"
@@ -109,9 +105,6 @@ pub enum BlockExecutionError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-    /// Consensus error, transparently wrapping [`ConsensusError`]
-    #[error(transparent)]
-    Consensus(#[from] ConsensusError),
     /// Internal, i.e. non consensus or validation related Block Executor Errors
     #[error(transparent)]
     Internal(#[from] InternalBlockExecutionError),
@@ -141,34 +134,41 @@ impl BlockExecutionError {
         }
     }
 
-    /// Returns `true` if the error is a state root error.
-    pub const fn is_state_root_error(&self) -> bool {
-        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
+    /// Handles an EVM error occurred when executing a transaction.
+    ///
+    /// If an error matches [`EvmError::InvalidTransaction`], it will be wrapped into
+    /// [`BlockValidationError::InvalidTx`], otherwise into [`InternalBlockExecutionError::EVM`].
+    pub fn evm<E: EvmError>(error: E, hash: B256) -> Self {
+        match error.try_into_invalid_tx_err() {
+            Ok(err) => {
+                Self::Validation(BlockValidationError::InvalidTx { hash, error: Box::new(err) })
+            }
+            Err(err) => {
+                Self::Internal(InternalBlockExecutionError::EVM { hash, error: Box::new(err) })
+            }
+        }
     }
 }
 
 impl From<ProviderError> for BlockExecutionError {
     fn from(error: ProviderError) -> Self {
-        InternalBlockExecutionError::from(error).into()
+        Self::other(error)
     }
 }
 
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum InternalBlockExecutionError {
-    /// Error when appending chain on fork is not possible
-    #[error(
-        "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
-    )]
-    AppendChainDoesntConnect {
-        /// The tip of the current chain
-        chain_tip: Box<BlockNumHash>,
-        /// The fork on the other chain
-        other_chain_fork: Box<BlockNumHash>,
+    /// EVM error occurred when executing transaction. This is different from
+    /// [`BlockValidationError::InvalidTx`] because it will only contain EVM errors which are not
+    /// transaction validation errors and are assumed to be fatal.
+    #[error("internal EVM error occurred when executing transaction {hash}: {error}")]
+    EVM {
+        /// The hash of the transaction
+        hash: B256,
+        /// The EVM error.
+        error: Box<dyn core::error::Error + Send + Sync>,
     },
-    /// Error when fetching data from the db.
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
     /// Arbitrary Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync + 'static>),

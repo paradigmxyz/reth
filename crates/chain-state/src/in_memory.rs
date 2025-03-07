@@ -944,7 +944,7 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue};
+    use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};
@@ -1049,7 +1049,7 @@ mod tests {
     }
 
     impl HashedPostStateProvider for MockStateProvider {
-        fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+        fn hashed_post_state(&self, _bundle_state: &revm_database::BundleState) -> HashedPostState {
             HashedPostState::default()
         }
     }
@@ -1104,8 +1104,8 @@ mod tests {
             &self,
             _input: TrieInput,
             _target: HashedPostState,
-        ) -> ProviderResult<B256Map<Bytes>> {
-            Ok(HashMap::default())
+        ) -> ProviderResult<Vec<Bytes>> {
+            Ok(Vec::default())
         }
     }
 

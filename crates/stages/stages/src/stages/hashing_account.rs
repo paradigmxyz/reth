@@ -1,10 +1,11 @@
 use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
-use reth_db::{tables, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
+    tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_primitives::Account;

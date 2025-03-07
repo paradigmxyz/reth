@@ -1,12 +1,12 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
 use alloc::vec::Vec;
+use alloy_consensus::ReceiptWithBloom;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives::ReceiptWithBloom;
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
@@ -79,12 +79,11 @@ pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Receipt;
+    use alloy_consensus::{Receipt, ReceiptWithBloom};
     use alloy_primitives::{b256, bloom, hex, Address, Bloom, Bytes, Log, LogData};
     use op_alloy_consensus::OpDepositReceipt;
     use reth_optimism_chainspec::BASE_SEPOLIA;
     use reth_optimism_primitives::OpReceipt;
-    use reth_primitives::ReceiptWithBloom;
 
     /// Tests that the receipt root is computed correctly for the regolith block.
     /// This was implemented due to a minor bug in op-geth and op-erigon where in
@@ -100,21 +99,21 @@ mod tests {
             (
                 "bedrock",
                 1679079599,
-                b256!("e255fed45eae7ede0556fe4fabc77b0d294d18781a5a581cab09127bc4cd9ffb"),
+                b256!("0xe255fed45eae7ede0556fe4fabc77b0d294d18781a5a581cab09127bc4cd9ffb"),
             ),
             // Deposit nonces introduced in Regolith. They weren't included in the receipt RLP,
             // so we need to strip them - the receipt root will differ.
             (
                 "regolith",
                 1679079600,
-                b256!("e255fed45eae7ede0556fe4fabc77b0d294d18781a5a581cab09127bc4cd9ffb"),
+                b256!("0xe255fed45eae7ede0556fe4fabc77b0d294d18781a5a581cab09127bc4cd9ffb"),
             ),
             // Receipt root hashing bug fixed in Canyon. Back to including the deposit nonce
             // in the receipt RLP when computing the receipt root.
             (
                 "canyon",
                 1699981200,
-                b256!("6eefbb5efb95235476654a8bfbf8cb64a4f5f0b0c80b700b0c5964550beee6d7"),
+                b256!("0x6eefbb5efb95235476654a8bfbf8cb64a4f5f0b0c80b700b0c5964550beee6d7"),
             ),
         ];
 
@@ -143,10 +142,10 @@ mod tests {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                                 data: LogData::new_unchecked(
                                     vec![
-                                        b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
-                                        b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
-                                        b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
-                                        b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+                                        b256!("0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
+                                        b256!("0x000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                        b256!("0x000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                        b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
                                     ],
                                     Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001"))
                                 )
@@ -155,10 +154,10 @@ mod tests {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                                 data: LogData::new_unchecked(
                                     vec![
-                                        b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
-                                        b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
-                                        b256!("0000000000000000000000000000000000000000000000000000000000000000"),
-                                        b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                        b256!("0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
+                                        b256!("0x000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                        b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
+                                        b256!("0x000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
                                     ],
                                     Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000000000001"))
                                 )
@@ -167,9 +166,9 @@ mod tests {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                                 data: LogData::new_unchecked(
                                 vec![
-                                    b256!("0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820"),
-                                    b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
-                                    b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                    b256!("0x0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820"),
+                                    b256!("0x000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
+                                    b256!("0x000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
                                 ], Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000003")))
                             },
                         ]}),
@@ -184,17 +183,17 @@ mod tests {
                             Log {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                                 data:  LogData::new_unchecked(vec![
-                                    b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
-                                    b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
-                                    b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
-                                    b256!("0000000000000000000000000000000000000000000000000000000000000000"),
+                                    b256!("0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
+                                    b256!("0x0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
+                                    b256!("0x0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
+                                    b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
                                 ],
                                 Bytes::from_static(&hex!("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001")))
                             },
                             Log {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                                 data:  LogData::new_unchecked(vec![
-                                    b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
+                                    b256!("0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
                                     b256!("0000000000000000000000000000000000000000000000000000000000000000"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
@@ -204,7 +203,7 @@ mod tests {
                             Log {
                                 address: hex!("ddb6dcce6b794415145eb5caa6cd335aeda9c272").into(),
                                 data:  LogData::new_unchecked(vec![
-                                    b256!("0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820"),
+                                    b256!("0x0eb774bb9698a73583fe07b6972cf2dcc08d1d97581a22861f45feb86b395820"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
                                     b256!("0000000000000000000000009d521a04bee134ff8136d2ec957e5bc8c50394ec"),
                                 ],

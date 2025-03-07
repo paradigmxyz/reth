@@ -63,7 +63,7 @@ const TIMEOUT_SCALING: u32 = 3;
 /// With proper softlimits in place (2MB) this targets 10MB (4+1 * 2MB) of outgoing response data.
 ///
 /// This parameter serves as backpressure for reading additional requests from the remote.
-/// Once we've queued up more responses than this, the session should priorotize message flushing
+/// Once we've queued up more responses than this, the session should prioritize message flushing
 /// before reading any more messages from the remote peer, throttling the peer.
 const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 
@@ -97,7 +97,7 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// A message that needs to be delivered to the session manager
     pub(crate) pending_message_to_session: Option<ActiveSessionMessage<N>>,
     /// Incoming internal requests which are delegated to the remote peer.
-    pub(crate) internal_request_tx: Fuse<ReceiverStream<PeerRequest<N>>>,
+    pub(crate) internal_request_rx: Fuse<ReceiverStream<PeerRequest<N>>>,
     /// All requests sent to the remote peer we're waiting on a response
     pub(crate) inflight_requests: FxHashMap<u64, InflightRequest<PeerRequest<N>>>,
     /// All requests that were sent by the remote peer and we're waiting on an internal response
@@ -296,7 +296,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 unreachable!("Not emitted by network")
             }
             PeerMessage::Other(other) => {
-                debug!(target: "net::session", message_id=%other.id, "Ignoring unsupported message");
                 self.queued_outgoing.push_back(OutgoingMessage::Raw(other));
             }
         }
@@ -548,7 +547,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
 
             let deadline = this.request_deadline();
 
-            while let Poll::Ready(Some(req)) = this.internal_request_tx.poll_next_unpin(cx) {
+            while let Poll::Ready(Some(req)) = this.internal_request_rx.poll_next_unpin(cx) {
                 progress = true;
                 this.on_internal_peer_request(req, deadline);
             }
@@ -846,8 +845,9 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
-        EthNetworkPrimitives, EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream,
-        Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockBodies,
+        HelloMessageWithProtocols, P2PStream, Status, StatusBuilder, UnauthedEthStream,
+        UnauthedP2PStream,
     };
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
@@ -920,6 +920,7 @@ mod tests {
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
 
             tokio::task::spawn(start_pending_incoming_session(
+                Arc::new(EthHandshake::default()),
                 disconnect_rx,
                 session_id,
                 stream,
@@ -961,7 +962,7 @@ mod tests {
                             "network_active_session",
                         ),
                         pending_message_to_session: None,
-                        internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
+                        internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
                         queued_outgoing: QueuedOutgoingMessages::new(Gauge::noop()),

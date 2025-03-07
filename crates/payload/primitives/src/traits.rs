@@ -27,7 +27,7 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
         None
     }
 
-    /// Returns the EIP-7865 requests for the payload if any.
+    /// Returns the EIP-7685 requests for the payload if any.
     fn requests(&self) -> Option<Requests>;
 }
 

@@ -1,12 +1,12 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_consensus::{BlockHeader, Header, Sealable};
-use alloy_eips::{eip1898::BlockWithParent, NumHash};
+use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{
-    execute::{BatchExecutor, BlockExecutorProvider},
+    execute::{BlockExecutorProvider, Executor},
     metrics::ExecutorMetrics,
 };
 use reth_execution_types::Chain;
@@ -15,9 +15,9 @@ use reth_primitives::StaticFileSegment;
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, StateCommitmentProvider, StateWriter,
-    StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
+    BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateCommitmentProvider,
+    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -72,6 +72,9 @@ where
 {
     /// The stage's internal block executor
     executor_provider: E,
+    /// The consensus instance for validating blocks.
+    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    /// The consensu
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -100,6 +103,7 @@ where
     /// Create new execution stage with specified config.
     pub fn new(
         executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         exex_manager_handle: ExExManagerHandle<E::Primitives>,
@@ -107,6 +111,7 @@ where
         Self {
             external_clean_threshold,
             executor_provider,
+            consensus,
             thresholds,
             post_execute_commit_input: None,
             post_unwind_commit_input: None,
@@ -118,9 +123,13 @@ where
     /// Create an execution stage with the provided executor.
     ///
     /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD`].
-    pub fn new_with_executor(executor_provider: E) -> Self {
+    pub fn new_with_executor(
+        executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    ) -> Self {
         Self::new(
             executor_provider,
+            consensus,
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
             ExExManagerHandle::empty(),
@@ -130,11 +139,13 @@ where
     /// Create new instance of [`ExecutionStage`] from configuration.
     pub fn from_config(
         executor_provider: E,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         config: ExecutionConfig,
         external_clean_threshold: u64,
     ) -> Self {
         Self::new(
             executor_provider,
+            consensus,
             config.into(),
             external_clean_threshold,
             ExExManagerHandle::empty(),
@@ -283,7 +294,7 @@ where
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
-        let mut executor = self.executor_provider.batch_executor(db);
+        let mut executor = self.executor_provider.executor(db);
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -310,6 +321,7 @@ where
         let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
+        let mut results = Vec::new();
         for block_number in start_block..=max_block {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -329,18 +341,20 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            self.metrics.metered_one(&block, |input| {
-                executor.execute_and_verify_one(input).map_err(|error| {
-                    let header = block.header();
-                    StageError::Block {
-                        block: Box::new(BlockWithParent::new(
-                            header.parent_hash(),
-                            NumHash::new(header.number(), header.hash_slow()),
-                        )),
-                        error: BlockErrorKind::Execution(error),
-                    }
+            let result = self.metrics.metered_one(&block, |input| {
+                executor.execute_one(input).map_err(|error| StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Execution(error),
                 })
             })?;
+
+            if let Err(err) = self.consensus.validate_block_post_execution(&block, &result) {
+                return Err(StageError::Block {
+                    block: Box::new(block.block_with_parent()),
+                    error: BlockErrorKind::Validation(err),
+                })
+            }
+            results.push(result);
 
             execution_duration += execute_start.elapsed();
 
@@ -369,10 +383,9 @@ where
             }
 
             // Check if we should commit now
-            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
             if self.thresholds.is_end_of_batch(
                 block_number - start_block,
-                bundle_size_hint,
+                executor.size_hint() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -382,7 +395,11 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let mut state = executor.finalize();
+        let mut state = ExecutionOutcome::from_blocks(
+            start_block,
+            executor.into_state().take_bundle(),
+            results,
+        );
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -497,7 +514,7 @@ where
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
             // Get the blocks for the unwound range.
-            let blocks = provider.sealed_block_with_senders_range(range.clone())?;
+            let blocks = provider.recovered_block_range(range.clone())?;
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,
@@ -647,10 +664,13 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_db::transaction::DbTx;
-    use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_db_api::{
+        models::AccountBeforeTx,
+        transaction::{DbTx, DbTxMut},
+    };
+    use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_evm::execute::BasicBlockExecutorProvider;
-    use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
@@ -661,13 +681,16 @@ mod tests {
     use reth_stages_api::StageUnitCheckpoint;
     use std::collections::BTreeMap;
 
-    fn stage() -> ExecutionStage<BasicBlockExecutorProvider<EthExecutionStrategyFactory>> {
-        let strategy_factory = EthExecutionStrategyFactory::ethereum(Arc::new(
-            ChainSpecBuilder::mainnet().berlin_activated().build(),
-        ));
+    fn stage() -> ExecutionStage<BasicBlockExecutorProvider<EthEvmConfig>> {
+        let strategy_factory =
+            EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
         let executor_provider = BasicBlockExecutorProvider::new(strategy_factory);
+        let consensus = Arc::new(EthBeaconConsensus::new(Arc::new(
+            ChainSpecBuilder::mainnet().berlin_activated().build(),
+        )));
         ExecutionStage::new(
             executor_provider,
+            consensus,
             ExecutionStageThresholds {
                 max_blocks: Some(100),
                 max_changes: None,
@@ -849,8 +872,8 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let db_tx = provider.tx_ref();
-        let acc1 = address!("1000000000000000000000000000000000000000");
-        let acc2 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+        let acc1 = address!("0x1000000000000000000000000000000000000000");
+        let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
         let code = hex!("5a465a905090036002900360015500");
         let balance = U256::from(0x3635c9adc5dea00000u128);
         let code_hash = keccak256(code);
@@ -914,16 +937,16 @@ mod tests {
             let provider = factory.provider().unwrap();
 
             // check post state
-            let account1 = address!("1000000000000000000000000000000000000000");
+            let account1 = address!("0x1000000000000000000000000000000000000000");
             let account1_info =
                 Account { balance: U256::ZERO, nonce: 0x00, bytecode_hash: Some(code_hash) };
-            let account2 = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
+            let account2 = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
             let account2_info = Account {
                 balance: U256::from(0x1bc16d674ece94bau128),
                 nonce: 0x00,
                 bytecode_hash: None,
             };
-            let account3 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+            let account3 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
             let account3_info = Account {
                 balance: U256::from(0x3635c9adc5de996b46u128),
                 nonce: 0x01,
@@ -995,9 +1018,9 @@ mod tests {
         let provider = factory.provider_rw().unwrap();
 
         let db_tx = provider.tx_ref();
-        let acc1 = address!("1000000000000000000000000000000000000000");
+        let acc1 = address!("0x1000000000000000000000000000000000000000");
         let acc1_info = Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) };
-        let acc2 = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+        let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
         let acc2_info = Account { nonce: 0, balance, bytecode_hash: None };
 
         db_tx.put::<tables::PlainAccountState>(acc1, acc1_info).unwrap();
@@ -1062,7 +1085,7 @@ mod tests {
             assert!(matches!(provider.basic_account(&acc1), Ok(Some(acc)) if acc == acc1_info));
             assert!(matches!(provider.basic_account(&acc2), Ok(Some(acc)) if acc == acc2_info));
 
-            let miner_acc = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
+            let miner_acc = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
             assert!(matches!(provider.basic_account(&miner_acc), Ok(None)));
 
             assert!(matches!(provider.receipt(0), Ok(None)));
@@ -1096,9 +1119,9 @@ mod tests {
         provider.commit().unwrap();
 
         // variables
-        let caller_address = address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b");
-        let destroyed_address = address!("095e7baea6a6c7c4c2dfeb977efac326af552d87");
-        let beneficiary_address = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
+        let caller_address = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
+        let destroyed_address = address!("0x095e7baea6a6c7c4c2dfeb977efac326af552d87");
+        let beneficiary_address = address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
 
         let code = hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00");
         let balance = U256::from(0x0de0b6b3a7640000u64);

@@ -4,12 +4,8 @@
 [advisories]
 yanked = "warn"
 ignore = [
-    # https://rustsec.org/advisories/RUSTSEC-2024-0379 used by boa (js-tracer)
-    "RUSTSEC-2024-0379",
     # https://rustsec.org/advisories/RUSTSEC-2024-0384 used by sse example
     "RUSTSEC-2024-0384",
-    # https://rustsec.org/advisories/RUSTSEC-2024-0388 used by ssz, will be removed https://github.com/sigp/ethereum_ssz/pull/34
-    "RUSTSEC-2024-0388",
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -93,4 +89,6 @@ allow-git = [
     "https://github.com/foundry-rs/block-explorers",
     "https://github.com/bluealloy/revm",
     "https://github.com/paradigmxyz/revm-inspectors",
+    "https://github.com/alloy-rs/evm",
+    "https://github.com/alloy-rs/hardforks",
 ]

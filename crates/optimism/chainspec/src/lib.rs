@@ -19,13 +19,13 @@ mod op_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::Header;
+use alloy_consensus::{proofs::storage_root_unhashed, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
-use derive_more::{Constructor, Deref, Display, From, Into};
+use derive_more::{Constructor, Deref, From, Into};
 pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
@@ -35,8 +35,9 @@ use reth_chainspec::{
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
-use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_primitives_traits::sync::LazyLock;
+use reth_optimism_forks::{OpHardfork, OpHardforks, OP_MAINNET_HARDFORKS};
+use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
+use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -94,7 +95,7 @@ impl OpChainSpecBuilder {
     }
 
     /// Remove the given fork from the spec.
-    pub fn without_fork(mut self, fork: reth_optimism_forks::OpHardfork) -> Self {
+    pub fn without_fork(mut self, fork: OpHardfork) -> Self {
         self.inner = self.inner.without_fork(fork);
         self
     }
@@ -102,17 +103,14 @@ impl OpChainSpecBuilder {
     /// Enable Bedrock at genesis
     pub fn bedrock_activated(mut self) -> Self {
         self.inner = self.inner.paris_activated();
-        self.inner =
-            self.inner.with_fork(reth_optimism_forks::OpHardfork::Bedrock, ForkCondition::Block(0));
+        self.inner = self.inner.with_fork(OpHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
     /// Enable Regolith at genesis
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Regolith, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -121,9 +119,7 @@ impl OpChainSpecBuilder {
         self = self.regolith_activated();
         // Canyon also activates changes from L1's Shanghai hardfork
         self.inner = self.inner.with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Canyon, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -131,36 +127,28 @@ impl OpChainSpecBuilder {
     pub fn ecotone_activated(mut self) -> Self {
         self = self.canyon_activated();
         self.inner = self.inner.with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Ecotone, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Fjord at genesis
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Fjord, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Granite at genesis
     pub fn granite_activated(mut self) -> Self {
         self = self.fjord_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Granite, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Granite, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Holocene at genesis
     pub fn holocene_activated(mut self) -> Self {
         self = self.granite_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_optimism_forks::OpHardfork::Holocene, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Holocene, ForkCondition::Timestamp(0));
         self
     }
 
@@ -171,6 +159,13 @@ impl OpChainSpecBuilder {
         self
     }
 
+    /// Enable Interop at genesis
+    pub fn interop_activated(mut self) -> Self {
+        self = self.isthmus_activated();
+        self.inner = self.inner.with_fork(OpHardfork::Interop, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`OpChainSpec`].
     ///
     /// # Panics
@@ -178,7 +173,11 @@ impl OpChainSpecBuilder {
     /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
     /// [`Self::genesis`])
     pub fn build(self) -> OpChainSpec {
-        OpChainSpec { inner: self.inner.build() }
+        let mut inner = self.inner.build();
+        inner.genesis_header =
+            SealedHeader::seal_slow(make_op_genesis_header(&inner.genesis, &inner.hardforks));
+
+        OpChainSpec { inner }
     }
 }
 
@@ -199,7 +198,7 @@ impl OpChainSpec {
 impl EthChainSpec for OpChainSpec {
     type Header = Header;
 
-    fn chain(&self) -> alloy_chains::Chain {
+    fn chain(&self) -> Chain {
         self.inner.chain()
     }
 
@@ -227,7 +226,7 @@ impl EthChainSpec for OpChainSpec {
         self.inner.prune_delete_limit()
     }
 
-    fn display_hardforks(&self) -> Box<dyn Display> {
+    fn display_hardforks(&self) -> Box<dyn core::fmt::Display> {
         Box::new(ChainSpec::display_hardforks(self))
     }
 
@@ -246,16 +245,18 @@ impl EthChainSpec for OpChainSpec {
     fn is_optimism(&self) -> bool {
         true
     }
+
+    fn final_paris_total_difficulty(&self) -> Option<U256> {
+        self.inner.final_paris_total_difficulty()
+    }
 }
 
 impl Hardforks for OpChainSpec {
-    fn fork<H: reth_chainspec::Hardfork>(&self, fork: H) -> reth_chainspec::ForkCondition {
+    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
         self.inner.fork(fork)
     }
 
-    fn forks_iter(
-        &self,
-    ) -> impl Iterator<Item = (&dyn reth_chainspec::Hardfork, reth_chainspec::ForkCondition)> {
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.inner.forks_iter()
     }
 
@@ -275,14 +276,6 @@ impl Hardforks for OpChainSpec {
 impl EthereumHardforks for OpChainSpec {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
         self.fork(fork)
-    }
-
-    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
-        self.inner.get_final_paris_total_difficulty()
-    }
-
-    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
-        self.inner.final_paris_total_difficulty(block_number)
     }
 }
 
@@ -343,6 +336,7 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Granite.boxed(), genesis_info.granite_time),
             (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
             (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
+            (OpHardfork::Interop.boxed(), genesis_info.interop_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -355,7 +349,7 @@ impl From<Genesis> for OpChainSpec {
         block_hardforks.append(&mut time_hardforks);
 
         // Ordered Hardforks
-        let mainnet_hardforks = OpHardfork::op_mainnet();
+        let mainnet_hardforks = OP_MAINNET_HARDFORKS.clone();
         let mainnet_order = mainnet_hardforks.forks_iter();
 
         let mut ordered_hardforks = Vec::with_capacity(block_hardforks.len());
@@ -368,11 +362,15 @@ impl From<Genesis> for OpChainSpec {
         // append the remaining unknown hardforks to ensure we don't filter any out
         ordered_hardforks.append(&mut block_hardforks);
 
+        let hardforks = ChainHardforks::new(ordered_hardforks);
+        let genesis_header = SealedHeader::seal_slow(make_op_genesis_header(&genesis, &hardforks));
+
         Self {
             inner: ChainSpec {
                 chain: genesis.config.chain_id.into(),
+                genesis_header,
                 genesis,
-                hardforks: ChainHardforks::new(ordered_hardforks),
+                hardforks,
                 // We assume no OP network merges, and set the paris block and total difficulty to
                 // zero
                 paris_block_and_final_difficulty: Some((0, U256::ZERO)),
@@ -413,7 +411,7 @@ impl OpGenesisInfo {
                                 BaseFeeParams::new(denominator as u128, elasticity as u128),
                             ),
                             (
-                                reth_optimism_forks::OpHardfork::Canyon.boxed(),
+                                OpHardfork::Canyon.boxed(),
                                 BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
                             ),
                         ]
@@ -431,6 +429,24 @@ impl OpGenesisInfo {
     }
 }
 
+/// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
+pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
+    let mut header = reth_chainspec::make_genesis_header(genesis, hardforks);
+
+    // If Isthmus is active, overwrite the withdrawals root with the storage root of predeploy
+    // `L2ToL1MessagePasser.sol`
+    if hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(header.timestamp) {
+        if let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
+            if let Some(storage) = &predeploy.storage {
+                header.withdrawals_root =
+                    Some(storage_root_unhashed(storage.iter().map(|(k, v)| (*k, (*v).into()))))
+            }
+        }
+    }
+
+    header
+}
+
 #[cfg(test)]
 mod tests {
     use alloy_genesis::{ChainConfig, Genesis};
@@ -443,8 +459,8 @@ mod tests {
 
     #[test]
     fn base_mainnet_forkids() {
-        let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
-        let _ = base_mainnet.genesis_hash.set(BASE_MAINNET.genesis_hash.get().copied().unwrap());
+        let mut base_mainnet = OpChainSpecBuilder::base_mainnet().build();
+        base_mainnet.inner.genesis_header.set_hash(BASE_MAINNET.genesis_hash());
         test_fork_ids(
             &BASE_MAINNET,
             &[
@@ -539,10 +555,10 @@ mod tests {
 
     #[test]
     fn op_mainnet_forkids() {
-        let op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
+        let mut op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
         // for OP mainnet we have to do this because the genesis header can't be properly computed
         // from the genesis.json file
-        let _ = op_mainnet.genesis_hash.set(OP_MAINNET.genesis_hash());
+        op_mainnet.inner.genesis_header.set_hash(OP_MAINNET.genesis_hash());
         test_fork_ids(
             &op_mainnet,
             &[
@@ -613,7 +629,7 @@ mod tests {
         let genesis = BASE_MAINNET.genesis_header();
         assert_eq!(
             genesis.hash_slow(),
-            b256!("f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd")
+            b256!("0xf712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd")
         );
         let base_fee = genesis
             .next_block_base_fee(BASE_MAINNET.base_fee_params_at_timestamp(genesis.timestamp))
@@ -627,7 +643,7 @@ mod tests {
         let genesis = BASE_SEPOLIA.genesis_header();
         assert_eq!(
             genesis.hash_slow(),
-            b256!("0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4")
+            b256!("0x0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4")
         );
         let base_fee = genesis
             .next_block_base_fee(BASE_SEPOLIA.base_fee_params_at_timestamp(genesis.timestamp))
@@ -641,7 +657,7 @@ mod tests {
         let genesis = OP_SEPOLIA.genesis_header();
         assert_eq!(
             genesis.hash_slow(),
-            b256!("102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d")
+            b256!("0x102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d")
         );
         let base_fee = genesis
             .next_block_base_fee(OP_SEPOLIA.base_fee_params_at_timestamp(genesis.timestamp))
@@ -965,6 +981,7 @@ mod tests {
             OpHardfork::Granite.boxed(),
             OpHardfork::Holocene.boxed(),
             // OpHardfork::Isthmus.boxed(),
+            // OpHardfork::Interop.boxed(),
         ];
 
         for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {

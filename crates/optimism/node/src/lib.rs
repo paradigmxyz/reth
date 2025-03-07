@@ -9,8 +9,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 /// CLI argument parsing for the optimism node.
 pub mod args;
@@ -25,6 +23,9 @@ pub use node::{OpNetworkPrimitives, OpNode};
 
 pub mod rpc;
 pub use rpc::OpEngineApiBuilder;
+
+pub mod version;
+pub use version::OP_NAME_CLIENT;
 
 pub use reth_optimism_txpool as txpool;
 

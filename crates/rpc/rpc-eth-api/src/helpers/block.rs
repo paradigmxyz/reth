@@ -93,7 +93,7 @@ pub trait EthBlocks: LoadBlock {
 
             Ok(self
                 .cache()
-                .get_sealed_block_with_senders(block_hash)
+                .get_recovered_block(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
                 .map(|b| b.body().transaction_count()))
@@ -111,7 +111,7 @@ pub trait EthBlocks: LoadBlock {
     where
         Self: LoadReceipt;
 
-    /// Helper method that loads a bock and all its receipts.
+    /// Helper method that loads a block and all its receipts.
     #[allow(clippy::type_complexity)]
     fn load_block_and_receipts(
         &self,
@@ -241,10 +241,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                 None => return Ok(None),
             };
 
-            self.cache()
-                .get_sealed_block_with_senders(block_hash)
-                .await
-                .map_err(Self::Error::from_eth_err)
+            self.cache().get_recovered_block(block_hash).await.map_err(Self::Error::from_eth_err)
         }
     }
 }
