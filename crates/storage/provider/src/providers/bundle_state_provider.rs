@@ -1,7 +1,7 @@
 use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, B256};
+use alloy_primitives::{Address, BlockNumber, Bytes, B256};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
@@ -173,11 +173,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         self.state_provider.multiproof(input, targets)
     }
 
-    fn witness(
-        &self,
-        mut input: TrieInput,
-        target: HashedPostState,
-    ) -> ProviderResult<B256Map<Bytes>> {
+    fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         input.prepend(self.hashed_post_state(bundle_state));
         self.state_provider.witness(input, target)

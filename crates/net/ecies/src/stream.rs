@@ -68,7 +68,7 @@ where
         remote_id: PeerId,
     ) -> Result<Self, ECIESError> {
         let ecies = ECIESCodec::new_client(secret_key, remote_id)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid handshake"))?;
+            .map_err(|_| io::Error::other("invalid handshake"))?;
 
         let mut transport = ecies.framed(transport);
 
@@ -137,10 +137,9 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match ready!(self.project().stream.poll_next(cx)) {
             Some(Ok(IngressECIESValue::Message(body))) => Poll::Ready(Some(Ok(body))),
-            Some(other) => Poll::Ready(Some(Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("ECIES stream protocol error: expected message, received {other:?}"),
-            )))),
+            Some(other) => Poll::Ready(Some(Err(io::Error::other(format!(
+                "ECIES stream protocol error: expected message, received {other:?}"
+            ))))),
             None => Poll::Ready(None),
         }
     }

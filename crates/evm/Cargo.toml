@@ -19,11 +19,13 @@ reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
 
 revm.workspace = true
 revm-database.workspace = true
-revm-optimism = { workspace = true, optional = true }
+op-revm = { workspace = true, optional = true }
 
 # alloy
 alloy-primitives.workspace = true
@@ -59,12 +61,14 @@ std = [
     "reth-consensus-common/std",
     "alloy-evm/std",
     "revm-database/std",
-    "revm-optimism?/std",
+    "op-revm?/std",
     "reth-execution-errors/std",
     "reth-execution-types/std",
     "reth-storage-errors/std",
     "futures-util/std",
     "derive_more/std",
+    "reth-storage-api/std",
+    "reth-trie-common/std",
 ]
 metrics = [
     "std",
@@ -78,9 +82,10 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "revm/test-utils",
+    "reth-trie-common/test-utils",
 ]
 op = [
-    "revm-optimism",
+    "op-revm",
     "alloy-evm/op",
     "reth-primitives-traits/op",
 ]

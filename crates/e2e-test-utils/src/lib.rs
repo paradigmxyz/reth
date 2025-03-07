@@ -23,6 +23,7 @@ use wallet::Wallet;
 
 /// Wrapper type to create test nodes
 pub mod node;
+pub mod testsuite;
 
 /// Helper for transaction operations
 pub mod transaction;
@@ -36,13 +37,8 @@ mod payload;
 /// Helper for network operations
 mod network;
 
-/// Helper for engine api operations
-mod engine_api;
 /// Helper for rpc operations
 mod rpc;
-
-/// Helper traits
-mod traits;
 
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
@@ -189,7 +185,7 @@ where
         let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
         let genesis = node.block_hash(0);
-        node.engine_api.update_forkchoice(genesis, genesis).await?;
+        node.update_forkchoice(genesis, genesis).await?;
 
         // Connect each node in a chain.
         if let Some(previous_node) = nodes.last_mut() {

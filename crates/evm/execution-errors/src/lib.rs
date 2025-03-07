@@ -15,7 +15,6 @@ use alloc::{
     boxed::Box,
     string::{String, ToString},
 };
-use alloy_eips::BlockNumHash;
 use alloy_evm::{EvmError, InvalidTxError};
 use alloy_primitives::B256;
 use reth_storage_errors::provider::ProviderError;
@@ -38,9 +37,6 @@ pub enum BlockValidationError {
     /// Error when incrementing balance in post execution
     #[error("incrementing balance in post execution failed")]
     IncrementBalanceFailed,
-    /// Error when the state root does not match the expected value.
-    #[error(transparent)]
-    StateRoot(#[from] StateRootError),
     /// Error when transaction gas limit exceeds available block gas
     #[error(
         "transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}"
@@ -138,11 +134,6 @@ impl BlockExecutionError {
         }
     }
 
-    /// Returns `true` if the error is a state root error.
-    pub const fn is_state_root_error(&self) -> bool {
-        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
-    }
-
     /// Handles an EVM error occurred when executing a transaction.
     ///
     /// If an error matches [`EvmError::InvalidTransaction`], it will be wrapped into
@@ -161,25 +152,13 @@ impl BlockExecutionError {
 
 impl From<ProviderError> for BlockExecutionError {
     fn from(error: ProviderError) -> Self {
-        InternalBlockExecutionError::from(error).into()
+        Self::other(error)
     }
 }
-
-impl revm_database_interface::DBErrorMarker for BlockExecutionError {}
 
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum InternalBlockExecutionError {
-    /// Error when appending chain on fork is not possible
-    #[error(
-        "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
-    )]
-    AppendChainDoesntConnect {
-        /// The tip of the current chain
-        chain_tip: Box<BlockNumHash>,
-        /// The fork on the other chain
-        other_chain_fork: Box<BlockNumHash>,
-    },
     /// EVM error occurred when executing transaction. This is different from
     /// [`BlockValidationError::InvalidTx`] because it will only contain EVM errors which are not
     /// transaction validation errors and are assumed to be fatal.
@@ -190,9 +169,6 @@ pub enum InternalBlockExecutionError {
         /// The EVM error.
         error: Box<dyn core::error::Error + Send + Sync>,
     },
-    /// Error when fetching data from the db.
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
     /// Arbitrary Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync + 'static>),

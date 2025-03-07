@@ -8,7 +8,6 @@ optimism_package:
   chains:
     - participants:
       - el_type: op-geth
-        el_image: "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-geth:v1.101411.8"
         cl_type: op-node
       - el_type: op-reth
         el_image: "ghcr.io/paradigmxyz/op-reth:kurtosis-ci"

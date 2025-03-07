@@ -14,9 +14,9 @@ workspace = true
 [dependencies]
 # reth
 reth-chain-state.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
-reth-primitives = { workspace = true, features = ["c-kzg", "secp256k1"] }
 reth-primitives-traits.workspace = true
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
@@ -29,7 +29,7 @@ revm-specification.workspace = true
 alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-consensus.workspace = true
+alloy-consensus = { workspace = true, features = ["kzg"] }
 
 # async/futures
 futures-util.workspace = true
@@ -59,7 +59,6 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 paste.workspace = true
@@ -86,9 +85,9 @@ serde = [
     "parking_lot/serde",
     "rand?/serde",
     "smallvec/serde",
-    "reth-primitives-traits/serde",
     "revm-interpreter/serde",
     "revm-specification/serde",
+    "reth-primitives-traits/serde",
 ]
 test-utils = [
     "rand",
@@ -96,13 +95,12 @@ test-utils = [
     "serde",
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
-    "reth-primitives/test-utils",
     "reth-provider/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-ethereum-primitives/test-utils",
 ]
 arbitrary = [
     "proptest",
-    "reth-primitives/arbitrary",
     "proptest-arbitrary-interop",
     "reth-chainspec/arbitrary",
     "reth-eth-wire-types/arbitrary",
@@ -113,6 +111,7 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "smallvec/arbitrary",
     "revm-interpreter/arbitrary",
+    "reth-ethereum-primitives/arbitrary",
 ]
 
 [[bench]]

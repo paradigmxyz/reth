@@ -4,7 +4,7 @@ use alloy_consensus::{
     TxEip7702, TxLegacy, TxType,
 };
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+use alloy_primitives::{PrimitiveSignature as Signature, TxHash, B256};
 use revm_primitives::Log;
 
 /// Trait for calculating a heuristic for the in-memory size of a struct.
@@ -16,7 +16,7 @@ pub trait InMemorySize {
 
 impl<T: InMemorySize> InMemorySize for alloy_consensus::Signed<T> {
     fn size(&self) -> usize {
-        T::size(self.tx()) + self.signature().size() + self.hash().size()
+        T::size(self.tx()) + self.signature().size() + core::mem::size_of::<B256>()
     }
 }
 

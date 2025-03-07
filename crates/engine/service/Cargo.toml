@@ -41,6 +41,7 @@ reth-evm-ethereum.workspace = true
 reth-exex-types.workspace = true
 reth-primitives.workspace = true
 reth-chainspec.workspace = true
+reth-node-ethereum.workspace = true
 
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true

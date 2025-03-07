@@ -845,8 +845,9 @@ mod tests {
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
-        EthNetworkPrimitives, EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream,
-        Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockBodies,
+        HelloMessageWithProtocols, P2PStream, Status, StatusBuilder, UnauthedEthStream,
+        UnauthedP2PStream,
     };
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
@@ -919,6 +920,7 @@ mod tests {
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
 
             tokio::task::spawn(start_pending_incoming_session(
+                Arc::new(EthHandshake::default()),
                 disconnect_rx,
                 session_id,
                 stream,

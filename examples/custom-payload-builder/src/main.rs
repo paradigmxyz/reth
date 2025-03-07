@@ -3,13 +3,13 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p custom-payload-builder -- node
 //! ```
 //!
-//! This launch the regular reth node overriding the engine api payload builder with our custom.
+//! This launches a regular reth node overriding the engine api payload builder with our custom.
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use crate::generator::EmptyBlockPayloadJobGenerator;
 use reth::{
@@ -52,13 +52,12 @@ where
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
         tracing::info!("Spawning a custom payload builder");
-        let conf = ctx.payload_builder_config();
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             ctx.provider().clone(),
             pool,
             EthEvmConfig::new(ctx.chain_spec()),
-            EthereumBuilderConfig::new(conf.extra_data_bytes()),
+            EthereumBuilderConfig::new(),
         );
 
         let conf = ctx.payload_builder_config();

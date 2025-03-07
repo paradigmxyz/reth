@@ -17,8 +17,9 @@ use alloy_op_evm::OpEvmFactory;
 use alloy_primitives::U256;
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
+use op_revm::{OpHaltReason, OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
@@ -29,16 +30,17 @@ use revm::{
     context_interface::block::BlobExcessGasAndPrice,
     specification::hardfork::SpecId,
 };
-use revm_optimism::{OpHaltReason, OpSpecId, OpTransaction};
 
 mod config;
-pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
+pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock, OpNextBlockEnvAttributes};
 mod execute;
 pub use execute::*;
 pub mod l1;
 pub use l1::*;
 mod receipts;
 pub use receipts::*;
+mod build;
+pub use build::OpBlockAssembler;
 
 mod error;
 pub use error::OpBlockExecutionError;
@@ -49,6 +51,7 @@ pub struct OpEvmConfig<ChainSpec = OpChainSpec, N: NodePrimitives = OpPrimitives
     chain_spec: Arc<ChainSpec>,
     evm_factory: OpEvmFactory,
     receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, OpHaltReason, Receipt = N::Receipt>>,
+    block_assembler: OpBlockAssembler<ChainSpec>,
 }
 
 impl<ChainSpec, N: NodePrimitives> Clone for OpEvmConfig<ChainSpec, N> {
@@ -57,6 +60,7 @@ impl<ChainSpec, N: NodePrimitives> Clone for OpEvmConfig<ChainSpec, N> {
             chain_spec: self.chain_spec.clone(),
             evm_factory: OpEvmFactory::default(),
             receipt_builder: self.receipt_builder.clone(),
+            block_assembler: self.block_assembler.clone(),
         }
     }
 }
@@ -75,6 +79,7 @@ impl<ChainSpec, N: NodePrimitives> OpEvmConfig<ChainSpec, N> {
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, OpHaltReason, Receipt = N::Receipt>,
     ) -> Self {
         Self {
+            block_assembler: OpBlockAssembler::new(chain_spec.clone()),
             chain_spec,
             evm_factory: OpEvmFactory::default(),
             receipt_builder: Arc::new(receipt_builder),
@@ -98,6 +103,7 @@ where
     type Error = EIP1559ParamError;
     type TxEnv = OpTransaction<TxEnv>;
     type Spec = OpSpecId;
+    type NextBlockEnvCtx = OpNextBlockEnvAttributes;
 
     fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
         let spec = config::revm_spec(self.chain_spec(), header);
@@ -132,7 +138,7 @@ where
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
+        attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<Self::Spec>, Self::Error> {
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_after_bedrock(&self.chain_spec, attributes.timestamp);
@@ -186,6 +192,7 @@ mod tests {
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
     use alloy_primitives::{bytes, map::HashMap, Address, LogData, B256};
+    use op_revm::OpSpecId;
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
     use reth_execution_types::{
@@ -196,7 +203,6 @@ mod tests {
     use reth_primitives_traits::{Account, RecoveredBlock};
     use revm::{database_interface::EmptyDBTyped, inspector::NoOpInspector, state::AccountInfo};
     use revm_database::{BundleState, CacheDB};
-    use revm_optimism::OpSpecId;
     use revm_primitives::Log;
     use std::sync::Arc;
 

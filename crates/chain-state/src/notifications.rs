@@ -357,7 +357,7 @@ mod tests {
                 block: block1.num_hash(),
                 tx_receipts: vec![(
                     // Transaction hash of a Transaction::default()
-                    b256!("20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
+                    b256!("0x20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
                     receipt1
                 )]
             }
@@ -442,7 +442,7 @@ mod tests {
                 block: old_block1.num_hash(),
                 tx_receipts: vec![(
                     // Transaction hash of a Transaction::default()
-                    b256!("20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
+                    b256!("0x20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
                     old_receipt
                 )]
             }
@@ -458,7 +458,7 @@ mod tests {
                 block: new_block1.num_hash(),
                 tx_receipts: vec![(
                     // Transaction hash of a Transaction::default()
-                    b256!("20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
+                    b256!("0x20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
                     new_receipt
                 )]
             }
