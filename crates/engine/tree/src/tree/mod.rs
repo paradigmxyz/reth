@@ -1876,6 +1876,10 @@ where
         Ok(Some(self.prepare_invalid_response(header.parent)?))
     }
 
+    fn on_invalid_header(&mut self, block: RecoveredBlock<<N as NodePrimitives>::Block>) -> bool {
+        self.state.invalid_headers.get(&block.hash()).is_some()
+    }
+
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     fn validate_block(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
@@ -2403,7 +2407,7 @@ where
 
         if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
-            if !(self.state.invalid_headers.get(&block.hash()).is_some()) {
+            if self.on_invalid_header(block.clone()) {
                 self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
                 self.state.invalid_headers.insert(block.block_with_parent());
             }
@@ -2417,7 +2421,7 @@ where
             .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
         {
             // call post-block hook
-            if !(self.state.invalid_headers.get(&block.hash()).is_some()) {
+            if self.on_invalid_header(block.clone()) {
                 self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
                 self.state.invalid_headers.insert(block.block_with_parent());
             }
