@@ -6,6 +6,8 @@ yanked = "warn"
 ignore = [
     # https://rustsec.org/advisories/RUSTSEC-2024-0384 used by sse example
     "RUSTSEC-2024-0384",
+    # https://rustsec.org/advisories/RUSTSEC-2024-0436 paste! is unmaintained
+    "RUSTSEC-2024-0436",
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -44,12 +46,9 @@ allow = [
     "0BSD",
     "CC0-1.0",
     "ISC",
-    "Unicode-DFS-2016",
     "Unlicense",
     "Unicode-3.0",
     "Zlib",
-    # https://github.com/briansmith/ring/issues/902
-    "LicenseRef-ring",
     # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
     "LicenseRef-rustls-webpki",
 ]
@@ -62,11 +61,6 @@ exceptions = [
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-roots" },
 ]
-
-[[licenses.clarify]]
-name = "ring"
-expression = "LicenseRef-ring"
-license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [[licenses.clarify]]
 name = "rustls-webpki"
