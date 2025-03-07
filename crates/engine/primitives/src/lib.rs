@@ -42,8 +42,8 @@ pub use event::*;
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
-mod config;
-pub use config::{has_enough_parallelism, *};
+pub mod config;
+pub use config::*;
 
 /// This type defines the versioned types of the engine API.
 ///

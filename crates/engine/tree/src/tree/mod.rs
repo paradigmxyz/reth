@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockNumHash;
+use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256, U256,
@@ -82,7 +82,14 @@ pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use persistence_state::PersistenceState;
-use reth_engine_primitives::{TreeConfig, MIN_BLOCKS_FOR_PIPELINE_RUN};
+pub use reth_engine_primitives::TreeConfig;
+
+/// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
+/// for more information.
+///
+/// This is the default threshold, the distance to the head that the tree will be used for sync.
+/// If the distance exceeds this threshold, the pipeline will be used for sync.
+pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Keeps track of the state of the tree.
 ///
@@ -3150,10 +3157,10 @@ mod tests {
                 PersistenceState::default(),
                 payload_builder,
                 // TODO: fix tests for state root task https://github.com/paradigmxyz/reth/issues/14376
-                // Use the has_enough_parallelism function from config for tests
+                // always assume enough parallelism for tests
                 TreeConfig::default()
                     .with_legacy_state_root(true)
-                    .with_has_enough_parallelism(reth_engine_primitives::has_enough_parallelism()),
+                    .with_has_enough_parallelism(true),
                 EngineApiKind::Ethereum,
                 evm_config,
             );
