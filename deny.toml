@@ -25,6 +25,7 @@ skip = [
                         libsecp256k1  <https://github.com/libp2p/rust-libp2p/issues/5916>
     "revm-precompile", # same issue with libsecp256k1
     "jsonrpsee", # outdated thiserror, fixed new release pending
+    "vergen", # https://github.com/paradigmxyz/reth/issues/14904
 
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
