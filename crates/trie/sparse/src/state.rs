@@ -648,6 +648,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             .map(|v| TrieAccount::decode(&mut &v[..]))
             .transpose()?
         else {
+            trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
             return Ok(())
         };
 
