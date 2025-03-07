@@ -355,7 +355,7 @@ where
             };
 
             size += encoded_len;
-            elements.push(pooled.into_tx());
+            elements.push(pooled.into_inner());
 
             if limit.exceeds(size) {
                 break

@@ -914,7 +914,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
 
     fn try_from(tx: Recovered<TransactionSigned>) -> Result<Self, Self::Error> {
         let sender = tx.signer();
-        let transaction = tx.into_tx();
+        let transaction = tx.into_inner();
         let hash = *transaction.tx_hash();
         let size = transaction.size();
 
