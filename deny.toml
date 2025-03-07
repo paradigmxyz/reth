@@ -19,7 +19,9 @@ ignore = [
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
 [bans]
 # Lint level for when multiple versions of the same crate are detected
-multiple-versions = "warn"
+# fails for example due to base64 at old version in discv5 via libp2p-identity 
+# <https://github.com/libp2p/rust-libp2p/issues/5916> 
+multiple-versions = "allow"
 # Lint level for when a crate version requirement is `*`
 wildcards = "allow"
 highlight = "all"
