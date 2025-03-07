@@ -3,7 +3,7 @@
 use crate::{Adapter, TmpDB, TmpNodeAdapter};
 use actions::{Action, ActionBox};
 use eyre::Result;
-use jsonrpsee::http_client::HttpClient;
+use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
@@ -15,6 +15,7 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_rpc_layer::AuthClientService;
 use setup::Setup;
 
 pub mod actions;
@@ -104,7 +105,7 @@ pub struct NodeClient {
     /// Regular JSON-RPC client
     pub rpc: HttpClient,
     /// Engine API client
-    pub engine: HttpClient,
+    pub engine: HttpClient<AuthClientService<HttpBackend>>,
 }
 
 /// Represents a test environment.
