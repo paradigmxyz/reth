@@ -693,34 +693,34 @@ op-revm = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
 
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "9219073" }
 
-# alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
-# alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+alloy-consensus = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-contract = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-eips = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-genesis = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-json-rpc = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-network = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-network-primitives = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-node-bindings = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-provider = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-pubsub = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-client = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types-admin = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types-anvil = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types-beacon = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types-debug = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types-engine = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types-eth = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types-mev = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types-trace = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-rpc-types-txpool = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-serde = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-signer = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-signer-local = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-transport = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-transport-http = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-transport-ipc = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
+alloy-transport-ws = { git = "https://github.com/ryanschneider/alloy", rev = "c7dadbd" }
 #
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
