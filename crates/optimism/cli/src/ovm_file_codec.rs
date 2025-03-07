@@ -1,7 +1,9 @@
 use alloy_consensus::{
-    transaction::{from_eip155_value, RlpEcdsaTx},
+    transaction::{from_eip155_value},
     Header, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
 };
+use alloy_consensus::transaction::RlpEcdsaDecodableTx;
+use alloy_consensus::transaction::RlpEcdsaEncodableTx;
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip4895::Withdrawals,
