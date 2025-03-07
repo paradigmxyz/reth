@@ -13,7 +13,8 @@ use alloy_eips::{
 };
 use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{
-    keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
+    bytes::BufMut, keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash,
+    TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
@@ -180,14 +181,6 @@ impl alloy_consensus::Transaction for Transaction {
         delegate!(self => tx.kind())
     }
 
-    fn access_list(&self) -> Option<&alloy_eips::eip2930::AccessList> {
-        delegate!(self => tx.access_list())
-    }
-
-    fn authorization_list(&self) -> Option<&[alloy_eips::eip7702::SignedAuthorization]> {
-        delegate!(self => tx.authorization_list())
-    }
-
     fn is_create(&self) -> bool {
         delegate!(self => tx.is_create())
     }
@@ -200,8 +193,16 @@ impl alloy_consensus::Transaction for Transaction {
         delegate!(self => tx.input())
     }
 
+    fn access_list(&self) -> Option<&alloy_eips::eip2930::AccessList> {
+        delegate!(self => tx.access_list())
+    }
+
     fn blob_versioned_hashes(&self) -> Option<&[B256]> {
         delegate!(self => tx.blob_versioned_hashes())
+    }
+
+    fn authorization_list(&self) -> Option<&[alloy_eips::eip7702::SignedAuthorization]> {
+        delegate!(self => tx.authorization_list())
     }
 }
 
@@ -288,6 +289,42 @@ impl From<TypedTransaction> for Transaction {
             TypedTransaction::Eip4844(tx) => Self::Eip4844(tx.into()),
             TypedTransaction::Eip7702(tx) => Self::Eip7702(tx),
         }
+    }
+}
+
+impl RlpEcdsaEncodableTx for Transaction {
+    const DEFAULT_TX_TYPE: u8 = 0;
+
+    fn rlp_encoded_fields_length(&self) -> usize {
+        delegate!(self => tx.rlp_encoded_fields_length())
+    }
+
+    fn rlp_encode_fields(&self, out: &mut dyn BufMut) {
+        delegate!(self => tx.rlp_encode_fields(out))
+    }
+
+    fn eip2718_encode_with_type(&self, signature: &Signature, _ty: u8, out: &mut dyn BufMut) {
+        delegate!(self => tx.eip2718_encode_with_type(signature, tx.ty(), out))
+    }
+
+    fn eip2718_encode(&self, signature: &Signature, out: &mut dyn BufMut) {
+        delegate!(self => tx.eip2718_encode(signature, out))
+    }
+
+    fn network_encode_with_type(&self, signature: &Signature, _ty: u8, out: &mut dyn BufMut) {
+        delegate!(self => tx.network_encode_with_type(signature, tx.ty(), out))
+    }
+
+    fn network_encode(&self, signature: &Signature, out: &mut dyn BufMut) {
+        delegate!(self => tx.network_encode(signature, out))
+    }
+
+    fn tx_hash_with_type(&self, signature: &Signature, _ty: u8) -> TxHash {
+        delegate!(self => tx.tx_hash_with_type(signature, tx.ty()))
+    }
+
+    fn tx_hash(&self, signature: &Signature) -> TxHash {
+        delegate!(self => tx.tx_hash(signature))
     }
 }
 
@@ -502,12 +539,12 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
 impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844, TypedTransaction);
 
-// impl From<Signed<Transaction>> for TransactionSigned {
-//     fn from(value: Signed<Transaction>) -> Self {
-//         let (tx, sig, hash) = value.into_parts();
-//         Self::new(tx, sig, hash)
-//     }
-// }
+impl From<Signed<Transaction>> for TransactionSigned {
+    fn from(value: Signed<Transaction>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx, sig, hash)
+    }
+}
 
 impl From<Signed<TxEip4844WithSidecar>> for TransactionSigned {
     fn from(value: Signed<TxEip4844WithSidecar>) -> Self {
