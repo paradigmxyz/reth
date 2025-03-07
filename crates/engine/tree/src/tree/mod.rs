@@ -2403,7 +2403,10 @@ where
 
         if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            if !(self.state.invalid_headers.get(&block.hash()).is_some()) {
+                self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+                self.state.invalid_headers.insert(block.block_with_parent());
+            }
             return Err(err.into())
         }
 
@@ -2414,7 +2417,11 @@ where
             .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
         {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            if !(self.state.invalid_headers.get(&block.hash()).is_some()) {
+                self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+                self.state.invalid_headers.insert(block.block_with_parent());
+            }
+
             return Err(err.into())
         }
 
