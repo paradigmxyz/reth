@@ -171,7 +171,7 @@ pub trait TransactionValidator: Send + Sync {
     ///    * nonce >= next nonce of the sender
     ///    * ...
     ///
-    /// See [`InvalidTransactionError`](reth_primitives_traits::InvalidTransactionError) for common
+    /// See [`InvalidTransactionError`](reth_primitives_traits::transaction::error::InvalidTransactionError) for common
     /// errors variants.
     ///
     /// The transaction pool makes no additional assumptions about the validity of the transaction
