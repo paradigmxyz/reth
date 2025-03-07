@@ -631,17 +631,18 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         }
     }
 
-    /// Update the account storage root.
+    /// Update the storage root of a revealed account.
     ///
-    /// If the account isn't revealed or doesn't exist in the trie, the function is a no-op.
+    /// If the account doesn't exist in the trie, the function is a no-op.
     ///
     /// If the new storage root is empty, and the account info was already empty, the account leaf
     /// will be removed.
     pub fn update_account_storage_root(&mut self, address: B256) -> SparseStateTrieResult<()> {
-        // Nothing to update if the account isn't revealed or doesn't exist in the trie.
         if !self.is_account_revealed(address) {
-            return Ok(())
+            return Err(SparseTrieErrorKind::Blind.into())
         }
+
+        // Nothing to update if the account doesn't exist in the trie.
         let Some(mut trie_account) = self
             .get_account_value(&address)
             .map(|v| TrieAccount::decode(&mut &v[..]))
