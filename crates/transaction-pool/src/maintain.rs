@@ -641,7 +641,7 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| tx.transaction.clone_into_consensus().into_tx())
+        .map(|tx| tx.transaction.clone_into_consensus().into_inner())
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();

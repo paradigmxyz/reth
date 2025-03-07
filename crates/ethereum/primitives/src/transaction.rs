@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559,
-    TxEip2930, TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
-    Typed2718, TypedTransaction,
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844,
+    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
+    TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -501,12 +502,12 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
 impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844, TypedTransaction);
 
-impl From<Signed<Transaction>> for TransactionSigned {
-    fn from(value: Signed<Transaction>) -> Self {
-        let (tx, sig, hash) = value.into_parts();
-        Self::new(tx, sig, hash)
-    }
-}
+// impl From<Signed<Transaction>> for TransactionSigned {
+//     fn from(value: Signed<Transaction>) -> Self {
+//         let (tx, sig, hash) = value.into_parts();
+//         Self::new(tx, sig, hash)
+//     }
+// }
 
 impl From<Signed<TxEip4844WithSidecar>> for TransactionSigned {
     fn from(value: Signed<TxEip4844WithSidecar>) -> Self {

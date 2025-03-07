@@ -110,7 +110,7 @@ where
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
         let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
-            .map_transaction(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
+            .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
         let tx_env = self.eth_api().evm_config().tx_env(tx);

@@ -12,7 +12,6 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    map::{B256Map, HashMap},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use core::{
@@ -437,12 +436,8 @@ impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N
         Ok(MultiProof::default())
     }
 
-    fn witness(
-        &self,
-        _input: TrieInput,
-        _target: HashedPostState,
-    ) -> ProviderResult<B256Map<Bytes>> {
-        Ok(HashMap::default())
+    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+        Ok(Vec::default())
     }
 }
 

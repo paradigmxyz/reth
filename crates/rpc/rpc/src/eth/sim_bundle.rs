@@ -11,6 +11,7 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_primitives::Recovered;
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::ProviderTx;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::MevSimApiServer;
@@ -168,7 +169,7 @@ where
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
                         let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
-                        let tx = tx.map_transaction(
+                        let tx = tx.map(
                             <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus,
                         );
 
@@ -262,8 +263,9 @@ where
                 let mut body_logs: Vec<SimBundleLogs> = Vec::new();
 
                 let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
+                let mut log_index = 0;
 
-                for item in &flattened_bundle {
+                for (tx_index, item) in flattened_bundle.iter().enumerate() {
                     // Check inclusion constraints
                     let block_number = item.inclusion.block_number();
                     let max_block_number =
@@ -312,7 +314,24 @@ where
                     // TODO: since we are looping over iteratively, we are not collecting bundle
                     // logs. We should collect bundle logs when we are processing the bundle items.
                     if logs {
-                        let tx_logs = result.logs().to_vec();
+                        let tx_logs = result
+                            .logs()
+                            .iter()
+                            .map(|log| {
+                                let full_log = alloy_rpc_types_eth::Log {
+                                    inner: log.clone(),
+                                    block_hash: None,
+                                    block_number: None,
+                                    block_timestamp: None,
+                                    transaction_hash: Some(*item.tx.tx_hash()),
+                                    transaction_index: Some(tx_index as u64),
+                                    log_index: Some(log_index),
+                                    removed: false,
+                                };
+                                log_index += 1;
+                                full_log
+                            })
+                            .collect();
                         let sim_bundle_logs =
                             SimBundleLogs { tx_logs: Some(tx_logs), bundle_logs: None };
                         body_logs.push(sim_bundle_logs);
