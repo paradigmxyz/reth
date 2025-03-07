@@ -550,7 +550,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         )
     }
 
-    fn block_with_senders<H, HF, B, BF>(
+    fn recovered_block<H, HF, B, BF>(
         &self,
         id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
@@ -1217,12 +1217,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// If the header for this block is not found, this returns `None`.
     /// If the header is found, but the transactions either do not exist, or are not indexed, this
     /// will return None.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.block_with_senders(
+        self.recovered_block(
             id,
             transaction_kind,
             |block_number| self.header_by_number(block_number),
@@ -1243,7 +1243,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.block_with_senders(
+        self.recovered_block(
             id,
             transaction_kind,
             |block_number| self.sealed_header(block_number),
