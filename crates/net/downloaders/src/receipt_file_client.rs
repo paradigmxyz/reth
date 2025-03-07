@@ -326,7 +326,7 @@ mod test {
 
     fn receipt_block_1() -> ReceiptWithBlockNumber {
         let log_1 = Log {
-            address: Address::from(hex!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -347,7 +347,7 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -369,7 +369,7 @@ mod test {
         };
 
         let log_3 = Log {
-            address: Address::from(hex!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -398,7 +398,7 @@ mod test {
 
     fn receipt_block_2() -> ReceiptWithBlockNumber {
         let log_1 = Log {
-            address: Address::from(hex!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -420,7 +420,7 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -448,7 +448,7 @@ mod test {
 
     fn receipt_block_3() -> ReceiptWithBlockNumber {
         let log_1 = Log {
-            address: Address::from(hex!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
@@ -470,7 +470,7 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: Address::from(address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
             data: LogData::new(
                 vec![
                     B256::from(hex!(
