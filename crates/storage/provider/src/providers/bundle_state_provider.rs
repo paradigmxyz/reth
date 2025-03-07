@@ -173,11 +173,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         self.state_provider.multiproof(input, targets)
     }
 
-    fn witness(
-        &self,
-        mut input: TrieInput,
-        target: HashedPostState,
-    ) -> ProviderResult<Vec<Bytes>> {
+    fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         input.prepend(self.hashed_post_state(bundle_state));
         self.state_provider.witness(input, target)

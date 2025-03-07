@@ -42,8 +42,7 @@ where
         tx: Recovered<TransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
-        let (tx, from) = tx.into_parts();
-        let inner: TxEnvelope = tx.into();
+        let tx = tx.convert::<TxEnvelope>();
 
         let TransactionInfo {
             block_hash, block_number, index: transaction_index, base_fee, ..
@@ -51,16 +50,15 @@ where
 
         let effective_gas_price = base_fee
             .map(|base_fee| {
-                inner.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
+                tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
             })
-            .unwrap_or_else(|| inner.max_fee_per_gas());
+            .unwrap_or_else(|| tx.max_fee_per_gas());
 
         Ok(Transaction {
-            inner,
+            inner: tx ,
             block_hash,
             block_number,
             transaction_index,
-            from,
             effective_gas_price: Some(effective_gas_price),
         })
     }

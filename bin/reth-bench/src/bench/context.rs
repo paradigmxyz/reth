@@ -73,7 +73,8 @@ impl BenchContext {
             BenchMode::Continuous => {
                 // fetch Latest block
                 block_provider
-                    .get_block_by_number(BlockNumberOrTag::Latest, true.into())
+                    .get_block_by_number(BlockNumberOrTag::Latest)
+                    .full()
                     .await?
                     .unwrap()
             }
@@ -82,7 +83,8 @@ impl BenchContext {
                     Some(block_number) => {
                         // fetch first block in range
                         block_provider
-                            .get_block_by_number(block_number.into(), true.into())
+                            .get_block_by_number(block_number.into())
+                            .full()
                             .await?
                             .unwrap()
                     }

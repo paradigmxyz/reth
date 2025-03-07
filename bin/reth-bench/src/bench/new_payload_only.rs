@@ -42,7 +42,7 @@ impl Command {
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
                 let block_res =
-                    block_provider.get_block_by_number(next_block.into(), true.into()).await;
+                    block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
                 let response = from_any_rpc_block(block).unwrap();
 

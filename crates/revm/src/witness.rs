@@ -25,19 +25,13 @@ impl ExecutionWitnessRecord {
     pub fn record_executed_state<DB>(&mut self, statedb: &State<DB>) {
         self.codes = statedb
             .cache
-            .contracts
-            .iter()
-            .map(|(_hash, code)| code.original_bytes())
+            .contracts.values().map(|code| code.original_bytes())
             .chain(
                 // cache state does not have all the contracts, especially when
                 // a contract is created within the block
                 // the contract only exists in bundle state, therefore we need
                 // to include them as well
-                statedb
-                    .bundle_state
-                    .contracts
-                    .iter()
-                    .map(|(_hash, code)| code.original_bytes()),
+                statedb.bundle_state.contracts.values().map(|code| code.original_bytes()),
             )
             .collect();
 

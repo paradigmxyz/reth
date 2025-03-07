@@ -169,7 +169,7 @@ where
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
                         let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
-                        let tx = tx.map_transaction(
+                        let tx = tx.map(
                             <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus,
                         );
 

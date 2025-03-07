@@ -81,7 +81,7 @@ async fn test_4844_tx_gossip_penalization() {
     }
 
     let signed_txs: Vec<Arc<TransactionSigned>> =
-        txs.iter().map(|tx| Arc::new(tx.transaction().clone().into_tx())).collect();
+        txs.iter().map(|tx| Arc::new(tx.transaction().clone().into_inner())).collect();
 
     let network_handle = peer0.network();
 
