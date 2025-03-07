@@ -25,7 +25,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tracing::{debug, error, trace};
+use tracing::{debug, error, info, trace};
 
 /// The size of proof targets chunk to spawn in one calculation.
 const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
@@ -602,6 +602,19 @@ where
         // targets.
         let (fetched_state_update, not_fetched_state_update) =
             hashed_state_update.partition_by_targets(&self.fetched_proof_targets);
+
+        let storages_without_accounts = not_fetched_state_update
+            .storages
+            .keys()
+            .filter(|&address| !not_fetched_state_update.accounts.contains_key(address))
+            .count();
+        if storages_without_accounts > 0 {
+            info!(
+                target: "engine::root",
+                storages_without_accounts,
+                "State update contains storages without accounts"
+            );
+        }
 
         let mut state_updates = 0;
         // If there are any accounts or storage slots that we already fetched the proofs for,
