@@ -233,7 +233,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
     ) -> ExecutedBlockWithTrieUpdates {
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::thread_rng().r#gen::<u64>();
         self.get_executed_block(number, receipts, parent_hash)
     }
 

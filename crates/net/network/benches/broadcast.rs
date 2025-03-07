@@ -51,14 +51,14 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         }
 
                         // prepare some transactions
-                        let mut gen = TransactionGenerator::new(TestRng::deterministic_rng(
+                        let mut tx_gen = TransactionGenerator::new(TestRng::deterministic_rng(
                             RngAlgorithm::ChaCha,
                         ));
                         let num_broadcasts = 10;
                         for _ in 0..num_broadcasts {
                             for _ in 0..2 {
                                 let mut txs = Vec::new();
-                                let tx = gen.gen_eip1559_pooled();
+                                let tx = tx_gen.gen_eip1559_pooled();
                                 // ensure the sender has balance
                                 provider.add_account(
                                     tx.sender(),

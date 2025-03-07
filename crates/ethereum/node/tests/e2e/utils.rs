@@ -40,10 +40,12 @@ where
     Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
 {
     let provider = ProviderBuilder::new().on_http(node.rpc_url());
-    let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).gen();
+    let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).wallet_gen();
 
     // simple contract which writes to storage on any call
-    let dummy_bytecode = bytes!("6080604052348015600f57600080fd5b50602880601d6000396000f3fe4360a09081523360c0526040608081905260e08152902080805500fea164736f6c6343000810000a");
+    let dummy_bytecode = bytes!(
+        "6080604052348015600f57600080fd5b50602880601d6000396000f3fe4360a09081523360c0526040608081905260e08152902080805500fea164736f6c6343000810000a"
+    );
     let mut call_destinations = signers.iter().map(|s| s.address()).collect::<Vec<_>>();
 
     for _ in 0..num_blocks {
@@ -63,12 +65,12 @@ where
                 TransactionRequest::default().with_from(signer.address()).with_nonce(nonce);
 
             let should_create =
-                rng.gen::<bool>() && tx_type != TxType::Eip4844 && tx_type != TxType::Eip7702;
+                rng.r#gen::<bool>() && tx_type != TxType::Eip4844 && tx_type != TxType::Eip7702;
             if should_create {
                 tx = tx.into_create().with_input(dummy_bytecode.clone());
             } else {
                 tx = tx.with_to(*call_destinations.choose(rng).unwrap()).with_input(
-                    (0..rng.gen_range(0..10000)).map(|_| rng.gen()).collect::<Vec<u8>>(),
+                    (0..rng.gen_range(0..10000)).map(|_| rng.r#gen()).collect::<Vec<u8>>(),
                 );
             }
 
@@ -76,11 +78,11 @@ where
                 tx = tx.with_gas_price(provider.get_gas_price().await?);
             }
 
-            if rng.gen::<bool>() || tx_type == TxType::Eip2930 {
+            if rng.r#gen::<bool>() || tx_type == TxType::Eip2930 {
                 tx = tx.with_access_list(
                     vec![AccessListItem {
                         address: *call_destinations.choose(rng).unwrap(),
-                        storage_keys: (0..rng.gen_range(0..100)).map(|_| rng.gen()).collect(),
+                        storage_keys: (0..rng.gen_range(0..100)).map(|_| rng.r#gen()).collect(),
                     }]
                     .into(),
                 );

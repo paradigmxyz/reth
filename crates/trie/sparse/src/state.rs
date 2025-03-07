@@ -897,7 +897,7 @@ mod tests {
         let value_2 = U256::from(rng.gen::<u64>());
         let slot_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let slot_path_3 = Nibbles::unpack(slot_3);
-        let value_3 = U256::from(rng.gen::<u64>());
+        let value_3 = U256::from(rng.r#gen::<u64>());
 
         let mut storage_hash_builder =
             HashBuilder::default().with_proof_retainer(ProofRetainer::from_iter([
