@@ -8,10 +8,8 @@ use tokio_util::codec::{Decoder, FramedRead};
 use tracing::{trace, warn};
 
 use crate::{DecodedFileChunk, FileClientError};
-use alloy_primitives::{
-    bytes::{Buf, BytesMut},
-    hex, address, Address, Bytes, Log, LogData, B256,
-};
+#[cfg(test)]
+use alloy_primitives::{address, Address, Log};
 
 /// Helper trait implemented for [`Decoder`] that decodes the receipt type.
 pub trait ReceiptDecoder: Decoder<Item = Option<ReceiptWithBlockNumber<Self::Receipt>>> {
@@ -105,7 +103,7 @@ where
 
                         remaining_bytes = bytes;
 
-                        break
+                        break;
                     }
                     Err(err) => return Err(err),
                 };
@@ -114,7 +112,7 @@ where
                     Some(ReceiptWithBlockNumber { receipt, number }) => {
                         if block_number > number {
                             warn!(target: "downloaders::file", previous_block_number = block_number, "skipping receipt from a lower block: {number}");
-                            continue
+                            continue;
                         }
 
                         total_receipts += 1;
@@ -219,8 +217,9 @@ pub struct ReceiptWithBlockNumber<R = Receipt> {
 #[cfg(test)]
 mod test {
     use alloy_primitives::{
+        address,
         bytes::{Buf, BytesMut},
-        hex, address, Address, Bytes, Log, LogData, B256,
+        hex, Address, Bytes, Log, LogData, B256,
     };
     use alloy_rlp::{Decodable, RlpDecodable};
     use reth_primitives::{Receipt, TxType};
@@ -270,7 +269,7 @@ mod test {
 
         fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
             if src.is_empty() {
-                return Ok(None)
+                return Ok(None);
             }
 
             let buf_slice = &mut src.as_ref();
