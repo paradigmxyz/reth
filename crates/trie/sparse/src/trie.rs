@@ -106,6 +106,11 @@ impl<P> SparseTrie<P> {
         }
     }
 
+    /// Returns `true` if the trie is revealed and the node at the given path is revealed.
+    pub fn is_node_revealed(&self, path: &Nibbles) -> bool {
+        self.as_revealed_ref().is_some_and(|trie| trie.is_node_revealed(path))
+    }
+
     /// Reveals the root node if the trie is blinded.
     ///
     /// # Returns
@@ -176,6 +181,8 @@ impl<P: BlindedProvider> SparseTrie<P> {
 pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     /// Blinded node provider.
     provider: P,
+    /// Revealed trie non-hash node paths.
+    revealed_node_paths: HashSet<Nibbles>,
     /// All trie nodes.
     nodes: HashMap<Nibbles, SparseNode>,
     /// All branch node tree masks.
@@ -195,6 +202,7 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
 impl<P> fmt::Debug for RevealedSparseTrie<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RevealedSparseTrie")
+            .field("revealed_node_paths", &self.revealed_node_paths)
             .field("nodes", &self.nodes)
             .field("branch_tree_masks", &self.branch_node_tree_masks)
             .field("branch_hash_masks", &self.branch_node_hash_masks)
@@ -282,6 +290,7 @@ impl Default for RevealedSparseTrie {
     fn default() -> Self {
         Self {
             provider: Default::default(),
+            revealed_node_paths: HashSet::from_iter([Nibbles::default()]),
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
@@ -302,6 +311,7 @@ impl RevealedSparseTrie {
     ) -> SparseTrieResult<Self> {
         let mut this = Self {
             provider: Default::default(),
+            revealed_node_paths: HashSet::default(),
             nodes: HashMap::default(),
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
@@ -326,6 +336,7 @@ impl<P> RevealedSparseTrie<P> {
     ) -> SparseTrieResult<Self> {
         let mut this = Self {
             provider,
+            revealed_node_paths: HashSet::default(),
             nodes: HashMap::default(),
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
@@ -343,6 +354,7 @@ impl<P> RevealedSparseTrie<P> {
     pub fn with_provider<BP>(self, provider: BP) -> RevealedSparseTrie<BP> {
         RevealedSparseTrie {
             provider,
+            revealed_node_paths: self.revealed_node_paths,
             nodes: self.nodes,
             branch_node_tree_masks: self.branch_node_tree_masks,
             branch_node_hash_masks: self.branch_node_hash_masks,
@@ -381,6 +393,11 @@ impl<P> RevealedSparseTrie<P> {
         self.updates.take().unwrap_or_default()
     }
 
+    /// Returns `true` if the node at the given path is revealed.
+    pub fn is_node_revealed(&self, path: &Nibbles) -> bool {
+        self.revealed_node_paths.contains(path)
+    }
+
     /// Reveal the trie node only if it was not known already.
     pub fn reveal_node(
         &mut self,
@@ -388,10 +405,11 @@ impl<P> RevealedSparseTrie<P> {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
-        // If the node is already revealed and it's not a hash node, do nothing.
-        if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
+        // If the non-hash node at the given path is already revealed, do nothing.
+        if self.revealed_node_paths.contains(&path) {
             return Ok(())
         }
+        self.revealed_node_paths.insert(path.clone());
 
         if let Some(tree_mask) = masks.tree_mask {
             self.branch_node_tree_masks.insert(path.clone(), tree_mask);
