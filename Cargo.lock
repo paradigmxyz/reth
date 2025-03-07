@@ -8306,7 +8306,6 @@ dependencies = [
  "reth-db-common",
  "reth-downloaders",
  "reth-engine-local",
- "reth-engine-primitives",
  "reth-engine-service",
  "reth-engine-tree",
  "reth-engine-util",
