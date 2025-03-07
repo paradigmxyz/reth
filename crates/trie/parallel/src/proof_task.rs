@@ -20,32 +20,34 @@ use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdatesSorted, HashedPostStateSorted,
     StorageMultiProof,
 };
-use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut};
+use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{
     collections::VecDeque,
     sync::{
-        mpsc::{channel, Receiver, TryRecvError},
-        Arc,
+        mpsc::{channel, Receiver, Sender, TryRecvError},
+        Arc, Condvar,
     },
     time::Instant,
 };
 use tokio::runtime::Handle;
 use tracing::debug;
 
+type StorageProofResult = Result<StorageMultiProof, ParallelStateRootError>;
+
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
 /// database transactions
 #[derive(Debug)]
 pub struct ProofTaskManager<Tx> {
     /// Storage proof input pending execution
-    pending_targets: VecDeque<StorageProofInput>,
+    pending_proofs: VecDeque<(StorageProofInput, Sender<StorageProofResult>)>,
     /// The underlying handle from which to spawn proof tasks
     executor: Handle,
     /// The proof task transactions, containing owned cursor factories that are reused for proof
     /// calculation.
     proof_task_txs: Vec<ProofTaskTx<Tx>>,
     /// The currently running proof tasks.
-    running_proof_tasks: Vec<Receiver<ProofTaskOutput<Tx>>>,
+    running_proof_tasks: Vec<RunningProofTask<Tx>>,
     /// A receiver for new proof tasks.
     proof_task_rx: Receiver<ProofTaskMessage>,
 }
@@ -53,6 +55,8 @@ pub struct ProofTaskManager<Tx> {
 impl<Tx> ProofTaskManager<Tx> {
     /// Creates a new [`ProofTaskManager`] with the given max concurrency, creating that number of
     /// cursor factories.
+    ///
+    /// Returns an error if the consistent view provider fails to create a read-only transaction.
     pub fn new<Factory>(
         executor: Handle,
         view: ConsistentDbView<Factory>,
@@ -72,7 +76,7 @@ impl<Tx> ProofTaskManager<Tx> {
         }
 
         Ok(ProofTaskManager {
-            pending_targets: VecDeque::new(),
+            pending_proofs: VecDeque::new(),
             executor,
             proof_task_txs,
             running_proof_tasks: Vec::new(),
@@ -88,32 +92,38 @@ where
     /// Spawns the proof task on the executor, with the input multiproof targets.
     ///
     /// If a task cannot be spawned immediately, this will be queued for completion later.
-    pub fn queue_proof_task(&mut self, input: StorageProofInput) {
-        self.pending_targets.push_back(input);
+    pub fn queue_proof_task(
+        &mut self,
+        input: StorageProofInput,
+        sender: Sender<StorageProofResult>,
+    ) {
+        self.pending_proofs.push_back((input, sender));
     }
 
     /// Spawns the next queued proof task on the executor with the given input, if there are any
     /// transactions available.
     pub fn try_spawn_next(&mut self) {
-        if self.pending_targets.front().is_none() {
-            return;
-        }
+        let Some(proof_task_tx) = self.proof_task_txs.pop() else { return };
 
-        let next_input = self.pending_targets.pop_front().unwrap();
+        let Some((pending_proof, sender)) = self.pending_proofs.pop_front() else {
+            // if there are no targets to do anything with put the tx back
+            self.proof_task_txs.push(proof_task_tx);
+            return
+        };
 
-        if let Some(proof_task_tx) = self.proof_task_txs.pop() {
-            let (tx, rx) = channel();
-            self.executor.spawn_blocking(move || {
-                let output = proof_task_tx.storage_proof(next_input);
-                let _ = tx.send(output);
-            });
-            self.running_proof_tasks.push(rx);
-        }
+        let (tx, rx) = channel();
+        self.executor.spawn_blocking(move || {
+            let output = proof_task_tx.storage_proof(pending_proof);
+            let _ = tx.send(output);
+        });
+        self.running_proof_tasks.push(RunningProofTask::new(rx, sender));
     }
 
     /// Loops, managing the proof tasks, and sending new tasks to the executor.
     pub fn run(mut self) {
         loop {
+            // * either running or proof tasks have stuff
+            // * otherwise yield thread
             let message = match self.proof_task_rx.try_recv() {
                 Ok(message) => match message {
                     ProofTaskMessage::StorageProof(input) => Some(input),
@@ -123,18 +133,18 @@ where
                 Err(TryRecvError::Disconnected) => return,
             };
 
-            if let Some(input) = message {
-                self.queue_proof_task(input);
+            if let Some((input, sender)) = message {
+                self.queue_proof_task(input, sender);
             }
 
             // try spawning the next task
             self.try_spawn_next();
 
-            // TODO: handle proof task outputs
-            for rx in &self.running_proof_tasks {
-                match rx.try_recv() {
-                    Ok(ProofTaskOutput { tx, result: _ }) => {
-                        // TODO: actually handle
+            for running_task in &self.running_proof_tasks {
+                let RunningProofTask { task_receiver, sender } = running_task;
+                match task_receiver.try_recv() {
+                    Ok(ProofTaskOutput { tx, result }) => {
+                        let _ = sender.send(result);
                         self.proof_task_txs.push(tx);
                     }
                     Err(TryRecvError::Empty) => {}
@@ -220,7 +230,7 @@ pub struct ProofTaskOutput<Tx> {
     /// The tx to be returned back for later use.
     tx: ProofTaskTx<Tx>,
     /// The result of proof calculation.
-    result: Result<StorageMultiProof, ParallelStateRootError>,
+    result: StorageProofResult,
 }
 
 /// This represents an input for a storage proof.
@@ -234,6 +244,14 @@ pub struct StorageProofInput {
     target_slots: B256Set,
 }
 
+impl StorageProofInput {
+    /// Creates a new [`StorageProofInput`] with the given hashed address, prefix set, and target
+    /// slots.
+    pub const fn new(hashed_address: B256, prefix_set: PrefixSet, target_slots: B256Set) -> Self {
+        Self { hashed_address, prefix_set, target_slots }
+    }
+}
+
 /// Data used for initializing cursor factories that is shared across all storage proof instances.
 #[derive(Debug, Clone)]
 pub struct ProofTaskCtx {
@@ -242,19 +260,44 @@ pub struct ProofTaskCtx {
     nodes_sorted: Arc<TrieUpdatesSorted>,
     /// The sorted in-memory overlay hashed state.
     state_sorted: Arc<HashedPostStateSorted>,
+}
 
-    // TODO: make use of this, since this is also reused across multiproof calls
-    /// The collection of prefix sets for the computation. Since the prefix sets _always_
-    /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
-    /// if we have cached nodes for them.
-    prefix_sets: Arc<TriePrefixSetsMut>,
+impl ProofTaskCtx {
+    /// Creates a new [`ProofTaskCtx`] with the given sorted nodes and state.
+    pub const fn new(
+        nodes_sorted: Arc<TrieUpdatesSorted>,
+        state_sorted: Arc<HashedPostStateSorted>,
+    ) -> Self {
+        Self { nodes_sorted, state_sorted }
+    }
+}
+
+/// This represents a running proof task, holding a receiver that receives both a database tx and a
+/// proof result. This also contains a sender that will be used to send back the storage proof
+/// result to the caller.
+#[derive(Debug)]
+pub struct RunningProofTask<Tx> {
+    /// The receiver for the database tx and proof result.
+    task_receiver: Receiver<ProofTaskOutput<Tx>>,
+    /// The sender to return the proof result back to the caller.
+    sender: Sender<StorageProofResult>,
+}
+
+impl<Tx> RunningProofTask<Tx> {
+    /// Creates a new [`RunningProofTask`].
+    pub const fn new(
+        task_receiver: Receiver<ProofTaskOutput<Tx>>,
+        sender: Sender<StorageProofResult>,
+    ) -> Self {
+        Self { task_receiver, sender }
+    }
 }
 
 /// A message used to send a storage proof request to the [`ProofTaskManager`].
 #[derive(Debug)]
 pub enum ProofTaskMessage {
     /// A storage proof request.
-    StorageProof(StorageProofInput),
+    StorageProof((StorageProofInput, Sender<StorageProofResult>)),
     /// A request to terminate the proof task manager.
     Terminate,
 }
