@@ -21,8 +21,8 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{
-    transaction::{error::TransactionConversionError},
-    Block, InMemorySize, Recovered, SealedBlock, SignedTransaction,
+    transaction::error::TransactionConversionError, Block, InMemorySize, Recovered, SealedBlock,
+    SignedTransaction,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

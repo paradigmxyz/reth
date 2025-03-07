@@ -31,9 +31,7 @@ use rand::{
 };
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
 use reth_primitives_traits::{
-    transaction::{
-        error::{TransactionConversionError, TryFromRecoveredTransactionError},
-    },
+    transaction::error::{TransactionConversionError, TryFromRecoveredTransactionError},
     InMemorySize, Recovered, SignedTransaction,
 };
 

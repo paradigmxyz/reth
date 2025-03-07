@@ -1271,6 +1271,32 @@ mod tests {
 
     #[test]
     fn test_discard_blobs_on_blob_tx_eviction() {
+        let blobs = {
+            // Read the contents of the JSON file into a string.
+            let json_content = fs::read_to_string(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/blob1.json"),
+            )
+            .expect("Failed to read the blob data file");
+
+            // Parse the JSON contents into a serde_json::Value.
+            let json_value: serde_json::Value =
+                serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
+
+            // Extract blob data from JSON and convert it to Blob.
+            vec![
+                // Extract the "data" field from the JSON and parse it as a string.
+                json_value
+                    .get("data")
+                    .unwrap()
+                    .as_str()
+                    .expect("Data is not a valid string")
+                    .to_string(),
+            ]
+        };
+
+        // Generate a BlobTransactionSidecar from the blobs.
+        let sidecar = BlobTransactionSidecar::try_from_blobs_hex(blobs).unwrap();
+
         // Define the maximum limit for blobs in the sub-pool.
         let blob_limit = SubPoolLimit::new(1000, usize::MAX);
 
@@ -1282,26 +1308,6 @@ mod tests {
         // Set the block info for the pool, including a pending blob fee.
         test_pool
             .set_block_info(BlockInfo { pending_blob_fee: Some(10_000_000), ..Default::default() });
-
-        // Read the contents of the JSON file into a string.
-        let json_content = fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/blob1.json"),
-        )
-        .expect("Failed to read the blob data file");
-
-        // Parse the JSON contents into a serde_json::Value.
-        let json_value: serde_json::Value =
-            serde_json::from_str(&json_content).expect("Failed to deserialize JSON");
-
-        // Extract blob data from JSON and convert it to Blob.
-        let blobs: Vec<Blob> = vec![Blob::from_hex(
-            // Extract the "data" field from the JSON and parse it as a string.
-            json_value.get("data").unwrap().as_str().expect("Data is not a valid string"),
-        )
-        .unwrap()];
-
-        // Generate a BlobTransactionSidecar from the blobs.
-        let sidecar = BlobTransactionSidecar::try_from_blobs(blobs).unwrap();
 
         // Create an in-memory blob store.
         let blob_store = InMemoryBlobStore::default();
