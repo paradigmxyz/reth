@@ -18,7 +18,9 @@ use crate::miner::{LocalMiner, MiningMode};
 use futures_util::{Stream, StreamExt};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineValidator};
+use reth_engine_primitives::{
+    BeaconConsensusEngineEvent, BeaconEngineMessage, EngineValidator, TreeConfig,
+};
 use reth_engine_service::service::EngineMessageStream;
 use reth_engine_tree::{
     chain::{ChainEvent, HandlerEvent},
@@ -27,7 +29,7 @@ use reth_engine_tree::{
         RequestHandlerEvent,
     },
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
+    tree::{EngineApiTreeHandler, InvalidBlockHook},
 };
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_node_types::{BlockTy, HeaderTy, TxTy};

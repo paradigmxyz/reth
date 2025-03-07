@@ -66,7 +66,6 @@ use tracing::*;
 
 mod block_buffer;
 mod cached_state;
-pub mod config;
 pub mod error;
 mod invalid_block_hook;
 mod invalid_headers;
@@ -77,13 +76,13 @@ mod persistence_state;
 #[allow(unused)]
 mod trie_updates;
 
-use crate::tree::{config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError};
+use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
-pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use persistence_state::PersistenceState;
+use reth_engine_primitives::{TreeConfig, MIN_BLOCKS_FOR_PIPELINE_RUN};
 
 /// Keeps track of the state of the tree.
 ///
@@ -3151,10 +3150,10 @@ mod tests {
                 PersistenceState::default(),
                 payload_builder,
                 // TODO: fix tests for state root task https://github.com/paradigmxyz/reth/issues/14376
-                // always assume enough parallelism for tests
+                // Use the has_enough_parallelism function from config for tests
                 TreeConfig::default()
                     .with_legacy_state_root(true)
-                    .with_has_enough_parallelism(true),
+                    .with_has_enough_parallelism(reth_engine_primitives::has_enough_parallelism()),
                 EngineApiKind::Ethereum,
                 evm_config,
             );

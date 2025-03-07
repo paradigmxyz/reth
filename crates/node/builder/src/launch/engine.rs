@@ -5,11 +5,9 @@ use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
+use reth_engine_primitives::TreeConfig;
 use reth_engine_service::service::{ChainEvent, EngineService};
-use reth_engine_tree::{
-    engine::{EngineApiRequest, EngineRequestHandler},
-    tree::TreeConfig,
-};
+use reth_engine_tree::engine::{EngineApiRequest, EngineRequestHandler};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};

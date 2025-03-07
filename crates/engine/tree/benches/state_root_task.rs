@@ -11,9 +11,8 @@ use rand::Rng;
 use reth_chain_state::EthPrimitives;
 use reth_chainspec::ChainSpec;
 use reth_db_common::init::init_genesis;
-use reth_engine_tree::tree::{
-    executor::WorkloadExecutor, PayloadProcessor, StateProviderBuilder, TreeConfig,
-};
+use reth_engine_primitives::TreeConfig;
+use reth_engine_tree::tree::{executor::WorkloadExecutor, PayloadProcessor, StateProviderBuilder};
 use reth_evm::system_calls::{OnStateHook, StateChangeSource};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Account as RethAccount, StorageEntry};

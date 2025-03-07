@@ -1,6 +1,5 @@
 //! Engine tree configuration.
 
-use crate::tree::payload_processor::executor::has_enough_parallelism;
 use alloy_eips::merge::EPOCH_SLOTS;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
@@ -8,7 +7,7 @@ use alloy_eips::merge::EPOCH_SLOTS;
 ///
 /// This is the default threshold, the distance to the head that the tree will be used for sync.
 /// If the distance exceeds this threshold, the pipeline will be used for sync.
-pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
+pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
@@ -22,6 +21,18 @@ const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
 
 const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+
+/// Determines if the host has enough parallelism to run the payload processor.
+///
+/// It requires at least 5 parallel threads:
+/// - Engine in main thread that spawns the state root task.
+/// - Multiproof task in payload processor
+/// - Sparse Trie task in payload processor
+/// - Multiproof computation spawned in payload processor
+/// - Storage root computation spawned in trie parallel proof
+pub fn has_enough_parallelism() -> bool {
+    std::thread::available_parallelism().is_ok_and(|num| num.get() >= 5)
+}
 
 /// The configuration of the engine tree.
 #[derive(Debug)]
@@ -225,7 +236,7 @@ impl TreeConfig {
     }
 
     /// Whether or not to use state root task
-    pub(crate) fn use_state_root_task(&self) -> bool {
+    pub fn use_state_root_task(&self) -> bool {
         self.has_enough_parallelism && !self.legacy_state_root
     }
 }
