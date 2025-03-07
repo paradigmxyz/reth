@@ -943,7 +943,7 @@ mod tests {
         assert_eq!(
             with_targets,
             HashedPostState {
-                accounts: B256Map::default(),
+                accounts: B256Map::from_iter([(addr1, Some(Default::default()))]),
                 storages: B256Map::from_iter([(
                     addr1,
                     HashedStorage {
@@ -956,10 +956,7 @@ mod tests {
         assert_eq!(
             without_targets,
             HashedPostState {
-                accounts: B256Map::from_iter([
-                    (addr1, Some(Default::default())),
-                    (addr2, Some(Default::default()))
-                ]),
+                accounts: B256Map::from_iter([(addr2, Some(Default::default()))]),
                 storages: B256Map::from_iter([(
                     addr1,
                     HashedStorage {
