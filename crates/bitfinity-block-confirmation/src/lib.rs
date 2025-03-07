@@ -183,7 +183,8 @@ where
 
         let (from, _) = genesis_accounts.first().ok_or_else(|| eyre!("no genesis accounts"))?;
 
-        let pow_tx = did::utils::block_confirmation_pow_transaction(from.clone(), base_fee);
+        let pow_tx =
+            did::utils::block_confirmation_pow_transaction(from.clone(), base_fee, None, None);
 
         // Simple transaction
         let to = match pow_tx.to {
