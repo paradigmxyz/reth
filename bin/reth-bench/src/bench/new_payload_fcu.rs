@@ -48,16 +48,15 @@ impl Command {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res =
-                    block_provider.get_block_by_number(next_block.into(), true.into()).await;
+                let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
                 let (header, versioned_hashes, payload) = from_any_rpc_block(block).unwrap();
                 let head_block_hash = header.hash;
-                let safe_block_hash = block_provider
-                    .get_block_by_number(header.number.saturating_sub(32).into(), false.into());
+                let safe_block_hash =
+                    block_provider.get_block_by_number(header.number.saturating_sub(32).into());
 
-                let finalized_block_hash = block_provider
-                    .get_block_by_number(header.number.saturating_sub(64).into(), false.into());
+                let finalized_block_hash =
+                    block_provider.get_block_by_number(header.number.saturating_sub(64).into());
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
@@ -180,7 +179,7 @@ impl Command {
 pub(crate) fn from_any_rpc_block(
     block: AnyRpcBlock,
 ) -> eyre::Result<(RpcHeader<AnyHeader>, Vec<B256>, ExecutionPayload)> {
-    let block = block.inner.try_map_transactions(|tx| {
+    let block = block.into_inner().try_map_transactions(|tx| {
         // TODO: convert without json roundtrip
         serde_json::to_value(tx).and_then(serde_json::from_value::<RpcTransaction>)
     })?;
