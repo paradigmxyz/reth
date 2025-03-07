@@ -1170,7 +1170,7 @@ mod tests {
         let decoded = TransactionSigned::decode_2718(&mut &tx_bytes[..]).unwrap();
         assert_eq!(
             decoded.recover_signer().unwrap(),
-            Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap()
+            address!("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5")
         );
     }
 
