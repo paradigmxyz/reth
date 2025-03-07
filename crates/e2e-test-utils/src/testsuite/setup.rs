@@ -221,7 +221,7 @@ impl Setup {
                     let _tasks = tasks;
                     // Wait for shutdown signal
                     let _ = shutdown_rx.recv().await;
-                    // nodes will be dropped here when the task completes
+                    // nodes and tasks will be dropped here when the test completes
                 });
             }
             Err(e) => {
