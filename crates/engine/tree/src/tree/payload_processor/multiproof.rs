@@ -5,7 +5,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use derive_more::derive::Deref;
 use metrics::Histogram;
-use reth_errors::ProviderError;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_metrics::Metrics;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -15,7 +15,10 @@ use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
     HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
 };
-use reth_trie_parallel::proof::ParallelProof;
+use reth_trie_parallel::{
+    proof::ParallelProof,
+    proof_task::{ProofTaskCtx, ProofTaskManager, ProofTaskMessage},
+};
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
@@ -261,8 +264,10 @@ pub struct MultiproofManager<Factory> {
     inflight: usize,
     /// Queued calculations.
     pending: VecDeque<MultiproofInput<Factory>>,
-    /// Executor for tassks
+    /// Executor for tasks
     executor: WorkloadExecutor,
+    /// Sender to the storage proof task.
+    to_storage_proof_task: Sender<ProofTaskMessage>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
 }
@@ -273,7 +278,11 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(executor: WorkloadExecutor, metrics: MultiProofTaskMetrics) -> Self {
+    fn new(
+        executor: WorkloadExecutor,
+        metrics: MultiProofTaskMetrics,
+        to_storage_proof_task: Sender<ProofTaskMessage>,
+    ) -> Self {
         let max_concurrent = executor.rayon_pool().current_num_threads();
         Self {
             pending: VecDeque::with_capacity(max_concurrent),
@@ -281,6 +290,7 @@ where
             executor,
             inflight: 0,
             metrics,
+            to_storage_proof_task,
         }
     }
 
@@ -334,6 +344,7 @@ where
         }: MultiproofInput<Factory>,
     ) {
         let executor = self.executor.clone();
+        let to_storage_proof_task = self.to_storage_proof_task.clone();
 
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
@@ -354,6 +365,7 @@ where
                 config.state_sorted,
                 config.prefix_sets,
                 executor.handle().clone(),
+                to_storage_proof_task.clone(),
             )
             .with_branch_node_masks(true)
             .multiproof(proof_targets);
@@ -473,20 +485,40 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
-        to_sparse_trie: Sender<SparseTrieUpdate>,
-    ) -> Self {
+         to_sparse_trie: Sender<SparseTrieUpdate>,
+    ) -> ProviderResult<Self> {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
-        Self {
+
+        // Create and spawn the storage proof task
+        let (proof_task_sender, proof_task_receiver) = channel();
+        let task_ctx = ProofTaskCtx::new(config.nodes_sorted, config.state_sorted);
+        let max_concurrency = 32;
+        let proof_task = ProofTaskManager::new(
+            executor.handle().clone(),
+            config.consistent_view.clone(),
+            task_ctx,
+            max_concurrency,
+            proof_task_receiver,
+        )?;
+
+        // spawn the proof task
+        executor.spawn_blocking(move || proof_task.run());
+
+        Ok(Self {
             config,
             rx,
             tx,
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::default(),
-            multiproof_manager: MultiproofManager::new(executor, metrics.clone()),
+            multiproof_manager: MultiproofManager::new(
+                executor,
+                metrics.clone(),
+                proof_task_sender,
+            ),
             metrics,
-        }
+        })
     }
 
     /// Returns a [`Sender`] that can be used to send arbitrary [`MultiProofMessage`]s to this task.
