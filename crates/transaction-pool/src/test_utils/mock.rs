@@ -12,7 +12,8 @@ use alloy_consensus::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
         LEGACY_TX_TYPE_ID,
     },
-    TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, Typed2718,
+    transaction::PooledTransaction,
+    TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
@@ -28,11 +29,13 @@ use rand::{
     distributions::{Uniform, WeightedIndex},
     prelude::Distribution,
 };
-use reth_primitives::{
-    transaction::{TransactionConversionError, TryFromRecoveredTransactionError},
-    PooledTransaction, Recovered, Transaction, TransactionSigned, TxType,
+use reth_ethereum_primitives::{Transaction, TransactionSigned};
+use reth_primitives_traits::{
+    transaction::error::{TransactionConversionError, TryFromRecoveredTransactionError},
+    InMemorySize, Recovered, SignedTransaction,
 };
-use reth_primitives_traits::{InMemorySize, SignedTransaction};
+
+use alloy_eips::eip4844::env_settings::KzgSettings;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
@@ -900,7 +903,7 @@ impl EthPoolTransaction for MockTransaction {
     fn validate_blob(
         &self,
         _blob: &BlobTransactionSidecar,
-        _settings: &reth_primitives::kzg::KzgSettings,
+        _settings: &KzgSettings,
     ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         match &self {
             Self::Eip4844 { .. } => Ok(()),

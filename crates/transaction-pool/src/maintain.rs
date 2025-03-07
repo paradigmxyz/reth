@@ -19,8 +19,9 @@ use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
-use reth_primitives::SealedHeader;
-use reth_primitives_traits::{NodePrimitives, SignedTransaction};
+use reth_primitives_traits::{
+    transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
+};
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -707,10 +708,11 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
+    use alloy_consensus::transaction::PooledTransaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_fs_util as fs;
-    use reth_primitives::{PooledTransaction, TransactionSigned};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 
