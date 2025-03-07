@@ -44,12 +44,9 @@ allow = [
     "0BSD",
     "CC0-1.0",
     "ISC",
-    "Unicode-DFS-2016",
     "Unlicense",
     "Unicode-3.0",
     "Zlib",
-    # https://github.com/briansmith/ring/issues/902
-    "LicenseRef-ring",
     # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
     "LicenseRef-rustls-webpki",
 ]
