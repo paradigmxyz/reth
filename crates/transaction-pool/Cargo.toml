@@ -87,6 +87,7 @@ serde = [
     "smallvec/serde",
     "revm-interpreter/serde",
     "revm-specification/serde",
+    "reth-primitives-traits/serde",
 ]
 test-utils = [
     "rand",
@@ -96,6 +97,7 @@ test-utils = [
     "reth-chainspec/test-utils",
     "reth-provider/test-utils",
     "reth-primitives-traits/test-utils",
+    "reth-ethereum-primitives/test-utils",
 ]
 arbitrary = [
     "proptest",
@@ -109,9 +111,8 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "smallvec/arbitrary",
     "revm-interpreter/arbitrary",
+    "reth-ethereum-primitives/arbitrary",
 ]
-
-
 
 [[bench]]
 name = "truncate"
