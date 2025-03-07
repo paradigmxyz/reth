@@ -6,7 +6,6 @@ use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction};
 use eyre::{eyre, Result};
-use jsonrpsee::http_client::HttpClientBuilder;
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
@@ -182,30 +181,10 @@ impl Setup {
             Ok((nodes, executor, _wallet)) => {
                 // create HTTP clients for each node's RPC and Engine API endpoints
                 for node in &nodes {
-                    let rpc_url = node.rpc_url();
-                    let engine_url = node.engine_api_url();
-                    debug!("rpc_url: {rpc_url}, engine_url: {engine_url}");
+                    let rpc = node.rpc_client();
+                    let engine = node.engine_api_client();
 
-                    let rpc_client = match HttpClientBuilder::default().build(&rpc_url) {
-                        Ok(client) => client,
-                        Err(e) => {
-                            error!("Failed to create RPC client for {}: {}", rpc_url, e);
-                            return Err(eyre!("Failed to create RPC client: {}", e));
-                        }
-                    };
-
-                    let engine_client = match HttpClientBuilder::default().build(&engine_url) {
-                        Ok(client) => client,
-                        Err(e) => {
-                            error!("Failed to create Engine API client for {}: {}", engine_url, e);
-                            return Err(eyre!("Failed to create Engine API client: {}", e));
-                        }
-                    };
-
-                    node_clients.push(crate::testsuite::NodeClient {
-                        rpc: rpc_client,
-                        engine: engine_client,
-                    });
+                    node_clients.push(crate::testsuite::NodeClient { rpc, engine });
                 }
 
                 // spawn a separate task just to handle the shutdown
