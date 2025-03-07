@@ -23,7 +23,6 @@ use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
-use reth_primitives::kzg::KzgSettings;
 use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignedTransaction};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -104,11 +103,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// `EnvKzgSettings::Default`.
     fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .wrap_err_with(|| {
-                    format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
-                })?;
-            Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
+            EnvKzgSettings::load_from_trusted_setup_file(trusted_setup_file).wrap_err_with(|| {
+                format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
+            })
         } else {
             Ok(EnvKzgSettings::Default)
         }
