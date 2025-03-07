@@ -110,6 +110,7 @@ lightspeed_scheduler = { workspace = true, features = ["tracing"] }
 tempfile.workspace = true
 
 # bitfinity dev dependencies
+alloy-genesis.workspace = true
 async-trait = { workspace = true }
 dirs.workspace = true
 ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }

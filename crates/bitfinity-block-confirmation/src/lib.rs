@@ -323,7 +323,6 @@ mod tests {
         let base_fee_per_gas = header.next_block_base_fee(BaseFeeParams::ethereum());
         let state_root =
             StateRoot::from_tx(provider_factory.provider().unwrap().tx_ref()).root().unwrap();
-
         let chain_spec = provider_factory.chain_spec();
         let block = Block {
             header: Header {
@@ -781,12 +780,27 @@ mod tests {
 
         let outcome = to_execution_outcome(block.number, &block_output);
 
+        let inital_state =
+            StateRoot::from_tx(block_validator.provider_factory.provider().unwrap().tx_ref())
+                .root()
+                .unwrap();
+
         let computed_pow =
             block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
+
+        let post_execution_state =
+            StateRoot::from_tx(block_validator.provider_factory.provider().unwrap().tx_ref())
+                .root()
+                .unwrap();
 
         assert_eq!(
             expected_pow_hash, computed_pow,
             "POW hash should be deterministic given the same state"
+        );
+
+        assert_eq!(
+            inital_state, post_execution_state,
+            "State should remain unchanged after block execution"
         );
     }
 }

@@ -228,10 +228,10 @@ impl BitfinityImportCommand {
         let config = self.rpc_config();
         let client = BitfinityEvmClient::client(config).await?;
 
-        let confirmator = BitfinityBlockConfirmation::new(client, provider_factory);
+        let confirmer = BitfinityBlockConfirmation::new(client, provider_factory);
         let blocks = remote_client.unsafe_blocks(block)?;
 
-        confirmator.confirm_blocks(&blocks).await
+        confirmer.confirm_blocks(&blocks).await
     }
 
     /// Imports the blocks up to the given block hash of the `remove_client`.
