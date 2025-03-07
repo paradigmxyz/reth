@@ -22,7 +22,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-use tracing::{debug, info, trace, trace_span};
+use tracing::{debug, trace, trace_span};
 
 /// The level below which the sparse trie hashes are calculated in
 /// [`update_sparse_trie`].
@@ -193,12 +193,6 @@ where
             // Otherwise, if the account is revealed, only update its storage root.
             trace!(target: "engine::root::sparse", ?address, "Updating account storage root");
             trie.update_account_storage_root(address)?;
-        } else {
-            info!(
-                target: "engine::root::sparse",
-                ?address,
-                "Account is not revealed, skipping"
-            );
         }
     }
 
