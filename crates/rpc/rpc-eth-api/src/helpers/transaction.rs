@@ -206,7 +206,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.block_with_senders(block_id).await? {
+            if let Some(block) = self.recovered_block(block_id).await? {
                 let block_hash = block.hash();
                 let block_number = block.number();
                 let base_fee_per_gas = block.base_fee_per_gas();
@@ -278,7 +278,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             .await?;
 
             let block_id = num.into();
-            self.block_with_senders(block_id)
+            self.recovered_block(block_id)
                 .await?
                 .and_then(|block| {
                     let block_hash = block.hash();
@@ -317,7 +317,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.block_with_senders(block_id).await? {
+            if let Some(block) = self.recovered_block(block_id).await? {
                 if let Some(tx) = block.body().transactions().get(index) {
                     return Ok(Some(tx.encoded_2718().into()))
                 }

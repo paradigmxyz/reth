@@ -595,7 +595,7 @@ impl<T: SignedTransaction, ChainSpec: EthChainSpec> BlockReader for MockEthProvi
         Ok(None)
     }
 
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
