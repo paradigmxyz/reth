@@ -1,5 +1,4 @@
 //! Command for debugging block building.
-use crate::primitives::kzg::KzgSettings;
 use alloy_consensus::{BlockHeader, TxEip4844};
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -104,11 +103,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// `EnvKzgSettings::Default`.
     fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .wrap_err_with(|| {
-                    format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
-                })?;
-            Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
+            EnvKzgSettings::load_from_trusted_setup_file(trusted_setup_file).wrap_err_with(|| {
+                format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
+            })
         } else {
             Ok(EnvKzgSettings::Default)
         }
