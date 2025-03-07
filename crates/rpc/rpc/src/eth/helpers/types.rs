@@ -55,7 +55,7 @@ where
             .unwrap_or_else(|| tx.max_fee_per_gas());
 
         Ok(Transaction {
-            inner: tx ,
+            inner: tx,
             block_hash,
             block_number,
             transaction_index,
@@ -77,7 +77,7 @@ where
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = match &mut tx.inner {
+        let input = match tx.inner.inner_mut() {
             TxEnvelope::Eip1559(tx) => &mut tx.tx_mut().input,
             TxEnvelope::Eip2930(tx) => &mut tx.tx_mut().input,
             TxEnvelope::Legacy(tx) => &mut tx.tx_mut().input,

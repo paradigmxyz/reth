@@ -150,7 +150,7 @@ where
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = match &mut tx.inner.inner {
+        let input = match tx.inner.inner.inner_mut() {
             OpTxEnvelope::Eip1559(tx) => &mut tx.tx_mut().input,
             OpTxEnvelope::Eip2930(tx) => &mut tx.tx_mut().input,
             OpTxEnvelope::Legacy(tx) => &mut tx.tx_mut().input,

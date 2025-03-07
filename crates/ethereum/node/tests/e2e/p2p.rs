@@ -78,8 +78,7 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
 
     assert_eq!(second_provider.get_block_number().await?, 0);
 
-    let head =
-        provider.get_block_by_number(Default::default()).await?.unwrap().header.hash;
+    let head = provider.get_block_by_number(Default::default()).await?.unwrap().header.hash;
 
     second_node.sync_to(head).await?;
 

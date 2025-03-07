@@ -72,11 +72,7 @@ impl BenchContext {
         let first_block = match benchmark_mode {
             BenchMode::Continuous => {
                 // fetch Latest block
-                block_provider
-                    .get_block_by_number(BlockNumberOrTag::Latest)
-                    .full()
-                    .await?
-                    .unwrap()
+                block_provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap()
             }
             BenchMode::Range(ref mut range) => {
                 match range.next() {
