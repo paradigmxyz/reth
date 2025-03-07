@@ -13,11 +13,16 @@ use super::{
 };
 use alloy_eips::BlockNumberOrTag;
 
+use did::H256;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 
 use reth::commands::bitfinity_import::BitfinityImportCommand;
 use reth_provider::{BlockNumReader, BlockReader, BlockReaderIdExt};
+use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
+use revm_primitives::{Address, U256};
 
+use std::sync::Arc;
 use std::time::Duration;
 
 #[tokio::test]
@@ -374,7 +379,15 @@ async fn bitfinity_test_should_confirm_and_import_unsafe_blocks() {
     const UNSAFE_BLOCKS: u64 = 3;
     const MAX_BLOCKS: u64 = 10;
 
-    let mut eth_server = EthImpl::new_with_max_block(MAX_BLOCKS);
+    let genesis_balances =
+        vec![(Address::from_slice(&[0u8; 20]).into(), U256::from(1_000_000_u64))];
+
+    let state_root = compute_state_root(&genesis_balances);
+
+    let mut eth_server = EthImpl::new_with_max_block(MAX_BLOCKS)
+        .with_genesis_balances(genesis_balances)
+        .with_state_root(state_root.into());
+
     let bf_evm_server = eth_server.bf_impl(UNSAFE_BLOCKS);
 
     let (_server, eth_server_address) = mock_multi_server_start([
@@ -422,8 +435,14 @@ async fn bitfinity_test_should_import_until_last_confirmed() {
     const UNSAFE_BLOCKS: u64 = 3;
     const MAX_BLOCKS: u64 = 10;
     const CONFIRM_UNTIL: u64 = 8;
+    let genesis_balances =
+        vec![(Address::from_slice(&[0u8; 20]).into(), U256::from(1_000_000_u64))];
 
-    let mut eth_server = EthImpl::new_with_max_block(MAX_BLOCKS);
+    let state_root = compute_state_root(&genesis_balances);
+
+    let mut eth_server = EthImpl::new_with_max_block(MAX_BLOCKS)
+        .with_genesis_balances(genesis_balances)
+        .with_state_root(state_root.into());
     let mut bf_evm_server = eth_server.bf_impl(UNSAFE_BLOCKS);
     bf_evm_server.confirm_until = CONFIRM_UNTIL;
 
@@ -462,4 +481,40 @@ async fn bitfinity_test_should_import_until_last_confirmed() {
     let provider = import_data.provider_factory.provider().unwrap();
     let last_imported_block = provider.last_block_number().unwrap();
     assert_eq!(last_imported_block, CONFIRM_UNTIL);
+}
+
+/// Compute state root for genesis Balances
+fn compute_state_root(genesis_balances: &[(Address, U256)]) -> H256 {
+    use alloy_genesis::Genesis;
+    use alloy_genesis::GenesisAccount;
+    use reth_chainspec::ChainSpec;
+    use reth_db_common::init::init_genesis;
+    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+
+    let chain_spec = Arc::new(ChainSpec {
+        chain: 1_u64.into(),
+        genesis: Genesis {
+            alloc: genesis_balances
+                .iter()
+                .map(|(address, balance)| {
+                    (*address, GenesisAccount { balance: *balance, ..Default::default() })
+                })
+                .collect(),
+            ..Default::default()
+        },
+        hardforks: Default::default(),
+        genesis_hash: Default::default(),
+        paris_block_and_final_difficulty: None,
+        deposit_contract: None,
+        ..Default::default()
+    });
+
+    let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+    init_genesis(&factory).unwrap();
+
+    let provider = factory.provider().unwrap();
+
+    let tx = provider.tx_ref();
+
+    StateRoot::from_tx(tx).root().unwrap().into()
 }

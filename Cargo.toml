@@ -665,3 +665,5 @@ ic-certificate-verification = "3"
 ic-certification = "3"
 hex = "0.4"
 lightspeed_scheduler = { version = "0.60.0", features = ["tracing"] }
+anyhow = "1"
+jsonrpc-core = "18.0.0"

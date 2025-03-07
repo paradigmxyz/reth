@@ -26,13 +26,14 @@ reth-engine-tree.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
 reth-node-types.workspace = true
-reth-provider.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-revm.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 tracing.workspace = true
+reth-rpc-eth-types.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true
@@ -45,3 +46,9 @@ reth-db-common.workspace = true
 tokio.workspace = true
 serde.workspace = true
 tempfile.workspace = true
+reth-testing-utils.workspace = true
+reth-ethereum-engine-primitives.workspace = true
+anyhow.workspace = true
+jsonrpc-core.workspace = true
+serde_json.workspace = true
+alloy-network.workspace = true

@@ -118,7 +118,7 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::with_genesis_balances(vec![
+    let eth_server = EthImpl::new().with_genesis_balances(vec![
         (Address::from_slice(&[1u8; 20]), U256::from(10)),
         (Address::from_slice(&[2u8; 20]), U256::from(20)),
         (Address::from_slice(&[3u8; 20]), U256::from(30)),
@@ -156,7 +156,7 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::with_genesis_balances(vec![
+    let eth_server = EthImpl::new().with_genesis_balances(vec![
         (Address::from_slice(&[1u8; 20]), U256::from(10)),
         (Address::from_slice(&[2u8; 20]), U256::from(20)),
         (Address::from_slice(&[3u8; 20]), U256::from(30)),
@@ -347,7 +347,9 @@ pub async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle
 }
 
 /// Starts a local mock server that combines methods from different sources.
-pub async fn mock_multi_server_start(methods: impl IntoIterator<Item = Methods>) -> (ServerHandle, SocketAddr) {
+pub async fn mock_multi_server_start(
+    methods: impl IntoIterator<Item = Methods>,
+) -> (ServerHandle, SocketAddr) {
     let addr = SocketAddr::from(([127, 0, 0, 1], 0));
     let server = Server::builder().build(addr).await.unwrap();
 
@@ -373,6 +375,7 @@ pub mod eth_server {
     use did::{keccak, BlockConfirmationData, BlockConfirmationResult, BlockNumber, H256, U64};
     use ethereum_json_rpc_client::CertifiedResult;
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+
     use reth_trie::EMPTY_ROOT_HASH;
     use revm_primitives::{Address, B256, U256};
 
@@ -424,7 +427,10 @@ pub mod eth_server {
     trait BfEvm {
         /// Send block confirmation request.
         #[method(name = "sendConfirmBlock")]
-        async fn confirm_block(&self, data: BlockConfirmationData) -> RpcResult<BlockConfirmationResult>;
+        async fn confirm_block(
+            &self,
+            data: BlockConfirmationData,
+        ) -> RpcResult<BlockConfirmationResult>;
     }
 
     /// Eth server implementation for local testing
@@ -447,6 +453,8 @@ pub mod eth_server {
         pub genesis_balances: Vec<(Address, U256)>,
         /// Unsafe blocks count
         pub unsafe_blocks_count: u64,
+        /// Custom state root hash
+        pub custom_state_root: H256,
     }
 
     impl EthImpl {
@@ -483,6 +491,7 @@ pub mod eth_server {
                 block_task,
                 genesis_balances: vec![],
                 unsafe_blocks_count: 0,
+                custom_state_root: EMPTY_ROOT_HASH.into(),
             }
         }
 
@@ -494,18 +503,21 @@ pub mod eth_server {
         }
 
         /// Set the genesis balances
-        pub fn with_genesis_balances(balances: Vec<(Address, U256)>) -> Self {
-            let mut instance = Self::new();
-            instance.genesis_balances = balances;
-            instance
+        pub fn with_genesis_balances(mut self, balances: Vec<(Address, U256)>) -> Self {
+            self.genesis_balances = balances;
+            self
+        }
+
+        /// Set a custom state root hash
+        pub fn with_state_root(mut self, state_root: did::H256) -> Self {
+            self.custom_state_root = state_root;
+            self
         }
 
         /// Returns an implementation of Bitfinity EVM canister API
         pub fn bf_impl(&mut self, unsafe_blocks_count: u64) -> BfEvmImpl {
             self.unsafe_blocks_count = unsafe_blocks_count;
-            BfEvmImpl {
-                confirm_until: u64::MAX,
-            }
+            BfEvmImpl { confirm_until: u64::MAX }
         }
     }
 
@@ -550,7 +562,7 @@ pub mod eth_server {
                 timestamp: did::U256::from(1234567890_u64 + block_num),
                 gas_limit: did::U256::from(30_000_000_u64),
                 base_fee_per_gas: Some(did::U256::from(7_u64)),
-                state_root: EMPTY_ROOT_HASH.into(),
+                state_root: self.custom_state_root.clone(),
                 receipts_root: EMPTY_RECEIPTS.into(),
                 transactions_root: EMPTY_TRANSACTIONS.into(),
                 parent_hash: if block_num == 0 {
@@ -625,7 +637,10 @@ pub mod eth_server {
 
     #[async_trait::async_trait]
     impl BfEvmServer for BfEvmImpl {
-        async fn confirm_block(&self, data: BlockConfirmationData) -> RpcResult<BlockConfirmationResult> {
+        async fn confirm_block(
+            &self,
+            data: BlockConfirmationData,
+        ) -> RpcResult<BlockConfirmationResult> {
             if data.block_number > self.confirm_until {
                 Ok(BlockConfirmationResult::NotConfirmed)
             } else {
