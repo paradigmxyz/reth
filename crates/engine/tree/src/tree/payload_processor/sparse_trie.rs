@@ -184,12 +184,13 @@ where
         let (address, storage_trie) = result?;
         trie.insert_storage_trie(address, storage_trie);
 
-        // If the account itself has an update, remove it from the state update and update in one
-        // go instead of doing it down below.
         if let Some(account) = state.accounts.remove(&address) {
+            // If the account itself has an update, remove it from the state update and update in
+            // one go instead of doing it down below.
             trace!(target: "engine::root::sparse", ?address, "Updating account and its storage root");
             trie.update_account(address, account.unwrap_or_default())?;
-        } else {
+        } else if trie.is_account_revealed(address) {
+            // Otherwise, if the account is revealed, only update its storage root.
             trace!(target: "engine::root::sparse", ?address, "Updating account storage root");
             trie.update_account_storage_root(address)?;
         }
