@@ -21,7 +21,7 @@ use reth_primitives::Block;
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_rpc_api::clients::EthApiClient;
 use revm::state::EvmState;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 use tokio::{
     sync::mpsc,
     time::{sleep, Duration},
@@ -30,7 +30,7 @@ use tracing::{debug, error};
 
 /// Configuration for setting upa test environment
 #[derive(Debug)]
-pub struct Setup {
+pub struct Setup<I> {
     /// Chain specification to use
     pub chain_spec: Option<Arc<ChainSpec>>,
     /// Genesis block to use
@@ -45,9 +45,11 @@ pub struct Setup {
     shutdown_tx: Option<mpsc::Sender<()>>,
     /// Is this setup in dev mode
     pub is_dev: bool,
+    /// Tracks instance generic.
+    _phantom: PhantomData<I>,
 }
 
-impl Default for Setup {
+impl<I> Default for Setup<I> {
     fn default() -> Self {
         Self {
             chain_spec: None,
@@ -57,11 +59,12 @@ impl Default for Setup {
             network: NetworkSetup::default(),
             shutdown_tx: None,
             is_dev: true,
+            _phantom: Default::default(),
         }
     }
 }
 
-impl Drop for Setup {
+impl<I> Drop for Setup<I> {
     fn drop(&mut self) {
         // Send shutdown signal if the channel exists
         if let Some(tx) = self.shutdown_tx.take() {
@@ -70,7 +73,7 @@ impl Drop for Setup {
     }
 }
 
-impl Setup {
+impl<I> Setup<I> {
     /// Create a new setup with default values
     pub fn new() -> Self {
         Self::default()
@@ -119,7 +122,7 @@ impl Setup {
     }
 
     /// Apply the setup to the environment
-    pub async fn apply<N>(&mut self, env: &mut Environment) -> Result<()>
+    pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
         N: Default
             + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
