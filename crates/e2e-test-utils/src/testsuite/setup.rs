@@ -181,7 +181,9 @@ impl Setup {
             Ok((nodes, executor, _wallet)) => {
                 // create HTTP clients for each node's RPC and Engine API endpoints
                 for node in &nodes {
-                    let rpc = node.rpc_client();
+                    let rpc = node
+                        .rpc_client()
+                        .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
                     let engine = node.engine_api_client();
 
                     node_clients.push(crate::testsuite::NodeClient { rpc, engine });

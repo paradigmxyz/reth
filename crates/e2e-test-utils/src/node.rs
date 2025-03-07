@@ -297,8 +297,8 @@ where
     }
 
     /// Returns an RPC client.
-    pub fn rpc_client(&self) -> HttpClient {
-        self.inner.rpc_server_handle().http_client().unwrap()
+    pub fn rpc_client(&self) -> Option<HttpClient> {
+        self.inner.rpc_server_handle().http_client()
     }
 
     /// Returns an Engine API client.
