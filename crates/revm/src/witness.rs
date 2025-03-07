@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, map::B256Map, Bytes, B256};
+use alloy_primitives::{keccak256, Bytes, B256};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm_database::State;
 
@@ -11,13 +11,13 @@ pub struct ExecutionWitnessRecord {
     /// the execution of the block, including during state root recomputation.
     ///
     /// `keccak(bytecodes) => bytecodes`
-    pub codes: B256Map<Bytes>,
+    pub codes: Vec<Bytes>,
     /// Map of all hashed account and storage keys (addresses and slots) to their preimages
     /// (unhashed account addresses and storage slots, respectively) that were required during
     /// the execution of the block. during the execution of the block.
     ///
     /// `keccak(address|slot) => address|slot`
-    pub keys: B256Map<Bytes>,
+    pub keys: Vec<Bytes>,
 }
 
 impl ExecutionWitnessRecord {
@@ -27,7 +27,7 @@ impl ExecutionWitnessRecord {
             .cache
             .contracts
             .iter()
-            .map(|(hash, code)| (*hash, code.original_bytes()))
+            .map(|(_hash, code)| code.original_bytes())
             .chain(
                 // cache state does not have all the contracts, especially when
                 // a contract is created within the block
@@ -37,7 +37,7 @@ impl ExecutionWitnessRecord {
                     .bundle_state
                     .contracts
                     .iter()
-                    .map(|(hash, code)| (*hash, code.original_bytes())),
+                    .map(|(_hash, code)| code.original_bytes()),
             )
             .collect();
 
@@ -54,14 +54,14 @@ impl ExecutionWitnessRecord {
                 .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
             if let Some(account) = &account.account {
-                self.keys.insert(hashed_address, address.to_vec().into());
+                self.keys.push(address.to_vec().into());
 
                 for (slot, value) in &account.storage {
                     let slot = B256::from(*slot);
                     let hashed_slot = keccak256(slot);
                     storage.storage.insert(hashed_slot, *value);
 
-                    self.keys.insert(hashed_slot, slot.into());
+                    self.keys.push(slot.into());
                 }
             }
         }
