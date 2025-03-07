@@ -24,7 +24,7 @@ use reth_rpc_api::clients::EthApiClient;
 use revm::state::EvmState;
 use std::sync::Arc;
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::mpsc,
     time::{sleep, Duration},
 };
 use tracing::{debug, error};
@@ -149,7 +149,6 @@ impl Setup {
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
 
-        let (clients_tx, clients_rx) = oneshot::channel();
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
 
         self.shutdown_tx = Some(shutdown_tx);
@@ -178,10 +177,10 @@ impl Setup {
         )
         .await;
 
+        let mut node_clients = Vec::new();
         match result {
             Ok((nodes, executor, _wallet)) => {
                 // create HTTP clients for each node's RPC and Engine API endpoints
-                let mut node_clients = Vec::with_capacity(nodes.len());
                 for node in &nodes {
                     let rpc_url = node.rpc_url();
                     let engine_url = node.engine_api_url();
@@ -191,7 +190,6 @@ impl Setup {
                         Ok(client) => client,
                         Err(e) => {
                             error!("Failed to create RPC client for {}: {}", rpc_url, e);
-                            let _ = clients_tx.send(Vec::new());
                             return Err(eyre!("Failed to create RPC client: {}", e));
                         }
                     };
@@ -200,7 +198,6 @@ impl Setup {
                         Ok(client) => client,
                         Err(e) => {
                             error!("Failed to create Engine API client for {}: {}", engine_url, e);
-                            let _ = clients_tx.send(Vec::new());
                             return Err(eyre!("Failed to create Engine API client: {}", e));
                         }
                     };
@@ -210,9 +207,6 @@ impl Setup {
                         engine: engine_client,
                     });
                 }
-
-                // send the clients back through the channel
-                let _ = clients_tx.send(node_clients);
 
                 // spawn a separate task just to handle the shutdown
                 tokio::spawn(async move {
@@ -225,15 +219,10 @@ impl Setup {
                 });
             }
             Err(e) => {
-                let _ = clients_tx.send(Vec::new());
                 error!("Failed to setup nodes: {}", e);
                 return Err(eyre!("Failed to setup nodes: {}", e));
             }
         }
-
-        // wait for the clients to be created
-        let node_clients =
-            clients_rx.await.map_err(|_| eyre!("Failed to receive clients from setup task"))?;
 
         if node_clients.is_empty() {
             return Err(eyre!("No nodes were created"));
