@@ -316,12 +316,12 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.consistent_provider()?.block_with_senders(id, transaction_kind)
+        self.consistent_provider()?.recovered_block(id, transaction_kind)
     }
 
     fn sealed_block_with_senders(
@@ -2546,7 +2546,7 @@ mod tests {
             ),
             (
                 TWO,
-                block_with_senders,
+                recovered_block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
                     block.clone().try_recover().ok()
@@ -2555,7 +2555,7 @@ mod tests {
             ),
             (
                 TWO,
-                block_with_senders,
+                recovered_block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
                     block.clone().try_recover().ok()

@@ -233,7 +233,7 @@ where
 
         let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (mut evm_env, current_block_id) = self.eth_api().evm_env_at(block_id).await?;
-        let current_block = self.eth_api().block_with_senders(current_block_id).await?;
+        let current_block = self.eth_api().recovered_block(current_block_id).await?;
         let current_block = current_block.ok_or(EthApiError::HeaderNotFound(block_id))?;
 
         let eth_api = self.inner.eth_api.clone();

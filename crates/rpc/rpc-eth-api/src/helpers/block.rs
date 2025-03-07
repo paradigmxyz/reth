@@ -58,7 +58,7 @@ pub trait EthBlocks: LoadBlock {
         Self: FullEthApiTypes,
     {
         async move {
-            let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
+            let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
             let block = from_block((*block).clone(), full.into(), self.tx_resp_builder())?;
             Ok(Some(block))
@@ -205,7 +205,7 @@ pub trait EthBlocks: LoadBlock {
 pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         block_id: BlockId,
     ) -> impl Future<

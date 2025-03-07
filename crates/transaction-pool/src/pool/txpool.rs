@@ -1980,9 +1980,8 @@ mod tests {
         traits::TransactionOrigin,
         SubPoolLimit,
     };
-    use alloy_consensus::Transaction;
+    use alloy_consensus::{Transaction, TxType};
     use alloy_primitives::address;
-    use reth_primitives::TxType;
 
     #[test]
     fn test_insert_blob() {
