@@ -11,8 +11,7 @@ use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives_traits::RecoveredBlock;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use revm::state::EvmState;
 use std::time::Instant;
 

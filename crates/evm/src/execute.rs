@@ -19,9 +19,9 @@ pub use reth_execution_errors::{
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{
-    HeaderTy, NodePrimitives,Recovered, RecoveredBlock, SealedBlock, SealedHeader,
+    BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedBlock,
+    SealedHeader, TxTy,
 };
-use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
 pub use reth_storage_errors::provider::ProviderError;
 use revm::{
     context::result::ExecutionResult,
@@ -698,9 +698,9 @@ mod tests {
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_primitives::{address, U256};
     use core::marker::PhantomData;
+    use reth_ethereum_primitives::EthPrimitives;
     use revm::state::AccountInfo;
     use revm_database::{CacheDB, EmptyDB};
-    use reth_ethereum_primitives::EthPrimitives;
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
