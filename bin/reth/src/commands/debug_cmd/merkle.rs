@@ -125,7 +125,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         .retry(backoff)
         .notify(|err, _| warn!(target: "reth::cli", "Error requesting header: {err}. Retrying..."))
         .await?;
-        info!(target: "reth::cli", target_block_number=self.to, "Finished downloading tip of block range");
+        info!(target: "reth::cli", target_block_number = self.to, "Finished downloading tip of block range");
 
         // build the full block client
         let consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>> =
