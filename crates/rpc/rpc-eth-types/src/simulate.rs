@@ -54,7 +54,7 @@ impl ToRpcError for EthSimulateError {
 }
 
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
-/// given [`BlockExecutionStrategy`].
+/// given [`BlockExecutor`].
 ///
 /// Returns all executed transactions and the result of the execution.
 #[expect(clippy::type_complexity)]

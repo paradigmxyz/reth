@@ -266,7 +266,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=b781326#b78132605805e60b87a55ab38364430740c41b29"
+source = "git+https://github.com/alloy-rs/evm?rev=f9ed4d3#f9ed4d335b2e0002e257ead3198eb463a84c5219"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -394,7 +394,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/evm?rev=b781326#b78132605805e60b87a55ab38364430740c41b29"
+source = "git+https://github.com/alloy-rs/evm?rev=f9ed4d3#f9ed4d335b2e0002e257ead3198eb463a84c5219"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7565,19 +7565,14 @@ name = "reth-engine-util"
 version = "1.2.2"
 dependencies = [
  "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
  "futures",
  "itertools 0.14.0",
  "pin-project",
  "reth-chainspec",
- "reth-consensus-common",
  "reth-engine-primitives",
  "reth-errors",
- "reth-ethereum-forks",
- "reth-ethereum-primitives",
  "reth-evm",
  "reth-fs-util",
  "reth-payload-primitives",
@@ -7585,9 +7580,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
- "reth-trie",
- "revm-database",
- "revm-primitives",
  "serde",
  "serde_json",
  "tokio",

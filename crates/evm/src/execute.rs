@@ -179,7 +179,7 @@ pub struct ExecuteOutput<R> {
 /// A factory that can create block execution strategies.
 ///
 /// This trait extends [`crate::ConfigureEvm`] and provides a way to construct a
-/// [`BlockExecutionStrategy`]. Strategy is expected to derive most of the context for block
+/// [`BlockExecutor`]. Strategy is expected to derive most of the context for block
 /// execution from the EVM (which includes [`revm::context::BlockEnv`]), and any additional context
 /// should be contained in configured [`ExecutionCtx`].
 ///
@@ -187,14 +187,14 @@ pub struct ExecuteOutput<R> {
 /// [`SealedBlock`] (in case of execution of an externally obtained block), or from a parent header
 /// along with [`crate::ConfigureEvmEnv::NextBlockEnvCtx`] (in the case of block building).
 ///
-/// For more context on the strategy design, see the documentation for [`BlockExecutionStrategy`].
+/// For more context on the strategy design, see the documentation for [`BlockExecutor`].
 ///
 /// Additionally, trait implementations are expected to define a [`BlockAssembler`] type that is
 /// used to assemble blocks. Assembler combined with strategy are used to create a [`BlockBuilder`].
 /// [`BlockBuilder`] exposes a simple API for building blocks and can be consumed by payload
 /// builder.
 ///
-/// [`ExecutionCtx`]: BlockExecutionStrategyFactory::ExecutionCtx
+/// [`ExecutionCtx`]: BlockExecutorFactory::ExecutionCtx
 pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'static {
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
@@ -215,13 +215,13 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
     /// Provides reference to configured [`BlockAssembler`].
     fn block_assembler(&self) -> &Self::BlockAssembler;
 
-    /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for a given block.
+    /// Returns the configured [`BlockExecutorFactory::ExecutionCtx`] for a given block.
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>;
 
-    /// Returns the configured [`BlockExecutionStrategyFactory::ExecutionCtx`] for `parent + 1`
+    /// Returns the configured [`BlockExecutorFactory::ExecutionCtx`] for `parent + 1`
     /// block.
     fn context_for_next_block(
         &self,
@@ -255,7 +255,7 @@ pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'st
 
     /// Creates a [`BlockBuilder`]. Should be used when building a new block.
     ///
-    /// Block builder wraps an inner [`BlockExecutionStrategy`] and has a similar interface. Builder
+    /// Block builder wraps an inner [`BlockExecutor`] and has a similar interface. Builder
     /// collects all of the executed transactions, and once [`BlockBuilder::finish`] is called, it
     /// invokes the configured [`BlockAssembler`] to create a block.
     fn create_block_builder<'a, DB, I>(
@@ -303,7 +303,7 @@ pub struct BlockAssemblerInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
     ///
     /// Contains context relevant to EVM such as [`revm::context::BlockEnv`].
     pub evm_env: EvmEnvFor<Evm>,
-    /// [`BlockExecutionStrategyFactory::ExecutionCtx`] used to execute the block.
+    /// [`BlockExecutorFactory::ExecutionCtx`] used to execute the block.
     pub execution_ctx: <Evm::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
     /// Parent block header.
     pub parent: &'a SealedHeader<HeaderTy<Evm::Primitives>>,
@@ -345,12 +345,12 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
 
 /// A type that knows how to execute and build a block.
 ///
-/// It wraps an inner [`BlockExecutionStrategy`] and provides a way to execute transactions and
+/// It wraps an inner [`BlockExecutor`] and provides a way to execute transactions and
 /// construct a block.
 ///
 /// This is a helper to erase `BasicBlockBuilder` type.
 pub trait BlockBuilder {
-    /// The primitive types used by the inner [`BlockExecutionStrategy`].
+    /// The primitive types used by the inner [`BlockExecutor`].
     type Primitives: NodePrimitives;
     /// Inner [`BlockExecutor`].
     type Executor: BlockExecutor<
@@ -358,10 +358,10 @@ pub trait BlockBuilder {
         Receipt = ReceiptTy<Self::Primitives>,
     >;
 
-    /// Invokes [`BlockExecutionStrategy::apply_pre_execution_changes`].
+    /// Invokes [`BlockExecutor::apply_pre_execution_changes`].
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
-    /// Invokes [`BlockExecutionStrategy::execute_transaction_with_result_closure`] and saves the
+    /// Invokes [`BlockExecutor::execute_transaction_with_result_closure`] and saves the
     /// transaction in internal state.
     fn execute_transaction_with_result_closure(
         &mut self,
@@ -369,7 +369,7 @@ pub trait BlockBuilder {
         f: impl FnOnce(&ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError>;
 
-    /// Invokes [`BlockExecutionStrategy::execute_transaction`] and saves the transaction in
+    /// Invokes [`BlockExecutor::execute_transaction`] and saves the transaction in
     /// internal state.
     fn execute_transaction(
         &mut self,
@@ -384,15 +384,15 @@ pub trait BlockBuilder {
         state_provider: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
 
-    /// Provides mutable access to the inner [`BlockExecutionStrategy`].
+    /// Provides mutable access to the inner [`BlockExecutor`].
     fn executor_mut(&mut self) -> &mut Self::Executor;
 
-    /// Helper to access inner [`BlockExecutionStrategy::Evm`].
+    /// Helper to access inner [`BlockExecutor::Evm`].
     fn evm_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::Evm {
         self.executor_mut().evm_mut()
     }
 
-    /// Consumes the type and returns the underlying [`BlockExecutionStrategy`].
+    /// Consumes the type and returns the underlying [`BlockExecutor`].
     fn into_executor(self) -> Self::Executor;
 }
 
@@ -518,7 +518,7 @@ where
     }
 }
 
-/// A generic block executor that uses a [`BlockExecutionStrategy`] to
+/// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
 #[allow(missing_debug_implementations, dead_code)]
 pub struct BasicBlockExecutor<F, DB> {
