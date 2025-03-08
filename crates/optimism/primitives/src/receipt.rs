@@ -370,11 +370,11 @@ pub(super) mod serde_bincode_compat {
     impl<'a> From<&'a super::OpReceipt> for OpReceipt<'a> {
         fn from(value: &'a super::OpReceipt) -> Self {
             match value {
-                super::OpReceipt::Legacy(receipt) => OpReceipt::Legacy(receipt.into()),
-                super::OpReceipt::Eip2930(receipt) => OpReceipt::Eip2930(receipt.into()),
-                super::OpReceipt::Eip1559(receipt) => OpReceipt::Eip1559(receipt.into()),
-                super::OpReceipt::Eip7702(receipt) => OpReceipt::Eip7702(receipt.into()),
-                super::OpReceipt::Deposit(receipt) => OpReceipt::Deposit(receipt.into()),
+                super::OpReceipt::Legacy(receipt) => Self::Legacy(receipt.into()),
+                super::OpReceipt::Eip2930(receipt) => Self::Eip2930(receipt.into()),
+                super::OpReceipt::Eip1559(receipt) => Self::Eip1559(receipt.into()),
+                super::OpReceipt::Eip7702(receipt) => Self::Eip7702(receipt.into()),
+                super::OpReceipt::Deposit(receipt) => Self::Deposit(receipt.into()),
             }
         }
     }
@@ -382,11 +382,11 @@ pub(super) mod serde_bincode_compat {
     impl<'a> From<OpReceipt<'a>> for super::OpReceipt {
         fn from(value: OpReceipt<'a>) -> Self {
             match value {
-                OpReceipt::Legacy(receipt) => super::OpReceipt::Legacy(receipt.into()),
-                OpReceipt::Eip2930(receipt) => super::OpReceipt::Eip2930(receipt.into()),
-                OpReceipt::Eip1559(receipt) => super::OpReceipt::Eip1559(receipt.into()),
-                OpReceipt::Eip7702(receipt) => super::OpReceipt::Eip7702(receipt.into()),
-                OpReceipt::Deposit(receipt) => super::OpReceipt::Deposit(receipt.into()),
+                OpReceipt::Legacy(receipt) => Self::Legacy(receipt.into()),
+                OpReceipt::Eip2930(receipt) => Self::Eip2930(receipt.into()),
+                OpReceipt::Eip1559(receipt) => Self::Eip1559(receipt.into()),
+                OpReceipt::Eip7702(receipt) => Self::Eip7702(receipt.into()),
+                OpReceipt::Deposit(receipt) => Self::Deposit(receipt.into()),
             }
         }
     }
