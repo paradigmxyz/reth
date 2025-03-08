@@ -11,7 +11,7 @@ use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives::RecoveredBlock;
+use reth_primitives_traits::RecoveredBlock;
 use reth_primitives_traits::NodePrimitives;
 use revm::state::EvmState;
 use std::time::Instant;
@@ -147,7 +147,7 @@ mod tests {
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use reth_execution_types::BlockExecutionResult;
-    use reth_primitives::EthPrimitives;
+    use reth_primitives_traits::EthPrimitives;
     use revm::{
         database_interface::EmptyDB,
         state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},

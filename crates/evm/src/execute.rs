@@ -18,8 +18,8 @@ pub use reth_execution_errors::{
 };
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{
-    HeaderTy, NodePrimitives, Receipt, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
+use reth_primitives_traits::{
+    HeaderTy, NodePrimitives,Recovered, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
 pub use reth_storage_errors::provider::ProviderError;
@@ -167,7 +167,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 
 /// Helper type for the output of executing a block.
 #[derive(Debug, Clone)]
-pub struct ExecuteOutput<R = Receipt> {
+pub struct ExecuteOutput<R> {
     /// Receipts obtained after executing a block.
     pub receipts: Vec<R>,
     /// Cumulative gas used in the block execution.
@@ -698,9 +698,9 @@ mod tests {
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_primitives::{address, U256};
     use core::marker::PhantomData;
-    use reth_primitives::EthPrimitives;
     use revm::state::AccountInfo;
     use revm_database::{CacheDB, EmptyDB};
+    use reth_ethereum_primitives::EthPrimitives;
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
