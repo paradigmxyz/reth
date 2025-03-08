@@ -5,7 +5,7 @@ use alloy_network::{Ethereum, Network};
 use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
-use reth_primitives::{Recovered, TransactionSigned};
+use reth_primitives::{NodePrimitives, Recovered, TransactionSigned};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
@@ -29,7 +29,7 @@ impl EthApiTypes for EthereumEthApiTypes {
 #[non_exhaustive]
 pub struct EthTxBuilder;
 
-impl TransactionCompat for EthTxBuilder
+impl<N: NodePrimitives<SignedTx = TransactionSigned>> TransactionCompat<N> for EthTxBuilder
 where
     Self: Send + Sync,
 {

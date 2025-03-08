@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::RecoveredBlock;
+use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_provider::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderError, ProviderReceipt,
@@ -29,6 +29,7 @@ use std::{
     collections::HashMap,
     fmt,
     iter::StepBy,
+    marker::PhantomData,
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
@@ -636,19 +637,21 @@ impl PendingTransactionsReceiver {
 
 /// A structure to manage and provide access to a stream of full transaction details.
 #[derive(Debug, Clone)]
-struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
+struct FullTransactionsReceiver<N, T: PoolTransaction, TxCompat> {
     txs_stream: Arc<Mutex<NewSubpoolTransactionStream<T>>>,
     tx_resp_builder: TxCompat,
+    _phantom: PhantomData<N>,
 }
 
-impl<T, TxCompat> FullTransactionsReceiver<T, TxCompat>
+impl<N, T, TxCompat> FullTransactionsReceiver<N, T, TxCompat>
 where
+    N: NodePrimitives<SignedTx = T::Consensus>,
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat<T::Consensus>,
+    TxCompat: TransactionCompat<N>,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>, tx_resp_builder: TxCompat) -> Self {
-        Self { txs_stream: Arc::new(Mutex::new(stream)), tx_resp_builder }
+        Self { txs_stream: Arc::new(Mutex::new(stream)), tx_resp_builder, _phantom: PhantomData }
     }
 
     /// Returns all new pending transactions received since the last poll.
@@ -678,11 +681,12 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 }
 
 #[async_trait]
-impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
-    for FullTransactionsReceiver<T, TxCompat>
+impl<N, T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
+    for FullTransactionsReceiver<N, T, TxCompat>
 where
+    N: NodePrimitives<SignedTx = T::Consensus>,
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat<T::Consensus> + 'static,
+    TxCompat: TransactionCompat<N> + 'static,
 {
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
         Self::drain(self).await

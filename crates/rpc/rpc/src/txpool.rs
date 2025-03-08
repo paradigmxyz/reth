@@ -1,5 +1,5 @@
 use core::fmt;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, marker::PhantomData};
 
 use alloy_consensus::Transaction;
 use alloy_primitives::Address;
@@ -8,6 +8,7 @@ use alloy_rpc_types_txpool::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use reth_primitives::NodePrimitives;
 use reth_rpc_api::TxPoolApiServer;
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{
@@ -19,34 +20,37 @@ use tracing::trace;
 ///
 /// This type provides the functionality for handling `txpool` related requests.
 #[derive(Clone)]
-pub struct TxPoolApi<Pool, Eth> {
+pub struct TxPoolApi<N, Pool, Eth> {
     /// An interface to interact with the pool
     pool: Pool,
     tx_resp_builder: Eth,
+    _phantom: PhantomData<N>,
 }
 
-impl<Pool, Eth> TxPoolApi<Pool, Eth> {
+impl<N, Pool, Eth> TxPoolApi<N, Pool, Eth> {
     /// Creates a new instance of `TxpoolApi`.
     pub const fn new(pool: Pool, tx_resp_builder: Eth) -> Self {
-        Self { pool, tx_resp_builder }
+        Self { pool, tx_resp_builder, _phantom: PhantomData }
     }
 }
 
-impl<Pool, Eth> TxPoolApi<Pool, Eth>
+impl<Pool, N, Eth> TxPoolApi<N, Pool, Eth>
 where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
-    Eth: TransactionCompat<PoolConsensusTx<Pool>>,
+    N: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>,
+    Eth: TransactionCompat<N>,
 {
     fn content(&self) -> Result<TxpoolContent<Eth::Transaction>, Eth::Error> {
         #[inline]
-        fn insert<Tx, RpcTxB>(
+        fn insert<N, Tx, RpcTxB>(
             tx: &Tx,
             content: &mut BTreeMap<Address, BTreeMap<String, RpcTxB::Transaction>>,
             resp_builder: &RpcTxB,
         ) -> Result<(), RpcTxB::Error>
         where
+            N: NodePrimitives<SignedTx = Tx::Consensus>,
             Tx: PoolTransaction,
-            RpcTxB: TransactionCompat<Tx::Consensus>,
+            RpcTxB: TransactionCompat<N>,
         {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
@@ -60,10 +64,10 @@ where
 
         let mut content = TxpoolContent { pending: BTreeMap::new(), queued: BTreeMap::new() };
         for pending in pending {
-            insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder)?;
+            insert::<_, _, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder)?;
         }
         for queued in queued {
-            insert::<_, Eth>(&queued.transaction, &mut content.queued, &self.tx_resp_builder)?;
+            insert::<_, _, Eth>(&queued.transaction, &mut content.queued, &self.tx_resp_builder)?;
         }
 
         Ok(content)
@@ -71,10 +75,11 @@ where
 }
 
 #[async_trait]
-impl<Pool, Eth> TxPoolApiServer<Eth::Transaction> for TxPoolApi<Pool, Eth>
+impl<N, Pool, Eth> TxPoolApiServer<Eth::Transaction> for TxPoolApi<N, Pool, Eth>
 where
+    N: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
-    Eth: TransactionCompat<PoolConsensusTx<Pool>> + 'static,
+    Eth: TransactionCompat<N> + 'static,
 {
     /// Returns the number of transactions currently pending for inclusion in the next block(s), as
     /// well as the ones that are being scheduled for future execution only.
@@ -144,7 +149,7 @@ where
     }
 }
 
-impl<Pool, Eth> fmt::Debug for TxPoolApi<Pool, Eth> {
+impl<N, Pool, Eth> fmt::Debug for TxPoolApi<N, Pool, Eth> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TxpoolApi").finish_non_exhaustive()
     }

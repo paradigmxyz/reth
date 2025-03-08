@@ -4,7 +4,7 @@
 
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
-use reth_primitives::{Recovered, TransactionSigned};
+use reth_primitives::{NodePrimitives, Recovered, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
 use reth_rpc_types_compat::TransactionCompat;
 
@@ -39,7 +39,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
     }
 
     /// Conversion into network specific transaction type.
-    pub fn into_transaction<Builder: TransactionCompat<T>>(
+    pub fn into_transaction<N: NodePrimitives<SignedTx = T>, Builder: TransactionCompat<N>>(
         self,
         resp_builder: &Builder,
     ) -> Result<Builder::Transaction, Builder::Error> {

@@ -4,7 +4,8 @@ use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
-use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_primitives_traits::NodePrimitives;
+use reth_provider::{BlockReader, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
@@ -77,13 +78,17 @@ pub type RpcError<T> = <T as EthApiTypes>::Error;
 pub trait FullEthApiTypes
 where
     Self: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider,
+            Provider: TransactionsProvider + ReceiptProvider + BlockReader,
+            Primitives: NodePrimitives<
+                SignedTx = <Self::Provider as TransactionsProvider>::Transaction,
+                Block = <Self::Provider as BlockReader>::Block,
+            >,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
-                <Self::Provider as TransactionsProvider>::Transaction,
+                Self::Primitives,
                 Transaction = RpcTransaction<Self::NetworkTypes>,
                 Error = RpcError<Self>,
             >,
@@ -93,13 +98,17 @@ where
 
 impl<T> FullEthApiTypes for T where
     T: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider,
+            Provider: TransactionsProvider + ReceiptProvider + BlockReader,
+            Primitives: NodePrimitives<
+                SignedTx = <Self::Provider as TransactionsProvider>::Transaction,
+                Block = <Self::Provider as BlockReader>::Block,
+            >,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
-                <Self::Provider as TransactionsProvider>::Transaction,
+                Self::Primitives,
                 Transaction = RpcTransaction<T::NetworkTypes>,
                 Error = RpcError<T>,
             >,
