@@ -12,8 +12,8 @@ use reth_db_api::{
     table::{DupSort, Table, TableRow},
     tables,
 };
+use reth_ethereum_primitives::TransactionSigned;
 use reth_fs_util as fs;
-use reth_primitives::TransactionSigned;
 use std::collections::HashSet;
 use tracing::error;
 
