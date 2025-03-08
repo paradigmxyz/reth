@@ -261,7 +261,7 @@ pub struct MultiproofManager<Factory> {
     inflight: usize,
     /// Queued calculations.
     pending: VecDeque<MultiproofInput<Factory>>,
-    /// Executor for tassks
+    /// Executor for tasks
     executor: WorkloadExecutor,
     /// Metrics
     metrics: MultiProofTaskMetrics,
