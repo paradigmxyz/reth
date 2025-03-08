@@ -1,6 +1,6 @@
 # Observability with Prometheus & Grafana
 
-Reth exposes a number of metrics, which are listed [here][metrics]. We can serve them from an HTTP endpoint by adding the `--metrics` flag:
+Reth exposes a number of metrics which can be enabled by adding the `--metrics` flag:
 
 ```bash
 reth node --metrics 127.0.0.1:9001
@@ -24,7 +24,7 @@ We're finally getting somewhere! As a final step, though, wouldn't it be great t
 
 ## Prometheus & Grafana
 
-We're going to be using Prometheus to collect metrics off of the endpoint we set up, and use Grafana to scrape the metrics from Prometheus and define a dashboard with them.
+We're going to use Prometheus to scrape the metrics from our node, and use Grafana to on a dashboard.
 
 Let's begin by installing both Prometheus and Grafana, which one can do with e.g. Homebrew:
 
