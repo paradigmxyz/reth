@@ -18,7 +18,7 @@
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::PayloadValidator;
-//! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+//! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmEnv};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
@@ -88,7 +88,7 @@
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::PayloadValidator;
-//! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+//! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmEnv};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
@@ -185,7 +185,7 @@ use jsonrpsee::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmEnv};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
@@ -273,7 +273,7 @@ where
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvmEnv<Primitives = N>,
     EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
 {
@@ -693,7 +693,7 @@ where
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvmEnv<Primitives = N>,
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {
@@ -752,7 +752,7 @@ where
     /// ```no_run
     /// use reth_consensus::noop::NoopConsensus;
     /// use reth_engine_primitives::PayloadValidator;
-    /// use reth_evm::ConfigureEvm;
+    /// use reth_evm::ConfigureEvmEnv;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_primitives::{Header, TransactionSigned};
@@ -765,7 +765,7 @@ where
     ///
     /// fn init<Evm>(evm: Evm)
     /// where
-    ///     Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
+    ///     Evm: ConfigureEvmEnv<Header = Header, Transaction = TransactionSigned> + 'static,
     /// {
     ///     let builder = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
@@ -988,7 +988,7 @@ where
         block_executor: BlockExecutor,
     ) -> Self
     where
-        EvmConfig: ConfigureEvm<Header = Provider::Header>,
+        EvmConfig: ConfigureEvmEnv<Primitives = N>,
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 

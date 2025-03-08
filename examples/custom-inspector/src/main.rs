@@ -29,7 +29,7 @@ use reth::{
     rpc::api::eth::helpers::Call,
     transaction_pool::TransactionPool,
 };
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmEnv;
 use reth_node_ethereum::node::EthereumNode;
 
 fn main() {

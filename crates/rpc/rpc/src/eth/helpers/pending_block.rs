@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::{execute::BlockExecutionStrategyFactory, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_node_api::NodePrimitives;
 use reth_primitives::SealedHeader;
 use reth_provider::{
@@ -37,7 +37,7 @@ where
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
-            Evm: BlockExecutionStrategyFactory<
+            Evm: ConfigureEvmEnv<
                 Primitives: NodePrimitives<
                     BlockHeader = ProviderHeader<Self::Provider>,
                     SignedTx = ProviderTx<Self::Provider>,

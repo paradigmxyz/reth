@@ -31,7 +31,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmEnv};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_primitives_traits::{
@@ -638,7 +638,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
-    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx> + 'static,
+    C: ConfigureEvmEnv<Primitives = N> + 'static,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {

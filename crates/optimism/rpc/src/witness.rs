@@ -5,7 +5,7 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use jsonrpsee_core::{async_trait, RpcResult};
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::{execute::BlockExecutionStrategyFactory, ConfigureEvm};
+use reth_evm::ConfigureEvmEnv;
 use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
@@ -41,7 +41,7 @@ impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig> {
 
 impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmEnv,
     Provider: NodePrimitivesProvider + BlockReaderIdExt<Header = reth_primitives::Header>,
 {
     /// Fetches the parent header by hash.
@@ -68,7 +68,7 @@ where
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
         + 'static,
-    EvmConfig: BlockExecutionStrategyFactory<
+    EvmConfig: ConfigureEvmEnv<
             Primitives = Provider::Primitives,
             NextBlockEnvCtx = OpNextBlockEnvAttributes,
         > + 'static,

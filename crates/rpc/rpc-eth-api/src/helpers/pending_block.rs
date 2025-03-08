@@ -10,8 +10,8 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionStrategyFactory},
-    ConfigureEvmEnv, Evm,
+    execute::{BlockBuilder, BlockBuilderOutcome},
+    ConfigureEvmEnv, Evm, SpecFor,
 };
 use reth_node_api::NodePrimitives;
 use reth_primitives::{InvalidTransactionError, RecoveredBlock, SealedHeader};
@@ -45,7 +45,7 @@ pub trait LoadPendingBlock:
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-        Evm: BlockExecutionStrategyFactory<
+        Evm: ConfigureEvmEnv<
             Primitives: NodePrimitives<
                 BlockHeader = ProviderHeader<Self::Provider>,
                 SignedTx = ProviderTx<Self::Provider>,
@@ -73,7 +73,7 @@ pub trait LoadPendingBlock:
         PendingBlockEnv<
             ProviderBlock<Self::Provider>,
             ProviderReceipt<Self::Provider>,
-            <Self::Evm as ConfigureEvmEnv>::Spec,
+            SpecFor<Self::Evm>,
         >,
         Self::Error,
     > {
