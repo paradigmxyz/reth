@@ -1,14 +1,13 @@
 use alloy_consensus::{
-    BlockBody,
     Transaction
 };
 use alloy_provider::network::AnyRpcBlock;
-use alloy_rpc_types::BlockTransactions;
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use eyre::{OptionExt, Result};
 use reth_cli_runner::CliContext;
 use std::io::{BufReader, Read, Write};
+use op_alloy_consensus::OpTxEnvelope;
 
 /// Command for generating and sending an `engine_newPayload` request constructed from an RPC
 /// block.
@@ -89,34 +88,26 @@ impl Command {
         let jwt_secret = self.load_jwt_secret()?;
 
         // Parse the block
-        let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?.inner;
+        let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?
+            .into_inner()
+            .map_header(|header|header.map(|h|h.into_header_with_defaults()))
+            .try_map_transactions(|tx| tx.try_into_either::<OpTxEnvelope>()
+            )?.into_consensus();
+
 
         // Extract parent beacon block root
         let parent_beacon_block_root = block.header.parent_beacon_block_root;
 
-        // Extract transactions
-        let transactions = match block.transactions {
-            BlockTransactions::Hashes(_) => {
-                return Err(eyre::eyre!("Block must include full transaction data. Send the eth_getBlockByHash request with full: `true`"));
-            }
-            BlockTransactions::Full(txs) => txs,
-            BlockTransactions::Uncle => {
-                return Err(eyre::eyre!("Cannot process uncle blocks"));
-            }
-        };
 
         // Extract blob versioned hashes
-        let blob_versioned_hashes = transactions
+        let blob_versioned_hashes = block.body.transactions
             .iter()
             .filter_map(|tx| tx.blob_versioned_hashes().map(|v| v.to_vec()))
             .flatten()
             .collect::<Vec<_>>();
 
         // Convert to execution payload
-        let execution_payload = ExecutionPayload::from_block_slow(&alloy_consensus::Block::new(
-            block.header.inner.clone().into_header_with_defaults(),
-            BlockBody { transactions, ommers: vec![], withdrawals: block.withdrawals.clone() },
-        ))
+        let execution_payload = ExecutionPayload::from_block_slow(&block)
         .0;
 
         // Create JSON request data
