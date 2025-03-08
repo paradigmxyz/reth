@@ -244,11 +244,6 @@ impl HashedPostState {
 
             if let Some(storage_not_in_targets) = storage_not_in_targets {
                 state_updates_not_in_targets.storages.insert(address, storage_not_in_targets);
-
-                // Storage update should have an associated account, if it exists.
-                if let Some(account) = self.accounts.remove(&address) {
-                    state_updates_not_in_targets.accounts.insert(address, account);
-                }
             }
 
             retain
@@ -948,7 +943,7 @@ mod tests {
         assert_eq!(
             with_targets,
             HashedPostState {
-                accounts: B256Map::default(),
+                accounts: B256Map::from_iter([(addr1, Some(Default::default()))]),
                 storages: B256Map::from_iter([(
                     addr1,
                     HashedStorage {
@@ -961,10 +956,7 @@ mod tests {
         assert_eq!(
             without_targets,
             HashedPostState {
-                accounts: B256Map::from_iter([
-                    (addr1, Some(Default::default())),
-                    (addr2, Some(Default::default()))
-                ]),
+                accounts: B256Map::from_iter([(addr2, Some(Default::default()))]),
                 storages: B256Map::from_iter([(
                     addr1,
                     HashedStorage {

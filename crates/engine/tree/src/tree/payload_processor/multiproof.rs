@@ -731,8 +731,7 @@ where
                         );
                     }
                     MultiProofMessage::StateUpdate(source, update) => {
-                        trace!(target: "engine::root", "processing
-        MultiProofMessage::StateUpdate");
+                        trace!(target: "engine::root", "processing MultiProofMessage::StateUpdate");
                         if state_update_proofs_requested == 0 {
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
