@@ -2,8 +2,7 @@
 
 use crate::{
     execute::{BasicBlockExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor},
-    system_calls::OnStateHook,
-    Database,
+    Database, OnStateHook,
 };
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::eip7685::Requests;

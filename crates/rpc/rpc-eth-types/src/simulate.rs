@@ -8,7 +8,7 @@ use alloy_rpc_types_eth::{
 };
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionStrategy},
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm,
 };
 use reth_primitives::{Recovered, RecoveredBlock, TxTy};
@@ -54,7 +54,7 @@ impl ToRpcError for EthSimulateError {
 }
 
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
-/// given [`BlockExecutionStrategy`].
+/// given [`BlockExecutor`].
 ///
 /// Returns all executed transactions and the result of the execution.
 #[expect(clippy::type_complexity)]
@@ -68,14 +68,12 @@ pub fn execute_transactions<S, T>(
 ) -> Result<
     (
         BlockBuilderOutcome<S::Primitives>,
-        Vec<ExecutionResult<<<S::Strategy as BlockExecutionStrategy>::Evm as Evm>::HaltReason>>,
+        Vec<ExecutionResult<<<S::Executor as BlockExecutor>::Evm as Evm>::HaltReason>>,
     ),
     EthApiError,
 >
 where
-    S: BlockBuilder<
-        Strategy: BlockExecutionStrategy<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>,
-    >,
+    S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
     T: TransactionCompat<TxTy<S::Primitives>>,
 {
     builder.apply_pre_execution_changes()?;

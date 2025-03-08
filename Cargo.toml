@@ -448,13 +448,13 @@ revm-inspectors = "0.16"
 alloy-chains = { version = "0.1.32", default-features = false }
 alloy-dyn-abi = "0.8.20"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "69c77cf", default-features = false }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "f9ed4d3", default-features = false }
 alloy-primitives = { version = "0.8.20", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-types = { version = "0.8.20", default-features = false }
 alloy-trie = { version = "0.7", default-features = false }
 
-alloy-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "42a3427" }
+alloy-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "ae4176c" }
 
 alloy-consensus = { version = "0.12.2", default-features = false }
 alloy-contract = { version = "0.12.2", default-features = false }
@@ -486,8 +486,8 @@ alloy-transport-ipc = { version = "0.12.2", default-features = false }
 alloy-transport-ws = { version = "0.12.2", default-features = false }
 
 # op
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "69c77cf", default-features = false }
-alloy-op-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "42a3427" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "f9ed4d3", default-features = false }
+alloy-op-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "ae4176c" }
 op-alloy-rpc-types = { version = "0.11.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.11.0", default-features = false }
 op-alloy-network = { version = "0.11.0", default-features = false }

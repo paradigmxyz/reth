@@ -2,12 +2,9 @@
 //!
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use crate::{
-    execute::Executor,
-    system_calls::{OnStateHook, StateChangeSource},
-    Database,
-};
+use crate::{execute::Executor, Database, OnStateHook};
 use alloy_consensus::BlockHeader;
+use alloy_evm::block::StateChangeSource;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;

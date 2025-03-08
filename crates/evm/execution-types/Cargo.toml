@@ -19,6 +19,7 @@ revm.workspace = true
 revm-database.workspace = true
 
 # alloy
+alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
@@ -70,4 +71,5 @@ std = [
     "reth-ethereum-primitives/std",
     "reth-trie-common/std",
     "revm-database/std",
+    "alloy-evm/std",
 ]

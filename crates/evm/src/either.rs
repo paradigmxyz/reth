@@ -2,8 +2,7 @@
 
 use crate::{
     execute::{BlockExecutorProvider, Executor},
-    system_calls::OnStateHook,
-    Database,
+    Database, OnStateHook,
 };
 
 // re-export Either
