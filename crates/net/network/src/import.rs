@@ -1,6 +1,7 @@
 //! This module provides an abstraction over block import in the form of the `BlockImport` trait.
 
 use crate::message::NewBlockMessage;
+use reth_engine_primitives::BeaconOnNewPayloadError;
 use reth_network_peers::PeerId;
 use std::task::{Context, Poll};
 
@@ -51,6 +52,12 @@ pub enum BlockImportError {
     /// Consensus error
     #[error(transparent)]
     Consensus(#[from] reth_consensus::ConsensusError),
+    /// Engine error
+    #[error(transparent)]
+    Engine(#[from] BeaconOnNewPayloadError),
+    /// Invalid payload
+    #[error("invalid payload: {0}")]
+    InvalidPayload(String),
 }
 
 /// An implementation of `BlockImport` used in Proof-of-Stake consensus that does nothing.
