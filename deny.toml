@@ -22,7 +22,14 @@ highlight = "all"
 # List of crates to deny
 deny = [{ name = "openssl" }]
 # Certain crates/versions that will be skipped when doing duplicate detection.
-skip = []
+skip = [
+    "libp2p-identity", # used by discv5, fails on outdated thiserror and base64 via unmaintained  
+                        libsecp256k1  <https://github.com/libp2p/rust-libp2p/issues/5916>
+    "revm-precompile", # same issue with libsecp256k1
+    "jsonrpsee", # outdated thiserror, fixed new release pending
+    "vergen", # https://github.com/paradigmxyz/reth/issues/14904
+
+]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
 # dependencies starting at the specified crate, up to a certain depth, which is
