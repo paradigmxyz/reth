@@ -1,13 +1,11 @@
-use alloy_consensus::{
-    Transaction
-};
+use alloy_consensus::Transaction;
 use alloy_provider::network::AnyRpcBlock;
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use eyre::{OptionExt, Result};
+use op_alloy_consensus::OpTxEnvelope;
 use reth_cli_runner::CliContext;
 use std::io::{BufReader, Read, Write};
-use op_alloy_consensus::OpTxEnvelope;
 
 /// Command for generating and sending an `engine_newPayload` request constructed from an RPC
 /// block.
@@ -90,25 +88,27 @@ impl Command {
         // Parse the block
         let block = serde_json::from_str::<AnyRpcBlock>(&block_json)?
             .into_inner()
-            .map_header(|header|header.map(|h|h.into_header_with_defaults()))
-            .try_map_transactions(|tx| tx.try_into_either::<OpTxEnvelope>()
-            )?.into_consensus();
-
+            .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+            .try_map_transactions(|tx| {
+                // try to convert unknowns into op type so that we can also support optimism
+                tx.try_into_either::<OpTxEnvelope>()
+            })?
+            .into_consensus();
 
         // Extract parent beacon block root
         let parent_beacon_block_root = block.header.parent_beacon_block_root;
 
-
         // Extract blob versioned hashes
-        let blob_versioned_hashes = block.body.transactions
+        let blob_versioned_hashes = block
+            .body
+            .transactions
             .iter()
             .filter_map(|tx| tx.blob_versioned_hashes().map(|v| v.to_vec()))
             .flatten()
             .collect::<Vec<_>>();
 
         // Convert to execution payload
-        let execution_payload = ExecutionPayload::from_block_slow(&block)
-        .0;
+        let execution_payload = ExecutionPayload::from_block_slow(&block).0;
 
         // Create JSON request data
         let json_request = serde_json::to_string(&(
