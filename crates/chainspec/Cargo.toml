@@ -52,6 +52,7 @@ std = [
     "derive_more/std",
     "reth-network-peers/std",
     "serde_json/std",
+    "alloy-evm/std",
 ]
 arbitrary = [
     "alloy-chains/arbitrary",
