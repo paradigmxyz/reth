@@ -18,6 +18,7 @@
 extern crate alloc;
 
 use crate::execute::BasicBlockBuilder;
+use alloc::vec::Vec;
 use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
 pub use alloy_evm::evm::EvmFactory;
 use alloy_evm::{

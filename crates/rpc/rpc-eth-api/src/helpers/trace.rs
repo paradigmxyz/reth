@@ -42,7 +42,7 @@ pub trait Trace:
     Error: FromEvmError<Self::Evm>,
 >
 {
-    /// Executes the [`EvmEnv`] against the given [Database] without committing state
+    /// Executes the [`reth_evm::EvmEnv`] against the given [Database] without committing state
     /// changes.
     #[expect(clippy::type_complexity)]
     fn inspect<DB, I>(
@@ -68,7 +68,7 @@ pub trait Trace:
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EvmEnv`] was inspected.
+    /// the configured [`reth_evm::EvmEnv`] was inspected.
     ///
     /// Caution: this is blocking
     fn trace_at<F, R>(
@@ -100,7 +100,7 @@ pub trait Trace:
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EvmEnv`] was inspected.
+    /// the configured [`reth_evm::EvmEnv`] was inspected.
     fn spawn_trace_at_with_state<F, R>(
         &self,
         evm_env: EvmEnvFor<Self::Evm>,
