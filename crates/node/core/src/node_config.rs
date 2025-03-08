@@ -31,11 +31,10 @@ use std::{
 };
 use tracing::*;
 
+pub use reth_engine_primitives::DEFAULT_MEMORY_BLOCK_BUFFER_TARGET;
+
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
-
-/// How close to the canonical head we persist blocks.
-pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 2;
 
 /// Default size of cross-block cache in megabytes.
 pub const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: u64 = 4 * 1024;

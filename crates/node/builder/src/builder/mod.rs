@@ -14,7 +14,6 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_engine_tree::tree::TreeConfig;
 use reth_exex::ExExContext;
 use reth_network::{
     transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
@@ -551,15 +550,7 @@ where
     {
         let Self { builder, task_executor } = self;
 
-        let engine_tree_config = TreeConfig::default()
-            .with_persistence_threshold(builder.config.engine.persistence_threshold)
-            .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
-            .with_legacy_state_root(builder.config.engine.legacy_state_root_task_enabled)
-            .with_caching_and_prewarming(builder.config.engine.caching_and_prewarming_enabled)
-            .with_always_compare_trie_updates(builder.config.engine.state_root_task_compare_updates)
-            .with_cross_block_cache_size(
-                builder.config.engine.cross_block_cache_size * 1024 * 1024,
-            );
+        let engine_tree_config = builder.config.engine.tree_config();
 
         let launcher =
             EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
@@ -579,15 +570,7 @@ where
     {
         let Self { builder, task_executor } = self;
 
-        let engine_tree_config = TreeConfig::default()
-            .with_persistence_threshold(builder.config.engine.persistence_threshold)
-            .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
-            .with_legacy_state_root(builder.config.engine.legacy_state_root_task_enabled)
-            .with_caching_and_prewarming(builder.config.engine.caching_and_prewarming_enabled)
-            .with_always_compare_trie_updates(builder.config.engine.state_root_task_compare_updates)
-            .with_cross_block_cache_size(
-                builder.config.engine.cross_block_cache_size * 1024 * 1024,
-            );
+        let engine_tree_config = builder.config.engine.tree_config();
 
         let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
             task_executor,
