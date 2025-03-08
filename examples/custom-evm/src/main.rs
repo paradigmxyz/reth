@@ -155,7 +155,7 @@ impl<CTX: ContextTr> CustomPrecompiles<CTX> {
 pub fn prague_custom() -> &'static Precompiles {
     static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
     INSTANCE.get_or_init(|| {
-        let mut precompiles = Precompiles::prague().clone();
+        let mut precompiles = Precompiles::prague();
         // Custom precompile.
         precompiles.extend([(
             address!("0x0000000000000000000000000000000000000999"),
