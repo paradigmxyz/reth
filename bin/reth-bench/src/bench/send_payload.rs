@@ -1,4 +1,3 @@
-use alloy_consensus::Transaction;
 use alloy_provider::network::AnyRpcBlock;
 use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
@@ -99,13 +98,8 @@ impl Command {
         let parent_beacon_block_root = block.header.parent_beacon_block_root;
 
         // Extract blob versioned hashes
-        let blob_versioned_hashes = block
-            .body
-            .transactions
-            .iter()
-            .filter_map(|tx| tx.blob_versioned_hashes().map(|v| v.to_vec()))
-            .flatten()
-            .collect::<Vec<_>>();
+        let blob_versioned_hashes =
+            block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
 
         // Convert to execution payload
         let execution_payload = ExecutionPayload::from_block_slow(&block).0;
