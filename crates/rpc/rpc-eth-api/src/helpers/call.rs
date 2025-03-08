@@ -94,7 +94,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let total_gas_limit = self.call_gas_limit();
 
             let base_block =
-                self.block_with_senders(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
+                self.recovered_block(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
             let mut parent = base_block.sealed_header().clone();
 
             let this = self.clone();
@@ -262,7 +262,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let ((evm_env, _), block) = futures::try_join!(
                 self.evm_env_at(target_block),
-                self.block_with_senders(target_block)
+                self.recovered_block(target_block)
             )?;
 
             let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;

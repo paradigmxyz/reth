@@ -379,12 +379,12 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.pending_block_and_receipts()
     }
 
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.provider()?.block_with_senders(id, transaction_kind)
+        self.provider()?.recovered_block(id, transaction_kind)
     }
 
     fn sealed_block_with_senders(
@@ -406,11 +406,11 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.block_with_senders_range(range)
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        self.provider()?.sealed_block_with_senders_range(range)
+        self.provider()?.recovered_block_range(range)
     }
 }
 

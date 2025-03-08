@@ -2415,7 +2415,7 @@ impl RpcServerHandle {
         let rpc_url = self.ws_url()?;
         let provider = ProviderBuilder::default()
             .with_recommended_fillers()
-            .on_builtin(&rpc_url)
+            .connect(&rpc_url)
             .await
             .expect("failed to create ws client");
         Some(provider)
@@ -2441,7 +2441,7 @@ impl RpcServerHandle {
         let rpc_url = self.ipc_endpoint()?;
         let provider = ProviderBuilder::default()
             .with_recommended_fillers()
-            .on_builtin(&rpc_url)
+            .connect(&rpc_url)
             .await
             .expect("failed to create ipc client");
         Some(provider)

@@ -9,7 +9,7 @@ use crate::{
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{Recovered, SealedBlock};
+use reth_primitives_traits::{Recovered, SealedBlock};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -171,8 +171,8 @@ pub trait TransactionValidator: Send + Sync {
     ///    * nonce >= next nonce of the sender
     ///    * ...
     ///
-    /// See [`InvalidTransactionError`](reth_primitives::InvalidTransactionError) for common errors
-    /// variants.
+    /// See [`InvalidTransactionError`](reth_primitives_traits::transaction::error::InvalidTransactionError) for common
+    /// errors variants.
     ///
     /// The transaction pool makes no additional assumptions about the validity of the transaction
     /// at the time of this call before it inserts it into the pool. However, the validity of

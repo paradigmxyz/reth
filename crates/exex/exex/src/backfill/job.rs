@@ -206,7 +206,7 @@ where
         // Fetch the block with senders for execution.
         let block_with_senders = self
             .provider
-            .block_with_senders(block_number.into(), TransactionVariant::WithHash)?
+            .recovered_block(block_number.into(), TransactionVariant::WithHash)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
         // Configure the executor to use the previous block's state.

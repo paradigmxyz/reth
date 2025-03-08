@@ -37,8 +37,8 @@ use reth_primitives::{
 };
 use std::fmt::Display;
 
-pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
-pub const WITHDRAWALS_ADDRESS: Address = address!("4200000000000000000000000000000000000000");
+pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
+pub const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
 
 fn main() {
     Cli::parse_args()
