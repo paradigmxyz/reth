@@ -1,9 +1,9 @@
-use crate::execute::EthBlockExecutionCtx;
 use alloc::sync::Arc;
 use alloy_consensus::{
     proofs, Block, BlockBody, BlockHeader, Header, Transaction, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::merge::BEACON_NONCE;
+use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use alloy_primitives::Bytes;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::execute::{
@@ -32,7 +32,7 @@ impl<Evm, ChainSpec> BlockAssembler<Evm> for EthBlockAssembler<ChainSpec>
 where
     Evm: for<'a> BlockExecutionStrategyFactory<
         Primitives = EthPrimitives,
-        ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+        BlockExecutorFactory: BlockExecutorFactory<ExecutionCtx<'a> = EthBlockExecutionCtx<'a>>,
     >,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {

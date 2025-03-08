@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
+use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use alloy_primitives::{map::HashSet, Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
@@ -15,7 +16,6 @@ use alloy_rpc_types_trace::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
-use reth_consensus_common::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
