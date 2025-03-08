@@ -159,6 +159,9 @@ pub trait DatabaseProviderFactory: Send + Sync {
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW>;
 }
 
+/// Helper type alias to get the associated transaction type from a [`DatabaseProviderFactory`].
+pub type FactoryTx<F> = <<F as DatabaseProviderFactory>::DB as Database>::TX;
+
 fn range_size_hint(range: &impl RangeBounds<u64>) -> Option<usize> {
     let start = match range.start_bound().cloned() {
         Bound::Included(start) => start,
