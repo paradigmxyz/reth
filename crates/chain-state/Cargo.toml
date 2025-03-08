@@ -17,7 +17,7 @@ reth-chainspec.workspace = true
 reth-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics.workspace = true
-reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-trie.workspace = true
@@ -62,7 +62,7 @@ test-utils = [
     "rand",
     "revm-state",
     "reth-chainspec/test-utils",
-    "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie/test-utils",
+    "reth-ethereum-primitives/test-utils",
 ]

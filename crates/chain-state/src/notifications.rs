@@ -3,7 +3,7 @@
 use alloy_eips::eip2718::Encodable2718;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_storage_api::NodePrimitivesProvider;
 use std::{
     pin::Pin,
@@ -18,11 +18,11 @@ use tokio_stream::{
 use tracing::debug;
 
 /// Type alias for a receiver that receives [`CanonStateNotification`]
-pub type CanonStateNotifications<N = reth_primitives::EthPrimitives> =
+pub type CanonStateNotifications<N = reth_ethereum_primitives::EthPrimitives> =
     broadcast::Receiver<CanonStateNotification<N>>;
 
 /// Type alias for a sender that sends [`CanonStateNotification`]
-pub type CanonStateNotificationSender<N = reth_primitives::EthPrimitives> =
+pub type CanonStateNotificationSender<N = reth_ethereum_primitives::EthPrimitives> =
     broadcast::Sender<CanonStateNotification<N>>;
 
 /// A type that allows to register chain related event subscriptions.
@@ -53,7 +53,8 @@ impl<T: CanonStateSubscriptions> CanonStateSubscriptions for &T {
 /// A Stream of [`CanonStateNotification`].
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct CanonStateNotificationStream<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct CanonStateNotificationStream<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives>
+{
     #[pin]
     st: BroadcastStream<CanonStateNotification<N>>,
 }
@@ -80,7 +81,7 @@ impl<N: NodePrimitives> Stream for CanonStateNotificationStream<N> {
 /// The notification contains at least one [`Chain`] with the imported segment. If some blocks were
 /// reverted (e.g. during a reorg), the old chain is also returned.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CanonStateNotification<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub enum CanonStateNotification<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// The canonical chain was extended.
     Commit {
         /// The newly added chain segment.
@@ -216,12 +217,13 @@ mod tests {
     use super::*;
     use alloy_consensus::BlockBody;
     use alloy_primitives::{b256, B256};
+    use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{Receipt, SealedBlock, TransactionSigned, TxType};
+    use reth_primitives_traits::SealedBlock;
 
     #[test]
     fn test_commit_notification() {
-        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
+        let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
 
@@ -254,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_reorg_notification() {
-        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
+        let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
