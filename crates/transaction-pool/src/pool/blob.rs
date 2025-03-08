@@ -387,20 +387,20 @@ pub fn blob_tx_priority(
     blob_fee: u128,
     max_priority_fee: u128,
     base_fee: u128,
-) -> i64 {
+) -> u64 {
     let delta_blob_fee = fee_delta(blob_fee_cap, blob_fee);
     let delta_priority_fee = fee_delta(max_priority_fee, base_fee);
 
-    // TODO: this could be u64:
-    // * if all are positive, zero is returned
-    // * if all are negative, the min negative value is returned
-    // * if some are positive and some are negative, the min negative value is returned
-    //
-    // the BlobOrd could then just be a u64, and higher values represent worse transactions (more
-    // jumps for one of the fees until the cap satisfies)
-    //
-    // priority = min(delta-basefee, delta-blobfee, 0)
-    delta_blob_fee.min(delta_priority_fee).min(0)
+    // Convert to u64 where higher values represent worse transactions
+    // (more jumps for one of the fees until the cap satisfies)
+    if delta_blob_fee >= 0 && delta_priority_fee >= 0 {
+        // If all are positive, zero is returned (best case)
+        0
+    } else {
+        // If any are negative, convert the minimum negative value to a positive u64
+        // where higher values represent worse transactions
+        (-delta_blob_fee.min(delta_priority_fee).min(0)) as u64
+    }
 }
 
 /// A struct used to determine the ordering for a specific blob transaction in the pool. This uses
@@ -414,7 +414,8 @@ struct BlobOrd {
     pub(crate) submission_id: u64,
     /// The priority for this transaction, calculated using the [`blob_tx_priority`] function,
     /// taking into account both the blob and priority fee.
-    pub(crate) priority: i64,
+    /// Higher values represent worse transactions (more fee jumps needed).
+    pub(crate) priority: u64,
 }
 
 impl Eq for BlobOrd {}
@@ -434,16 +435,13 @@ impl PartialOrd<Self> for BlobOrd {
 impl Ord for BlobOrd {
     /// Compares two `BlobOrd` instances.
     ///
-    /// The comparison is performed in reverse order based on the priority field. This is
-    /// because transactions with larger negative values in the priority field will take more fee
-    /// jumps, making them take longer to become executable. Therefore, transactions with lower
-    /// ordering should return `Greater`, ensuring they are evicted first.
+    /// The comparison is performed based on the priority field. Higher priority values
+    /// represent worse transactions (more fee jumps needed), so they should be evicted first.
     ///
     /// If the priority values are equal, the submission ID is used to break ties.
     fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .priority
-            .cmp(&self.priority)
+        self.priority
+            .cmp(&other.priority)
             .then_with(|| self.submission_id.cmp(&other.submission_id))
     }
 }
@@ -790,5 +788,33 @@ mod tests {
         assert!(pool.is_empty());
         assert_eq!(pool.size(), 0);
         assert_eq!(pool.len(), 0);
+    }
+
+    #[test]
+    fn test_blob_tx_priority() {
+        // Test cases with expected results
+        let test_cases = vec![
+            // (blob_fee_cap, blob_fee, max_priority_fee, base_fee, expected)
+            // All positive deltas should return 0
+            (100, 50, 100, 50, 0),
+            (100, 100, 100, 100, 0),
+
+            // Negative deltas should return positive u64 values
+            (50, 100, 50, 100, 2), // Both deltas are -2
+            (50, 100, 100, 100, 2), // Only blob_fee delta is negative
+            (100, 100, 50, 100, 2), // Only priority_fee delta is negative
+
+            // Different negative values should return the absolute of the minimum
+            (50, 200, 50, 100, 3), // blob_fee_delta = -3, priority_fee_delta = -2
+            (50, 100, 50, 200, 3), // blob_fee_delta = -2, priority_fee_delta = -3
+        ];
+
+        for (blob_fee_cap, blob_fee, max_priority_fee, base_fee, expected) in test_cases {
+            let result = blob_tx_priority(blob_fee_cap, blob_fee, max_priority_fee, base_fee);
+            assert_eq!(
+                result, expected,
+                "blob_tx_priority({blob_fee_cap}, {blob_fee}, {max_priority_fee}, {base_fee}) = {result}, expected: {expected}"
+            );
+        }
     }
 }
