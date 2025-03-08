@@ -18,7 +18,7 @@ macro_rules! delegate {
 
 impl<Eip4844: Compact> Compact for EthereumTypedTransaction<Eip4844> 
 where
-    Eip4844: RlpEcdsaEncodableTx,
+    Eip4844: Compact + RlpEcdsaEncodableTx,
 {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
