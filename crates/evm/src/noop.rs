@@ -7,7 +7,7 @@ use crate::{
 };
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 
