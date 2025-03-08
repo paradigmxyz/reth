@@ -222,7 +222,6 @@ impl InMemorySize for OpReceipt {
 
 impl reth_primitives_traits::Receipt for OpReceipt {}
 
-
 /// Trait for deposit receipt.
 pub trait DepositReceipt: reth_primitives_traits::Receipt {
     /// Returns deposit receipt if it is a deposit transaction.
@@ -334,8 +333,6 @@ mod compact {
 
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
-    use alloc::{borrow::Cow};
-    use alloy_consensus::Receipt;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -357,66 +354,45 @@ pub(super) mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub enum OpReceipt<'a> {
         /// Legacy receipt
-        Legacy(Cow<'a, Receipt>),
+        Legacy(alloy_consensus::serde_bincode_compat::Receipt<'a, alloy_primitives::Log>),
         /// EIP-2930 receipt
-        Eip2930(Cow<'a, Receipt>),
+        Eip2930(alloy_consensus::serde_bincode_compat::Receipt<'a, alloy_primitives::Log>),
         /// EIP-1559 receipt
-        Eip1559(Cow<'a, Receipt>),
+        Eip1559(alloy_consensus::serde_bincode_compat::Receipt<'a, alloy_primitives::Log>),
         /// EIP-7702 receipt
-        Eip7702(Cow<'a, Receipt>),
+        Eip7702(alloy_consensus::serde_bincode_compat::Receipt<'a, alloy_primitives::Log>),
         /// Deposit receipt
-        Deposit(op_alloy_consensus::serde_bincode_compat::OpDepositReceipt<'a, alloy_primitives::Log>),
+        Deposit(
+            op_alloy_consensus::serde_bincode_compat::OpDepositReceipt<'a, alloy_primitives::Log>,
+        ),
     }
 
     impl<'a> From<&'a super::OpReceipt> for OpReceipt<'a> {
         fn from(value: &'a super::OpReceipt) -> Self {
-           match value {
-               super::OpReceipt::Legacy(receipt) => {
-                   OpReceipt::Legacy(Cow::Borrowed(receipt))
-               }
-               super::OpReceipt::Eip2930(receipt) => {
-                   OpReceipt::Eip2930(Cow::Borrowed(receipt))
-               }
-               super::OpReceipt::Eip1559(receipt) => {
-                   OpReceipt::Eip1559(Cow::Borrowed(receipt))
-               }
-               super::OpReceipt::Eip7702(receipt) => {
-                   OpReceipt::Eip7702(Cow::Borrowed(receipt))
-               }
-               super::OpReceipt::Deposit(receipt) => {
-                   OpReceipt::Deposit(receipt.into())
-               }
-           }
+            match value {
+                super::OpReceipt::Legacy(receipt) => OpReceipt::Legacy(receipt.into()),
+                super::OpReceipt::Eip2930(receipt) => OpReceipt::Eip2930(receipt.into()),
+                super::OpReceipt::Eip1559(receipt) => OpReceipt::Eip1559(receipt.into()),
+                super::OpReceipt::Eip7702(receipt) => OpReceipt::Eip7702(receipt.into()),
+                super::OpReceipt::Deposit(receipt) => OpReceipt::Deposit(receipt.into()),
+            }
         }
     }
 
     impl<'a> From<OpReceipt<'a>> for super::OpReceipt {
         fn from(value: OpReceipt<'a>) -> Self {
-           match value {
-               OpReceipt::Legacy(receipt) => {
-                   super::OpReceipt::Legacy(receipt.into_owned())
-               }
-               OpReceipt::Eip2930(receipt) => {
-                   super::OpReceipt::Eip2930(receipt.into_owned())
-               }
-               OpReceipt::Eip1559(receipt) => {
-                   super::OpReceipt::Eip1559(receipt.into_owned())
-               }
-               OpReceipt::Eip7702(receipt) => {
-                   super::OpReceipt::Eip7702(receipt.into_owned())
-               }
-               OpReceipt::Deposit(receipt) => {
-                   super::OpReceipt::Deposit(receipt.into())
-               }
-           }
+            match value {
+                OpReceipt::Legacy(receipt) => super::OpReceipt::Legacy(receipt.into()),
+                OpReceipt::Eip2930(receipt) => super::OpReceipt::Eip2930(receipt.into()),
+                OpReceipt::Eip1559(receipt) => super::OpReceipt::Eip1559(receipt.into()),
+                OpReceipt::Eip7702(receipt) => super::OpReceipt::Eip7702(receipt.into()),
+                OpReceipt::Deposit(receipt) => super::OpReceipt::Deposit(receipt.into()),
+            }
         }
     }
 
     impl SerializeAs<super::OpReceipt> for OpReceipt<'_> {
-        fn serialize_as<S>(
-            source: &super::OpReceipt,
-            serializer: S,
-        ) -> Result<S::Ok, S::Error>
+        fn serialize_as<S>(source: &super::OpReceipt, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
@@ -424,9 +400,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de> DeserializeAs<'de, super::OpReceipt>
-    for OpReceipt<'de>
-    {
+    impl<'de> DeserializeAs<'de, super::OpReceipt> for OpReceipt<'de> {
         fn deserialize_as<D>(deserializer: D) -> Result<super::OpReceipt, D::Error>
         where
             D: Deserializer<'de>,
@@ -436,14 +410,14 @@ pub(super) mod serde_bincode_compat {
     }
 
     impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for super::OpReceipt {
-        type BincodeRepr<'a> = Self;
+        type BincodeRepr<'a> = OpReceipt<'a>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
-            self.clone()
+            self.into()
         }
 
         fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-            repr
+            repr.into()
         }
     }
 
@@ -467,8 +441,7 @@ pub(super) mod serde_bincode_compat {
             let mut bytes = [0u8; 1024];
             rand::thread_rng().fill(bytes.as_mut_slice());
             let mut data = Data {
-                reseipt: OpReceipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
-                    .unwrap(),
+                reseipt: OpReceipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
             };
             let success = data.reseipt.as_receipt_mut().status.coerce_status();
             // // ensure we don't have an invalid poststate variant
