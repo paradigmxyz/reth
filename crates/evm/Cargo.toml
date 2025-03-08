@@ -12,8 +12,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
-reth-consensus-common.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
@@ -57,8 +55,6 @@ std = [
     "revm/std",
     "reth-ethereum-forks/std",
     "reth-ethereum-primitives?/std",
-    "reth-chainspec/std",
-    "reth-consensus-common/std",
     "alloy-evm/std",
     "revm-database/std",
     "op-revm?/std",
@@ -77,8 +73,6 @@ metrics = [
 ]
 test-utils = [
     "dep:parking_lot",
-    "dep:reth-ethereum-primitives",
-    "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "revm/test-utils",

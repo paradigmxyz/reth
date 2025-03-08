@@ -27,7 +27,6 @@ reth-network-api.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-revm = { workspace = true, features = ["witness"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
-reth-consensus-common.workspace = true
 reth-rpc-types-compat.workspace = true
 revm-inspectors.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
@@ -39,6 +38,7 @@ reth-consensus.workspace = true
 reth-node-api.workspace = true
 
 # ethereum
+alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true

@@ -20,7 +20,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
-use alloy_evm::{EthEvmFactory, FromRecoveredTx};
+use alloy_evm::{eth::EthBlockExecutorFactory, EthEvmFactory, FromRecoveredTx};
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
@@ -44,18 +44,16 @@ pub mod execute;
 mod build;
 pub use build::EthBlockAssembler;
 
-/// Ethereum DAO hardfork state change data.
-pub mod dao_fork;
-
-/// [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) handling.
-pub mod eip6110;
+mod receipt;
+pub use receipt::RethReceiptBuilder;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {
-    chain_spec: Arc<ChainSpec>,
-    evm_factory: EvmFactory,
-    block_assembler: EthBlockAssembler<ChainSpec>,
+    /// Inner [`EthBlockExecutorFactory`].
+    pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmFactory>,
+    /// Ethereum block assembler.
+    pub block_assembler: EthBlockAssembler<ChainSpec>,
 }
 
 impl EthEvmConfig {
@@ -80,14 +78,17 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
             block_assembler: EthBlockAssembler::new(chain_spec.clone()),
-            chain_spec,
-            evm_factory,
+            executor_factory: EthBlockExecutorFactory::new(
+                RethReceiptBuilder::default(),
+                chain_spec,
+                evm_factory,
+            ),
         }
     }
 
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
-        &self.chain_spec
+        self.executor_factory.spec()
     }
 
     /// Sets the extra data for the block assembler.
@@ -116,7 +117,7 @@ where
         let spec = config::revm_spec(self.chain_spec(), header);
 
         // configure evm env based on parent block
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec.chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
 
         let block_env = BlockEnv {
             number: header.number(),
@@ -142,34 +143,35 @@ where
     ) -> Result<EvmEnv, Self::Error> {
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_and_block_number(
-            &self.chain_spec,
+            self.chain_spec(),
             attributes.timestamp,
             parent.number() + 1,
         );
 
         // configure evm env based on parent block
-        let cfg = CfgEnv::new().with_chain_id(self.chain_spec.chain().id()).with_spec(spec_id);
+        let cfg = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
             .maybe_next_block_excess_blob_gas(
-                self.chain_spec.blob_params_at_timestamp(attributes.timestamp),
+                self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
             )
             .or_else(|| (spec_id == SpecId::CANCUN).then_some(0))
             .map(|gas| BlobExcessGasAndPrice::new(gas, spec_id >= SpecId::PRAGUE));
 
         let mut basefee = parent.next_block_base_fee(
-            self.chain_spec.base_fee_params_at_timestamp(attributes.timestamp),
+            self.chain_spec().base_fee_params_at_timestamp(attributes.timestamp),
         );
 
         let mut gas_limit = attributes.gas_limit;
 
         // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
         // elasticity multiplier to get the new gas limit.
-        if self.chain_spec.fork(EthereumHardfork::London).transitions_at_block(parent.number + 1) {
+        if self.chain_spec().fork(EthereumHardfork::London).transitions_at_block(parent.number + 1)
+        {
             let elasticity_multiplier = self
-                .chain_spec
+                .chain_spec()
                 .base_fee_params_at_timestamp(attributes.timestamp)
                 .elasticity_multiplier;
 
@@ -208,7 +210,7 @@ where
     type EvmFactory = EvmF;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
-        &self.evm_factory
+        self.executor_factory.evm_factory()
     }
 }
 

@@ -1,11 +1,11 @@
 //! Multiproof task related functionality.
 
 use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::SparseTrieEvent};
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
-use reth_evm::system_calls::StateChangeSource;
 use reth_metrics::Metrics;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,

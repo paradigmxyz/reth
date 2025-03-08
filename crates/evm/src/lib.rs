@@ -35,13 +35,16 @@ pub use aliases::*;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;
-pub mod state_change;
-pub mod system_calls;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
 
-pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, FromRecoveredTx, InvalidTxError};
+pub use alloy_evm::{
+    block::{state_changes, system_calls, OnStateHook},
+    Database, Evm, EvmEnv, EvmError, FromRecoveredTx, InvalidTxError,
+};
+
+pub use alloy_evm::block::state_changes as state_change;
 
 /// Alias for `EvmEnv<<Evm as ConfigureEvmEnv>::Spec>`
 pub type EvmEnvFor<Evm> = EvmEnv<<Evm as ConfigureEvmEnv>::Spec>;

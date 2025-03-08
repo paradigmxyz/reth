@@ -23,7 +23,6 @@ reth-primitives.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
-alloy-sol-types.workspace = true
 alloy-consensus.workspace = true
 
 [dev-dependencies]
@@ -52,6 +51,5 @@ std = [
     "reth-execution-types/std",
     "reth-evm/std",
     "reth-primitives-traits/std",
-    "alloy-sol-types/std",
     "revm/std",
 ]

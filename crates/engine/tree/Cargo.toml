@@ -35,6 +35,7 @@ reth-trie-sparse.workspace = true
 reth-trie.workspace = true
 
 # alloy
+alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
