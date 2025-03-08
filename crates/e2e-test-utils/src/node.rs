@@ -6,6 +6,7 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
+use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
@@ -20,6 +21,7 @@ use reth_provider::{
     StageCheckpointReader,
 };
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
+use reth_rpc_layer::AuthClientService;
 use reth_stages_types::StageId;
 use std::pin::Pin;
 use tokio_stream::StreamExt;
@@ -55,7 +57,7 @@ where
     /// Creates a new test node
     pub async fn new(
         node: FullNode<Node, AddOns>,
-        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + 'static,
+        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
             inner: node.clone(),
@@ -292,5 +294,15 @@ where
     pub fn rpc_url(&self) -> Url {
         let addr = self.inner.rpc_server_handle().http_local_addr().unwrap();
         format!("http://{}", addr).parse().unwrap()
+    }
+
+    /// Returns an RPC client.
+    pub fn rpc_client(&self) -> Option<HttpClient> {
+        self.inner.rpc_server_handle().http_client()
+    }
+
+    /// Returns an Engine API client.
+    pub fn engine_api_client(&self) -> HttpClient<AuthClientService<HttpBackend>> {
+        self.inner.auth_server_handle().http_client()
     }
 }
