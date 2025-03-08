@@ -270,7 +270,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         Ok(())
     }
 
-    /// Unwind the stages to the target block.
+    /// Unwind the stages to the target block (exclusive).
     ///
     /// If the unwind is due to a bad block the number of that block should be specified.
     pub fn unwind(

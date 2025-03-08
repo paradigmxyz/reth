@@ -125,6 +125,11 @@ impl<N: NodePrimitives> TreeState<N> {
         }
     }
 
+    /// Resets the state and points to the given canonical head.
+    fn reset(&mut self, current_canonical_head: BlockNumHash) {
+        *self = Self::new(current_canonical_head);
+    }
+
     /// Returns the number of executed blocks stored.
     fn block_count(&self) -> usize {
         self.blocks_by_hash.len()
@@ -1472,6 +1477,9 @@ where
     /// This will also do the necessary housekeeping of the tree state, this includes:
     ///  - removing all blocks below the backfill height
     ///  - resetting the canonical in-memory state
+    ///
+    /// In case backfill resulted in an unwind, this will clear the tree state above the unwind
+    /// target block.
     fn on_backfill_sync_finished(
         &mut self,
         ctrl: ControlFlow,
@@ -1479,33 +1487,48 @@ where
         debug!(target: "engine::tree", "received backfill sync finished event");
         self.backfill_sync_state = BackfillSyncState::Idle;
 
+        // backfill height is the block number that the backfill finished at
+        let mut backfill_height = ctrl.block_number();
+
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
-        if let ControlFlow::Unwind { bad_block, .. } = ctrl {
+        if let ControlFlow::Unwind { bad_block, target } = &ctrl {
             warn!(target: "engine::tree", invalid_block=?bad_block, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
-            self.state.invalid_headers.insert(*bad_block);
-            return Ok(())
+            self.state.invalid_headers.insert(**bad_block);
+
+            // if this was an unwind then the target is the new height
+            backfill_height = Some(*target);
         }
 
         // backfill height is the block number that the backfill finished at
-        let Some(backfill_height) = ctrl.block_number() else { return Ok(()) };
+        let Some(backfill_height) = backfill_height else { return Ok(()) };
 
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
         //
         // We set the `finalized_num` to `Some(backfill_height)` to ensure we remove all state
         // before that
-        let backfill_num_hash = self
+        let Some(backfill_num_hash) = self
             .provider
             .block_hash(backfill_height)?
-            .map(|hash| BlockNumHash { hash, number: backfill_height });
+            .map(|hash| BlockNumHash { hash, number: backfill_height })
+        else {
+            debug!(target: "engine::tree", ?ctrl, "Backfill block not found");
+            return Ok(())
+        };
 
-        self.state.tree_state.remove_until(
-            backfill_num_hash
-                .expect("after backfill the block target hash should be present in the db"),
-            self.persistence_state.last_persisted_block.hash,
-            backfill_num_hash,
-        );
+        if ctrl.is_unwind() {
+            // the node reset so we need to clear everything above that height so that backfill
+            // height is the new canonical block.
+            self.state.tree_state.reset(backfill_num_hash)
+        } else {
+            self.state.tree_state.remove_until(
+                backfill_num_hash,
+                self.persistence_state.last_persisted_block.hash,
+                Some(backfill_num_hash),
+            );
+        }
+
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         self.metrics.tree.canonical_chain_height.set(backfill_height as f64);
 
