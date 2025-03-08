@@ -755,7 +755,7 @@ where
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
-    /// use reth_primitives::{Header, TransactionSigned};
+    /// use reth_primitives::{EthPrimitives, Header, TransactionSigned};
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc::EthApi;
     /// use reth_rpc_builder::RpcModuleBuilder;
@@ -765,7 +765,7 @@ where
     ///
     /// fn init<Evm>(evm: Evm)
     /// where
-    ///     Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
+    ///     Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
     /// {
     ///     let builder = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())

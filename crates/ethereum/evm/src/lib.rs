@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
+use alloc::{borrow::Cow, sync::Arc};
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
 use alloy_evm::{
@@ -34,7 +34,6 @@ use revm::{
     context_interface::block::BlobExcessGasAndPrice,
     specification::hardfork::SpecId,
 };
-use std::borrow::Cow;
 
 mod config;
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
