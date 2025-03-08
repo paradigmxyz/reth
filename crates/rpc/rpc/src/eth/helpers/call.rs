@@ -5,7 +5,7 @@ use alloy_consensus::TxType;
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
-use reth_evm::{ConfigureEvmEnv, EvmEnv, EvmFactory, SpecFor};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
 use reth_node_api::NodePrimitives;
 use reth_provider::{BlockReader, ProviderHeader, ProviderTx};
 use reth_rpc_eth_api::{
@@ -25,7 +25,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState<
-            Evm: ConfigureEvmEnv<
+            Evm: ConfigureEvm<
                 BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
                 Primitives: NodePrimitives<
                     BlockHeader = ProviderHeader<Self::Provider>,

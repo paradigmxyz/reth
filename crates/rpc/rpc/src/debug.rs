@@ -18,7 +18,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
-    ConfigureEvmEnv, EvmEnvFor, TxEnvFor,
+    ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};

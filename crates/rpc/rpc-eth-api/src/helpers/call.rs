@@ -17,7 +17,7 @@ use alloy_rpc_types_eth::{
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{
-    ConfigureEvmEnv, Evm, EvmEnv, EvmEnvFor, HaltReasonFor, InspectorFor, SpecFor, TransactionEnv,
+    ConfigureEvm, Evm, EvmEnv, EvmEnvFor, HaltReasonFor, InspectorFor, SpecFor, TransactionEnv,
     TxEnvFor,
 };
 use reth_node_api::{BlockBody, NodePrimitives};
@@ -432,7 +432,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 /// Executes code on state.
 pub trait Call:
     LoadState<
-        Evm: ConfigureEvmEnv<
+        Evm: ConfigureEvm<
             Primitives: NodePrimitives<
                 BlockHeader = ProviderHeader<Self::Provider>,
                 SignedTx = ProviderTx<Self::Provider>,

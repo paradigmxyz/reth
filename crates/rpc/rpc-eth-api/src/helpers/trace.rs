@@ -9,7 +9,7 @@ use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_errors::ProviderError;
 use reth_evm::{
-    system_calls::SystemCaller, ConfigureEvmEnv, Database, Evm, EvmEnvFor, HaltReasonFor,
+    system_calls::SystemCaller, ConfigureEvm, Database, Evm, EvmEnvFor, HaltReasonFor,
     InspectorFor, TxEnvFor,
 };
 use reth_node_api::NodePrimitives;
@@ -33,7 +33,7 @@ use std::sync::Arc;
 pub trait Trace:
     LoadState<
     Provider: BlockReader,
-    Evm: ConfigureEvmEnv<
+    Evm: ConfigureEvm<
         Primitives: NodePrimitives<
             BlockHeader = ProviderHeader<Self::Provider>,
             SignedTx = ProviderTx<Self::Provider>,

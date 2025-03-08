@@ -27,7 +27,7 @@ use alloy_evm::{
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
-use reth_evm::{ConfigureEvmEnv, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv};
 use reth_primitives::{EthPrimitives, SealedBlock, SealedHeader, TransactionSigned};
 use revm::{
     context::{BlockEnv, CfgEnv},
@@ -100,7 +100,7 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     }
 }
 
-impl<EvmF> ConfigureEvmEnv for EthEvmConfig<EvmF>
+impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
 where
     EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
         + Send

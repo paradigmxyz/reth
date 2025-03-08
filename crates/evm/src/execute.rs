@@ -1,6 +1,6 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvmEnv, Database, OnStateHook};
+use crate::{ConfigureEvm, Database, OnStateHook};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
@@ -382,7 +382,7 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
-    F: ConfigureEvmEnv + 'static,
+    F: ConfigureEvm + 'static,
 {
     type Primitives = F::Primitives;
 
@@ -417,7 +417,7 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
 
 impl<F, DB> Executor<DB> for BasicBlockExecutor<F, DB>
 where
-    F: ConfigureEvmEnv,
+    F: ConfigureEvm,
     DB: Database,
 {
     type Primitives = F::Primitives;

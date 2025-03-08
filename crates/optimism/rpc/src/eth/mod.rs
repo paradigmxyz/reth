@@ -13,7 +13,7 @@ pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use alloy_primitives::U256;
 use op_alloy_network::Optimism;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BlockTy, FullNodeComponents, NodePrimitives, ReceiptTy};
 use reth_node_builder::rpc::EthApiBuilder;
@@ -249,7 +249,7 @@ impl<N> Trace for OpEthApi<N>
 where
     Self: RpcNodeCore<Provider: BlockReader>
         + LoadState<
-            Evm: ConfigureEvmEnv<
+            Evm: ConfigureEvm<
                 Primitives: NodePrimitives<
                     BlockHeader = ProviderHeader<Self::Provider>,
                     SignedTx = ProviderTx<Self::Provider>,

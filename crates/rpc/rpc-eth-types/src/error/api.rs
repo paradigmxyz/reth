@@ -3,7 +3,7 @@
 
 use crate::EthApiError;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvmEnv, EvmErrorFor, HaltReasonFor};
+use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
 use revm::context_interface::result::HaltReason;
 
 use super::RpcInvalidTransactionError;
@@ -82,7 +82,7 @@ impl AsEthApiError for EthApiError {
 }
 
 /// Helper trait to convert from revm errors.
-pub trait FromEvmError<Evm: ConfigureEvmEnv>:
+pub trait FromEvmError<Evm: ConfigureEvm>:
     From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>>
 {
     /// Converts from EVM error to this type.
@@ -94,7 +94,7 @@ pub trait FromEvmError<Evm: ConfigureEvmEnv>:
 impl<T, Evm> FromEvmError<Evm> for T
 where
     T: From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>>,
-    Evm: ConfigureEvmEnv,
+    Evm: ConfigureEvm,
 {
 }
 

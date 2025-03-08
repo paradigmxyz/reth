@@ -10,7 +10,7 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
 use reth_evm::{
-    execute::BasicBlockExecutorProvider, ConfigureEvmEnv, EvmFactory, EvmFactoryFor,
+    execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
     NextBlockEnvAttributes,
 };
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
@@ -182,7 +182,7 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
@@ -223,7 +223,7 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,

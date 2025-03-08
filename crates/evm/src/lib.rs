@@ -79,21 +79,21 @@ pub use alloy_evm::block::state_changes as state_change;
 ///     2. Block building when we know parent block and some additional context obtained from
 ///       payload attributes or alike.
 ///
-/// First case is handled by [`ConfigureEvmEnv::evm_env`] and [`ConfigureEvmEnv::context_for_block`]
+/// First case is handled by [`ConfigureEvm::evm_env`] and [`ConfigureEvm::context_for_block`]
 /// which implement a conversion from [`NodePrimitives::Block`] to [`EvmEnv`] and [`ExecutionCtx`],
 /// and allow configuring EVM and block execution environment at a given block.
 ///
-/// Second case is handled by similar [`ConfigureEvmEnv::next_evm_env`] and
-/// [`ConfigureEvmEnv::context_for_next_block`] which take parent [`NodePrimitives::BlockHeader`]
+/// Second case is handled by similar [`ConfigureEvm::next_evm_env`] and
+/// [`ConfigureEvm::context_for_next_block`] which take parent [`NodePrimitives::BlockHeader`]
 /// along with [`NextBlockEnvCtx`]. [`NextBlockEnvCtx`] is very similar to payload attributes and
 /// simply contains context for next block that is generally received from a CL node (timestamp,
 /// beneficiary, withdrawals, etc.).
 ///
 /// [`ExecutionCtx`]: BlockExecutorFactory::ExecutionCtx
-/// [`NextBlockEnvCtx`]: ConfigureEvmEnv::NextBlockEnvCtx
+/// [`NextBlockEnvCtx`]: ConfigureEvm::NextBlockEnvCtx
 /// [`BlockExecutor`]: alloy_evm::block::BlockExecutor
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
+pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
     /// The primitives type used by the EVM.
     type Primitives: NodePrimitives;
 
@@ -172,7 +172,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`
     /// configuration derived from the given header. Relies on
-    /// [`ConfigureEvmEnv::evm_env`].
+    /// [`ConfigureEvm::evm_env`].
     ///
     /// # Caution
     ///
@@ -258,7 +258,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     }
 
     /// Creates a [`BlockBuilder`] for building of a new block. This is a helper to invoke
-    /// [`ConfigureEvmEnv::create_block_builder`].
+    /// [`ConfigureEvm::create_block_builder`].
     fn builder_for_next_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
@@ -274,7 +274,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
 
 /// Represents additional attributes required to configure the next block.
 /// This is used to configure the next block's environment
-/// [`ConfigureEvmEnv::next_evm_env`] and contains fields that can't be derived from the
+/// [`ConfigureEvm::next_evm_env`] and contains fields that can't be derived from the
 /// parent header alone (attributes that are determined by the CL.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NextBlockEnvAttributes {

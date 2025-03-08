@@ -29,7 +29,7 @@ use reth_engine_tree::{
     persistence::PersistenceHandle,
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmEnv};
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_node_types::BlockTy;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
@@ -85,7 +85,7 @@ where
     where
         B: PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
         V: EngineValidator<N::Engine, Block = BlockTy<N>>,
-        C: ConfigureEvmEnv<Primitives = N::Primitives> + 'static,
+        C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let chain_spec = provider.chain_spec();
         let engine_kind =

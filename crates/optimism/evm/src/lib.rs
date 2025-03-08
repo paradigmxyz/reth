@@ -22,7 +22,7 @@ use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvmEnv, EvmEnv};
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
@@ -97,7 +97,7 @@ impl<ChainSpec, N: NodePrimitives, R> OpEvmConfig<ChainSpec, N, R> {
     }
 }
 
-impl<ChainSpec, N, R> ConfigureEvmEnv for OpEvmConfig<ChainSpec, N, R>
+impl<ChainSpec, N, R> ConfigureEvm for OpEvmConfig<ChainSpec, N, R>
 where
     ChainSpec: EthChainSpec + OpHardforks,
     N: NodePrimitives<

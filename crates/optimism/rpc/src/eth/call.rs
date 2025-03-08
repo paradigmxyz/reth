@@ -4,7 +4,7 @@ use alloy_consensus::TxType;
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use op_revm::OpTransaction;
-use reth_evm::{execute::BlockExecutorFactory, ConfigureEvmEnv, EvmEnv, EvmFactory, SpecFor};
+use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
 use reth_node_api::NodePrimitives;
 use reth_provider::{ProviderHeader, ProviderTx};
 use reth_rpc_eth_api::{
@@ -32,7 +32,7 @@ where
 impl<N> Call for OpEthApi<N>
 where
     Self: LoadState<
-            Evm: ConfigureEvmEnv<
+            Evm: ConfigureEvm<
                 Primitives: NodePrimitives<
                     BlockHeader = ProviderHeader<Self::Provider>,
                     SignedTx = ProviderTx<Self::Provider>,

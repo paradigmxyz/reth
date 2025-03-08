@@ -12,7 +12,7 @@ use alloy_evm::{
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth::{
-    api::{ConfigureEvmEnv, NodeTypesWithEngine},
+    api::{ConfigureEvm, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
     providers::BlockExecutionResult,
@@ -118,10 +118,10 @@ impl BlockExecutorFactory for CustomEvmConfig {
     }
 }
 
-impl ConfigureEvmEnv for CustomEvmConfig {
-    type Primitives = <EthEvmConfig as ConfigureEvmEnv>::Primitives;
-    type Error = <EthEvmConfig as ConfigureEvmEnv>::Error;
-    type NextBlockEnvCtx = <EthEvmConfig as ConfigureEvmEnv>::NextBlockEnvCtx;
+impl ConfigureEvm for CustomEvmConfig {
+    type Primitives = <EthEvmConfig as ConfigureEvm>::Primitives;
+    type Error = <EthEvmConfig as ConfigureEvm>::Error;
+    type NextBlockEnvCtx = <EthEvmConfig as ConfigureEvm>::NextBlockEnvCtx;
     type BlockExecutorFactory = Self;
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
 

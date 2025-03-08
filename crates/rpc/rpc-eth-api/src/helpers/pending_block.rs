@@ -11,7 +11,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvmEnv, Evm, SpecFor,
+    ConfigureEvm, Evm, SpecFor,
 };
 use reth_node_api::NodePrimitives;
 use reth_primitives::{InvalidTransactionError, RecoveredBlock, SealedHeader};
@@ -45,7 +45,7 @@ pub trait LoadPendingBlock:
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-        Evm: ConfigureEvmEnv<
+        Evm: ConfigureEvm<
             Primitives: NodePrimitives<
                 BlockHeader = ProviderHeader<Self::Provider>,
                 SignedTx = ProviderTx<Self::Provider>,
@@ -114,11 +114,11 @@ pub trait LoadPendingBlock:
         Ok(PendingBlockEnv::new(evm_env, PendingBlockEnvOrigin::DerivedFromLatest(latest)))
     }
 
-    /// Returns [`ConfigureEvmEnv::NextBlockEnvCtx`] for building a local pending block.
+    /// Returns [`ConfigureEvm::NextBlockEnvCtx`] for building a local pending block.
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as ConfigureEvmEnv>::NextBlockEnvCtx, Self::Error>;
+    ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error>;
 
     /// Returns the locally built pending block
     #[expect(clippy::type_complexity)]
