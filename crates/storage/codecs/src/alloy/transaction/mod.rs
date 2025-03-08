@@ -4,19 +4,7 @@ use alloy_consensus::{EthereumTypedTransaction, TxType, transaction::{TxEip7702,
 use alloy_primitives::bytes::BufMut;
 use alloy_consensus::transaction::RlpEcdsaEncodableTx;
 
-macro_rules! delegate {
-    ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
-        match $self {
-            EthereumTypedTransaction::Legacy($tx) => $tx.$method($($arg),*),
-            EthereumTypedTransaction::Eip2930($tx) => $tx.$method($($arg),*),
-            EthereumTypedTransaction::Eip1559($tx) => $tx.$method($($arg),*),
-            EthereumTypedTransaction::Eip4844($tx) => $tx.$method($($arg),*),
-            EthereumTypedTransaction::Eip7702($tx) => $tx.$method($($arg),*),
-        }
-    };
-}
-
-impl<Eip4844> Compact for EthereumTypedTransaction<Eip4844> 
+impl<Eip4844> Compact for EthereumTypedTransaction<Eip4844>
 where
     Eip4844: Compact + RlpEcdsaEncodableTx,
 {
@@ -25,7 +13,13 @@ where
         B: BufMut + AsMut<[u8]>,
     {
         let identifier = self.tx_type().to_compact(buf);
-        delegate!(self => tx.to_compact(buf));
+        match self {
+            Self::Legacy(tx) => tx.to_compact(buf),
+            Self::Eip2930(tx) => tx.to_compact(buf),
+            Self::Eip1559(tx) => tx.to_compact(buf),
+            Self::Eip4844(tx) => tx.to_compact(buf),
+            Self::Eip7702(tx) => tx.to_compact(buf),
+        };
         identifier
     }
 
