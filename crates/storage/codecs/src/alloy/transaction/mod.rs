@@ -16,7 +16,7 @@ macro_rules! delegate {
     };
 }
 
-impl<Eip4844: Compact> Compact for EthereumTypedTransaction<Eip4844> 
+impl<Eip4844> Compact for EthereumTypedTransaction<Eip4844> 
 where
     Eip4844: Compact + RlpEcdsaEncodableTx,
 {
