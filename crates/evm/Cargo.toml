@@ -17,11 +17,12 @@ reth-consensus-common.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
+
+reth-ethereum-primitives = { workspace = true, optional = true }
 
 revm.workspace = true
 revm-database.workspace = true
@@ -40,23 +41,22 @@ metrics = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
-parking_lot.workspace = true
 reth-ethereum-forks.workspace = true
+reth-ethereum-primitives.workspace = true
+parking_lot.workspace = true
 alloy-consensus.workspace = true
 metrics-util = { workspace = true, features = ["debugging"] }
-reth-ethereum-primitives.workspace = true
 
 [features]
 default = ["std"]
 std = [
-    "reth-primitives/std",
     "reth-primitives-traits/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "revm/std",
     "reth-ethereum-forks/std",
-    "reth-ethereum-primitives/std",
+    "reth-ethereum-primitives?/std",
     "reth-chainspec/std",
     "reth-consensus-common/std",
     "alloy-evm/std",
@@ -77,9 +77,9 @@ metrics = [
 ]
 test-utils = [
     "dep:parking_lot",
+    "dep:reth-ethereum-primitives",
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",
-    "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "revm/test-utils",
     "reth-trie-common/test-utils",

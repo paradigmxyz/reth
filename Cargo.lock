@@ -7853,7 +7853,6 @@ dependencies = [
  "reth-execution-errors",
  "reth-execution-types",
  "reth-metrics",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-storage-api",
  "reth-storage-errors",
