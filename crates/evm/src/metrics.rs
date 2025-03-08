@@ -145,8 +145,8 @@ mod tests {
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_execution_types::BlockExecutionResult;
-    use reth_primitives_traits::EthPrimitives;
     use revm::{
         database_interface::EmptyDB,
         state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
