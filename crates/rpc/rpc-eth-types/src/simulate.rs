@@ -11,10 +11,12 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionStrategy},
     Evm,
 };
-use reth_primitives::{Recovered, RecoveredBlock, TxTy};
-use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
+use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, TxTy};
+use reth_primitives_traits::{
+    block::BlockTx, Block as BlockTrait, BlockBody as _, SignedTransaction,
+};
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types_compat::{block::from_block, TransactionCompat};
+use reth_rpc_types_compat::TransactionCompat;
 use reth_storage_api::noop::NoopProvider;
 use revm::{context_interface::result::ExecutionResult, Database};
 use revm_primitives::{Address, Bytes, TxKind};
@@ -58,7 +60,7 @@ impl ToRpcError for EthSimulateError {
 ///
 /// Returns all executed transactions and the result of the execution.
 #[expect(clippy::type_complexity)]
-pub fn execute_transactions<S, T>(
+pub fn execute_transactions<N, S, T>(
     mut builder: S,
     calls: Vec<TransactionRequest>,
     validation: bool,
@@ -76,7 +78,8 @@ where
     S: BlockBuilder<
         Strategy: BlockExecutionStrategy<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>,
     >,
-    T: TransactionCompat<TxTy<S::Primitives>>,
+    N: NodePrimitives<SignedTx = TxTy<S::Primitives>>,
+    T: TransactionCompat<N>,
 {
     builder.apply_pre_execution_changes()?;
 
@@ -108,7 +111,7 @@ where
 ///
 /// If validation is enabled, the function will return error if any of the transactions can't be
 /// built right away.
-pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
+pub fn resolve_transaction<DB: Database, Tx, N, T: TransactionCompat<N>>(
     mut tx: TransactionRequest,
     validation: bool,
     default_gas_limit: u64,
@@ -117,6 +120,8 @@ pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
     tx_resp_builder: &T,
 ) -> Result<Recovered<Tx>, EthApiError>
 where
+    N: NodePrimitives<SignedTx = Tx>,
+    Tx: SignedTransaction,
     DB::Error: Into<EthApiError>,
 {
     if tx.buildable_type().is_none() && validation {
@@ -173,15 +178,16 @@ where
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
 #[expect(clippy::type_complexity)]
-pub fn build_simulated_block<T, B, Halt: Clone>(
-    block: RecoveredBlock<B>,
+pub fn build_simulated_block<T, N, Halt: Clone>(
+    block: RecoveredBlock<N::Block>,
     results: Vec<ExecutionResult<Halt>>,
     full_transactions: bool,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
+) -> Result<SimulatedBlock<Block<T::Transaction, Header<<N::Block as BlockTrait>::Header>>>, T::Error>
 where
-    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError + FromEvmHalt<Halt>>,
-    B: reth_primitives_traits::Block,
+    N: NodePrimitives,
+    T: TransactionCompat<N, Error: FromEthApiError + FromEvmHalt<Halt>>,
+    //B: reth_primitives_traits::Block,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
@@ -243,6 +249,6 @@ where
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, txs_kind, tx_resp_builder)?;
+    let block = tx_resp_builder.from_block(block, txs_kind)?;
     Ok(SimulatedBlock { inner: block, calls })
 }

@@ -61,9 +61,10 @@ impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Et
 where
     Eth: RpcNodeCore<
             Provider: BlockNumReader + CanonStateSubscriptions,
+            Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
             Pool: TransactionPool,
             Network: NetworkInfo,
-        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>
+        > + EthApiTypes<TransactionCompat: TransactionCompat<Eth::Primitives>>
         + 'static,
 {
     /// Handler for `eth_subscribe`
@@ -93,9 +94,10 @@ async fn handle_accepted<Eth>(
 where
     Eth: RpcNodeCore<
             Provider: BlockNumReader + CanonStateSubscriptions,
+            Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
             Pool: TransactionPool,
             Network: NetworkInfo,
-        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>,
+        > + EthApiTypes<TransactionCompat: TransactionCompat<Eth::Primitives>>,
 {
     match kind {
         SubscriptionKind::NewHeads => {
