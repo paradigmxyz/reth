@@ -79,6 +79,7 @@ std = [
     "revm-context/std",
     "serde_json/std",
     "alloy-evm/std",
+    "serde_with?/std",
 ]
 alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth", "op-alloy-consensus/alloy-compat"]
 reth-codec = [
