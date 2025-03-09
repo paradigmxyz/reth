@@ -2,7 +2,7 @@ use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
     HashedPostStateProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{
@@ -143,8 +143,10 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
         Proof::overlay_multiproof(self.tx(), input, targets).map_err(ProviderError::from)
     }
 
-    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<B256Map<Bytes>> {
-        TrieWitness::overlay_witness(self.tx(), input, target).map_err(ProviderError::from)
+    fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+        TrieWitness::overlay_witness(self.tx(), input, target)
+            .map_err(ProviderError::from)
+            .map(|hm| hm.into_values().collect())
     }
 }
 

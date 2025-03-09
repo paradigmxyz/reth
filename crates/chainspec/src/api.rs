@@ -4,7 +4,7 @@ use alloy_chains::Chain;
 use alloy_consensus::Header;
 use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use core::fmt::{Debug, Display};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_network_peers::NodeRecord;
@@ -62,6 +62,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn is_ethereum(&self) -> bool {
         self.chain().is_ethereum()
     }
+
+    /// Returns the final total difficulty if the Paris hardfork is known.
+    fn final_paris_total_difficulty(&self) -> Option<U256>;
 }
 
 impl EthChainSpec for ChainSpec {
@@ -119,5 +122,9 @@ impl EthChainSpec for ChainSpec {
 
     fn is_optimism(&self) -> bool {
         false
+    }
+
+    fn final_paris_total_difficulty(&self) -> Option<U256> {
+        self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
     }
 }

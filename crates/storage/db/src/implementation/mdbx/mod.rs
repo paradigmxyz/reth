@@ -503,7 +503,7 @@ mod tests {
         AccountChangeSets,
     };
     use alloy_consensus::Header;
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_primitives::{address, Address, B256, U256};
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, IntegerList, ShardedKey},
@@ -1341,7 +1341,7 @@ mod tests {
     #[test]
     fn db_sharded_key() {
         let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
-        let real_key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
+        let real_key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         for i in 1..5 {
             let key = ShardedKey::new(real_key, i * 100);

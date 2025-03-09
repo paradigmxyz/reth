@@ -1,5 +1,4 @@
 //! Command for debugging block building.
-use crate::primitives::kzg::KzgSettings;
 use alloy_consensus::{BlockHeader, TxEip4844};
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -24,10 +23,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
-use reth_primitives_traits::{
-    transaction::signed::SignedTransactionIntoRecoveredExt, Block as _, SealedBlock, SealedHeader,
-    SignedTransaction,
-};
+use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignedTransaction};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
@@ -78,7 +74,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    /// Fetches the best block block from the database.
+    /// Fetches the best block from the database.
     ///
     /// If the database is empty, returns the genesis block.
     fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
@@ -105,11 +101,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// `EnvKzgSettings::Default`.
     fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .wrap_err_with(|| {
-                    format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
-                })?;
-            Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
+            EnvKzgSettings::load_from_trusted_setup_file(trusted_setup_file).wrap_err_with(|| {
+                format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
+            })
         } else {
             Ok(EnvKzgSettings::Default)
         }
@@ -172,7 +166,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                     let pooled = transaction
                         .clone()
-                        .into_tx()
+                        .into_inner()
                         .try_into_pooled_eip4844(sidecar.clone())
                         .expect("should not fail to convert blob tx if it is already eip4844");
                     let encoded_length = pooled.encode_2718_len();
@@ -225,7 +219,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             blockchain_db.clone(),
             transaction_pool,
             EthEvmConfig::new(provider_factory.chain_spec()),
-            EthereumBuilderConfig::new(Default::default()),
+            EthereumBuilderConfig::new(),
         );
 
         match payload_builder.try_build(args)? {

@@ -1,6 +1,6 @@
 //! Helper aliases when working with [`NodePrimitives`] and the traits in this crate.
 use crate::{ConfigureEvm, ConfigureEvmEnv};
-use alloy_evm::{EvmEnv, EvmFactory};
+use alloy_evm::EvmFactory;
 use reth_primitives_traits::NodePrimitives;
 use revm::inspector::NoOpInspector;
 
@@ -33,19 +33,14 @@ where
 }
 
 /// Helper to access [`EvmFactory::Error`] for a given [`ConfigureEvm`].
-pub type EvmErrorFor<Evm, DB> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory<
-    EvmEnv<<Evm as ConfigureEvmEnv>::Spec>,
->>::Error<DB>;
+pub type EvmErrorFor<Evm, DB> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory>::Error<DB>;
 
 /// Helper to access [`EvmFactory::HaltReason`] for a given [`ConfigureEvm`].
-pub type HaltReasonFor<Evm> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory<
-    EvmEnv<<Evm as ConfigureEvmEnv>::Spec>,
->>::HaltReason;
+pub type HaltReasonFor<Evm> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory>::HaltReason;
 
 /// Helper to access [`ConfigureEvmEnv::Spec`] for a given [`ConfigureEvmEnv`].
 pub type SpecFor<Evm> = <Evm as ConfigureEvmEnv>::Spec;
 
 /// Helper to access [`EvmFactory::Evm`] for a given [`ConfigureEvm`].
-pub type EvmFor<Evm, DB, I = NoOpInspector> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory<
-    EvmEnv<<Evm as ConfigureEvmEnv>::Spec>,
->>::Evm<DB, I>;
+pub type EvmFor<Evm, DB, I = NoOpInspector> =
+    <<Evm as ConfigureEvm>::EvmFactory as EvmFactory>::Evm<DB, I>;

@@ -844,14 +844,14 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.get_in_memory_or_storage_by_block(
             id,
-            |db_provider| db_provider.block_with_senders(id, transaction_kind),
+            |db_provider| db_provider.recovered_block(id, transaction_kind),
             |block_state| Ok(Some(block_state.block().recovered_block().clone())),
         )
     }
@@ -889,13 +889,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         )
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
-            |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
+            |db_provider, range, _| db_provider.recovered_block_range(range),
             |block_state, _| Some(block_state.block().recovered_block().clone()),
             |_| true,
         )
@@ -1163,7 +1163,7 @@ impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
             id,
             |db_provider| db_provider.ommers(id),
             |block_state| {
-                if self.chain_spec().final_paris_total_difficulty(block_state.number()).is_some() {
+                if self.chain_spec().is_paris_active_at_block(block_state.number()) {
                     return Ok(Some(Vec::new()))
                 }
 

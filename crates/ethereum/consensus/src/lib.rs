@@ -203,8 +203,7 @@ where
         header: &H,
         _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        let is_post_merge =
-            self.chain_spec.is_paris_active_at_block(header.number()).is_some_and(|active| active);
+        let is_post_merge = self.chain_spec.is_paris_active_at_block(header.number());
 
         if is_post_merge {
             if !header.difficulty().is_zero() {

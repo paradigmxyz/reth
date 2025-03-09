@@ -70,6 +70,25 @@ impl Account {
             code_hash: bytecode_hash.unwrap_or(KECCAK_EMPTY),
         }
     }
+
+    /// Extracts the account information from a [`revm_state::Account`]
+    pub fn from_revm_account(revm_account: &revm_state::Account) -> Self {
+        Self {
+            balance: revm_account.info.balance,
+            nonce: revm_account.info.nonce,
+            bytecode_hash: if revm_account.info.code_hash == revm_primitives::KECCAK_EMPTY {
+                None
+            } else {
+                Some(revm_account.info.code_hash)
+            },
+        }
+    }
+}
+
+impl From<revm_state::Account> for Account {
+    fn from(value: revm_state::Account) -> Self {
+        Self::from_revm_account(&value)
+    }
 }
 
 /// Bytecode for an account.
@@ -154,13 +173,11 @@ impl reth_codecs::Compact for Bytecode {
             REMOVED_BYTECODE_ID => {
                 unreachable!("Junk data in database: checked Bytecode variant was removed")
             }
-            LEGACY_ANALYZED_BYTECODE_ID => Self(unsafe {
-                RevmBytecode::new_analyzed(
-                    bytes,
-                    buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
-                    revm_bytecode::JumpTable::from_slice(buf),
-                )
-            }),
+            LEGACY_ANALYZED_BYTECODE_ID => Self(RevmBytecode::new_analyzed(
+                bytes,
+                buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
+                revm_bytecode::JumpTable::from_slice(buf),
+            )),
             EOF_BYTECODE_ID | EIP7702_BYTECODE_ID => {
                 // EOF and EIP-7702 bytecode objects will be decoded from the raw bytecode
                 Self(RevmBytecode::new_raw(bytes))
@@ -265,16 +282,16 @@ mod tests {
         let mut buf = vec![];
         let bytecode = Bytecode::new_raw(Bytes::default());
         let len = bytecode.to_compact(&mut buf);
-        assert_eq!(len, 46);
+        assert_eq!(len, 51);
 
         let mut buf = vec![];
         let bytecode = Bytecode::new_raw(Bytes::from(&hex!("ffff")));
         let len = bytecode.to_compact(&mut buf);
-        assert_eq!(len, 49);
+        assert_eq!(len, 53);
 
         let mut buf = vec![];
         let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(LegacyAnalyzedBytecode::new(
-            Bytes::from(&hex!("ffff")),
+            Bytes::from(&hex!("ff00")),
             2,
             JumpTable::from_slice(&[0]),
         )));

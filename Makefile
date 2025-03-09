@@ -410,7 +410,7 @@ lint-udeps:
         --exclude reth-scroll-trie
 
 lint-codespell: ensure-codespell
-	codespell --skip "*.json"
+	codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests"
 
 ensure-codespell:
 	@if ! command -v codespell &> /dev/null; then \

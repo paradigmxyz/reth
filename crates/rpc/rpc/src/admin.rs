@@ -112,7 +112,7 @@ where
             chain_id: self.chain_spec.chain().id(),
             terminal_total_difficulty_passed: self
                 .chain_spec
-                .get_final_paris_total_difficulty()
+                .final_paris_total_difficulty()
                 .is_some(),
             terminal_total_difficulty: self
                 .chain_spec

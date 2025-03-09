@@ -17,9 +17,9 @@
 
 extern crate alloc;
 
-use alloy_eips::eip2930::AccessList;
+use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
 pub use alloy_evm::evm::EvmFactory;
-use alloy_evm::{FromRecoveredTx, IntoTxEnv};
+use alloy_evm::IntoTxEnv;
 use alloy_primitives::{Address, B256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
@@ -35,34 +35,37 @@ pub use aliases::*;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod noop;
-pub mod state_change;
-pub mod system_calls;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
 
-pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, InvalidTxError};
+pub use alloy_evm::{
+    block::{state_changes, system_calls, OnStateHook},
+    Database, Evm, EvmEnv, EvmError, FromRecoveredTx, InvalidTxError,
+};
+
+pub use alloy_evm::block::state_changes as state_change;
 
 /// Alias for `EvmEnv<<Evm as ConfigureEvmEnv>::Spec>`
 pub type EvmEnvFor<Evm> = EvmEnv<<Evm as ConfigureEvmEnv>::Spec>;
 
 /// Helper trait to bound [`Inspector`] for a [`ConfigureEvm`].
 pub trait InspectorFor<DB: Database, Evm: ConfigureEvm>:
-    Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>
+    Inspector<<Evm::EvmFactory as EvmFactory>::Context<DB>>
 {
 }
 impl<T, DB, Evm> InspectorFor<DB, Evm> for T
 where
     DB: Database,
     Evm: ConfigureEvm,
-    T: Inspector<<Evm::EvmFactory as EvmFactory<EvmEnv<Evm::Spec>>>::Context<DB>>,
+    T: Inspector<<Evm::EvmFactory as EvmFactory>::Context<DB>>,
 {
 }
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// The EVM factory.
-    type EvmFactory: EvmFactory<EvmEnv<Self::Spec>, Tx = Self::TxEnv>;
+    type EvmFactory: EvmFactory<Tx = Self::TxEnv, Spec = Self::Spec>;
 
     /// Provides a reference to [`EvmFactory`] implementation.
     fn evm_factory(&self) -> &Self::EvmFactory;
@@ -161,6 +164,11 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     /// Identifier of the EVM specification.
     type Spec: Debug + Copy + Send + Sync + 'static;
 
+    /// Context required for configuring next block environment.
+    ///
+    /// Contains values that can't be derived from the parent block.
+    type NextBlockEnvCtx: Debug + Clone;
+
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
     fn tx_env(&self, transaction: impl IntoTxEnv<Self::TxEnv>) -> Self::TxEnv {
         transaction.into_tx_env()
@@ -177,7 +185,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
     fn next_evm_env(
         &self,
         parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
+        attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<Self::Spec>, Self::Error>;
 }
 
@@ -185,7 +193,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone {
 /// This is used to configure the next block's environment
 /// [`ConfigureEvmEnv::next_evm_env`] and contains fields that can't be derived from the
 /// parent header alone (attributes that are determined by the CL.)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NextBlockEnvAttributes {
     /// The timestamp of the next block.
     pub timestamp: u64,
@@ -195,6 +203,10 @@ pub struct NextBlockEnvAttributes {
     pub prev_randao: B256,
     /// Block gas limit.
     pub gas_limit: u64,
+    /// The parent beacon block root.
+    pub parent_beacon_block_root: Option<B256>,
+    /// Withdrawals
+    pub withdrawals: Option<Withdrawals>,
 }
 
 /// Abstraction over transaction environment.
@@ -251,7 +263,7 @@ impl TransactionEnv for TxEnv {
 }
 
 #[cfg(feature = "op")]
-impl<T: TransactionEnv> TransactionEnv for revm_optimism::OpTransaction<T> {
+impl<T: TransactionEnv> TransactionEnv for op_revm::OpTransaction<T> {
     fn set_gas_limit(&mut self, gas_limit: u64) {
         self.base.set_gas_limit(gas_limit);
     }

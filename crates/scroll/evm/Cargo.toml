@@ -22,7 +22,7 @@ reth-primitives-traits.workspace = true
 reth-revm.workspace = true
 
 # revm
-revm = { workspace = true, features = ["optional_no_base_fee", "optional_gas_refund"] }
+revm = { workspace = true, features = ["optional_no_base_fee"] }
 revm-primitives.workspace = true
 revm-scroll.workspace = true
 

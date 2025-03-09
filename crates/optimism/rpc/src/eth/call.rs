@@ -1,7 +1,9 @@
 use super::OpNodeCore;
 use crate::{OpEthApi, OpEthApiError};
+use alloy_consensus::TxType;
 use alloy_primitives::{Bytes, TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
+use op_revm::OpTransaction;
 use reth_evm::{ConfigureEvm, EvmEnv, SpecFor};
 use reth_provider::ProviderHeader;
 use reth_rpc_eth_api::{
@@ -10,7 +12,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, EthApiError, RpcInvalidTransactionError};
 use revm::{context::TxEnv, context_interface::Block, Database};
-use revm_optimism::OpTransaction;
 
 impl<N> EthCall for OpEthApi<N>
 where
@@ -60,7 +61,17 @@ where
             return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
         }
 
-        let tx_type = request.preferred_type() as u8;
+        let tx_type = if request.authorization_list.is_some() {
+            TxType::Eip7702
+        } else if request.sidecar.is_some() || request.max_fee_per_blob_gas.is_some() {
+            TxType::Eip4844
+        } else if request.max_fee_per_gas.is_some() || request.max_priority_fee_per_gas.is_some() {
+            TxType::Eip1559
+        } else if request.access_list.is_some() {
+            TxType::Eip2930
+        } else {
+            TxType::Legacy
+        } as u8;
 
         let TransactionRequest {
             from,
