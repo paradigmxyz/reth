@@ -22,12 +22,13 @@ use reth_e2e_test_utils::{transaction as e2e_tx, wallet as e2e_wallet};
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_primitives::{transaction::SignedTransaction, PooledTransaction};
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::info;
 mod builder;
 
 fn main() {
-    let (tx, mut rx) = broadcast::channel::<EthBuiltPayload>(16);
+    let (tx, mut rx) = broadcast::channel::<Arc<EthBuiltPayload>>(16);
     let payload_builder = BasicPayloadServiceBuilder::new(BetterPayloadEmitterBuilder::new(tx));
 
     Cli::parse_args()

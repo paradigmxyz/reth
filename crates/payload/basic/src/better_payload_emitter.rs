@@ -1,12 +1,12 @@
 use crate::{BuildOutcome, PayloadBuilder};
+use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::error;
 
 /// Emits events when a better payload is built. Delegates the actual payload building
 /// to an inner [`PayloadBuilder`].
 #[derive(Debug, Clone)]
 pub struct BetterPayloadEmitter<PB: PayloadBuilder> {
-    better_payloads_tx: broadcast::Sender<PB::BuiltPayload>,
+    better_payloads_tx: broadcast::Sender<Arc<PB::BuiltPayload>>,
     inner: PB,
 }
 
@@ -16,7 +16,7 @@ where
 {
     /// Create a new [`BetterPayloadEmitter`] with the given inner payload builder.
     /// Owns the sender half of a broadcast channel that emits the better payloads.
-    pub fn new(better_payloads_tx: broadcast::Sender<PB::BuiltPayload>, inner: PB) -> Self {
+    pub fn new(better_payloads_tx: broadcast::Sender<Arc<PB::BuiltPayload>>, inner: PB) -> Self {
         Self { better_payloads_tx, inner }
     }
 }
@@ -36,10 +36,7 @@ where
     {
         match self.inner.try_build(args) {
             Ok(BuildOutcome::Better { payload, cached_reads }) => {
-                if let Err(err) = self.better_payloads_tx.send(payload.clone()) {
-                    error!(target: "payload", "Error relaying better payload: {err}");
-                }
-
+                let _ = self.better_payloads_tx.send(Arc::new(payload.clone()));
                 Ok(BuildOutcome::Better { payload, cached_reads })
             }
             res => res,

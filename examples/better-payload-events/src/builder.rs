@@ -9,6 +9,7 @@ use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumPayloadBuilde
 use reth_node_ethereum::{engine::EthPayloadAttributes, EthEvmConfig};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_primitives::EthPrimitives;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
 /// Provides an example on how to build a [`BetterPayloadEmitter`] wrapping an inner [`EthereumPayloadBuilder`].
@@ -16,11 +17,11 @@ use tokio::sync::broadcast;
 /// This can also serve as guideline to implement your own wrapper types.
 #[derive(Debug)]
 pub struct BetterPayloadEmitterBuilder {
-    better_payloads_tx: broadcast::Sender<EthBuiltPayload>,
+    better_payloads_tx: broadcast::Sender<Arc<EthBuiltPayload>>,
 }
 
 impl BetterPayloadEmitterBuilder {
-    pub const fn new(better_payloads_tx: broadcast::Sender<EthBuiltPayload>) -> Self {
+    pub const fn new(better_payloads_tx: broadcast::Sender<Arc<EthBuiltPayload>>) -> Self {
         Self { better_payloads_tx }
     }
 }
