@@ -216,6 +216,18 @@ pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<
     NodeTestContext<Adapter<N, Provider>, <N as Node<TmpNodeAdapter<N, Provider>>>::AddOns>;
 
 /// Helper trait to simplify bounds when calling setup functions.
-pub trait NodeBuilderHelper: Default + NodeTypesWithEngine + NodeTypesForProvider {}
+pub trait NodeBuilderHelper:
+    Default
+    + NodeTypesWithEngine
+    + NodeTypesForProvider
+    + Node<TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>>
+{
+}
 
-impl<T> NodeBuilderHelper for T where T: Default + NodeTypesWithEngine + NodeTypesForProvider {}
+impl<T> NodeBuilderHelper for T where
+    T: Default
+        + NodeTypesWithEngine
+        + NodeTypesForProvider
+        + Node<TmpNodeAdapter<T, BlockchainProvider<NodeTypesWithDBAdapter<T, TmpDB>>>>
+{
+}

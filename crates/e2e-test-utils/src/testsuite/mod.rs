@@ -13,7 +13,7 @@ use reth_node_api::NodePrimitives;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    Node, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
+    NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
     PayloadTypes,
 };
 use reth_provider::providers::BlockchainProvider;
@@ -59,8 +59,7 @@ impl<I: 'static> Runner<I> {
         actions: Vec<ActionBox<I>>,
     ) -> Result<()>
     where
-        N: NodeBuilderHelper
-            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        N: NodeBuilderHelper,
         N::Primitives: NodePrimitives<
             BlockHeader = alloy_consensus::Header,
             BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
@@ -165,8 +164,7 @@ impl<I: 'static> TestBuilder<I> {
     /// Run the test scenario
     pub async fn run<N>(self) -> Result<()>
     where
-        N: NodeBuilderHelper
-            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        N: NodeBuilderHelper,
         N::Primitives: NodePrimitives<
             BlockHeader = alloy_consensus::Header,
             BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,

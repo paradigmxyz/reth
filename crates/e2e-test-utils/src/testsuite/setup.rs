@@ -15,7 +15,7 @@ use reth_node_api::NodePrimitives;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    Node, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
+    NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
     PayloadTypes,
 };
 use reth_node_core::primitives::RecoveredBlock;
@@ -126,8 +126,7 @@ impl<I> Setup<I> {
     /// Apply the setup to the environment
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
-        N: NodeBuilderHelper
-            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        N: NodeBuilderHelper,
         N::Primitives: NodePrimitives<
             BlockHeader = alloy_consensus::Header,
             BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
