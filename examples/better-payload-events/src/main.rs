@@ -1,11 +1,12 @@
-//! Example for how to instantiate a payload builder that emits events when a better payload is built.
+//! Example for how to instantiate a payload builder that emits events when a better payload is
+//! built.
 //!
 //! Run with
 //!
 //! ```sh
 //! cargo run -p example-better-payload-events -- node --chain=dev
 //! ```
-//! This launches a regular reth node overriding the engine api payload builder with a 
+//! This launches a regular reth node overriding the engine api payload builder with a
 //! [`reth_basic_payload_builder::BetterPayloadEmitter`].
 
 #![warn(unused_crate_dependencies)]
