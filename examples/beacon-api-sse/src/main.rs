@@ -30,9 +30,7 @@ fn main() {
     Cli::<EthereumChainSpecParser, BeaconEventsConfig>::parse()
         .run(|builder, args| async move {
             let handle = builder.node(EthereumNode::default()).launch().await?;
-
             handle.node.task_executor.spawn(Box::pin(args.run()));
-
             handle.wait_for_node_exit().await
         })
         .unwrap();
