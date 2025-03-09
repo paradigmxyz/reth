@@ -43,7 +43,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let second_wallet = wallets.last().unwrap();
 
     // inject normal tx
-    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, second_wallet.clone()).await;
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, second_wallet.clone(), 0).await;
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
     // build payload with normal tx
     let payload = node.new_payload().await?;

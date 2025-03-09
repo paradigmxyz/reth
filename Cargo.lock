@@ -3128,6 +3128,7 @@ dependencies = [
  "reth",
  "reth-basic-payload-builder",
  "reth-chainspec",
+ "reth-e2e-test-utils",
  "reth-ethereum-payload-builder",
  "reth-evm",
  "reth-node-api",

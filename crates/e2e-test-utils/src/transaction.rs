@@ -15,14 +15,14 @@ pub struct TransactionTestContext;
 
 impl TransactionTestContext {
     /// Creates a static transfer and signs it, returning an envelope.
-    pub async fn transfer_tx(chain_id: u64, wallet: PrivateKeySigner) -> TxEnvelope {
-        let tx = tx(chain_id, 21000, None, None, 0);
+    pub async fn transfer_tx(chain_id: u64, wallet: PrivateKeySigner, nonce: u64) -> TxEnvelope {
+        let tx = tx(chain_id, 21000, None, None, nonce);
         Self::sign_tx(wallet, tx).await
     }
 
     /// Creates a static transfer and signs it, returning bytes.
-    pub async fn transfer_tx_bytes(chain_id: u64, wallet: PrivateKeySigner) -> Bytes {
-        let signed = Self::transfer_tx(chain_id, wallet).await;
+    pub async fn transfer_tx_bytes(chain_id: u64, wallet: PrivateKeySigner, nonce: u64) -> Bytes {
+        let signed = Self::transfer_tx(chain_id, wallet, nonce).await;
         signed.encoded_2718().into()
     }
 
