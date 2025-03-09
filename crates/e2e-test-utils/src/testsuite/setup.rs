@@ -1,6 +1,8 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::{setup_engine, testsuite::Environment, Adapter, TmpDB, TmpNodeAdapter};
+use crate::{
+    setup_engine, testsuite::Environment, Adapter, NodeBuilderHelper, TmpDB, TmpNodeAdapter,
+};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadAttributes;
@@ -18,7 +20,7 @@ use reth_node_builder::{
 };
 use reth_node_core::primitives::RecoveredBlock;
 use reth_primitives::Block;
-use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_provider::providers::BlockchainProvider;
 use reth_rpc_api::clients::EthApiClient;
 use revm::state::EvmState;
 use std::{marker::PhantomData, sync::Arc};
@@ -124,10 +126,8 @@ impl<I> Setup<I> {
     /// Apply the setup to the environment
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
-        N: Default
-            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-            + NodeTypesWithEngine
-            + NodeTypesForProvider,
+        N: NodeBuilderHelper
+            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
         N::Primitives: NodePrimitives<
             BlockHeader = alloy_consensus::Header,
             BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,

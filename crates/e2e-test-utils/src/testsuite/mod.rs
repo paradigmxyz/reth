@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use crate::{Adapter, TmpDB, TmpNodeAdapter};
+use crate::{Adapter, NodeBuilderHelper, TmpDB, TmpNodeAdapter};
 use actions::{Action, ActionBox};
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
@@ -16,7 +16,7 @@ use reth_node_builder::{
     Node, NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
     PayloadTypes,
 };
-use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_provider::providers::BlockchainProvider;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
 
@@ -59,10 +59,8 @@ impl<I: 'static> Runner<I> {
         actions: Vec<ActionBox<I>>,
     ) -> Result<()>
     where
-        N: Default
-            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-            + NodeTypesWithEngine
-            + NodeTypesForProvider,
+        N: NodeBuilderHelper
+            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
         N::Primitives: NodePrimitives<
             BlockHeader = alloy_consensus::Header,
             BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
@@ -167,10 +165,8 @@ impl<I: 'static> TestBuilder<I> {
     /// Run the test scenario
     pub async fn run<N>(self) -> Result<()>
     where
-        N: Default
-            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-            + NodeTypesWithEngine
-            + NodeTypesForProvider,
+        N: NodeBuilderHelper
+            + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
         N::Primitives: NodePrimitives<
             BlockHeader = alloy_consensus::Header,
             BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
