@@ -3119,6 +3119,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-better-payload-events"
+version = "0.0.0"
+dependencies = [
+ "alloy-eips",
+ "eyre",
+ "futures-util",
+ "reth",
+ "reth-basic-payload-builder",
+ "reth-chainspec",
+ "reth-ethereum-payload-builder",
+ "reth-evm",
+ "reth-node-api",
+ "reth-node-ethereum",
+ "reth-payload-builder",
+ "reth-primitives",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "example-bsc-p2p"
 version = "0.0.0"
 dependencies = [
