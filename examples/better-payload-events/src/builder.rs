@@ -12,9 +12,9 @@ use reth_primitives::EthPrimitives;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-/// Provides an example on how to build a [`BetterPayloadEmitter`] wrapping an inner [`EthereumPayloadBuilder`].
-/// [`BetterPayloadEmitter`] is a generic type that can wrap any payload builder implementation.
-/// This can also serve as guideline to implement your own wrapper types.
+/// Provides an example on how to build a [`BetterPayloadEmitter`] wrapping an inner
+/// [`EthereumPayloadBuilder`]. [`BetterPayloadEmitter`] is a generic type that can wrap any payload
+/// builder implementation. This can also serve as guideline to implement your own wrapper types.
 #[derive(Debug)]
 pub struct BetterPayloadEmitterBuilder {
     better_payloads_tx: broadcast::Sender<Arc<EthBuiltPayload>>,
