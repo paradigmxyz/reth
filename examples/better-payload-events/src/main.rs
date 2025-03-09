@@ -61,7 +61,7 @@ fn main() {
                 while let Ok(better_payload) = rx.recv().await {
                     let gas_used = better_payload.block().gas_used();
                     let usage = gas_used * 100 / ETHEREUM_BLOCK_GAS_LIMIT_30M;
-                    info!("Better payload: gas used: {gas_used}, block usage: {usage}%");
+                    info!("Got better payload: gas used: {gas_used}, block usage: {usage}%");
                 }
             });
 
