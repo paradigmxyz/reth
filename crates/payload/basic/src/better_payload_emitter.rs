@@ -1,4 +1,5 @@
-use crate::{BuildOutcome, PayloadBuilder};
+use crate::{BuildArguments, BuildOutcome, HeaderForPayload, PayloadBuilder, PayloadConfig};
+use reth_payload_builder::PayloadBuilderError;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -31,9 +32,8 @@ where
 
     fn try_build(
         &self,
-        args: crate::BuildArguments<Self::Attributes, Self::BuiltPayload>,
-    ) -> Result<crate::BuildOutcome<Self::BuiltPayload>, reth_payload_builder::PayloadBuilderError>
-    {
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         match self.inner.try_build(args) {
             Ok(BuildOutcome::Better { payload, cached_reads }) => {
                 let _ = self.better_payloads_tx.send(Arc::new(payload.clone()));
@@ -45,8 +45,8 @@ where
 
     fn build_empty_payload(
         &self,
-        config: crate::PayloadConfig<Self::Attributes, crate::HeaderForPayload<Self::BuiltPayload>>,
-    ) -> Result<Self::BuiltPayload, reth_payload_builder::PayloadBuilderError> {
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
+    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         self.inner.build_empty_payload(config)
     }
 }
