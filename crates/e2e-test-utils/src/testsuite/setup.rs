@@ -1,34 +1,28 @@
 //! Test setup utilities for configuring the initial state.
 
 use crate::{
-    setup_engine, testsuite::Environment, Adapter, NodeBuilderHelper, TmpDB, TmpNodeAdapter,
+    testsuite::{Environment, NodeClient},
+    NodeBuilderHelper,
 };
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::B256;
-use alloy_rpc_types_engine::PayloadAttributes;
 use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
-use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::NodePrimitives;
-use reth_node_builder::{
-    components::NodeComponentsBuilder,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
-    PayloadTypes,
+use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
+use reth_node_core::{
+    args::{DiscoveryArgs, NetworkArgs},
+    primitives::RecoveredBlock,
 };
-use reth_node_core::primitives::RecoveredBlock;
 use reth_primitives::Block;
-use reth_provider::providers::BlockchainProvider;
 use reth_rpc_api::clients::EthApiClient;
+use reth_tasks::TaskManager;
 use revm::state::EvmState;
 use std::{marker::PhantomData, sync::Arc};
 use tokio::{
     sync::mpsc,
     time::{sleep, Duration},
 };
-use tracing::{debug, error};
+use tracing::{debug, span, Level};
 
 /// Configuration for setting upa test environment
 #[derive(Debug)]
@@ -127,86 +121,9 @@ impl<I> Setup<I> {
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
         N: NodeBuilderHelper,
-        N::Primitives: NodePrimitives<
-            BlockHeader = alloy_consensus::Header,
-            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
-        >,
-        N::ComponentsBuilder: NodeComponentsBuilder<
-            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-            Components: NodeComponents<
-                TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-                Network: PeersHandleProvider,
-            >,
-        >,
-        N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-            + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-        >,
-        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
-            From<reth_payload_builder::EthPayloadBuilderAttributes>,
         N::ChainSpec: From<ChainSpec> + Clone,
     {
-        let chain_spec =
-            self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
-
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
-
-        self.shutdown_tx = Some(shutdown_tx);
-
-        let is_dev = self.is_dev;
-        let node_count = self.network.node_count;
-
-        let attributes_generator = move |timestamp| {
-            let attributes = PayloadAttributes {
-                timestamp,
-                prev_randao: B256::ZERO,
-                suggested_fee_recipient: alloy_primitives::Address::ZERO,
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
-            };
-            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes::from(
-                reth_payload_builder::EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
-            )
-        };
-
-        let result = setup_engine::<N>(
-            node_count,
-            Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
-            is_dev,
-            attributes_generator,
-        )
-        .await;
-
-        let mut node_clients = Vec::new();
-        match result {
-            Ok((nodes, executor, _wallet)) => {
-                // create HTTP clients for each node's RPC and Engine API endpoints
-                for node in &nodes {
-                    let rpc = node
-                        .rpc_client()
-                        .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
-                    let engine = node.engine_api_client();
-
-                    node_clients.push(crate::testsuite::NodeClient { rpc, engine });
-                }
-
-                // spawn a separate task just to handle the shutdown
-                tokio::spawn(async move {
-                    // keep nodes and executor in scope to ensure they're not dropped
-                    let _nodes = nodes;
-                    let _executor = executor;
-                    // Wait for shutdown signal
-                    let _ = shutdown_rx.recv().await;
-                    // nodes and executor will be dropped here when the test completes
-                });
-            }
-            Err(e) => {
-                error!("Failed to setup nodes: {}", e);
-                return Err(eyre!("Failed to setup nodes: {}", e));
-            }
-        }
-
+        let node_clients = self.create_clients::<N>().await?;
         if node_clients.is_empty() {
             return Err(eyre!("No nodes were created"));
         }
@@ -249,6 +166,72 @@ impl<I> Setup<I> {
         // TODO: For each block in self.blocks, replay it on the node
 
         Ok(())
+    }
+
+    /// Creates the given nodes
+    async fn create_clients<N>(&self) -> eyre::Result<Vec<NodeClient>>
+    where
+        N: NodeBuilderHelper,
+        N::ChainSpec: From<ChainSpec> + Clone,
+    {
+        let chain_spec =
+            self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
+
+        let is_dev = self.is_dev;
+        let node_count = self.network.node_count;
+
+        let tasks = TaskManager::current();
+        let exec = tasks.executor();
+
+        let network_config = NetworkArgs {
+            discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
+            ..NetworkArgs::default()
+        };
+
+        let mut clients = Vec::with_capacity(node_count);
+        let mut nodes = Vec::with_capacity(node_count);
+
+        for idx in 0..node_count {
+            let node_config = NodeConfig::new(chain_spec.clone())
+                .with_network(network_config.clone())
+                .with_unused_ports()
+                .with_rpc(
+                    reth_node_core::args::RpcServerArgs::default().with_unused_ports().with_http(),
+                )
+                .set_dev(is_dev);
+
+            let span = span!(Level::INFO, "node", idx);
+            let _enter = span.enter();
+            let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+                .testing_node(exec.clone())
+                .node(Default::default())
+                .launch()
+                .await?;
+
+            let rpc = node
+                .rpc_server_handler()
+                .http_client()
+                .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
+            let engine = node.auth_server_handle().http_client();
+
+            clients.push(NodeClient { rpc, engine });
+            nodes.push(node);
+        }
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+
+        self.shutdown_tx = Some(shutdown_tx);
+
+        // spawn a separate task just to handle the shutdown
+        tokio::spawn(async move {
+            // keep nodes and task manager in scope to ensure they're not dropped
+            let _nodes = nodes;
+            let _tasks = tasks;
+            // Wait for shutdown signal
+            let _ = shutdown_rx.recv().await;
+            // nodes and task manager will be dropped here when the test completes
+        });
+
+        Ok(clients)
     }
 }
 

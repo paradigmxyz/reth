@@ -1,24 +1,13 @@
 //! Utilities for running e2e tests against a node or a network of nodes.
 
-use std::marker::PhantomData;
-
-use crate::{Adapter, NodeBuilderHelper, TmpDB, TmpNodeAdapter};
+use crate::NodeBuilderHelper;
 use actions::{Action, ActionBox};
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_chainspec::ChainSpec;
-use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::NodePrimitives;
-use reth_node_builder::{
-    components::NodeComponentsBuilder,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    NodeComponents, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
-    PayloadTypes,
-};
-use reth_provider::providers::BlockchainProvider;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
+use std::marker::PhantomData;
 
 pub mod actions;
 pub mod setup;
@@ -60,24 +49,6 @@ impl<I: 'static> Runner<I> {
     ) -> Result<()>
     where
         N: NodeBuilderHelper,
-        N::Primitives: NodePrimitives<
-            BlockHeader = alloy_consensus::Header,
-            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
-        >,
-        N::ComponentsBuilder: NodeComponentsBuilder<
-            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-            Components: NodeComponents<
-                TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-                Network: PeersHandleProvider,
-            >,
-        >,
-        N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-            + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-        >,
-        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
-            From<reth_payload_builder::EthPayloadBuilderAttributes>,
         N::ChainSpec: From<ChainSpec> + Clone,
     {
         // keep the setup object in scope for the entire function
@@ -165,24 +136,6 @@ impl<I: 'static> TestBuilder<I> {
     pub async fn run<N>(self) -> Result<()>
     where
         N: NodeBuilderHelper,
-        N::Primitives: NodePrimitives<
-            BlockHeader = alloy_consensus::Header,
-            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
-        >,
-        N::ComponentsBuilder: NodeComponentsBuilder<
-            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-            Components: NodeComponents<
-                TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-                Network: PeersHandleProvider,
-            >,
-        >,
-        N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-            + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-        >,
-        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
-            From<reth_payload_builder::EthPayloadBuilderAttributes>,
         N::ChainSpec: From<ChainSpec> + Clone,
     {
         let mut runner = Runner::new();
