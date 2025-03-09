@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::PooledTransaction, Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844WithSidecar,
-    TxEip7702, TxLegacy, TxType,
+    transaction::PooledTransaction, Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant,
+    TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, TxType,
 };
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash, B256};
@@ -57,6 +57,7 @@ impl_in_mem_size!(
     TxEip1559,
     TxEip7702,
     TxEip4844,
+    TxEip4844Variant,
     TxEip4844WithSidecar
 );
 
@@ -73,6 +74,18 @@ impl InMemorySize for alloy_consensus::Receipt {
 }
 
 impl InMemorySize for PooledTransaction {
+    fn size(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.size(),
+            Self::Eip2930(tx) => tx.size(),
+            Self::Eip1559(tx) => tx.size(),
+            Self::Eip4844(tx) => tx.size(),
+            Self::Eip7702(tx) => tx.size(),
+        }
+    }
+}
+
+impl InMemorySize for TxEnvelope {
     fn size(&self) -> usize {
         match self {
             Self::Legacy(tx) => tx.size(),
@@ -145,6 +158,18 @@ mod op {
                 Self::Eip2930(tx) => tx.size(),
                 Self::Eip1559(tx) => tx.size(),
                 Self::Eip7702(tx) => tx.size(),
+            }
+        }
+    }
+
+    impl InMemorySize for op_alloy_consensus::OpTxEnvelope {
+        fn size(&self) -> usize {
+            match self {
+                Self::Legacy(tx) => tx.size(),
+                Self::Eip2930(tx) => tx.size(),
+                Self::Eip1559(tx) => tx.size(),
+                Self::Eip7702(tx) => tx.size(),
+                Self::Deposit(tx) => tx.size(),
             }
         }
     }
