@@ -11,6 +11,9 @@ use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_primitives::EthPrimitives;
 use tokio::sync::broadcast;
 
+/// Provides an example on how to build a [`BetterPayloadEmitter`] wrapping an inner [`EthereumPayloadBuilder`].
+/// [`BetterPayloadEmitter`] is a generic type that can wrap any payload builder implementation.
+/// This can also serve as guideline to implement your own wrapper types.
 #[derive(Debug)]
 pub struct BetterPayloadEmitterBuilder {
     better_payloads_tx: broadcast::Sender<EthBuiltPayload>,
@@ -48,7 +51,6 @@ where
         let evm_config = EthEvmConfig::new(ctx.chain_spec());
         let builder_config = EthereumBuilderConfig::new().with_gas_limit(conf.gas_limit());
         let inner = EthereumPayloadBuilder::new(client, pool, evm_config, builder_config);
-        let builder = BetterPayloadEmitter::new(self.better_payloads_tx, inner);
-        Ok(builder)
+        Ok(BetterPayloadEmitter::new(self.better_payloads_tx, inner))
     }
 }
