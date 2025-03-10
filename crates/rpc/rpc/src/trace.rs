@@ -22,8 +22,7 @@ use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
-use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
-use reth_rpc_server_types::constants::DEFAULT_MAX_TRACE_FILTER_BLOCKS;
+use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -258,7 +257,10 @@ where
 
         // ensure that the range is not too large, since we need to fetch all blocks in the range
         let distance = end.saturating_sub(start);
-        if distance > DEFAULT_MAX_TRACE_FILTER_BLOCKS {
+        let eth_config = EthConfig::default();
+        let max_blocks_per_filter = eth_config.max_trace_filter_blocks;
+
+        if distance > max_blocks_per_filter {
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
             )
