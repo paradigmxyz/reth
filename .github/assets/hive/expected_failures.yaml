@@ -50,9 +50,10 @@ engine-cancun:
 
 sync: []
 
-# no fix: it’s too expensive to check whether the storage is empty on each creation
 eest/consume-engine:
+  # no fix: it’s too expensive to check whether the storage is empty on each creation
   - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test_engine-zero_nonce]-reth
+  # no fix: mismatch between hive expectations and reth error code returned
   - tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests_engine[fork_Prague-duplicate_deposit_request-blockchain_test_engine-correct_requests_hash_in_header_True]-reth
   - tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests_engine[fork_Prague-duplicate_withdrawal_request-blockchain_test_engine-correct_requests_hash_in_header_True]-reth
   - tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests[fork_Prague-duplicate_consolidation_request-blockchain_test_engine]-reth
@@ -74,4 +75,5 @@ eest/consume-engine:
   - tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests[fork_Prague-no_requests_invalid_hash_calculation_method_2-blockchain_test_engine]-reth
   - tests/prague/eip7685_general_purpose_el_requests/test_deposits_withdrawals_consolidations.py::test_invalid_deposit_withdrawal_consolidation_requests_engine[fork_Prague-duplicate_consolidation_request-blockchain_test_engine-correct_requests_hash_in_header_True]-reth
 eest/consume-rlp:
+  # no fix: it’s too expensive to check whether the storage is empty on each creation
   - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test-zero_nonce]-reth
