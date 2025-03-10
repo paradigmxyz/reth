@@ -1,9 +1,6 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::{
-    setup_engine, testsuite::Environment, Adapter, NodeBuilderHelper, PayloadAttributesBuilder,
-    TmpDB, TmpNodeAdapter,
-};
+use crate::{setup_engine, testsuite::Environment, NodeBuilderHelper, PayloadAttributesBuilder};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadAttributes;
@@ -11,16 +8,9 @@ use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::{NodePrimitives, NodeTypesWithEngine, PayloadTypes};
-use reth_node_builder::{
-    rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    NodeComponents, NodeComponentsBuilder, NodeTypesWithDBAdapter,
-};
+use reth_node_api::{NodeTypesWithEngine, PayloadTypes};
 use reth_node_core::primitives::RecoveredBlock;
-use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::Block;
-use reth_provider::providers::BlockchainProvider;
 use reth_rpc_api::clients::EthApiClient;
 use revm::state::EvmState;
 use std::{marker::PhantomData, sync::Arc};
@@ -127,24 +117,9 @@ impl<I> Setup<I> {
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
         N: NodeBuilderHelper,
-        N::Primitives: NodePrimitives<
-            BlockHeader = alloy_consensus::Header,
-            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
-        >,
-        N::ComponentsBuilder: NodeComponentsBuilder<
-            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-            Components: NodeComponents<
-                TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-                Network: PeersHandleProvider,
-            >,
-        >,
-        N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-            + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
         >,
-        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
-            From<EthPayloadBuilderAttributes>,
         N::ChainSpec: From<ChainSpec> + Clone,
     {
         let chain_spec =
@@ -172,7 +147,7 @@ impl<I> Setup<I> {
 
         let result = setup_engine::<N>(
             node_count,
-            Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
+            Arc::<N::ChainSpec>::new((*chain_spec).into()),
             is_dev,
             attributes_generator,
         )
