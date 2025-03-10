@@ -15,60 +15,6 @@ pub mod setup;
 #[cfg(test)]
 mod examples;
 
-/// A runner performs operations on an environment.
-#[derive(Debug, Default)]
-pub struct Runner<I> {
-    /// The environment containing the node(s) to test
-    env: Environment<I>,
-}
-
-impl<I: 'static> Runner<I> {
-    /// Create a new test runner with an empty environment
-    pub fn new() -> Self {
-        Self { env: Environment::default() }
-    }
-
-    /// Execute an action
-    pub async fn execute(&mut self, action: ActionBox<I>) -> Result<()> {
-        action.execute(&self.env).await
-    }
-
-    /// Execute a sequence of actions
-    pub async fn run_actions(&mut self, actions: Vec<ActionBox<I>>) -> Result<()> {
-        for action in actions {
-            self.execute(action).await?;
-        }
-        Ok(())
-    }
-
-    /// Run a complete test scenario with setup and actions
-    pub async fn run_scenario<N>(
-        &mut self,
-        setup: Option<Setup<I>>,
-        actions: Vec<ActionBox<I>>,
-    ) -> Result<()>
-    where
-        N: NodeBuilderHelper,
-        N::ChainSpec: From<ChainSpec> + Clone,
-    {
-        // keep the setup object in scope for the entire function
-        let mut setup_instance = None;
-
-        if let Some(mut setup) = setup {
-            setup.apply::<N>(&mut self.env).await?;
-            setup_instance = Some(setup);
-        }
-
-        let result = self.run_actions(actions).await;
-
-        // explicitly drop the setup_instance to shutdown the nodes
-        // after all actions have completed
-        drop(setup_instance);
-
-        result
-    }
-}
-
 /// Client handles for both regular RPC and Engine API endpoints
 #[derive(Debug)]
 pub struct NodeClient {
@@ -99,12 +45,13 @@ impl<I> Default for Environment<I> {
 pub struct TestBuilder<I> {
     setup: Option<Setup<I>>,
     actions: Vec<ActionBox<I>>,
+    env: Environment<I>,
 }
 
 impl<I: 'static> TestBuilder<I> {
     /// Create a new test builder
     pub fn new() -> Self {
-        Self { setup: None, actions: Vec::new() }
+        Self { setup: None, actions: Vec::new(), env: Default::default() }
     }
 
     /// Set the test setup
@@ -133,12 +80,27 @@ impl<I: 'static> TestBuilder<I> {
     }
 
     /// Run the test scenario
-    pub async fn run<N>(self) -> Result<()>
+    pub async fn run<N>(mut self) -> Result<()>
     where
         N: NodeBuilderHelper,
         N::ChainSpec: From<ChainSpec> + Clone,
     {
-        let mut runner = Runner::new();
-        runner.run_scenario::<N>(self.setup, self.actions).await
+        let mut setup = self.setup.take();
+
+        if let Some(ref mut s) = setup {
+            s.apply::<N>(&mut self.env).await?;
+        }
+
+        let actions = std::mem::take(&mut self.actions);
+
+        for action in actions {
+            action.execute(&self.env).await?;
+        }
+
+        // explicitly drop the setup to shutdown the nodes
+        // after all actions have completed
+        drop(setup);
+
+        Ok(())
     }
 }
