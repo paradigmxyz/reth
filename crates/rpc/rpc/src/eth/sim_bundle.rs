@@ -9,7 +9,7 @@ use alloy_rpc_types_mev::{
     SimBundleOverrides, SimBundleResponse, Validity,
 };
 use jsonrpsee::core::RpcResult;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives::Recovered;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::ProviderTx;

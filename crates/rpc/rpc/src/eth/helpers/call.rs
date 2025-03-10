@@ -1,11 +1,13 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
 use crate::EthApi;
-use alloy_consensus::{Header, TxType};
+use alloy_consensus::TxType;
+use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
-use reth_evm::{ConfigureEvm, EvmEnv, SpecFor};
-use reth_provider::{BlockReader, ProviderHeader};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
+use reth_node_api::NodePrimitives;
+use reth_provider::{BlockReader, ProviderHeader, ProviderTx};
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError,
@@ -23,10 +25,15 @@ where
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState<
-            Evm: ConfigureEvm<TxEnv = TxEnv, Header = ProviderHeader<Self::Provider>>,
+            Evm: ConfigureEvm<
+                BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
+                Primitives: NodePrimitives<
+                    BlockHeader = ProviderHeader<Self::Provider>,
+                    SignedTx = ProviderTx<Self::Provider>,
+                >,
+            >,
             Error: FromEvmError<Self::Evm>,
         > + SpawnBlocking,
-    EvmConfig: ConfigureEvm<Header = Header>,
     Provider: BlockReader,
 {
     #[inline]

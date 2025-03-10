@@ -638,7 +638,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
-    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx> + 'static,
+    C: ConfigureEvm<Primitives = N> + 'static,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {

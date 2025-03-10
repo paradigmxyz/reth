@@ -20,21 +20,19 @@ use reth::{
         context::{result::ExecutionResult, TxEnv},
         db::State,
         primitives::{address, Address},
+        specification::hardfork::SpecId,
         DatabaseCommit,
     },
 };
 use reth_chainspec::ChainSpec;
 use reth_evm::{
-    execute::{
-        BlockExecutionError, BlockExecutionStrategyFactory, BlockExecutor,
-        InternalBlockExecutionError,
-    },
-    ConfigureEvmEnv, Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
+    execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
+    Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
 };
 use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
 use reth_primitives::{
-    EthPrimitives, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
+    EthPrimitives, Header, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -90,35 +88,6 @@ pub struct CustomEvmConfig {
     inner: EthEvmConfig,
 }
 
-impl ConfigureEvmEnv for CustomEvmConfig {
-    type Error = <EthEvmConfig as ConfigureEvmEnv>::Error;
-    type Header = <EthEvmConfig as ConfigureEvmEnv>::Header;
-    type Spec = <EthEvmConfig as ConfigureEvmEnv>::Spec;
-    type Transaction = <EthEvmConfig as ConfigureEvmEnv>::Transaction;
-    type TxEnv = <EthEvmConfig as ConfigureEvmEnv>::TxEnv;
-    type NextBlockEnvCtx = NextBlockEnvAttributes;
-
-    fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
-        self.inner.evm_env(header)
-    }
-
-    fn next_evm_env(
-        &self,
-        parent: &Self::Header,
-        attributes: &NextBlockEnvAttributes,
-    ) -> Result<EvmEnv<Self::Spec>, Self::Error> {
-        self.inner.next_evm_env(parent, attributes)
-    }
-}
-
-impl ConfigureEvm for CustomEvmConfig {
-    type EvmFactory = <EthEvmConfig as ConfigureEvm>::EvmFactory;
-
-    fn evm_factory(&self) -> &Self::EvmFactory {
-        self.inner.evm_factory()
-    }
-}
-
 impl BlockExecutorFactory for CustomEvmConfig {
     type EvmFactory = EthEvmFactory;
     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
@@ -136,7 +105,7 @@ impl BlockExecutorFactory for CustomEvmConfig {
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: Database + 'a,
-        I: InspectorFor<&'a mut State<DB>, Self> + 'a,
+        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
         CustomBlockExecutor {
             inner: EthBlockExecutor::new(
@@ -149,8 +118,10 @@ impl BlockExecutorFactory for CustomEvmConfig {
     }
 }
 
-impl BlockExecutionStrategyFactory for CustomEvmConfig {
-    type Primitives = EthPrimitives;
+impl ConfigureEvm for CustomEvmConfig {
+    type Primitives = <EthEvmConfig as ConfigureEvm>::Primitives;
+    type Error = <EthEvmConfig as ConfigureEvm>::Error;
+    type NextBlockEnvCtx = <EthEvmConfig as ConfigureEvm>::NextBlockEnvCtx;
     type BlockExecutorFactory = Self;
     type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
@@ -160,6 +131,18 @@ impl BlockExecutionStrategyFactory for CustomEvmConfig {
 
     fn block_assembler(&self) -> &Self::BlockAssembler {
         self.inner.block_assembler()
+    }
+
+    fn evm_env(&self, header: &Header) -> EvmEnv<SpecId> {
+        self.inner.evm_env(header)
+    }
+
+    fn next_evm_env(
+        &self,
+        parent: &Header,
+        attributes: &NextBlockEnvAttributes,
+    ) -> Result<EvmEnv<SpecId>, Self::Error> {
+        self.inner.next_evm_env(parent, attributes)
     }
 
     fn context_for_block<'a>(&self, block: &'a SealedBlock) -> EthBlockExecutionCtx<'a> {

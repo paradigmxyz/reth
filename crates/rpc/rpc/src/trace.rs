@@ -16,7 +16,7 @@ use alloy_rpc_types_trace::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};

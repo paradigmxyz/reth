@@ -1,62 +1,9 @@
 //! Ethereum block execution strategy.
 
-use crate::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
-use alloc::{borrow::Cow, sync::Arc};
-use alloy_evm::{
-    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
-    FromRecoveredTx,
-};
+use crate::EthEvmConfig;
+use alloc::sync::Arc;
 use reth_chainspec::ChainSpec;
-use reth_evm::{
-    execute::{BasicBlockExecutorProvider, BlockExecutionStrategyFactory},
-    EvmFactory, TransactionEnv,
-};
-use reth_primitives::{EthPrimitives, SealedBlock, SealedHeader, TransactionSigned};
-use revm::specification::hardfork::SpecId;
-
-impl<EvmF> BlockExecutionStrategyFactory for EthEvmConfig<EvmF>
-where
-    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
-        + Send
-        + Sync
-        + Unpin
-        + Clone
-        + 'static,
-{
-    type Primitives = EthPrimitives;
-    type BlockExecutorFactory = EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmF>;
-    type BlockAssembler = EthBlockAssembler<ChainSpec>;
-
-    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
-        &self.executor_factory
-    }
-
-    fn block_assembler(&self) -> &Self::BlockAssembler {
-        &self.block_assembler
-    }
-
-    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> EthBlockExecutionCtx<'a> {
-        EthBlockExecutionCtx {
-            parent_hash: block.header().parent_hash,
-            parent_beacon_block_root: block.header().parent_beacon_block_root,
-            ommers: &block.body().ommers,
-            withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
-        }
-    }
-
-    fn context_for_next_block(
-        &self,
-        parent: &SealedHeader,
-        attributes: Self::NextBlockEnvCtx,
-    ) -> EthBlockExecutionCtx<'_> {
-        EthBlockExecutionCtx {
-            parent_hash: parent.hash(),
-            parent_beacon_block_root: attributes.parent_beacon_block_root,
-            ommers: &[],
-            withdrawals: attributes.withdrawals.map(Cow::Owned),
-        }
-    }
-}
+use reth_evm::execute::BasicBlockExecutorProvider;
 
 /// Helper type with backwards compatible methods to obtain Ethereum executor
 /// providers.
