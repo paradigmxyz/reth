@@ -6,9 +6,9 @@ use crate::{
 };
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
-use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{NodeTypesWithEngine, PayloadTypes};
+use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
 use std::marker::PhantomData;
@@ -90,7 +90,8 @@ impl<I: 'static> TestBuilder<I> {
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
         >,
-        N::ChainSpec: From<ChainSpec> + Clone,
+        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
+            From<EthPayloadBuilderAttributes>,
     {
         let mut setup = self.setup.take();
 

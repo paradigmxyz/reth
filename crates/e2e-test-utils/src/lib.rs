@@ -1,7 +1,7 @@
 //! Utilities for end-to-end tests.
 
 use node::NodeTestContext;
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
@@ -9,8 +9,8 @@ use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
     EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
-    NodeConfig, NodeHandle, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
-    PayloadTypes,
+    NodeConfig, NodeHandle, NodePrimitives, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
@@ -227,6 +227,7 @@ where
             > + EngineValidatorAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             >,
+            ChainSpec: From<ChainSpec> + Clone,
         >,
     LocalPayloadAttributesBuilder<Self::ChainSpec>:
         PayloadAttributesBuilder<<Self::Engine as PayloadTypes>::PayloadAttributes>,
@@ -257,6 +258,7 @@ where
             > + EngineValidatorAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             >,
+            ChainSpec: From<ChainSpec> + Clone,
         >,
     LocalPayloadAttributesBuilder<Self::ChainSpec>:
         PayloadAttributesBuilder<<Self::Engine as PayloadTypes>::PayloadAttributes>,

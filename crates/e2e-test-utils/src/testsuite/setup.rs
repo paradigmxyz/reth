@@ -10,6 +10,7 @@ use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{NodeTypesWithEngine, PayloadTypes};
 use reth_node_core::primitives::RecoveredBlock;
+use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_primitives::Block;
 use reth_rpc_api::clients::EthApiClient;
 use revm::state::EvmState;
@@ -120,7 +121,8 @@ impl<I> Setup<I> {
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
         >,
-        N::ChainSpec: From<ChainSpec> + Clone,
+        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
+            From<EthPayloadBuilderAttributes>,
     {
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
@@ -141,13 +143,13 @@ impl<I> Setup<I> {
                 parent_beacon_block_root: Some(B256::ZERO),
             };
             <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes::from(
-                reth_payload_builder::EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
+                EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
             )
         };
 
         let result = setup_engine::<N>(
             node_count,
-            Arc::<N::ChainSpec>::new((*chain_spec).into()),
+            Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
             is_dev,
             attributes_generator,
         )
