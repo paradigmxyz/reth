@@ -5,7 +5,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use derive_more::derive::Deref;
 use metrics::Histogram;
-use reth_errors::{ProviderError, ProviderResult};
+use reth_errors::ProviderError;
 use reth_metrics::Metrics;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -485,8 +485,8 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
-         to_sparse_trie: Sender<SparseTrieUpdate>,
-    ) -> ProviderResult<Self> {
+        to_sparse_trie: Sender<SparseTrieUpdate>,
+    ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
 
@@ -500,12 +500,21 @@ where
             task_ctx,
             max_concurrency,
             proof_task_receiver,
-        )?;
+        );
 
         // spawn the proof task
-        executor.spawn_blocking(move || proof_task.run());
+        executor.spawn_blocking(move || {
+            if let Err(err) = proof_task.run() {
+                // At least log if there is an error at any point
+                tracing::error!(
+                    target: "engine::root",
+                    ?err,
+                    "Storage proof task returned an error"
+                );
+            }
+        });
 
-        Ok(Self {
+        Self {
             config,
             rx,
             tx,
@@ -518,7 +527,7 @@ where
                 proof_task_sender,
             ),
             metrics,
-        })
+        }
     }
 
     /// Returns a [`Sender`] that can be used to send arbitrary [`MultiProofMessage`]s to this task.
@@ -985,7 +994,7 @@ mod tests {
         let config = create_state_root_config(factory, TrieInput::default());
         let channel = channel();
 
-        MultiProofTask::new(config, executor, channel.0).unwrap()
+        MultiProofTask::new(config, executor, channel.0)
     }
 
     #[test]

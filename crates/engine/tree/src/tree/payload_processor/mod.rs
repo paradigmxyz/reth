@@ -16,7 +16,6 @@ use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
 use reth_provider::{
@@ -117,7 +116,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
-    ) -> ProviderResult<PayloadHandle>
+    ) -> PayloadHandle
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -131,7 +130,7 @@ where
         // spawn multiproof task
         let state_root_config = MultiProofConfig::new_from_input(consistent_view, trie_input);
         let multi_proof_task =
-            MultiProofTask::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie)?;
+            MultiProofTask::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie);
 
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
@@ -158,7 +157,7 @@ where
             let _ = state_root_tx.send(res);
         });
 
-        Ok(PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) })
+        PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }
     }
 
     /// Spawn cache prewarming exclusively.
@@ -506,15 +505,13 @@ mod tests {
             &TreeConfig::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
-        let mut handle = payload_processor
-            .spawn(
-                Default::default(),
-                Default::default(),
-                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                TrieInput::from_state(hashed_state),
-            )
-            .unwrap();
+        let mut handle = payload_processor.spawn(
+            Default::default(),
+            Default::default(),
+            StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+            ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+            TrieInput::from_state(hashed_state),
+        );
 
         let mut state_hook = handle.state_hook();
 

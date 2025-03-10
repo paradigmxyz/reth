@@ -403,10 +403,11 @@ mod tests {
             task_ctx,
             1,
             proof_task_receiver,
-        )
-        .unwrap();
+        );
 
-        rt.spawn_blocking(move || proof_task.run());
+        // keep the join handle around to make sure it does not return any errors
+        // after we compute the state root
+        let join_handle = rt.spawn_blocking(move || proof_task.run());
 
         assert_eq!(
             ParallelProof::new(
@@ -421,5 +422,8 @@ mod tests {
             .unwrap(),
             Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap()
         );
+
+        // make sure the join handle does not return any errors either
+        rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
     }
 }

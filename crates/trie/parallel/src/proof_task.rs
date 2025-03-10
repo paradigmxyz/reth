@@ -9,10 +9,14 @@
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
 use crate::root::ParallelStateRootError;
-use alloy_primitives::{map::B256Set, B256};
+use alloy_primitives::{
+    map::{B256Set, HashSet},
+    B256,
+};
 use reth_db_api::transaction::DbTx;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx, ProviderResult, StateCommitmentProvider
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
+    ProviderResult, StateCommitmentProvider,
 };
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::StorageProof,
@@ -70,16 +74,8 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
         task_ctx: ProofTaskCtx,
         max_concurrency: usize,
         proof_task_rx: Receiver<ProofTaskMessage>,
-    ) -> ProviderResult<Self> {
-        // initialize proof task txs
-        // let mut proof_task_txs = Vec::with_capacity(max_concurrency);
-        // for _ in 0..max_concurrency {
-        //     let provider_ro = view.provider_ro()?;
-        //     let tx = provider_ro.into_tx();
-        //     proof_task_txs.push(ProofTaskTx::new(tx, task_ctx.clone()));
-        // }
-
-        Ok(Self {
+    ) -> Self {
+        Self {
             max_concurrency,
             total_transactions: 0,
             view,
@@ -89,15 +85,13 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
             proof_task_txs: Vec::new(),
             running_proof_tasks: Vec::new(),
             proof_task_rx,
-        })
+        }
     }
 }
 
 impl<Factory> ProofTaskManager<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>
-        + StateCommitmentProvider
-        + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + 'static,
 {
     /// Spawns the proof task on the executor, with the input multiproof targets.
     ///
@@ -112,31 +106,34 @@ where
 
     /// Gets either the next available transaction, or creates a new one if all are in use and the
     /// total number of transactions created is less than the max concurrency.
-    pub fn get_or_create_tx(&mut self) -> Option<ProofTaskTx<FactoryTx<Factory>>> {
+    pub fn get_or_create_tx(&mut self) -> ProviderResult<Option<ProofTaskTx<FactoryTx<Factory>>>> {
         if let Some(proof_task_tx) = self.proof_task_txs.pop() {
-            return Some(proof_task_tx);
+            return Ok(Some(proof_task_tx));
         }
 
+        // if we can create a new tx within our concurrency limits, create one on-demand
         if self.total_transactions < self.max_concurrency {
-            // TODO: propagate this result
-            let provider_ro = self.view.provider_ro().unwrap();
+            let provider_ro = self.view.provider_ro()?;
             let tx = provider_ro.into_tx();
             self.total_transactions += 1;
-            return Some(ProofTaskTx::new(tx, self.task_ctx.clone()));
+            return Ok(Some(ProofTaskTx::new(tx, self.task_ctx.clone())));
         }
 
-        None
+        Ok(None)
     }
 
     /// Spawns the next queued proof task on the executor with the given input, if there are any
     /// transactions available.
-    pub fn try_spawn_next(&mut self) {
-        let Some(proof_task_tx) = self.get_or_create_tx() else { return };
+    ///
+    /// This will return an error if a transaction must be created on-demand and the consistent view
+    /// provider fails.
+    pub fn try_spawn_next(&mut self) -> ProviderResult<()> {
+        let Some(proof_task_tx) = self.get_or_create_tx()? else { return Ok(()) };
 
         let Some((pending_proof, sender)) = self.pending_proofs.pop_front() else {
             // if there are no targets to do anything with put the tx back
             self.proof_task_txs.push(proof_task_tx);
-            return
+            return Ok(())
         };
 
         let (tx, rx) = channel();
@@ -146,10 +143,11 @@ where
         });
 
         self.running_proof_tasks.push(RunningProofTask::new(rx));
+        Ok(())
     }
 
     /// Loops, managing the proof tasks, and sending new tasks to the executor.
-    pub fn run(mut self) {
+    pub fn run(mut self) -> ProviderResult<()> {
         loop {
             // TODO: condvar for
             // * either running or proof tasks have stuff
@@ -157,10 +155,10 @@ where
             let message = match self.proof_task_rx.try_recv() {
                 Ok(message) => match message {
                     ProofTaskMessage::StorageProof(input) => Some(input),
-                    ProofTaskMessage::Terminate => return,
+                    ProofTaskMessage::Terminate => return Ok(()),
                 },
                 Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => return,
+                Err(TryRecvError::Disconnected) => return Ok(()),
             };
 
             if let Some((input, sender)) = message {
@@ -168,10 +166,10 @@ where
             }
 
             // try spawning the next task
-            self.try_spawn_next();
+            self.try_spawn_next()?;
 
             // tracks the disconnected senders
-            let mut tasks_to_remove = Vec::new();
+            let mut tasks_to_remove = HashSet::new();
 
             // poll each task
             for (idx, running_task) in self.running_proof_tasks.iter().enumerate() {
@@ -180,22 +178,27 @@ where
                     Ok(ProofTaskOutput { tx }) => {
                         // return the tx back to the pool
                         self.proof_task_txs.push(tx);
+
+                        // remove the task from the running tasks
+                        tasks_to_remove.insert(idx);
                     }
-                    // If the result is empty or the sender is disconnected, we cannot really do
-                    // anything, so
+                    // If the result is empty, we need to continue polling
                     Err(TryRecvError::Empty) => {}
                     Err(TryRecvError::Disconnected) => {
-                        tracing::debug!(target: "trie::parallel_proof", "Proof task disconnected");
                         // This means the sender from the task panicked, while this is likely not
                         // normal, we should at least stop polling this task.
-                        tasks_to_remove.push(idx);
+                        tasks_to_remove.insert(idx);
                     }
                 }
             }
 
-            // remove any panicked tasks
-            for idx in tasks_to_remove {
-                self.running_proof_tasks.swap_remove(idx);
+            if !tasks_to_remove.is_empty() {
+                // remove any completed or panicked tasks from the list of running tasks
+                let mut current_idx = 0;
+                self.running_proof_tasks.retain(|_| {
+                    current_idx += 1;
+                    tasks_to_remove.contains(&current_idx)
+                });
             }
         }
     }

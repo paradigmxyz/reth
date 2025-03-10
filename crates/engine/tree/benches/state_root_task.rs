@@ -222,15 +222,13 @@ fn bench_state_root(c: &mut Criterion) {
                     },
                     |(genesis_hash, payload_processor, provider, state_updates)| {
                         black_box({
-                            let mut handle = payload_processor
-                                .spawn(
-                                    Default::default(),
-                                    Default::default(),
-                                    StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-                                    ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-                                    TrieInput::default(),
-                                )
-                                .expect("task failed to start");
+                            let mut handle = payload_processor.spawn(
+                                Default::default(),
+                                Default::default(),
+                                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                                TrieInput::default(),
+                            );
 
                             let mut state_hook = handle.state_hook();
 
