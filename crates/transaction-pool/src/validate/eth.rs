@@ -300,7 +300,7 @@ where
         }
 
         if transaction.is_eip7702() {
-            // Cancun fork is required for 7702 txs
+            // Prague fork is required for 7702 txs
             if !self.fork_tracker.is_prague_activated() {
                 return TransactionValidationOutcome::Invalid(
                     transaction,

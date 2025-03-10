@@ -2,17 +2,13 @@
 //!
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use crate::{
-    execute::Executor,
-    system_calls::{OnStateHook, StateChangeSource},
-    Database,
-};
+use crate::{execute::Executor, Database, OnStateHook};
 use alloy_consensus::BlockHeader;
+use alloy_evm::block::StateChangeSource;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives::RecoveredBlock;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use revm::state::EvmState;
 use std::time::Instant;
 
@@ -146,8 +142,8 @@ mod tests {
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_execution_types::BlockExecutionResult;
-    use reth_primitives::EthPrimitives;
     use revm::{
         database_interface::EmptyDB,
         state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},

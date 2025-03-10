@@ -823,13 +823,13 @@ mod tests {
     fn header_not_found_message() {
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::hash(b256!(
-                "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
         assert_eq!(err.message(), "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::hash_canonical(b256!(
-                "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
         assert_eq!(err.message(), "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");

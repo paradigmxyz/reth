@@ -9,9 +9,10 @@ use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_errors::ProviderError;
 use reth_evm::{
-    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv,
-    HaltReasonFor, InspectorFor,
+    system_calls::SystemCaller, ConfigureEvm, Database, Evm, EvmEnvFor, HaltReasonFor,
+    InspectorFor, TxEnvFor,
 };
+use reth_node_api::NodePrimitives;
 use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
@@ -33,31 +34,30 @@ pub trait Trace:
     LoadState<
     Provider: BlockReader,
     Evm: ConfigureEvm<
-        Header = ProviderHeader<Self::Provider>,
-        Transaction = ProviderTx<Self::Provider>,
+        Primitives: NodePrimitives<
+            BlockHeader = ProviderHeader<Self::Provider>,
+            SignedTx = ProviderTx<Self::Provider>,
+        >,
     >,
     Error: FromEvmError<Self::Evm>,
 >
 {
-    /// Executes the [`EvmEnv`] against the given [Database] without committing state
+    /// Executes the [`reth_evm::EvmEnv`] against the given [Database] without committing state
     /// changes.
     #[expect(clippy::type_complexity)]
     fn inspect<DB, I>(
         &self,
         db: DB,
-        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
-        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
+        evm_env: EvmEnvFor<Self::Evm>,
+        tx_env: TxEnvFor<Self::Evm>,
         inspector: I,
     ) -> Result<
-        (
-            ResultAndState<HaltReasonFor<Self::Evm>>,
-            (EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, <Self::Evm as ConfigureEvmEnv>::TxEnv),
-        ),
+        (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
         Self::Error,
     >
     where
         DB: Database<Error = ProviderError>,
-        I: InspectorFor<DB, Self::Evm>,
+        I: InspectorFor<Self::Evm, DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
@@ -68,13 +68,13 @@ pub trait Trace:
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EvmEnv`] was inspected.
+    /// the configured [`reth_evm::EvmEnv`] was inspected.
     ///
     /// Caution: this is blocking
     fn trace_at<F, R>(
         &self,
-        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
-        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
+        evm_env: EvmEnvFor<Self::Evm>,
+        tx_env: TxEnvFor<Self::Evm>,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -100,11 +100,11 @@ pub trait Trace:
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EvmEnv`] was inspected.
+    /// the configured [`reth_evm::EvmEnv`] was inspected.
     fn spawn_trace_at_with_state<F, R>(
         &self,
-        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
-        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
+        evm_env: EvmEnvFor<Self::Evm>,
+        tx_env: TxEnvFor<Self::Evm>,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -185,7 +185,7 @@ pub trait Trace:
             + Send
             + 'static,
         Insp:
-            for<'a, 'b> InspectorFor<StateCacheDbRefMutWrapper<'a, 'b>, Self::Evm> + Send + 'static,
+            for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -292,7 +292,7 @@ pub trait Trace:
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
         Insp:
-            for<'a, 'b> InspectorFor<StateCacheDbRefMutWrapper<'a, 'b>, Self::Evm> + Send + 'static,
+            for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -451,7 +451,7 @@ pub trait Trace:
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
         Insp:
-            for<'a, 'b> InspectorFor<StateCacheDbRefMutWrapper<'a, 'b>, Self::Evm> + Send + 'static,
+            for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
@@ -466,7 +466,7 @@ pub trait Trace:
         &self,
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
         db: &mut DB,
-        evm_env: &EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        evm_env: &EvmEnvFor<Self::Evm>,
     ) -> Result<(), Self::Error> {
         let mut system_caller = SystemCaller::new(self.provider().chain_spec());
 

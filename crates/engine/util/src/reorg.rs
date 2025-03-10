@@ -10,7 +10,10 @@ use reth_engine_primitives::{
     OnForkChoiceUpdated, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
-use reth_evm::execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutionStrategyFactory};
+use reth_evm::{
+    execute::{BlockBuilder, BlockBuilderOutcome},
+    ConfigureEvm,
+};
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
 use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::{block::Block as _, BlockBody as _, SignedTransaction};
@@ -107,7 +110,7 @@ where
     Provider: BlockReader<Header = N::BlockHeader, Block = N::Block>
         + StateProviderFactory
         + ChainSpecProvider,
-    Evm: BlockExecutionStrategyFactory<Primitives = N>,
+    Evm: ConfigureEvm<Primitives = N>,
     Validator: PayloadValidator<ExecutionData = Engine::ExecutionData, Block = N::Block>,
 {
     type Item = S::Item;
@@ -258,7 +261,7 @@ where
     Provider: BlockReader<Header = N::BlockHeader, Block = N::Block>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec>,
-    Evm: BlockExecutionStrategyFactory<Primitives = N>,
+    Evm: ConfigureEvm<Primitives = N>,
     Validator: PayloadValidator<Block = N::Block>,
 {
     // Ensure next payload is valid.
