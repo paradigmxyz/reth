@@ -337,8 +337,8 @@ RPC:
 
           [default: <NUM CPU CORES-2>]
 
-      --rpc.max-tracing-requests <COUNT>
-          Maximum number of blocks for trace_filter requests.
+      --rpc.max-trace-filter-blocks <COUNT>
+          Maximum number of blocks for `trace_filter` requests.
 
           [default: 100]
 
