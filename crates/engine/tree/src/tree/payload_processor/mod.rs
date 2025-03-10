@@ -506,13 +506,15 @@ mod tests {
             &TreeConfig::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
-        let mut handle = payload_processor.spawn(
-            Default::default(),
-            Default::default(),
-            StateProviderBuilder::new(provider.clone(), genesis_hash, None),
-            ConsistentDbView::new_with_latest_tip(provider).unwrap(),
-            TrieInput::from_state(hashed_state),
-        );
+        let mut handle = payload_processor
+            .spawn(
+                Default::default(),
+                Default::default(),
+                StateProviderBuilder::new(provider.clone(), genesis_hash, None),
+                ConsistentDbView::new_with_latest_tip(provider).unwrap(),
+                TrieInput::from_state(hashed_state),
+            )
+            .unwrap();
 
         let mut state_hook = handle.state_hook();
 
