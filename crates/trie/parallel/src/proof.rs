@@ -1,6 +1,6 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{ProofTaskCtx, ProofTaskMessage, StorageProofInput},
+    proof_task::{ProofTaskMessage, StorageProofInput},
     root::ParallelStateRootError,
     stats::ParallelTrieTracker,
     StorageRootTargets,
@@ -140,8 +140,6 @@ where
         // this way we can lazily await the outcome when we iterate over the map
         let mut storage_proofs =
             B256Map::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
-
-        let task_ctx = ProofTaskCtx::new(self.nodes_sorted.clone(), self.state_sorted.clone());
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -321,6 +319,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proof_task::{ProofTaskCtx, ProofTaskManager};
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder},
@@ -397,13 +396,27 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
+        let task_ctx = ProofTaskCtx::new(Default::default(), Default::default());
+        let (proof_task_sender, proof_task_receiver) = std::sync::mpsc::channel();
+        let proof_task = ProofTaskManager::new(
+            rt.handle().clone(),
+            consistent_view.clone(),
+            task_ctx,
+            1,
+            proof_task_receiver,
+        )
+        .unwrap();
+
+        rt.spawn_blocking(move || proof_task.run());
+
         assert_eq!(
             ParallelProof::new(
                 consistent_view,
                 Default::default(),
                 Default::default(),
                 Default::default(),
-                rt.handle().clone()
+                rt.handle().clone(),
+                proof_task_sender,
             )
             .multiproof(targets.clone())
             .unwrap(),

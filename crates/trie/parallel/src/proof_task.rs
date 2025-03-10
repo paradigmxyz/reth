@@ -10,7 +10,7 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_primitives::{map::B256Set, B256};
-use reth_db_api::transaction::DbTx;
+use reth_db_api::{transaction::DbTx, Database};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderResult,
     StateCommitmentProvider,
@@ -63,9 +63,11 @@ impl<Tx> ProofTaskManager<Tx> {
         task_ctx: ProofTaskCtx,
         max_concurrency: usize,
         proof_task_rx: Receiver<ProofTaskMessage>,
-    ) -> ProviderResult<ProofTaskManager<impl DbTx>>
+    ) -> ProviderResult<Self>
     where
-        Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + 'static,
+        Factory: DatabaseProviderFactory<Provider: BlockReader, DB: Database<TX = Tx>>
+            + StateCommitmentProvider
+            + 'static,
     {
         // initialize proof task txs
         let mut proof_task_txs = Vec::with_capacity(max_concurrency);
@@ -75,7 +77,7 @@ impl<Tx> ProofTaskManager<Tx> {
             *item = ProofTaskTx::new(tx, task_ctx.clone());
         }
 
-        Ok(ProofTaskManager {
+        Ok(Self {
             pending_proofs: VecDeque::new(),
             executor,
             proof_task_txs,
