@@ -149,7 +149,6 @@ where
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
             let proof_task_sender = self.storage_proof_task.clone();
 
-            // TODO: get rid of this whole block and just insert the receiver
             // spawn the task as blocking and send the the result through the channel
             self.executor.spawn_blocking(move || {
                 debug!(

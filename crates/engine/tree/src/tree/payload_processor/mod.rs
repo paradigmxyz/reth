@@ -16,8 +16,8 @@ use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_errors::ProviderResult;
+use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
