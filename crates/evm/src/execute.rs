@@ -1,35 +1,23 @@
 //! Traits for execution.
 
-use crate::{
-    ConfigureEvmFor, Database, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, OnStateHook,
-};
+use crate::{ConfigureEvm, Database, OnStateHook};
 use alloc::{boxed::Box, vec::Vec};
-use alloy_consensus::BlockHeader;
-pub use alloy_evm::block::BlockExecutor;
-use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
-    Evm,
-};
-use alloy_primitives::{
-    map::{DefaultHashBuilder, HashMap},
-    Address, B256,
-};
+use alloy_consensus::{BlockHeader, Header};
+pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
+use alloy_evm::{Evm, EvmEnv, EvmFactory};
+use alloy_primitives::B256;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{
-    BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedBlock,
-    SealedHeader, TxTy,
+    Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, TxTy,
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{
-    context::result::ExecutionResult,
-    state::{Account, AccountStatus, EvmState},
-};
+use revm::context::result::ExecutionResult;
 use revm_database::{states::bundle_state::BundleRetention, BundleState, State};
 
 /// A type that knows how to execute a block. It is assumed to operate on a
@@ -176,141 +164,22 @@ pub struct ExecuteOutput<R> {
     pub gas_used: u64,
 }
 
-/// A factory that can create block execution strategies.
-///
-/// This trait extends [`crate::ConfigureEvm`] and provides a way to construct a
-/// [`BlockExecutor`]. Strategy is expected to derive most of the context for block
-/// execution from the EVM (which includes [`revm::context::BlockEnv`]), and any additional context
-/// should be contained in configured [`ExecutionCtx`].
-///
-/// Strategy is required to provide a way to obtain [`ExecutionCtx`] from either a complete
-/// [`SealedBlock`] (in case of execution of an externally obtained block), or from a parent header
-/// along with [`crate::ConfigureEvmEnv::NextBlockEnvCtx`] (in the case of block building).
-///
-/// For more context on the strategy design, see the documentation for [`BlockExecutor`].
-///
-/// Additionally, trait implementations are expected to define a [`BlockAssembler`] type that is
-/// used to assemble blocks. Assembler combined with strategy are used to create a [`BlockBuilder`].
-/// [`BlockBuilder`] exposes a simple API for building blocks and can be consumed by payload
-/// builder.
-///
-/// [`ExecutionCtx`]: BlockExecutorFactory::ExecutionCtx
-pub trait BlockExecutionStrategyFactory: ConfigureEvmFor<Self::Primitives> + 'static {
-    /// Primitive types used by the strategy.
-    type Primitives: NodePrimitives;
-
-    /// Block executor factory.
-    type BlockExecutorFactory: BlockExecutorFactory<
-        EvmFactory = Self::EvmFactory,
-        Transaction = TxTy<Self::Primitives>,
-        Receipt = ReceiptTy<Self::Primitives>,
-    >;
-
-    /// A type that knows how to build a block.
-    type BlockAssembler: BlockAssembler<Self>;
-
-    /// Provides reference to configured [`BlockExecutorFactory`].
-    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory;
-
-    /// Provides reference to configured [`BlockAssembler`].
-    fn block_assembler(&self) -> &Self::BlockAssembler;
-
-    /// Returns the configured [`BlockExecutorFactory::ExecutionCtx`] for a given block.
-    fn context_for_block<'a>(
-        &self,
-        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>;
-
-    /// Returns the configured [`BlockExecutorFactory::ExecutionCtx`] for `parent + 1`
-    /// block.
-    fn context_for_next_block(
-        &self,
-        parent: &SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
-        attributes: Self::NextBlockEnvCtx,
-    ) -> <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'_>;
-
-    /// Creates a strategy with given EVM and execution context.
-    fn create_strategy<'a, DB, I>(
-        &'a self,
-        evm: EvmFor<Self, &'a mut State<DB>, I>,
-        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>
-    where
-        DB: Database,
-        I: InspectorFor<&'a mut State<DB>, Self> + 'a,
-    {
-        self.block_executor_factory().create_executor(evm, ctx)
-    }
-
-    /// Creates a strategy for execution of a given block.
-    fn strategy_for_block<'a, DB: Database>(
-        &'a self,
-        db: &'a mut State<DB>,
-        block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB> {
-        let evm = self.evm_for_block(db, block.header());
-        let ctx = self.context_for_block(block);
-        self.create_strategy(evm, ctx)
-    }
-
-    /// Creates a [`BlockBuilder`]. Should be used when building a new block.
-    ///
-    /// Block builder wraps an inner [`BlockExecutor`] and has a similar interface. Builder
-    /// collects all of the executed transactions, and once [`BlockBuilder::finish`] is called, it
-    /// invokes the configured [`BlockAssembler`] to create a block.
-    fn create_block_builder<'a, DB, I>(
-        &'a self,
-        evm: EvmFor<Self, &'a mut State<DB>, I>,
-        parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
-        ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    ) -> impl BlockBuilder<
-        Primitives = Self::Primitives,
-        Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>,
-    >
-    where
-        DB: Database,
-        I: InspectorFor<&'a mut State<DB>, Self> + 'a,
-    {
-        BasicBlockBuilder {
-            executor: self.create_strategy(evm, ctx.clone()),
-            ctx,
-            assembler: self.block_assembler(),
-            parent,
-            transactions: Vec::new(),
-        }
-    }
-
-    /// Creates a [`BlockBuilder`] for building of a new block. This is a helper to invoke
-    /// [`BlockExecutionStrategyFactory::create_block_builder`].
-    fn builder_for_next_block<'a, DB: Database>(
-        &'a self,
-        db: &'a mut State<DB>,
-        parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
-        attributes: Self::NextBlockEnvCtx,
-    ) -> Result<impl BlockBuilder<Primitives = Self::Primitives>, Self::Error> {
-        let evm_env = self.next_evm_env(parent, &attributes)?;
-        let evm = self.evm_with_env(db, evm_env);
-        let ctx = self.context_for_next_block(parent, attributes);
-        Ok(self.create_block_builder(evm, parent, ctx))
-    }
-}
-
 /// Input for block building. Consumed by [`BlockAssembler`].
 #[derive(derive_more::Debug)]
 #[non_exhaustive]
-pub struct BlockAssemblerInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
+pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     /// Configuration of EVM used when executing the block.
     ///
     /// Contains context relevant to EVM such as [`revm::context::BlockEnv`].
-    pub evm_env: EvmEnvFor<Evm>,
+    pub evm_env: EvmEnv<<F::EvmFactory as EvmFactory>::Spec>,
     /// [`BlockExecutorFactory::ExecutionCtx`] used to execute the block.
-    pub execution_ctx: <Evm::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
+    pub execution_ctx: F::ExecutionCtx<'a>,
     /// Parent block header.
-    pub parent: &'a SealedHeader<HeaderTy<Evm::Primitives>>,
+    pub parent: &'a SealedHeader<H>,
     /// Transactions that were executed in this block.
-    pub transactions: Vec<TxTy<Evm::Primitives>>,
+    pub transactions: Vec<F::Transaction>,
     /// Output of block execution.
-    pub output: &'b BlockExecutionResult<ReceiptTy<Evm::Primitives>>,
+    pub output: &'b BlockExecutionResult<F::Receipt>,
     /// [`BundleState`] after the block execution.
     pub bundle_state: &'a BundleState,
     /// Provider with access to state.
@@ -322,12 +191,15 @@ pub struct BlockAssemblerInput<'a, 'b, Evm: BlockExecutionStrategyFactory> {
 
 /// A type that knows how to assemble a block.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BlockAssembler<Evm: BlockExecutionStrategyFactory> {
+pub trait BlockAssembler<F: BlockExecutorFactory> {
+    /// The block type produced by the assembler.
+    type Block: Block;
+
     /// Builds a block. see [`BlockAssemblerInput`] documentation for more details.
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, Evm>,
-    ) -> Result<BlockTy<Evm::Primitives>, BlockExecutionError>;
+        input: BlockAssemblerInput<'_, '_, F, <Self::Block as Block>::Header>,
+    ) -> Result<Self::Block, BlockExecutionError>;
 }
 
 /// Output of block building.
@@ -396,29 +268,35 @@ pub trait BlockBuilder {
     fn into_executor(self) -> Self::Executor;
 }
 
-struct BasicBlockBuilder<'a, Evm, Executor, Builder>
+pub(crate) struct BasicBlockBuilder<'a, F, Executor, Builder, N: NodePrimitives>
 where
-    Evm: BlockExecutionStrategyFactory,
+    F: BlockExecutorFactory,
 {
-    executor: Executor,
-    transactions: Vec<Recovered<TxTy<Evm::Primitives>>>,
-    ctx: <Evm::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
-    parent: &'a SealedHeader<HeaderTy<Evm::Primitives>>,
-    assembler: Builder,
+    pub(crate) executor: Executor,
+    pub(crate) transactions: Vec<Recovered<TxTy<N>>>,
+    pub(crate) ctx: F::ExecutionCtx<'a>,
+    pub(crate) parent: &'a SealedHeader<HeaderTy<N>>,
+    pub(crate) assembler: Builder,
 }
 
-impl<'a, E, DB, Executor, Builder> BlockBuilder for BasicBlockBuilder<'a, E, Executor, Builder>
+impl<'a, F, DB, Executor, Builder, N> BlockBuilder
+    for BasicBlockBuilder<'a, F, Executor, Builder, N>
 where
-    E: BlockExecutionStrategyFactory,
+    F: BlockExecutorFactory<Transaction = N::SignedTx, Receipt = N::Receipt>,
     Executor: BlockExecutor<
-        Receipt = ReceiptTy<E::Primitives>,
-        Transaction = TxTy<E::Primitives>,
-        Evm: Evm<Spec = E::Spec, HaltReason = HaltReasonFor<E>, DB = &'a mut State<DB>>,
+        Evm: Evm<
+            Spec = <F::EvmFactory as EvmFactory>::Spec,
+            HaltReason = <F::EvmFactory as EvmFactory>::HaltReason,
+            DB = &'a mut State<DB>,
+        >,
+        Transaction = N::SignedTx,
+        Receipt = N::Receipt,
     >,
     DB: Database + 'a,
-    Builder: BlockAssembler<E>,
+    Builder: BlockAssembler<F, Block = N::Block>,
+    N: NodePrimitives,
 {
-    type Primitives = E::Primitives;
+    type Primitives = N;
     type Executor = Executor;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
@@ -428,7 +306,7 @@ where
     fn execute_transaction_with_result_closure(
         &mut self,
         tx: Recovered<TxTy<Self::Primitives>>,
-        f: impl FnOnce(&ExecutionResult<HaltReasonFor<E>>),
+        f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
         let gas_used =
             self.executor.execute_transaction_with_result_closure(tx.as_recovered_ref(), f)?;
@@ -439,7 +317,7 @@ where
     fn finish(
         self,
         state: impl StateProvider,
-    ) -> Result<BlockBuilderOutcome<E::Primitives>, BlockExecutionError> {
+    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
 
@@ -504,7 +382,7 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
-    F: BlockExecutionStrategyFactory + 'static,
+    F: ConfigureEvm + 'static,
 {
     type Primitives = F::Primitives;
 
@@ -539,7 +417,7 @@ impl<F, DB: Database> BasicBlockExecutor<F, DB> {
 
 impl<F, DB> Executor<DB> for BasicBlockExecutor<F, DB>
 where
-    F: BlockExecutionStrategyFactory,
+    F: ConfigureEvm,
     DB: Database,
 {
     type Primitives = F::Primitives;
@@ -550,7 +428,7 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let mut strategy = self.strategy_factory.strategy_for_block(&mut self.db, block);
+        let mut strategy = self.strategy_factory.executor_for_block(&mut self.db, block);
 
         strategy.apply_pre_execution_changes()?;
         for tx in block.transactions_recovered() {
@@ -573,7 +451,7 @@ where
     {
         let mut strategy = self
             .strategy_factory
-            .strategy_for_block(&mut self.db, block)
+            .executor_for_block(&mut self.db, block)
             .with_state_hook(Some(Box::new(state_hook)));
 
         strategy.apply_pre_execution_changes()?;
@@ -596,47 +474,13 @@ where
     }
 }
 
-/// Creates an `EvmState` from a map of balance increments and the current state
-/// to load accounts from. No balance increment is done in the function.
-/// Zero balance increments are ignored and won't create state entries.
-pub fn balance_increment_state<DB>(
-    balance_increments: &HashMap<Address, u128, DefaultHashBuilder>,
-    state: &mut State<DB>,
-) -> Result<EvmState, BlockExecutionError>
-where
-    DB: Database,
-{
-    let mut load_account = |address: &Address| -> Result<(Address, Account), BlockExecutionError> {
-        let cache_account = state.load_cache_account(*address).map_err(|_| {
-            BlockExecutionError::msg("could not load account for balance increment")
-        })?;
-
-        let account = cache_account.account.as_ref().ok_or_else(|| {
-            BlockExecutionError::msg("could not load account for balance increment")
-        })?;
-
-        Ok((
-            *address,
-            Account {
-                info: account.info.clone(),
-                storage: Default::default(),
-                status: AccountStatus::Touched,
-            },
-        ))
-    };
-
-    balance_increments
-        .iter()
-        .filter(|(_, &balance)| balance != 0)
-        .map(|(addr, _)| load_account(addr))
-        .collect::<Result<EvmState, _>>()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Address;
     use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_primitives::{address, U256};
+    use alloy_evm::block::state_changes::balance_increment_state;
+    use alloy_primitives::{address, map::HashMap, U256};
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
     use revm::state::AccountInfo;
@@ -722,7 +566,7 @@ mod tests {
         let addr = address!("0x1000000000000000000000000000000000000000");
         let mut state = setup_state_with_account(addr, 100, 1);
 
-        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let mut increments = HashMap::default();
         increments.insert(addr, 0);
 
         let result = balance_increment_state(&increments, &mut state).unwrap();
@@ -736,7 +580,7 @@ mod tests {
             .with_bundle_update()
             .build();
 
-        let increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let increments = HashMap::default();
         let result = balance_increment_state(&increments, &mut state).unwrap();
         assert!(result.is_empty(), "Empty increments map should return empty state");
     }
@@ -752,7 +596,7 @@ mod tests {
             AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
         state.insert_account(addr2, account2);
 
-        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let mut increments = HashMap::default();
         increments.insert(addr1, 50);
         increments.insert(addr2, 100);
 
@@ -774,7 +618,7 @@ mod tests {
             AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
         state.insert_account(addr2, account2);
 
-        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let mut increments = HashMap::default();
         increments.insert(addr1, 0);
         increments.insert(addr2, 100);
 

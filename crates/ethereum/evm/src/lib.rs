@@ -17,17 +17,18 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
+use alloc::{borrow::Cow, sync::Arc};
 use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::EthEvm;
-use alloy_evm::{eth::EthBlockExecutorFactory, EthEvmFactory, FromRecoveredTx};
+use alloy_evm::{
+    eth::{EthBlockExecutionCtx, EthBlockExecutorFactory},
+    EthEvmFactory, FromRecoveredTx,
+};
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
-use reth_evm::{
-    ConfigureEvm, ConfigureEvmEnv, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv,
-};
-use reth_primitives::TransactionSigned;
+use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv};
+use reth_primitives::{EthPrimitives, SealedBlock, SealedHeader, TransactionSigned};
 use revm::{
     context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
@@ -98,22 +99,30 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     }
 }
 
-impl<EvmF> ConfigureEvmEnv for EthEvmConfig<EvmF>
+impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
 where
     EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
         + Send
         + Sync
         + Unpin
-        + Clone,
+        + Clone
+        + 'static,
 {
-    type Header = Header;
-    type Transaction = TransactionSigned;
+    type Primitives = EthPrimitives;
     type Error = Infallible;
-    type TxEnv = EvmF::Tx;
-    type Spec = SpecId;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
+    type BlockExecutorFactory = EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmF>;
+    type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
-    fn evm_env(&self, header: &Self::Header) -> EvmEnv {
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        &self.executor_factory
+    }
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assembler
+    }
+
+    fn evm_env(&self, header: &Header) -> EvmEnv {
         let spec = config::revm_spec(self.chain_spec(), header);
 
         // configure evm env based on parent block
@@ -138,7 +147,7 @@ where
 
     fn next_evm_env(
         &self,
-        parent: &Self::Header,
+        parent: &Header,
         attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
         // ensure we're not missing any timestamp based hardforks
@@ -197,20 +206,27 @@ where
 
         Ok((cfg, block_env).into())
     }
-}
 
-impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
-where
-    EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
-        + Send
-        + Sync
-        + Unpin
-        + Clone,
-{
-    type EvmFactory = EvmF;
+    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> EthBlockExecutionCtx<'a> {
+        EthBlockExecutionCtx {
+            parent_hash: block.header().parent_hash,
+            parent_beacon_block_root: block.header().parent_beacon_block_root,
+            ommers: &block.body().ommers,
+            withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
+        }
+    }
 
-    fn evm_factory(&self) -> &Self::EvmFactory {
-        self.executor_factory.evm_factory()
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader,
+        attributes: Self::NextBlockEnvCtx,
+    ) -> EthBlockExecutionCtx<'_> {
+        EthBlockExecutionCtx {
+            parent_hash: parent.hash(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            ommers: &[],
+            withdrawals: attributes.withdrawals.map(Cow::Owned),
+        }
     }
 }
 

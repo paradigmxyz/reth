@@ -26,7 +26,7 @@ use reth_db_api::{
     transaction::DbTx,
     Database,
 };
-use reth_evm::{ConfigureEvmEnv, EvmEnv};
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{

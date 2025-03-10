@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_evm::{execute::BlockExecutionStrategyFactory, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_node_api::NodePrimitives;
 use reth_primitives::SealedHeader;
 use reth_provider::{
@@ -37,7 +37,7 @@ where
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
-            Evm: BlockExecutionStrategyFactory<
+            Evm: ConfigureEvm<
                 Primitives: NodePrimitives<
                     BlockHeader = ProviderHeader<Self::Provider>,
                     SignedTx = ProviderTx<Self::Provider>,
@@ -61,7 +61,7 @@ where
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as reth_evm::ConfigureEvmEnv>::NextBlockEnvCtx, Self::Error> {
+    ) -> Result<<Self::Evm as reth_evm::ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
         Ok(NextBlockEnvAttributes {
             timestamp: parent.timestamp().saturating_add(12),
             suggested_fee_recipient: parent.beneficiary(),

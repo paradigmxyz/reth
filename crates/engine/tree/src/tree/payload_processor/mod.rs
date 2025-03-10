@@ -16,7 +16,7 @@ use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnvFor, OnStateHook};
+use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -75,10 +75,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
 impl<N, Evm> PayloadProcessor<N, Evm>
 where
     N: NodePrimitives,
-    Evm: ConfigureEvmEnvFor<N>
-        + 'static
-        + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
-        + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///

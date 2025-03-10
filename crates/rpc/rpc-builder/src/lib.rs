@@ -273,7 +273,7 @@ where
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvm<Primitives = N>,
     EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
 {
@@ -693,7 +693,7 @@ where
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvm<Primitives = N>,
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {
@@ -755,7 +755,7 @@ where
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
-    /// use reth_primitives::{Header, TransactionSigned};
+    /// use reth_primitives::{EthPrimitives, Header, TransactionSigned};
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc::EthApi;
     /// use reth_rpc_builder::RpcModuleBuilder;
@@ -765,7 +765,7 @@ where
     ///
     /// fn init<Evm>(evm: Evm)
     /// where
-    ///     Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
+    ///     Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
     /// {
     ///     let builder = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
@@ -988,7 +988,7 @@ where
         block_executor: BlockExecutor,
     ) -> Self
     where
-        EvmConfig: ConfigureEvm<Header = Provider::Header>,
+        EvmConfig: ConfigureEvm<Primitives = N>,
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
