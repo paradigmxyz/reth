@@ -123,7 +123,63 @@ impl<I> Setup<I> {
         N: NodeBuilderHelper,
         N::ChainSpec: From<ChainSpec> + Clone,
     {
-        let node_clients = self.create_clients::<N>().await?;
+        let chain_spec =
+            self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
+
+        let is_dev = self.is_dev;
+        let node_count = self.network.node_count;
+
+        let tasks = TaskManager::current();
+        let exec = tasks.executor();
+
+        let network_config = NetworkArgs {
+            discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
+            ..NetworkArgs::default()
+        };
+
+        let mut node_clients = Vec::with_capacity(node_count);
+        let mut nodes = Vec::with_capacity(node_count);
+
+        for idx in 0..node_count {
+            let node_config = NodeConfig::new(chain_spec.clone())
+                .with_network(network_config.clone())
+                .with_unused_ports()
+                .with_rpc(
+                    reth_node_core::args::RpcServerArgs::default().with_unused_ports().with_http(),
+                )
+                .set_dev(is_dev);
+
+            let span = span!(Level::INFO, "node", idx);
+            let _enter = span.enter();
+            let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+                .testing_node(exec.clone())
+                .node(Default::default())
+                .launch()
+                .await?;
+
+            let rpc = node
+                .rpc_server_handle()
+                .http_client()
+                .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
+            let engine = node.auth_server_handle().http_client();
+
+            node_clients.push(NodeClient { rpc, engine });
+            nodes.push(node);
+        }
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+
+        self.shutdown_tx = Some(shutdown_tx);
+
+        // spawn a separate task just to handle the shutdown
+        tokio::spawn(async move {
+            // keep nodes and task manager in scope to ensure they're not dropped
+            let _nodes = nodes;
+            let _tasks = tasks;
+            // Wait for shutdown signal
+            let _ = shutdown_rx.recv().await;
+            // nodes and task manager will be dropped here when the test completes
+        });
+
         if node_clients.is_empty() {
             return Err(eyre!("No nodes were created"));
         }
@@ -166,72 +222,6 @@ impl<I> Setup<I> {
         // TODO: For each block in self.blocks, replay it on the node
 
         Ok(())
-    }
-
-    /// Creates the given nodes
-    async fn create_clients<N>(&self) -> eyre::Result<Vec<NodeClient>>
-    where
-        N: NodeBuilderHelper,
-        N::ChainSpec: From<ChainSpec> + Clone,
-    {
-        let chain_spec =
-            self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
-
-        let is_dev = self.is_dev;
-        let node_count = self.network.node_count;
-
-        let tasks = TaskManager::current();
-        let exec = tasks.executor();
-
-        let network_config = NetworkArgs {
-            discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
-            ..NetworkArgs::default()
-        };
-
-        let mut clients = Vec::with_capacity(node_count);
-        let mut nodes = Vec::with_capacity(node_count);
-
-        for idx in 0..node_count {
-            let node_config = NodeConfig::new(chain_spec.clone())
-                .with_network(network_config.clone())
-                .with_unused_ports()
-                .with_rpc(
-                    reth_node_core::args::RpcServerArgs::default().with_unused_ports().with_http(),
-                )
-                .set_dev(is_dev);
-
-            let span = span!(Level::INFO, "node", idx);
-            let _enter = span.enter();
-            let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-                .testing_node(exec.clone())
-                .node(Default::default())
-                .launch()
-                .await?;
-
-            let rpc = node
-                .rpc_server_handler()
-                .http_client()
-                .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
-            let engine = node.auth_server_handle().http_client();
-
-            clients.push(NodeClient { rpc, engine });
-            nodes.push(node);
-        }
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
-
-        self.shutdown_tx = Some(shutdown_tx);
-
-        // spawn a separate task just to handle the shutdown
-        tokio::spawn(async move {
-            // keep nodes and task manager in scope to ensure they're not dropped
-            let _nodes = nodes;
-            let _tasks = tasks;
-            // Wait for shutdown signal
-            let _ = shutdown_rx.recv().await;
-            // nodes and task manager will be dropped here when the test completes
-        });
-
-        Ok(clients)
     }
 }
 
