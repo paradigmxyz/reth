@@ -152,7 +152,6 @@ members = [
     "examples/stateful-precompile/",
     "examples/txpool-tracing/",
     "examples/custom-beacon-withdrawals",
-    "examples/better-payload-events",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]
