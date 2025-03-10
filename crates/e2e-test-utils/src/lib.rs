@@ -115,22 +115,9 @@ pub async fn setup_engine<N>(
     Wallet,
 )>
 where
-    N: Default
-        + Node<TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + NodeTypesWithEngine
-        + NodeTypesForProvider,
-    N::ComponentsBuilder: NodeComponentsBuilder<
-        TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-        Components: NodeComponents<
-            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
-            Network: PeersHandleProvider,
-        >,
-    >,
-    N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-    >,
+    N: NodeBuilderHelper,
+    LocalPayloadAttributesBuilder<N::ChainSpec>:
+        PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -216,18 +203,62 @@ pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<
     NodeTestContext<Adapter<N, Provider>, <N as Node<TmpNodeAdapter<N, Provider>>>::AddOns>;
 
 /// Helper trait to simplify bounds when calling setup functions.
-pub trait NodeBuilderHelper:
-    Default
-    + NodeTypesWithEngine
-    + NodeTypesForProvider
-    + Node<TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>>
+pub trait NodeBuilderHelper
+where
+    Self: Default
+        + NodeTypesForProvider
+        + Node<
+            TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            Primitives: NodePrimitives<
+                BlockHeader = alloy_consensus::Header,
+                BlockBody = alloy_consensus::BlockBody<
+                    <Self::Primitives as NodePrimitives>::SignedTx,
+                >,
+            >,
+            ComponentsBuilder: NodeComponentsBuilder<
+                TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                Components: NodeComponents<
+                    TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                    Network: PeersHandleProvider,
+                >,
+            >,
+            AddOns: RethRpcAddOns<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            > + EngineValidatorAddOn<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            >,
+        >,
+    LocalPayloadAttributesBuilder<Self::ChainSpec>:
+        PayloadAttributesBuilder<<Self::Engine as PayloadTypes>::PayloadAttributes>,
 {
 }
 
-impl<T> NodeBuilderHelper for T where
-    T: Default
-        + NodeTypesWithEngine
+impl<T> NodeBuilderHelper for T
+where
+    Self: Default
         + NodeTypesForProvider
-        + Node<TmpNodeAdapter<T, BlockchainProvider<NodeTypesWithDBAdapter<T, TmpDB>>>>
+        + Node<
+            TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            Primitives: NodePrimitives<
+                BlockHeader = alloy_consensus::Header,
+                BlockBody = alloy_consensus::BlockBody<
+                    <Self::Primitives as NodePrimitives>::SignedTx,
+                >,
+            >,
+            ComponentsBuilder: NodeComponentsBuilder<
+                TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                Components: NodeComponents<
+                    TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                    Network: PeersHandleProvider,
+                >,
+            >,
+            AddOns: RethRpcAddOns<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            > + EngineValidatorAddOn<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            >,
+        >,
+    LocalPayloadAttributesBuilder<Self::ChainSpec>:
+        PayloadAttributesBuilder<<Self::Engine as PayloadTypes>::PayloadAttributes>,
 {
 }
