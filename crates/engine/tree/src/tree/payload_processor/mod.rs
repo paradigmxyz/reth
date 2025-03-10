@@ -520,12 +520,12 @@ mod tests {
         }
         drop(state_hook);
 
-        let root_from_task = handle.state_root().expect("task failed").state_root.0;
+        let root_from_task = handle.state_root().expect("task failed").state_root;
         let root_from_regular = state_root(accumulated_state);
 
         assert_eq!(
             root_from_task, root_from_regular,
-            "State root mismatch: task={root_from_task:?}, base={root_from_regular:?}"
+            "State root mismatch: task={root_from_task}, base={root_from_regular}"
         );
     }
 }
