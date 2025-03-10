@@ -158,13 +158,14 @@ where
     ) -> Self::Connection {
         let (tx, rx) = mpsc::unbounded_channel();
 
+        // Emit connection established event.
         self.state
             .events_sender
             .send(ProtocolEvent::Established { direction, peer_id, to_connection: tx })
             .ok();
 
-        let active_connections = self.state.active_connections.clone();
-        let prev = active_connections.fetch_add(1, Ordering::Relaxed);
+        // Increment the number of active sessions.
+        self.state.active_connections.fetch_add(1, Ordering::Relaxed);
 
         RessProtocolConnection::new(
             self.provider.clone(),
@@ -173,7 +174,7 @@ where
             peer_id,
             conn,
             UnboundedReceiverStream::from(rx),
-            self.state.active_connections.clone(),
+            self.state.active_connections,
         )
     }
 }
