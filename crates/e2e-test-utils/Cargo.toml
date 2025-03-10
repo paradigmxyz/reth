@@ -35,6 +35,7 @@ reth-tasks.workspace = true
 reth-primitives.workspace = true
 reth-node-ethereum.workspace = true
 reth-primitives-traits.workspace = true
+reth-rpc-builder.workspace = true
 
 revm.workspace = true
 

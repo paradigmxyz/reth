@@ -1,10 +1,21 @@
 //! Utilities for running e2e tests against a node or a network of nodes.
 
-use crate::NodeBuilderHelper;
-use actions::{Action, ActionBox};
+use crate::{
+    testsuite::actions::{Action, ActionBox},
+    Adapter, NodeBuilderHelper, PayloadAttributesBuilder, TmpDB, TmpNodeAdapter,
+};
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_chainspec::ChainSpec;
+use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::{NodePrimitives, NodeTypesWithEngine, PayloadTypes};
+use reth_node_builder::{
+    rpc::{EngineValidatorAddOn, RethRpcAddOns},
+    NodeComponents, NodeComponentsBuilder, NodeTypesWithDBAdapter,
+};
+use reth_payload_builder::EthPayloadBuilderAttributes;
+use reth_provider::providers::BlockchainProvider;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
 use std::marker::PhantomData;
@@ -83,6 +94,24 @@ impl<I: 'static> TestBuilder<I> {
     pub async fn run<N>(mut self) -> Result<()>
     where
         N: NodeBuilderHelper,
+        N::Primitives: NodePrimitives<
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = alloy_consensus::BlockBody<<N::Primitives as NodePrimitives>::SignedTx>,
+        >,
+        N::ComponentsBuilder: NodeComponentsBuilder<
+            TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+            Components: NodeComponents<
+                TmpNodeAdapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>,
+                Network: PeersHandleProvider,
+            >,
+        >,
+        N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>
+            + EngineValidatorAddOn<Adapter<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
+            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        >,
+        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
+            From<EthPayloadBuilderAttributes>,
         N::ChainSpec: From<ChainSpec> + Clone,
     {
         let mut setup = self.setup.take();
