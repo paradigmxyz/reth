@@ -12,26 +12,18 @@ workspace = true
 
 [dependencies]
 # reth
-reth-ethereum-primitives.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-errors.workspace = true
 reth-chainspec.workspace = true
-reth-consensus-common.workspace = true
 reth-fs-util.workspace = true
 reth-engine-primitives.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
 reth-provider.workspace = true
-reth-ethereum-forks.workspace = true
-revm-primitives.workspace = true
-revm-database.workspace = true
-reth-trie.workspace = true
 reth-payload-primitives.workspace = true
 
 # alloy
-alloy-eips.workspace = true
-alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 

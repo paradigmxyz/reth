@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest,
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvmEnv, Database, EvmEnv, TransactionEnv};
+use reth_evm::{Database, EvmEnvFor, TransactionEnv, TxEnvFor};
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
@@ -35,7 +35,7 @@ pub trait EstimateCall: Call {
     ///  - `nonce` is set to `None`
     fn estimate_gas_with<S>(
         &self,
-        mut evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        mut evm_env: EvmEnvFor<Self::Evm>,
         mut request: TransactionRequest,
         state: S,
         state_override: Option<StateOverride>,
@@ -287,8 +287,8 @@ pub trait EstimateCall: Call {
     fn map_out_of_gas_err<DB>(
         &self,
         env_gas_limit: u64,
-        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
-        mut tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
+        evm_env: EvmEnvFor<Self::Evm>,
+        mut tx_env: TxEnvFor<Self::Evm>,
         db: &mut DB,
     ) -> Self::Error
     where

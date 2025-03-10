@@ -16,7 +16,7 @@ pub use reth_engine_tree::{
 };
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_p2p::BlockClient;
-use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithEngine, TxTy};
+use reth_node_types::{BlockTy, NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::EthPrimitives;
 use reth_provider::{
@@ -93,7 +93,7 @@ where
     ) -> Self
     where
         V: EngineValidator<N::Engine, Block = BlockTy<N>>,
-        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>> + 'static,
+        C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
