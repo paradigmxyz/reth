@@ -163,7 +163,10 @@ where
         outcomes.into_iter().map(|outcome| self.apply_op_checks(outcome)).collect()
     }
 
-    fn apply_op_checks(&self, outcome: TransactionValidationOutcome<Tx>) -> TransactionValidationOutcome<Tx> {
+    fn apply_op_checks(
+        &self,
+        outcome: TransactionValidationOutcome<Tx>,
+    ) -> TransactionValidationOutcome<Tx> {
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
             return outcome
@@ -203,7 +206,7 @@ where
                     InvalidTransactionError::InsufficientFunds(
                         GotExpected { got: balance, expected: cost }.into(),
                     )
-                        .into(),
+                    .into(),
                 )
             }
 
