@@ -215,8 +215,9 @@ pub struct ReceiptWithBlockNumber<R = Receipt> {
 #[cfg(test)]
 mod test {
     use alloy_primitives::{
+        address, b256,
         bytes::{Buf, BytesMut},
-        hex, Address, Bytes, Log, LogData, B256,
+        hex, Bytes, Log, LogData,
     };
     use alloy_rlp::{Decodable, RlpDecodable};
     use reth_primitives::{Receipt, TxType};
@@ -326,18 +327,12 @@ mod test {
 
     fn receipt_block_1() -> ReceiptWithBlockNumber {
         let log_1 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "0109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac6027b"
-                    )),
-                    B256::from(hex!(
-                        "0000000000000000000000000000000000000000000000000000000000014218"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"
-                    )),
+                    b256!("0x0109fc6f55cf40689f02fbaad7af7fe7bbac8a3d2186600afc7d3e10cac6027b"),
+                    b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
+                    b256!("0x00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"),
                 ],
                 Bytes::from(hex!(
                     "00000000000000000000000000000000000000000000000000000000618d8837"
@@ -347,21 +342,13 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68b"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000000000000000d0e3ebf0"
-                    )),
-                    B256::from(hex!(
-                        "0000000000000000000000000000000000000000000000000000000000014218"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"
-                    )),
+                    b256!("0x92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68b"),
+                    b256!("0x00000000000000000000000000000000000000000000000000000000d0e3ebf0"),
+                    b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
+                    b256!("0x00000000000000000000000070b17c0fe982ab4a7ac17a4c25485643151a1f2d"),
                 ],
                 Bytes::default(),
             )
@@ -369,15 +356,11 @@ mod test {
         };
 
         let log_3 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234f"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000007edc6ca0bb68348000"
-                    )),
+                    b256!("0xfe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234f"),
+                    b256!("0x00000000000000000000000000000000000000000000007edc6ca0bb68348000"),
                 ],
                 Bytes::default(),
             )
@@ -398,21 +381,13 @@ mod test {
 
     fn receipt_block_2() -> ReceiptWithBlockNumber {
         let log_1 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68d"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000000000000000d0ea0e40"
-                    )),
-                    B256::from(hex!(
-                        "0000000000000000000000000000000000000000000000000000000000014218"
-                    )),
-                    B256::from(hex!(
-                        "000000000000000000000000e5e7492282fd1e3bfac337a0beccd29b15b7b240"
-                    )),
+                    b256!("0x92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68d"),
+                    b256!("0x00000000000000000000000000000000000000000000000000000000d0ea0e40"),
+                    b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
+                    b256!("0x000000000000000000000000e5e7492282fd1e3bfac337a0beccd29b15b7b240"),
                 ],
                 Bytes::default(),
             )
@@ -420,15 +395,11 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234e"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000007eda7867e0c7d48000"
-                    )),
+                    b256!("0xfe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234e"),
+                    b256!("0x00000000000000000000000000000000000000000000007eda7867e0c7d48000"),
                 ],
                 Bytes::default(),
             )
@@ -448,21 +419,13 @@ mod test {
 
     fn receipt_block_3() -> ReceiptWithBlockNumber {
         let log_1 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68d"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000000000000000d101e54b"
-                    )),
-                    B256::from(hex!(
-                        "0000000000000000000000000000000000000000000000000000000000014218"
-                    )),
-                    B256::from(hex!(
-                        "000000000000000000000000fa011d8d6c26f13abe2cefed38226e401b2b8a99"
-                    )),
+                    b256!("0x92e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68d"),
+                    b256!("0x00000000000000000000000000000000000000000000000000000000d101e54b"),
+                    b256!("0x0000000000000000000000000000000000000000000000000000000000014218"),
+                    b256!("0x000000000000000000000000fa011d8d6c26f13abe2cefed38226e401b2b8a99"),
                 ],
                 Bytes::default(),
             )
@@ -470,15 +433,11 @@ mod test {
         };
 
         let log_2 = Log {
-            address: Address::from(hex!("8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae")),
+            address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
                 vec![
-                    B256::from(hex!(
-                        "fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234e"
-                    )),
-                    B256::from(hex!(
-                        "00000000000000000000000000000000000000000000007ed8842f0627748000"
-                    )),
+                    b256!("0xfe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234e"),
+                    b256!("0x00000000000000000000000000000000000000000000007ed8842f0627748000"),
                 ],
                 Bytes::default(),
             )

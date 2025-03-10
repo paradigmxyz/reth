@@ -103,9 +103,8 @@ pub use block::{
     Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
-mod encoded;
 mod withdrawal;
-pub use encoded::WithEncoded;
+pub use alloy_eips::eip2718::WithEncoded;
 
 pub mod crypto;
 
