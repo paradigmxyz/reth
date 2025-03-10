@@ -32,9 +32,9 @@ reth-stages-types.workspace = true
 reth-network-peers.workspace = true
 reth-engine-local.workspace = true
 reth-tasks.workspace = true
+reth-primitives.workspace = true
 
-# currently need to enable this for workspace level
-reth-optimism-primitives = { workspace = true, features = ["arbitrary", "serde"] }
+revm.workspace = true
 
 # rpc
 jsonrpsee.workspace = true

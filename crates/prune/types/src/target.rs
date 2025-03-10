@@ -99,6 +99,7 @@ fn deserialize_opt_prune_mode_with_min_blocks<
 >(
     deserializer: D,
 ) -> Result<Option<PruneMode>, D::Error> {
+    use alloc::format;
     use serde::Deserialize;
     let prune_mode = Option::<PruneMode>::deserialize(deserializer)?;
 

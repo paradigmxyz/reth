@@ -62,6 +62,7 @@ std = [
     "reth-ethereum-primitives/std",
     "alloy-rlp/std",
     "alloy-primitives/std",
+    "reth-static-file-types/std",
 ]
 reth-codec = [
     "std",

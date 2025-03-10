@@ -27,23 +27,13 @@ tracing.workspace = true
 workspace = true
 
 [features]
-default = ["jemalloc"]
+default = ["jemalloc", "reth-optimism-evm/portable"]
 
 jemalloc = ["reth-cli-util/jemalloc", "reth-optimism-cli/jemalloc"]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
 asm-keccak = ["reth-optimism-cli/asm-keccak", "reth-optimism-node/asm-keccak"]
-
-optimism = [
-    "reth-optimism-cli/optimism",
-    "reth-optimism-node/optimism",
-    "reth-optimism-consensus/optimism",
-    "reth-optimism-evm/optimism",
-    "reth-optimism-payload-builder/optimism",
-    "reth-optimism-rpc/optimism",
-    "reth-optimism-primitives/optimism",
-]
 
 dev = [
     "reth-optimism-cli/dev",

@@ -184,6 +184,20 @@ impl NetworkArgs {
             bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
         })
     }
+    /// Configures and returns a `TransactionsManagerConfig` based on the current settings.
+    pub fn transactions_manager_config(&self) -> TransactionsManagerConfig {
+        TransactionsManagerConfig {
+            transaction_fetcher_config: TransactionFetcherConfig::new(
+                self.max_concurrent_tx_requests,
+                self.max_concurrent_tx_requests_per_peer,
+                self.soft_limit_byte_size_pooled_transactions_response,
+                self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+                self.max_capacity_cache_txns_pending_fetch,
+            ),
+            max_transactions_seen_by_peer_history: self.max_seen_tx_history,
+            propagation_mode: Default::default(),
+        }
+    }
 
     /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`EthChainSpec`], in addition to
     /// the values in this option struct.
@@ -216,19 +230,6 @@ impl NetworkArgs {
             .with_max_inbound_opt(self.max_inbound_peers)
             .with_max_outbound_opt(self.max_outbound_peers);
 
-        // Configure transactions manager
-        let transactions_manager_config = TransactionsManagerConfig {
-            transaction_fetcher_config: TransactionFetcherConfig::new(
-                self.max_concurrent_tx_requests,
-                self.max_concurrent_tx_requests_per_peer,
-                self.soft_limit_byte_size_pooled_transactions_response,
-                self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
-                self.max_capacity_cache_txns_pending_fetch,
-            ),
-            max_transactions_seen_by_peer_history: self.max_seen_tx_history,
-            propagation_mode: Default::default(),
-        };
-
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(
@@ -240,7 +241,7 @@ impl NetworkArgs {
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
-            .transactions_manager_config(transactions_manager_config)
+            .transactions_manager_config(self.transactions_manager_config())
             // Configure node identity
             .apply(|builder| {
                 let peer_id = builder.get_peer_id();
@@ -425,7 +426,8 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
 
-        if self.disable_discovery || self.disable_nat {
+        if self.disable_nat {
+            // we only check for `disable-nat` here and not for disable discovery because nat:extip can be used without discovery: <https://github.com/paradigmxyz/reth/issues/14878>
             network_config_builder = network_config_builder.disable_nat();
         }
 
@@ -594,7 +596,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "optimism"))]
     #[test]
     fn network_args_default_sanity_test() {
         let default_args = NetworkArgs::default();

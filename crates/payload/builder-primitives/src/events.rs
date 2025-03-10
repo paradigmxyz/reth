@@ -72,7 +72,7 @@ impl<T: PayloadTypes> Stream for BuiltPayloadStream<T> {
                     continue
                 }
                 Some(Err(err)) => {
-                    debug!(%err, "payload event stream stream lagging behind");
+                    debug!(%err, "payload event stream lagging behind");
                     continue
                 }
                 None => Poll::Ready(None),

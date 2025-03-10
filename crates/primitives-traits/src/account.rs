@@ -3,24 +3,25 @@ use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
 use alloy_trie::TrieAccount;
 use derive_more::Deref;
-use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError};
+use revm_bytecode::{Bytecode as RevmBytecode, BytecodeDecodeError};
+use revm_state::AccountInfo;
 
 #[cfg(any(test, feature = "reth-codec"))]
 /// Identifiers used in [`Compact`](reth_codecs::Compact) encoding of [`Bytecode`].
 pub mod compact_ids {
-    /// Identifier for [`LegacyRaw`](revm_primitives::Bytecode::LegacyRaw).
+    /// Identifier for legacy raw bytecode.
     pub const LEGACY_RAW_BYTECODE_ID: u8 = 0;
 
     /// Identifier for removed bytecode variant.
     pub const REMOVED_BYTECODE_ID: u8 = 1;
 
-    /// Identifier for [`LegacyAnalyzed`](revm_primitives::Bytecode::LegacyAnalyzed).
+    /// Identifier for [`LegacyAnalyzed`](revm_bytecode::Bytecode::LegacyAnalyzed).
     pub const LEGACY_ANALYZED_BYTECODE_ID: u8 = 2;
 
-    /// Identifier for [`Eof`](revm_primitives::Bytecode::Eof).
+    /// Identifier for [`Eof`](revm_bytecode::Bytecode::Eof).
     pub const EOF_BYTECODE_ID: u8 = 3;
 
-    /// Identifier for [`Eip7702`](revm_primitives::Bytecode::Eip7702).
+    /// Identifier for [`Eip7702`](revm_bytecode::Bytecode::Eip7702).
     pub const EIP7702_BYTECODE_ID: u8 = 4;
 }
 
@@ -69,6 +70,25 @@ impl Account {
             code_hash: bytecode_hash.unwrap_or(KECCAK_EMPTY),
         }
     }
+
+    /// Extracts the account information from a [`revm_state::Account`]
+    pub fn from_revm_account(revm_account: &revm_state::Account) -> Self {
+        Self {
+            balance: revm_account.info.balance,
+            nonce: revm_account.info.nonce,
+            bytecode_hash: if revm_account.info.code_hash == revm_primitives::KECCAK_EMPTY {
+                None
+            } else {
+                Some(revm_account.info.code_hash)
+            },
+        }
+    }
+}
+
+impl From<revm_state::Account> for Account {
+    fn from(value: revm_state::Account) -> Self {
+        Self::from_revm_account(&value)
+    }
 }
 
 /// Bytecode for an account.
@@ -90,7 +110,7 @@ impl Bytecode {
         Self(RevmBytecode::new_raw(bytes))
     }
 
-    /// Creates a new raw [`revm_primitives::Bytecode`].
+    /// Creates a new raw [`revm_bytecode::Bytecode`].
     ///
     /// Returns an error on incorrect Bytecode format.
     #[inline]
@@ -105,13 +125,9 @@ impl reth_codecs::Compact for Bytecode {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        use compact_ids::{
-            EIP7702_BYTECODE_ID, EOF_BYTECODE_ID, LEGACY_ANALYZED_BYTECODE_ID,
-            LEGACY_RAW_BYTECODE_ID,
-        };
+        use compact_ids::{EIP7702_BYTECODE_ID, EOF_BYTECODE_ID, LEGACY_ANALYZED_BYTECODE_ID};
 
         let bytecode = match &self.0 {
-            RevmBytecode::LegacyRaw(bytes) => bytes,
             RevmBytecode::LegacyAnalyzed(analyzed) => analyzed.bytecode(),
             RevmBytecode::Eof(eof) => eof.raw(),
             RevmBytecode::Eip7702(eip7702) => eip7702.raw(),
@@ -119,10 +135,6 @@ impl reth_codecs::Compact for Bytecode {
         buf.put_u32(bytecode.len() as u32);
         buf.put_slice(bytecode.as_ref());
         let len = match &self.0 {
-            RevmBytecode::LegacyRaw(_) => {
-                buf.put_u8(LEGACY_RAW_BYTECODE_ID);
-                1
-            }
             // [`REMOVED_BYTECODE_ID`] has been removed.
             RevmBytecode::LegacyAnalyzed(analyzed) => {
                 buf.put_u8(LEGACY_ANALYZED_BYTECODE_ID);
@@ -161,13 +173,11 @@ impl reth_codecs::Compact for Bytecode {
             REMOVED_BYTECODE_ID => {
                 unreachable!("Junk data in database: checked Bytecode variant was removed")
             }
-            LEGACY_ANALYZED_BYTECODE_ID => Self(unsafe {
-                RevmBytecode::new_analyzed(
-                    bytes,
-                    buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
-                    revm_primitives::JumpTable::from_slice(buf),
-                )
-            }),
+            LEGACY_ANALYZED_BYTECODE_ID => Self(RevmBytecode::new_analyzed(
+                bytes,
+                buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
+                revm_bytecode::JumpTable::from_slice(buf),
+            )),
             EOF_BYTECODE_ID | EIP7702_BYTECODE_ID => {
                 // EOF and EIP-7702 bytecode objects will be decoded from the raw bytecode
                 Self(RevmBytecode::new_raw(bytes))
@@ -221,11 +231,10 @@ impl From<Account> for AccountInfo {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_primitives::{hex_literal::hex, B256, U256};
     use reth_codecs::Compact;
-    use revm_primitives::{JumpTable, LegacyAnalyzedBytecode};
-
-    use super::*;
+    use revm_bytecode::{JumpTable, LegacyAnalyzedBytecode};
 
     #[test]
     fn test_account() {
@@ -273,16 +282,16 @@ mod tests {
         let mut buf = vec![];
         let bytecode = Bytecode::new_raw(Bytes::default());
         let len = bytecode.to_compact(&mut buf);
-        assert_eq!(len, 5);
+        assert_eq!(len, 51);
 
         let mut buf = vec![];
         let bytecode = Bytecode::new_raw(Bytes::from(&hex!("ffff")));
         let len = bytecode.to_compact(&mut buf);
-        assert_eq!(len, 7);
+        assert_eq!(len, 53);
 
         let mut buf = vec![];
         let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(LegacyAnalyzedBytecode::new(
-            Bytes::from(&hex!("ffff")),
+            Bytes::from(&hex!("ff00")),
             2,
             JumpTable::from_slice(&[0]),
         )));

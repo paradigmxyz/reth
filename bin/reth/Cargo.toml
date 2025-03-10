@@ -49,7 +49,6 @@ reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
-reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
@@ -93,7 +92,7 @@ similar-asserts.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc"]
+default = ["jemalloc", "reth-revm/portable"]
 
 dev = ["reth-cli-commands/arbitrary"]
 

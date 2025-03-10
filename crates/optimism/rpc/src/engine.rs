@@ -9,13 +9,32 @@ use alloy_rpc_types_engine::{
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
-use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
+use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayloadV4};
 use reth_chainspec::EthereumHardforks;
-use reth_node_api::{EngineTypes, EngineValidator, ExecutionData};
+use reth_node_api::{EngineTypes, EngineValidator};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
-use reth_rpc_engine_api::{EngineApi, EngineApiServer};
+use reth_rpc_engine_api::EngineApi;
 use reth_transaction_pool::TransactionPool;
+use tracing::trace;
+
+/// The list of all supported Engine capabilities available over the engine endpoint.
+///
+/// Spec: <https://specs.optimism.io/protocol/exec-engine.html>
+pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
+    "engine_forkchoiceUpdatedV2",
+    "engine_forkchoiceUpdatedV3",
+    "engine_exchangeTransitionConfigurationV1",
+    "engine_getClientVersionV1",
+    "engine_getPayloadV2",
+    "engine_getPayloadV3",
+    "engine_getPayloadV4",
+    "engine_newPayloadV2",
+    "engine_newPayloadV3",
+    "engine_newPayloadV4",
+    "engine_getPayloadBodiesByHashV1",
+    "engine_getPayloadBodiesByRangeV1",
+];
 
 /// Extension trait that gives access to Optimism engine API RPC methods.
 ///
@@ -206,13 +225,15 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> OpEngineApiServer<EngineT>
     for OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes<ExecutionData = ExecutionData>,
+    EngineT: EngineTypes<ExecutionData = OpExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
-        EngineApiServer::new_payload_v2(&self.inner, payload).await
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
+        let payload = OpExecutionData::v2(payload);
+        Ok(self.inner.new_payload_v2_metered(payload).await?)
     }
 
     async fn new_payload_v3(
@@ -221,13 +242,10 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
-        EngineApiServer::new_payload_v3(
-            &self.inner,
-            payload,
-            versioned_hashes,
-            parent_beacon_block_root,
-        )
-        .await
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
+        let payload = OpExecutionData::v3(payload, versioned_hashes, parent_beacon_block_root);
+
+        Ok(self.inner.new_payload_v3_metered(payload).await?)
     }
 
     async fn new_payload_v4(
@@ -237,16 +255,15 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
-        // todo: custom op engine validator <https://github.com/paradigmxyz/reth/pull/14207>
-        let payload = payload.payload_inner;
-        EngineApiServer::new_payload_v4(
-            &self.inner,
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
+        let payload = OpExecutionData::v4(
             payload,
             versioned_hashes,
             parent_beacon_block_root,
             execution_requests,
-        )
-        .await
+        );
+
+        Ok(self.inner.new_payload_v4_metered(payload).await?)
     }
 
     async fn fork_choice_updated_v2(
@@ -254,8 +271,7 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        EngineApiServer::fork_choice_updated_v2(&self.inner, fork_choice_state, payload_attributes)
-            .await
+        Ok(self.inner.fork_choice_updated_v2_metered(fork_choice_state, payload_attributes).await?)
     }
 
     async fn fork_choice_updated_v3(
@@ -263,36 +279,35 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<EngineT::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated> {
-        EngineApiServer::fork_choice_updated_v3(&self.inner, fork_choice_state, payload_attributes)
-            .await
+        Ok(self.inner.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
     }
 
     async fn get_payload_v2(
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV2> {
-        EngineApiServer::get_payload_v2(&self.inner, payload_id).await
+        Ok(self.inner.get_payload_v2_metered(payload_id).await?)
     }
 
     async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV3> {
-        EngineApiServer::get_payload_v3(&self.inner, payload_id).await
+        Ok(self.inner.get_payload_v3_metered(payload_id).await?)
     }
 
     async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
-        EngineApiServer::get_payload_v4(&self.inner, payload_id).await
+        Ok(self.inner.get_payload_v4_metered(payload_id).await?)
     }
 
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
-        EngineApiServer::get_payload_bodies_by_hash_v1(&self.inner, block_hashes).await
+        Ok(self.inner.get_payload_bodies_by_hash_v1_metered(block_hashes).await?)
     }
 
     async fn get_payload_bodies_by_range_v1(
@@ -300,18 +315,18 @@ where
         start: U64,
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
-        EngineApiServer::get_payload_bodies_by_range_v1(&self.inner, start, count).await
+        Ok(self.inner.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
     }
 
     async fn get_client_version_v1(
         &self,
         client: ClientVersionV1,
     ) -> RpcResult<Vec<ClientVersionV1>> {
-        EngineApiServer::get_client_version_v1(&self.inner, client).await
+        Ok(self.inner.get_client_version_v1(client)?)
     }
 
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        EngineApiServer::exchange_capabilities(&self.inner, _capabilities).await
+        Ok(self.inner.capabilities().list())
     }
 }
 

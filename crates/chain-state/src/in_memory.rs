@@ -9,10 +9,12 @@ use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
-use reth_primitives::{EthPrimitives, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_primitives_traits::{BlockBody as _, SignedTransaction};
+use reth_primitives_traits::{
+    BlockBody as _, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,
+};
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -944,10 +946,11 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue};
+    use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
-    use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};
+    use reth_ethereum_primitives::{EthPrimitives, Receipt};
+    use reth_primitives_traits::{Account, Bytecode};
     use reth_storage_api::{
         AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
         StateRootProvider, StorageRootProvider,
@@ -1049,7 +1052,7 @@ mod tests {
     }
 
     impl HashedPostStateProvider for MockStateProvider {
-        fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+        fn hashed_post_state(&self, _bundle_state: &revm_database::BundleState) -> HashedPostState {
             HashedPostState::default()
         }
     }
@@ -1104,8 +1107,8 @@ mod tests {
             &self,
             _input: TrieInput,
             _target: HashedPostState,
-        ) -> ProviderResult<B256Map<Bytes>> {
-            Ok(HashMap::default())
+        ) -> ProviderResult<Vec<Bytes>> {
+            Ok(Vec::default())
         }
     }
 

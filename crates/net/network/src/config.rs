@@ -11,6 +11,7 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOV
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
+    handshake::{EthHandshake, EthRlpxHandshake},
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, Status,
 };
 use reth_ethereum_forks::{ForkFilter, Head};
@@ -83,6 +84,11 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
     pub nat: Option<NatResolver>,
+    /// The Ethereum P2P handshake, see also:
+    /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
+    /// This can be overridden to support custom handshake logic via the
+    /// [`NetworkConfigBuilder`].
+    pub handshake: Arc<dyn EthRlpxHandshake>,
 }
 
 // === impl NetworkConfig ===
@@ -207,6 +213,9 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     transactions_manager_config: TransactionsManagerConfig,
     /// The NAT resolver for external IP
     nat: Option<NatResolver>,
+    /// The Ethereum P2P handshake, see also:
+    /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
+    handshake: Arc<dyn EthRlpxHandshake>,
 }
 
 impl NetworkConfigBuilder<EthNetworkPrimitives> {
@@ -246,6 +255,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             block_import: None,
             transactions_manager_config: Default::default(),
             nat: None,
+            handshake: Arc::new(EthHandshake::default()),
         }
     }
 
@@ -461,7 +471,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Disables all discovery.
     pub fn disable_discovery(self) -> Self {
-        self.disable_discv4_discovery().disable_dns_discovery().disable_nat()
+        self.disable_discv4_discovery().disable_discv5_discovery().disable_dns_discovery()
     }
 
     /// Disables all discovery if the given condition is true.
@@ -479,6 +489,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Disable the Discv5 discovery.
+    pub fn disable_discv5_discovery(mut self) -> Self {
+        self.discovery_v5_builder = None;
+        self
+    }
+
     /// Disable the DNS discovery if the given condition is true.
     pub fn disable_dns_discovery_if(self, disable: bool) -> Self {
         if disable {
@@ -492,6 +508,15 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     pub fn disable_discv4_discovery_if(self, disable: bool) -> Self {
         if disable {
             self.disable_discv4_discovery()
+        } else {
+            self
+        }
+    }
+
+    /// Disable the Discv5 discovery if the given condition is true.
+    pub fn disable_discv5_discovery_if(self, disable: bool) -> Self {
+        if disable {
+            self.disable_discv5_discovery()
         } else {
             self
         }
@@ -533,6 +558,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Overrides the default Eth `RLPx` handshake.
+    pub fn eth_rlpx_handshake(mut self, handshake: Arc<dyn EthRlpxHandshake>) -> Self {
+        self.handshake = handshake;
+        self
+    }
+
     /// Consumes the type and creates the actual [`NetworkConfig`]
     /// for the given client type that can interact with the chain.
     ///
@@ -564,6 +595,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             block_import,
             transactions_manager_config,
             nat,
+            handshake,
         } = self;
 
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
@@ -631,6 +663,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             tx_gossip_disabled,
             transactions_manager_config,
             nat,
+            handshake,
         }
     }
 }

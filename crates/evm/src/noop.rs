@@ -1,14 +1,12 @@
 //! A no operation block executor implementation.
 
-use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{NodePrimitives, RecoveredBlock};
-
 use crate::{
     execute::{BlockExecutorProvider, Executor},
-    system_calls::OnStateHook,
-    Database,
+    Database, OnStateHook,
 };
+use reth_execution_errors::BlockExecutionError;
+use reth_execution_types::BlockExecutionResult;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 
@@ -53,7 +51,7 @@ impl<DB: Database, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 
-    fn into_state(self) -> revm::db::State<DB> {
+    fn into_state(self) -> revm_database::State<DB> {
         unreachable!()
     }
 

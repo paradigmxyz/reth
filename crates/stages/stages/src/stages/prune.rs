@@ -1,4 +1,4 @@
-use reth_db::{table::Value, transaction::DbTxMut};
+use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,

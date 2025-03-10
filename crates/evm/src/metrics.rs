@@ -2,13 +2,14 @@
 //!
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use crate::{execute::Executor, system_calls::OnStateHook, Database};
+use crate::{execute::Executor, Database, OnStateHook};
 use alloy_consensus::BlockHeader;
+use alloy_evm::block::StateChangeSource;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives::{NodePrimitives, RecoveredBlock};
-use revm_primitives::EvmState;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use revm::state::EvmState;
 use std::time::Instant;
 
 /// Wrapper struct that combines metrics and state hook
@@ -18,7 +19,7 @@ struct MeteredStateHook {
 }
 
 impl OnStateHook for MeteredStateHook {
-    fn on_state(&mut self, state: &EvmState) {
+    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
         let accounts = state.keys().len();
         let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
@@ -33,7 +34,7 @@ impl OnStateHook for MeteredStateHook {
         self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
 
         // Call the original state hook
-        self.inner_hook.on_state(state);
+        self.inner_hook.on_state(source, state);
     }
 }
 
@@ -139,13 +140,15 @@ impl ExecutorMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
+    use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_execution_types::BlockExecutionResult;
-    use reth_primitives::EthPrimitives;
-    use revm::db::{EmptyDB, State};
-    use revm_primitives::{
-        Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot, B256, U256,
+    use revm::{
+        database_interface::EmptyDB,
+        state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
     };
+    use revm_database::State;
     use std::sync::mpsc;
 
     /// A mock executor that simulates state changes
@@ -178,7 +181,7 @@ mod tests {
             F: OnStateHook + 'static,
         {
             // Call hook with our mock state
-            hook.on_state(&self.state);
+            hook.on_state(StateChangeSource::Transaction(0), &self.state);
 
             Ok(BlockExecutionResult {
                 receipts: vec![],
@@ -187,7 +190,7 @@ mod tests {
             })
         }
 
-        fn into_state(self) -> revm::db::State<DB> {
+        fn into_state(self) -> revm_database::State<DB> {
             State::builder().with_database(Default::default()).build()
         }
 
@@ -202,7 +205,7 @@ mod tests {
     }
 
     impl OnStateHook for ChannelStateHook {
-        fn on_state(&mut self, _state: &EvmState) {
+        fn on_state(&mut self, _source: StateChangeSource, _state: &EvmState) {
             let _ = self.sender.send(self.output);
         }
     }

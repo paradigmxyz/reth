@@ -7,8 +7,7 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, SealedBlock};
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -34,7 +33,7 @@ pub struct ValidationTask {
 }
 
 impl ValidationTask {
-    /// Creates a new clonable task pair
+    /// Creates a new cloneable task pair
     pub fn new() -> (ValidationJobSender, Self) {
         let (tx, rx) = mpsc::channel(1);
         (ValidationJobSender { tx }, Self::with_receiver(rx))

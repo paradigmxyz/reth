@@ -1,19 +1,19 @@
 {
   "__inputs": [
     {
-      "name": "DS_EXPRESSION",
-      "label": "Expression",
-      "description": "",
-      "type": "datasource",
-      "pluginId": "__expr__"
-    },
-    {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
       "description": "",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
+    },
+    {
+      "name": "DS_EXPRESSION",
+      "label": "Expression",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "__expr__"
     }
   ],
   "__elements": {},
@@ -39,7 +39,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "11.2.0"
+      "version": "11.4.0"
     },
     {
       "type": "panel",
@@ -170,7 +170,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -240,7 +240,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -310,7 +310,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -380,7 +380,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -450,7 +450,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -520,7 +520,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -599,7 +599,7 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -675,7 +675,7 @@
         "sizing": "auto",
         "valueMode": "color"
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -777,7 +777,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1320,8 +1320,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -1438,7 +1437,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1508,8 +1507,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -1605,8 +1603,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -1705,8 +1702,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1864,8 +1860,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2097,8 +2092,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2268,8 +2262,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2366,8 +2359,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2398,6 +2390,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -2436,8 +2429,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2556,7 +2548,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -2644,7 +2636,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -2684,8 +2676,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2792,7 +2783,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -2834,8 +2825,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2942,7 +2932,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -3011,8 +3001,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3043,6 +3032,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -3108,8 +3098,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3140,6 +3129,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -3219,8 +3209,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -3247,6 +3236,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -3407,8 +3397,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3439,6 +3428,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -3525,8 +3515,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3557,6 +3546,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -3616,7 +3606,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "description": "The time it takes for operations that are part of block validation, but not execution or state root, to complete.",
       "fieldConfig": {
@@ -3662,8 +3652,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3694,11 +3683,12 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -3715,7 +3705,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -3732,7 +3722,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -3749,7 +3739,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "disableTextWrap": false,
           "editorMode": "builder",
@@ -3829,8 +3819,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3885,6 +3874,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -3987,8 +3977,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4019,6 +4008,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4108,8 +4098,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4139,6 +4128,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4230,8 +4220,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4295,6 +4284,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4433,8 +4423,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -4461,6 +4450,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4550,8 +4540,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4581,6 +4570,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4658,8 +4648,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4707,6 +4696,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4785,8 +4775,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4834,6 +4823,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -4939,8 +4929,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4970,6 +4959,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5036,8 +5026,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5067,6 +5056,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5133,8 +5123,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5164,6 +5153,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5229,8 +5219,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5261,6 +5250,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5326,8 +5316,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5358,6 +5347,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5438,8 +5428,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5469,6 +5458,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5534,8 +5524,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5565,6 +5554,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5642,8 +5632,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5674,6 +5663,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -5739,8 +5729,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5771,6 +5760,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6064,8 +6054,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6095,6 +6084,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6160,8 +6150,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6192,6 +6181,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6406,8 +6396,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6438,6 +6427,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6684,123 +6674,7 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "Counts the number of failed response deliveries due to client request termination.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 236
-      },
-      "id": 249,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "consensus_engine_beacon_failed_new_payload_response_deliveries{instance=~\"$instance\"}",
-          "legendFormat": "Failed NewPayload Deliveries",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "consensus_engine_beacon_failed_forkchoice_updated_response_deliveries{instance=~\"$instance\"}",
-          "legendFormat": "Failed ForkchoiceUpdated Deliveries",
-          "refId": "B"
-        }
-      ],
-      "title": "Failed Engine API Response Deliveries",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 244
-      },
-      "id": 214,
-      "panels": [],
-      "title": "State Trie",
-      "type": "row"
-    },
-    {
-      "datasource": {
+        "default": false,
         "type": "prometheus",
         "uid": "${datasource}"
       },
@@ -6863,10 +6737,10 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 245
+        "x": 12,
+        "y": 228
       },
-      "id": 215,
+      "id": 258,
       "options": {
         "legend": {
           "calcs": [],
@@ -6885,15 +6759,309 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "editorMode": "code",
-          "expr": "reth_trie_duration_seconds{instance=\"$instance\",quantile=~\"(0.5|0.9|0.99)\"}",
-          "instant": false,
-          "legendFormat": "{{type}} root p{{quantile}}",
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0.5\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 p50",
           "range": true,
-          "refId": "Trie Root Duration"
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0.95\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 p95",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0.99\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 p99",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"0\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 min",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_blobs_v1{instance=~\"$instance\", quantile=\"1\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getBlobsV1 max",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
         }
       ],
-      "title": "Trie Root Duration",
+      "title": "Engine API getBlobs Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Counts the number of failed response deliveries due to client request termination.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 236
+      },
+      "id": 249,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "consensus_engine_beacon_failed_new_payload_response_deliveries{instance=~\"$instance\"}",
+          "legendFormat": "Failed NewPayload Deliveries",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "consensus_engine_beacon_failed_forkchoice_updated_response_deliveries{instance=~\"$instance\"}",
+          "legendFormat": "Failed ForkchoiceUpdated Deliveries",
+          "refId": "B"
+        }
+      ],
+      "title": "Failed Engine API Response Deliveries",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 244
+      },
+      "id": 214,
+      "panels": [],
+      "title": "State Root Task",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 245
+      },
+      "id": 216,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_proof_calculation_storage_targets_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "{{type}} storage proof targets p{{quantile}}",
+          "range": true,
+          "refId": "Branch Nodes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_proof_calculation_account_targets_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "{{type}} account proof targets p{{quantile}}",
+          "range": true,
+          "refId": "Leaf Nodes"
+        }
+      ],
+      "title": "Proof Targets",
       "type": "timeseries"
     },
     {
@@ -6944,8 +7112,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6962,7 +7129,7 @@
         "x": 12,
         "y": 245
       },
-      "id": 216,
+      "id": 255,
       "options": {
         "legend": {
           "calcs": [],
@@ -6975,6 +7142,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -6982,27 +7150,305 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_trie_branches_added{instance=\"$instance\",quantile=~\"(0.5|0.9|0.99)\"}",
+          "expr": "reth_tree_root_proofs_processed_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "{{type}} branch nodes p{{quantile}}",
+          "legendFormat": "{{quantile}} percentile",
           "range": true,
           "refId": "Branch Nodes"
+        }
+      ],
+      "title": "Proofs Processed",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
         },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 253
+      },
+      "id": 254,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_trie_leaves_added{instance=\"$instance\",quantile=~\"(0.5|0.9|0.99)\"}",
-          "hide": false,
+          "expr": "reth_tree_root_proof_calculation_duration_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
-          "legendFormat": "{{type}} leaves added p{{quantile}}",
+          "legendFormat": "{{quantile}} percentile",
           "range": true,
-          "refId": "Leaf Nodes"
+          "refId": "Branch Nodes"
         }
       ],
-      "title": "Trie Nodes Added",
+      "title": "Proof calculation duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 253
+      },
+      "id": 256,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_inflight_multiproofs_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "{{quantile}} percentile",
+          "range": true,
+          "refId": "Branch Nodes"
+        }
+      ],
+      "title": "In-flight MultiProof requests",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 261
+      },
+      "id": 257,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "reth_tree_root_pending_multiproofs_histogram{instance=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "instant": false,
+          "legendFormat": "{{quantile}} percentile",
+          "range": true,
+          "refId": "Branch Nodes"
+        }
+      ],
+      "title": "Pending MultiProof requests",
       "type": "timeseries"
     },
     {
@@ -7011,7 +7457,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 253
+        "y": 269
       },
       "id": 68,
       "panels": [],
@@ -7068,8 +7514,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7084,7 +7529,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 254
+        "y": 270
       },
       "id": 60,
       "options": {
@@ -7099,6 +7544,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7164,8 +7610,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7180,7 +7625,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 254
+        "y": 270
       },
       "id": 62,
       "options": {
@@ -7195,6 +7640,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7260,8 +7706,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7276,7 +7721,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 262
+        "y": 278
       },
       "id": 64,
       "options": {
@@ -7291,6 +7736,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7313,7 +7759,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 270
+        "y": 286
       },
       "id": 97,
       "panels": [],
@@ -7368,8 +7814,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7398,7 +7843,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 271
+        "y": 287
       },
       "id": 98,
       "options": {
@@ -7413,6 +7858,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7544,8 +7990,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7561,7 +8006,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 271
+        "y": 287
       },
       "id": 101,
       "options": {
@@ -7576,6 +8021,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7642,8 +8088,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7659,7 +8104,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 279
+        "y": 295
       },
       "id": 99,
       "options": {
@@ -7674,6 +8119,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7740,8 +8186,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7757,7 +8202,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 279
+        "y": 295
       },
       "id": 100,
       "options": {
@@ -7772,6 +8217,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7795,7 +8241,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 287
+        "y": 303
       },
       "id": 105,
       "panels": [],
@@ -7851,8 +8297,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7868,7 +8313,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 288
+        "y": 304
       },
       "id": 106,
       "options": {
@@ -7883,6 +8328,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7949,8 +8395,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7966,7 +8411,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 288
+        "y": 304
       },
       "id": 107,
       "options": {
@@ -7981,6 +8426,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8046,8 +8492,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8063,7 +8508,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 296
+        "y": 312
       },
       "id": 217,
       "options": {
@@ -8078,6 +8523,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8101,7 +8547,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 304
+        "y": 320
       },
       "id": 108,
       "panels": [],
@@ -8157,8 +8603,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8199,7 +8644,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 305
+        "y": 321
       },
       "id": 109,
       "options": {
@@ -8214,7 +8659,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8261,7 +8706,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 305
+        "y": 321
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -8306,7 +8751,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8374,8 +8819,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8391,7 +8835,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 313
+        "y": 329
       },
       "id": 120,
       "options": {
@@ -8406,7 +8850,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8449,7 +8893,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 313
+        "y": 329
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -8494,7 +8938,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8562,8 +9006,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8615,7 +9058,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 321
+        "y": 337
       },
       "id": 198,
       "options": {
@@ -8630,6 +9073,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8818,8 +9262,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8835,7 +9278,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 321
+        "y": 337
       },
       "id": 246,
       "options": {
@@ -8850,7 +9293,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8874,7 +9317,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 329
+        "y": 345
       },
       "id": 236,
       "panels": [],
@@ -8930,8 +9373,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8946,7 +9388,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 330
+        "y": 346
       },
       "id": 237,
       "options": {
@@ -8961,6 +9403,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9027,8 +9470,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9043,7 +9485,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 330
+        "y": 346
       },
       "id": 238,
       "options": {
@@ -9058,6 +9500,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9124,8 +9567,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9140,7 +9582,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 338
+        "y": 354
       },
       "id": 239,
       "options": {
@@ -9155,6 +9597,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9233,8 +9676,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9249,7 +9691,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 338
+        "y": 354
       },
       "id": 219,
       "options": {
@@ -9264,6 +9706,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9297,8 +9740,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9314,7 +9756,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 346
+        "y": 362
       },
       "id": 220,
       "options": {
@@ -9334,7 +9776,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9358,7 +9800,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 354
+        "y": 370
       },
       "id": 241,
       "panels": [],
@@ -9415,8 +9857,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9431,7 +9872,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 355
+        "y": 371
       },
       "id": 243,
       "options": {
@@ -9446,6 +9887,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9527,8 +9969,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9543,7 +9984,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 355
+        "y": 371
       },
       "id": 244,
       "options": {
@@ -9558,6 +9999,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9639,8 +10081,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9656,7 +10097,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 363
+        "y": 379
       },
       "id": 245,
       "options": {
@@ -9671,6 +10112,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9695,7 +10137,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 371
+        "y": 387
       },
       "id": 226,
       "panels": [],
@@ -9751,8 +10193,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9793,7 +10234,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 372
+        "y": 388
       },
       "id": 225,
       "options": {
@@ -9809,7 +10250,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -9880,8 +10321,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9922,7 +10362,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 372
+        "y": 388
       },
       "id": 227,
       "options": {
@@ -9938,7 +10378,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -10009,8 +10449,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -10051,7 +10490,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 380
+        "y": 396
       },
       "id": 235,
       "options": {
@@ -10067,7 +10506,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -10138,8 +10577,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -10180,7 +10618,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 380
+        "y": 396
       },
       "id": 234,
       "options": {
@@ -10196,7 +10634,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -10233,11 +10671,32 @@
         "definition": "query_result(reth_info)",
         "hide": 0,
         "includeAll": false,
-        "multi": false,
+        "label": "Job",
+        "name": "job",
+        "options": [],
+        "query": {
+          "qryType": 3,
+          "query": "query_result(reth_info)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "/.*job=\\\"([^\\\"]*).*/",
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "query_result(reth_info{job=\"${job}\"})",
+        "includeAll": false,
+        "label": "Instance (auto-selected)",
         "name": "instance",
         "options": [],
         "query": {
-          "query": "query_result(reth_info)",
+          "qryType": 3,
+          "query": "query_result(reth_info{job=\"${job}\"})",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -10264,7 +10723,7 @@
     ]
   },
   "time": {
-    "from": "now-7d",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {},

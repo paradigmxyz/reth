@@ -96,7 +96,7 @@ fn blocks(
         header: Header {
             parent_hash: chain_spec.genesis_hash(),
             receipts_root: b256!(
-                "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
+                "0xd3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 1,
@@ -127,7 +127,7 @@ fn blocks(
         header: Header {
             parent_hash: block1.hash(),
             receipts_root: b256!(
-                "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
+                "0xd3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 2,

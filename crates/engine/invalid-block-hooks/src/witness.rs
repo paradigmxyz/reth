@@ -4,28 +4,23 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
-use reth_evm::{
-    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvmFor, Evm,
-};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
-use reth_revm::{
-    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, StateBuilder,
-};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
 use serde::Serialize;
-use std::{collections::HashMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
+use std::{fmt::Debug, fs::File, io::Write, path::PathBuf};
 
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
-pub struct InvalidBlockWitnessHook<P, EvmConfig> {
+pub struct InvalidBlockWitnessHook<P, E> {
     /// The provider to read the historical state and do the EVM execution.
     provider: P,
     /// The EVM configuration to use for the execution.
-    evm_config: EvmConfig,
+    executor: E,
     /// The directory to write the witness to. Additionally, diff files will be written to this
     /// directory in case of failed sanity checks.
     output_directory: PathBuf,
@@ -33,27 +28,29 @@ pub struct InvalidBlockWitnessHook<P, EvmConfig> {
     healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
 }
 
-impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig> {
+impl<P, E> InvalidBlockWitnessHook<P, E> {
     /// Creates a new witness hook.
     pub const fn new(
         provider: P,
-        evm_config: EvmConfig,
+        executor: E,
         output_directory: PathBuf,
         healthy_node_client: Option<jsonrpsee::http_client::HttpClient>,
     ) -> Self {
-        Self { provider, evm_config, output_directory, healthy_node_client }
+        Self { provider, executor, output_directory, healthy_node_client }
     }
 }
 
-impl<P, EvmConfig> InvalidBlockWitnessHook<P, EvmConfig>
+impl<P, E, N> InvalidBlockWitnessHook<P, E>
 where
     P: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
         + Send
         + Sync
         + 'static,
+    E: BlockExecutorProvider<Primitives = N>,
+    N: NodePrimitives,
 {
-    fn on_invalid_block<N>(
+    fn on_invalid_block(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
         block: &RecoveredBlock<N::Block>,
@@ -62,53 +59,21 @@ where
     ) -> eyre::Result<()>
     where
         N: NodePrimitives,
-        EvmConfig: ConfigureEvmFor<N>,
     {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
-        // Setup database.
-        let mut db = StateBuilder::new()
-            .with_database(StateProviderDatabase::new(
-                self.provider.state_by_block_hash(parent_header.hash())?,
-            ))
-            .with_bundle_update()
-            .build();
+        let mut executor = self.executor.executor(StateProviderDatabase::new(
+            self.provider.state_by_block_hash(parent_header.hash())?,
+        ));
 
-        // Setup EVM
-        let mut evm = self.evm_config.evm_for_block(&mut db, block.header());
-
-        let mut system_caller =
-            SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());
-
-        // Apply pre-block system contract calls.
-        system_caller.apply_pre_execution_changes(block.header(), &mut evm)?;
-
-        // Re-execute all of the transactions in the block to load all touched accounts into
-        // the cache DB.
-        for tx in block.body().transactions() {
-            let signer =
-                tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover sender"))?;
-            evm.transact_commit(self.evm_config.tx_env(tx, signer))?;
-        }
-
-        drop(evm);
-
-        // use U256::MAX here for difficulty, because fetching it is annoying
-        // NOTE: This is not mut because we are not doing the DAO irregular state change here
-        let balance_increments =
-            post_block_balance_increments(self.provider.chain_spec().as_ref(), block);
-
-        // increment balances
-        db.increment_balances(balance_increments)?;
-
-        // Merge all state transitions
-        db.merge_transitions(BundleRetention::Reverts);
+        executor.execute_one(block)?;
 
         // Take the bundle state
+        let mut db = executor.into_state();
         let mut bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
-        let mut state_preimages = HashMap::default();
+        let mut state_preimages = Vec::default();
 
         // Grab all account proofs for the data accessed during block execution.
         //
@@ -127,14 +92,14 @@ where
                 .or_insert_with(|| HashedStorage::new(account.status.was_destroyed()));
 
             if let Some(account) = account.account {
-                state_preimages.insert(hashed_address, alloy_rlp::encode(address).into());
+                state_preimages.push(alloy_rlp::encode(address).into());
 
                 for (slot, value) in account.storage {
                     let slot = B256::from(slot);
                     let hashed_slot = keccak256(slot);
                     storage.storage.insert(hashed_slot, value);
 
-                    state_preimages.insert(hashed_slot, alloy_rlp::encode(slot).into());
+                    state_preimages.push(alloy_rlp::encode(slot).into());
                 }
             }
         }
@@ -145,11 +110,7 @@ where
         let state = state_provider.witness(Default::default(), hashed_state.clone())?;
 
         // Write the witness to the output directory.
-        let response = ExecutionWitness {
-            state: HashMap::from_iter(state),
-            codes: Default::default(),
-            keys: state_preimages,
-        };
+        let response = ExecutionWitness { state, codes: Default::default(), keys: state_preimages };
         let re_executed_witness_path = self.save_file(
             format!("{}_{}.witness.re_executed.json", block.number(), block.hash()),
             &response,
@@ -281,15 +242,14 @@ where
     }
 }
 
-impl<P, EvmConfig, N> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, EvmConfig>
+impl<P, E, N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockWitnessHook<P, E>
 where
-    N: NodePrimitives,
     P: StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
         + Send
         + Sync
         + 'static,
-    EvmConfig: ConfigureEvmFor<N>,
+    E: BlockExecutorProvider<Primitives = N>,
 {
     fn on_invalid_block(
         &self,
@@ -298,7 +258,7 @@ where
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
-        if let Err(err) = self.on_invalid_block::<N>(parent_header, block, output, trie_updates) {
+        if let Err(err) = self.on_invalid_block(parent_header, block, output, trie_updates) {
             warn!(target: "engine::invalid_block_hooks::witness", %err, "Failed to invoke hook");
         }
     }

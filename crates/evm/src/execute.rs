@@ -1,25 +1,24 @@
 //! Traits for execution.
 
-use alloy_consensus::BlockHeader;
-// Re-export execution types
+use crate::{ConfigureEvm, Database, OnStateHook};
+use alloc::{boxed::Box, vec::Vec};
+use alloy_consensus::{BlockHeader, Header};
+pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
+use alloy_evm::{Evm, EvmEnv, EvmFactory};
+use alloy_primitives::B256;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 use reth_execution_types::BlockExecutionResult;
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-pub use reth_storage_errors::provider::ProviderError;
-
-use crate::{system_calls::OnStateHook, Database};
-use alloc::{boxed::Box, vec::Vec};
-use alloy_eips::eip7685::Requests;
-use alloy_primitives::{
-    map::{DefaultHashBuilder, HashMap},
-    Address,
+use reth_primitives_traits::{
+    Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, TxTy,
 };
-use reth_consensus::ConsensusError;
-use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
-use revm::db::{states::bundle_state::BundleRetention, State};
-use revm_primitives::{Account, AccountStatus, EvmState};
+use reth_storage_api::StateProvider;
+pub use reth_storage_errors::provider::ProviderError;
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use revm::context::result::ExecutionResult;
+use revm_database::{states::bundle_state::BundleRetention, BundleState, State};
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -57,9 +56,9 @@ pub trait Executor<DB: Database>: Sized {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let BlockExecutionResult { receipts, requests, gas_used } = self.execute_one(block)?;
+        let result = self.execute_one(block)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Executes multiple inputs in the batch, and returns an aggregated [`ExecutionOutcome`].
@@ -96,10 +95,10 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: FnMut(&State<DB>),
     {
-        let BlockExecutionResult { receipts, requests, gas_used } = self.execute_one(block)?;
+        let result = self.execute_one(block)?;
         let mut state = self.into_state();
         f(&state);
-        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
@@ -112,10 +111,9 @@ pub trait Executor<DB: Database>: Sized {
     where
         F: OnStateHook + 'static,
     {
-        let BlockExecutionResult { receipts, requests, gas_used } =
-            self.execute_one_with_state_hook(block, state_hook)?;
+        let result = self.execute_one_with_state_hook(block, state_hook)?;
         let mut state = self.into_state();
-        Ok(BlockExecutionOutput { state: state.take_bundle(), receipts, requests, gas_used })
+        Ok(BlockExecutionOutput { state: state.take_bundle(), result })
     }
 
     /// Consumes the executor and returns the [`State`] containing all state changes.
@@ -159,82 +157,205 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
 
 /// Helper type for the output of executing a block.
 #[derive(Debug, Clone)]
-pub struct ExecuteOutput<R = Receipt> {
+pub struct ExecuteOutput<R> {
     /// Receipts obtained after executing a block.
     pub receipts: Vec<R>,
     /// Cumulative gas used in the block execution.
     pub gas_used: u64,
 }
 
-/// Defines the strategy for executing a single block.
-pub trait BlockExecutionStrategy {
-    /// Database this strategy operates on.
-    type DB: revm::Database;
-
-    /// Primitive types used by the strategy.
-    type Primitives: NodePrimitives;
-
-    /// The error type returned by this strategy's methods.
-    type Error: core::error::Error;
-
-    /// Applies any necessary changes before executing the block's transactions.
-    fn apply_pre_execution_changes(
-        &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<(), Self::Error>;
-
-    /// Executes all transactions in the block.
-    fn execute_transactions(
-        &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> Result<ExecuteOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
-
-    /// Applies any necessary changes after executing the block's transactions.
-    fn apply_post_execution_changes(
-        &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
-    ) -> Result<Requests, Self::Error>;
-
-    /// Returns a reference to the current state.
-    fn state_ref(&self) -> &State<Self::DB>;
-
-    /// Returns a mutable reference to the current state.
-    fn state_mut(&mut self) -> &mut State<Self::DB>;
-
-    /// Consumes the strategy and returns inner [`State`].
-    fn into_state(self) -> State<Self::DB>;
-
-    /// Sets a hook to be called after each state change during execution.
-    fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
-
-    /// Validate a block with regard to execution results.
-    fn validate_block_post_execution(
-        &self,
-        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        _receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
-        _requests: &Requests,
-    ) -> Result<(), ConsensusError> {
-        Ok(())
-    }
+/// Input for block building. Consumed by [`BlockAssembler`].
+#[derive(derive_more::Debug)]
+#[non_exhaustive]
+pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
+    /// Configuration of EVM used when executing the block.
+    ///
+    /// Contains context relevant to EVM such as [`revm::context::BlockEnv`].
+    pub evm_env: EvmEnv<<F::EvmFactory as EvmFactory>::Spec>,
+    /// [`BlockExecutorFactory::ExecutionCtx`] used to execute the block.
+    pub execution_ctx: F::ExecutionCtx<'a>,
+    /// Parent block header.
+    pub parent: &'a SealedHeader<H>,
+    /// Transactions that were executed in this block.
+    pub transactions: Vec<F::Transaction>,
+    /// Output of block execution.
+    pub output: &'b BlockExecutionResult<F::Receipt>,
+    /// [`BundleState`] after the block execution.
+    pub bundle_state: &'a BundleState,
+    /// Provider with access to state.
+    #[debug(skip)]
+    pub state_provider: &'b dyn StateProvider,
+    /// State root for this block.
+    pub state_root: B256,
 }
 
-/// A strategy factory that can create block execution strategies.
-pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
-    /// Primitive types used by the strategy.
-    type Primitives: NodePrimitives;
+/// A type that knows how to assemble a block.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait BlockAssembler<F: BlockExecutorFactory> {
+    /// The block type produced by the assembler.
+    type Block: Block;
 
-    /// Associated strategy type.
-    type Strategy<DB: Database>: BlockExecutionStrategy<
-        DB = DB,
-        Primitives = Self::Primitives,
-        Error = BlockExecutionError,
+    /// Builds a block. see [`BlockAssemblerInput`] documentation for more details.
+    fn assemble_block(
+        &self,
+        input: BlockAssemblerInput<'_, '_, F, <Self::Block as Block>::Header>,
+    ) -> Result<Self::Block, BlockExecutionError>;
+}
+
+/// Output of block building.
+#[derive(Debug, Clone)]
+pub struct BlockBuilderOutcome<N: NodePrimitives> {
+    /// Result of block execution.
+    pub execution_result: BlockExecutionResult<N::Receipt>,
+    /// Hashed state after execution.
+    pub hashed_state: HashedPostState,
+    /// Trie updates collected during state root calculation.
+    pub trie_updates: TrieUpdates,
+    /// The built block.
+    pub block: RecoveredBlock<N::Block>,
+}
+
+/// A type that knows how to execute and build a block.
+///
+/// It wraps an inner [`BlockExecutor`] and provides a way to execute transactions and
+/// construct a block.
+///
+/// This is a helper to erase `BasicBlockBuilder` type.
+pub trait BlockBuilder {
+    /// The primitive types used by the inner [`BlockExecutor`].
+    type Primitives: NodePrimitives;
+    /// Inner [`BlockExecutor`].
+    type Executor: BlockExecutor<
+        Transaction = TxTy<Self::Primitives>,
+        Receipt = ReceiptTy<Self::Primitives>,
     >;
 
-    /// Creates a strategy using the give database.
-    fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
-    where
-        DB: Database;
+    /// Invokes [`BlockExecutor::apply_pre_execution_changes`].
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
+
+    /// Invokes [`BlockExecutor::execute_transaction_with_result_closure`] and saves the
+    /// transaction in internal state.
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: Recovered<TxTy<Self::Primitives>>,
+        f: impl FnOnce(&ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>),
+    ) -> Result<u64, BlockExecutionError>;
+
+    /// Invokes [`BlockExecutor::execute_transaction`] and saves the transaction in
+    /// internal state.
+    fn execute_transaction(
+        &mut self,
+        tx: Recovered<TxTy<Self::Primitives>>,
+    ) -> Result<u64, BlockExecutionError> {
+        self.execute_transaction_with_result_closure(tx, |_| ())
+    }
+
+    /// Completes the block building process and returns the [`BlockBuilderOutcome`].
+    fn finish(
+        self,
+        state_provider: impl StateProvider,
+    ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
+
+    /// Provides mutable access to the inner [`BlockExecutor`].
+    fn executor_mut(&mut self) -> &mut Self::Executor;
+
+    /// Helper to access inner [`BlockExecutor::Evm`].
+    fn evm_mut(&mut self) -> &mut <Self::Executor as BlockExecutor>::Evm {
+        self.executor_mut().evm_mut()
+    }
+
+    /// Consumes the type and returns the underlying [`BlockExecutor`].
+    fn into_executor(self) -> Self::Executor;
+}
+
+pub(crate) struct BasicBlockBuilder<'a, F, Executor, Builder, N: NodePrimitives>
+where
+    F: BlockExecutorFactory,
+{
+    pub(crate) executor: Executor,
+    pub(crate) transactions: Vec<Recovered<TxTy<N>>>,
+    pub(crate) ctx: F::ExecutionCtx<'a>,
+    pub(crate) parent: &'a SealedHeader<HeaderTy<N>>,
+    pub(crate) assembler: Builder,
+}
+
+impl<'a, F, DB, Executor, Builder, N> BlockBuilder
+    for BasicBlockBuilder<'a, F, Executor, Builder, N>
+where
+    F: BlockExecutorFactory<Transaction = N::SignedTx, Receipt = N::Receipt>,
+    Executor: BlockExecutor<
+        Evm: Evm<
+            Spec = <F::EvmFactory as EvmFactory>::Spec,
+            HaltReason = <F::EvmFactory as EvmFactory>::HaltReason,
+            DB = &'a mut State<DB>,
+        >,
+        Transaction = N::SignedTx,
+        Receipt = N::Receipt,
+    >,
+    DB: Database + 'a,
+    Builder: BlockAssembler<F, Block = N::Block>,
+    N: NodePrimitives,
+{
+    type Primitives = N;
+    type Executor = Executor;
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        self.executor.apply_pre_execution_changes()
+    }
+
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: Recovered<TxTy<Self::Primitives>>,
+        f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
+    ) -> Result<u64, BlockExecutionError> {
+        let gas_used =
+            self.executor.execute_transaction_with_result_closure(tx.as_recovered_ref(), f)?;
+        self.transactions.push(tx);
+        Ok(gas_used)
+    }
+
+    fn finish(
+        self,
+        state: impl StateProvider,
+    ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        let (evm, result) = self.executor.finish()?;
+        let (db, evm_env) = evm.finish();
+
+        // merge all transitions into bundle state
+        db.merge_transitions(BundleRetention::Reverts);
+
+        // calculate the state root
+        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let (state_root, trie_updates) = state
+            .state_root_with_updates(hashed_state.clone())
+            .map_err(BlockExecutionError::other)?;
+
+        let (transactions, senders) =
+            self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+
+        let block = self.assembler.assemble_block(BlockAssemblerInput {
+            evm_env,
+            execution_ctx: self.ctx,
+            parent: self.parent,
+            transactions,
+            output: &result,
+            bundle_state: &db.bundle_state,
+            state_provider: &state,
+            state_root,
+        })?;
+
+        let block = RecoveredBlock::new_unhashed(block, senders);
+
+        Ok(BlockBuilderOutcome { execution_result: result, hashed_state, trie_updates, block })
+    }
+
+    fn executor_mut(&mut self) -> &mut Self::Executor {
+        &mut self.executor
+    }
+
+    fn into_executor(self) -> Self::Executor {
+        self.executor
+    }
 }
 
 impl<F> Clone for BasicBlockExecutorProvider<F>
@@ -261,127 +382,109 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
-    F: BlockExecutionStrategyFactory,
+    F: ConfigureEvm + 'static,
 {
     type Primitives = F::Primitives;
 
-    type Executor<DB: Database> = BasicBlockExecutor<F::Strategy<DB>>;
+    type Executor<DB: Database> = BasicBlockExecutor<F, DB>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database,
     {
-        let strategy = self.strategy_factory.create_strategy(db);
-        BasicBlockExecutor::new(strategy)
+        BasicBlockExecutor::new(self.strategy_factory.clone(), db)
     }
 }
 
-/// A generic block executor that uses a [`BlockExecutionStrategy`] to
+/// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
 #[allow(missing_debug_implementations, dead_code)]
-pub struct BasicBlockExecutor<S> {
+pub struct BasicBlockExecutor<F, DB> {
     /// Block execution strategy.
-    pub(crate) strategy: S,
+    pub(crate) strategy_factory: F,
+    /// Database.
+    pub(crate) db: State<DB>,
 }
 
-impl<S> BasicBlockExecutor<S> {
+impl<F, DB: Database> BasicBlockExecutor<F, DB> {
     /// Creates a new `BasicBlockExecutor` with the given strategy.
-    pub const fn new(strategy: S) -> Self {
-        Self { strategy }
+    pub fn new(strategy_factory: F, db: DB) -> Self {
+        let db =
+            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        Self { strategy_factory, db }
     }
 }
 
-impl<S, DB> Executor<DB> for BasicBlockExecutor<S>
+impl<F, DB> Executor<DB> for BasicBlockExecutor<F, DB>
 where
-    S: BlockExecutionStrategy<DB = DB>,
+    F: ConfigureEvm,
     DB: Database,
 {
-    type Primitives = S::Primitives;
-    type Error = S::Error;
+    type Primitives = F::Primitives;
+    type Error = BlockExecutionError;
 
     fn execute_one(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        self.strategy.apply_pre_execution_changes(block)?;
-        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
-        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
-        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
+        let mut strategy = self.strategy_factory.executor_for_block(&mut self.db, block);
 
-        Ok(BlockExecutionResult { receipts, requests, gas_used })
+        strategy.apply_pre_execution_changes()?;
+        for tx in block.transactions_recovered() {
+            strategy.execute_transaction(tx)?;
+        }
+        let result = strategy.apply_post_execution_changes()?;
+
+        self.db.merge_transitions(BundleRetention::Reverts);
+
+        Ok(result)
     }
 
-    fn execute_one_with_state_hook<F>(
+    fn execute_one_with_state_hook<H>(
         &mut self,
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
-        state_hook: F,
+        state_hook: H,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: OnStateHook + 'static,
+        H: OnStateHook + 'static,
     {
-        self.strategy.with_state_hook(Some(Box::new(state_hook)));
-        let result = self.execute_one(block);
-        self.strategy.with_state_hook(None);
+        let mut strategy = self
+            .strategy_factory
+            .executor_for_block(&mut self.db, block)
+            .with_state_hook(Some(Box::new(state_hook)));
 
-        result
+        strategy.apply_pre_execution_changes()?;
+        for tx in block.transactions_recovered() {
+            strategy.execute_transaction(tx)?;
+        }
+        let result = strategy.apply_post_execution_changes()?;
+
+        self.db.merge_transitions(BundleRetention::Reverts);
+
+        Ok(result)
     }
 
     fn into_state(self) -> State<DB> {
-        self.strategy.into_state()
+        self.db
     }
 
     fn size_hint(&self) -> usize {
-        self.strategy.state_ref().bundle_state.size_hint()
+        self.db.bundle_state.size_hint()
     }
-}
-
-/// Creates an `EvmState` from a map of balance increments and the current state
-/// to load accounts from. No balance increment is done in the function.
-/// Zero balance increments are ignored and won't create state entries.
-pub fn balance_increment_state<DB>(
-    balance_increments: &HashMap<Address, u128, DefaultHashBuilder>,
-    state: &mut State<DB>,
-) -> Result<EvmState, BlockExecutionError>
-where
-    DB: Database,
-{
-    let mut load_account = |address: &Address| -> Result<(Address, Account), BlockExecutionError> {
-        let cache_account = state.load_cache_account(*address).map_err(|_| {
-            BlockExecutionError::msg("could not load account for balance increment")
-        })?;
-
-        let account = cache_account.account.as_ref().ok_or_else(|| {
-            BlockExecutionError::msg("could not load account for balance increment")
-        })?;
-
-        Ok((
-            *address,
-            Account {
-                info: account.info.clone(),
-                storage: Default::default(),
-                status: AccountStatus::Touched,
-            },
-        ))
-    };
-
-    balance_increments
-        .iter()
-        .filter(|(_, &balance)| balance != 0)
-        .map(|(addr, _)| load_account(addr))
-        .collect::<Result<EvmState, _>>()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::U256;
+    use crate::Address;
+    use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_evm::block::state_changes::balance_increment_state;
+    use alloy_primitives::{address, map::HashMap, U256};
     use core::marker::PhantomData;
-    use reth_chainspec::{ChainSpec, MAINNET};
-    use reth_primitives::EthPrimitives;
-    use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{address, bytes, AccountInfo, KECCAK_EMPTY};
-    use std::sync::Arc;
+    use reth_ethereum_primitives::EthPrimitives;
+    use revm::state::AccountInfo;
+    use revm_database::{CacheDB, EmptyDB};
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;
@@ -432,135 +535,20 @@ mod tests {
         }
     }
 
-    struct TestExecutorStrategy<DB, EvmConfig> {
-        // chain spec and evm config here only to illustrate how the strategy
-        // factory can use them in a real use case.
-        _chain_spec: Arc<ChainSpec>,
-        _evm_config: EvmConfig,
-        state: State<DB>,
-        execute_transactions_result: ExecuteOutput<Receipt>,
-        apply_post_execution_changes_result: Requests,
-    }
-
-    #[derive(Clone)]
-    struct TestExecutorStrategyFactory {
-        execute_transactions_result: ExecuteOutput<Receipt>,
-        apply_post_execution_changes_result: Requests,
-    }
-
-    impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
-        type Primitives = EthPrimitives;
-        type Strategy<DB: Database> = TestExecutorStrategy<DB, TestEvmConfig>;
-
-        fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
-        where
-            DB: Database,
-        {
-            let state = State::builder()
-                .with_database(db)
-                .with_bundle_update()
-                .without_state_clear()
-                .build();
-
-            TestExecutorStrategy {
-                _chain_spec: MAINNET.clone(),
-                _evm_config: TestEvmConfig {},
-                execute_transactions_result: self.execute_transactions_result.clone(),
-                apply_post_execution_changes_result: self
-                    .apply_post_execution_changes_result
-                    .clone(),
-                state,
-            }
-        }
-    }
-
-    impl<DB> BlockExecutionStrategy for TestExecutorStrategy<DB, TestEvmConfig>
-    where
-        DB: Database,
-    {
-        type DB = DB;
-        type Primitives = EthPrimitives;
-        type Error = BlockExecutionError;
-
-        fn apply_pre_execution_changes(
-            &mut self,
-            _block: &RecoveredBlock<reth_primitives::Block>,
-        ) -> Result<(), Self::Error> {
-            Ok(())
-        }
-
-        fn execute_transactions(
-            &mut self,
-            _block: &RecoveredBlock<reth_primitives::Block>,
-        ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
-            Ok(self.execute_transactions_result.clone())
-        }
-
-        fn apply_post_execution_changes(
-            &mut self,
-            _block: &RecoveredBlock<reth_primitives::Block>,
-            _receipts: &[Receipt],
-        ) -> Result<Requests, Self::Error> {
-            Ok(self.apply_post_execution_changes_result.clone())
-        }
-
-        fn state_ref(&self) -> &State<DB> {
-            &self.state
-        }
-
-        fn state_mut(&mut self) -> &mut State<DB> {
-            &mut self.state
-        }
-
-        fn into_state(self) -> State<Self::DB> {
-            self.state
-        }
-    }
-
-    #[derive(Clone)]
-    struct TestEvmConfig {}
-
     #[test]
     fn test_provider() {
         let provider = TestExecutorProvider;
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = CacheDB::<EmptyDB>::default();
         let executor = provider.executor(db);
         let _ = executor.execute(&Default::default());
-    }
-
-    #[test]
-    fn test_strategy() {
-        let expected_gas_used = 10;
-        let expected_receipts = vec![Receipt::default()];
-        let expected_execute_transactions_result = ExecuteOutput::<Receipt> {
-            receipts: expected_receipts.clone(),
-            gas_used: expected_gas_used,
-        };
-        let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
-
-        let strategy_factory = TestExecutorStrategyFactory {
-            execute_transactions_result: expected_execute_transactions_result,
-            apply_post_execution_changes_result: expected_apply_post_execution_changes_result
-                .clone(),
-        };
-        let provider = BasicBlockExecutorProvider::new(strategy_factory);
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-        let executor = provider.executor(db);
-        let result = executor.execute(&Default::default());
-
-        assert!(result.is_ok());
-        let block_execution_output = result.unwrap();
-        assert_eq!(block_execution_output.gas_used, expected_gas_used);
-        assert_eq!(block_execution_output.receipts, expected_receipts);
-        assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
     }
 
     fn setup_state_with_account(
         addr: Address,
         balance: u128,
         nonce: u64,
-    ) -> State<CacheDB<EmptyDBTyped<BlockExecutionError>>> {
-        let db = CacheDB::<EmptyDBTyped<BlockExecutionError>>::default();
+    ) -> State<CacheDB<EmptyDB>> {
+        let db = CacheDB::<EmptyDB>::default();
         let mut state = State::builder().with_database(db).with_bundle_update().build();
 
         let account_info = AccountInfo {
@@ -575,10 +563,10 @@ mod tests {
 
     #[test]
     fn test_balance_increment_state_zero() {
-        let addr = address!("1000000000000000000000000000000000000000");
+        let addr = address!("0x1000000000000000000000000000000000000000");
         let mut state = setup_state_with_account(addr, 100, 1);
 
-        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let mut increments = HashMap::default();
         increments.insert(addr, 0);
 
         let result = balance_increment_state(&increments, &mut state).unwrap();
@@ -588,19 +576,19 @@ mod tests {
     #[test]
     fn test_balance_increment_state_empty_increments_map() {
         let mut state = State::builder()
-            .with_database(CacheDB::<EmptyDBTyped<BlockExecutionError>>::default())
+            .with_database(CacheDB::<EmptyDB>::default())
             .with_bundle_update()
             .build();
 
-        let increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let increments = HashMap::default();
         let result = balance_increment_state(&increments, &mut state).unwrap();
         assert!(result.is_empty(), "Empty increments map should return empty state");
     }
 
     #[test]
     fn test_balance_increment_state_multiple_valid_increments() {
-        let addr1 = address!("1000000000000000000000000000000000000000");
-        let addr2 = address!("2000000000000000000000000000000000000000");
+        let addr1 = address!("0x1000000000000000000000000000000000000000");
+        let addr2 = address!("0x2000000000000000000000000000000000000000");
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
@@ -608,7 +596,7 @@ mod tests {
             AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
         state.insert_account(addr2, account2);
 
-        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let mut increments = HashMap::default();
         increments.insert(addr1, 50);
         increments.insert(addr2, 100);
 
@@ -621,8 +609,8 @@ mod tests {
 
     #[test]
     fn test_balance_increment_state_mixed_zero_and_nonzero_increments() {
-        let addr1 = address!("1000000000000000000000000000000000000000");
-        let addr2 = address!("2000000000000000000000000000000000000000");
+        let addr1 = address!("0x1000000000000000000000000000000000000000");
+        let addr2 = address!("0x2000000000000000000000000000000000000000");
 
         let mut state = setup_state_with_account(addr1, 100, 1);
 
@@ -630,7 +618,7 @@ mod tests {
             AccountInfo { balance: U256::from(200), nonce: 1, code_hash: KECCAK_EMPTY, code: None };
         state.insert_account(addr2, account2);
 
-        let mut increments = HashMap::<Address, u128, DefaultHashBuilder>::default();
+        let mut increments = HashMap::default();
         increments.insert(addr1, 0);
         increments.insert(addr2, 100);
 

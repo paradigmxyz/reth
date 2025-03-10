@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-evm.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-rpc-eth-api.workspace = true
@@ -32,7 +31,6 @@ reth-rpc-engine-api.workspace = true
 
 # op-reth
 reth-optimism-chainspec.workspace = true
-reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-txpool.workspace = true
@@ -53,6 +51,7 @@ op-alloy-rpc-types-engine.workspace = true
 op-alloy-rpc-jsonrpsee.workspace = true
 op-alloy-consensus.workspace = true
 revm.workspace = true
+op-revm.workspace = true
 
 # async
 parking_lot.workspace = true
@@ -75,14 +74,6 @@ derive_more = { workspace = true, features = ["constructor"] }
 reth-optimism-chainspec.workspace = true
 
 [features]
-optimism = [
-    "reth-optimism-evm/optimism",
-    "revm/optimism",
-    "reth-optimism-consensus/optimism",
-    "reth-optimism-payload-builder/optimism",
-    "reth-optimism-primitives/optimism",
-    "reth-optimism-txpool/optimism",
-]
 client = [
     "jsonrpsee/client",
     "jsonrpsee/async-client",

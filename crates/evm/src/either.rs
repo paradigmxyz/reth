@@ -2,14 +2,13 @@
 
 use crate::{
     execute::{BlockExecutorProvider, Executor},
-    system_calls::OnStateHook,
-    Database,
+    Database, OnStateHook,
 };
 
 // re-export Either
 pub use futures_util::future::Either;
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
-use reth_primitives::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 impl<A, B> BlockExecutorProvider for Either<A, B>
 where
@@ -82,7 +81,7 @@ where
         state: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: FnMut(&revm::db::State<DB>),
+        F: FnMut(&revm_database::State<DB>),
     {
         match self {
             Self::Left(a) => a.execute_with_state_closure(block, state),
@@ -90,7 +89,7 @@ where
         }
     }
 
-    fn into_state(self) -> revm::db::State<DB> {
+    fn into_state(self) -> revm_database::State<DB> {
         match self {
             Self::Left(a) => a.into_state(),
             Self::Right(b) => b.into_state(),

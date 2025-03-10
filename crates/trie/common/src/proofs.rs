@@ -1,7 +1,7 @@
 //! Merkle trie proofs.
 
 use crate::{Nibbles, TrieAccount};
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
@@ -14,11 +14,152 @@ use alloy_trie::{
     proof::{verify_proof, DecodedProofNodes, ProofNodes, ProofVerificationError},
     TrieMask, EMPTY_ROOT_HASH,
 };
+use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 /// Proof targets map.
-pub type MultiProofTargets = B256Map<B256Set>;
+#[derive(Deref, DerefMut, IntoIterator, Clone, PartialEq, Eq, Default, Debug)]
+pub struct MultiProofTargets(B256Map<B256Set>);
+
+impl FromIterator<(B256, B256Set)> for MultiProofTargets {
+    fn from_iter<T: IntoIterator<Item = (B256, B256Set)>>(iter: T) -> Self {
+        Self(B256Map::from_iter(iter))
+    }
+}
+
+impl MultiProofTargets {
+    /// Creates an empty `MultiProofTargets` with at least the specified capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(B256Map::with_capacity_and_hasher(capacity, Default::default()))
+    }
+
+    /// Create `MultiProofTargets` with a single account as a target.
+    pub fn account(hashed_address: B256) -> Self {
+        Self::accounts([hashed_address])
+    }
+
+    /// Create `MultiProofTargets` with a single account and slots as targets.
+    pub fn account_with_slots<I: IntoIterator<Item = B256>>(
+        hashed_address: B256,
+        slots_iter: I,
+    ) -> Self {
+        Self(B256Map::from_iter([(hashed_address, slots_iter.into_iter().collect())]))
+    }
+
+    /// Create `MultiProofTargets` only from accounts.
+    pub fn accounts<I: IntoIterator<Item = B256>>(iter: I) -> Self {
+        Self(iter.into_iter().map(|hashed_address| (hashed_address, Default::default())).collect())
+    }
+
+    /// Retains the targets representing the difference,
+    /// i.e., the values that are in `self` but not in `other`.
+    pub fn retain_difference(&mut self, other: &Self) {
+        self.0.retain(|hashed_address, hashed_slots| {
+            if let Some(other_hashed_slots) = other.get(hashed_address) {
+                hashed_slots.retain(|hashed_slot| !other_hashed_slots.contains(hashed_slot));
+                !hashed_slots.is_empty()
+            } else {
+                true
+            }
+        });
+    }
+
+    /// Extend multi proof targets with contents of other.
+    pub fn extend(&mut self, other: Self) {
+        self.extend_inner(Cow::Owned(other));
+    }
+
+    /// Extend multi proof targets with contents of other.
+    ///
+    /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.extend_inner(Cow::Borrowed(other));
+    }
+
+    fn extend_inner(&mut self, other: Cow<'_, Self>) {
+        for (hashed_address, hashed_slots) in other.iter() {
+            self.entry(*hashed_address).or_default().extend(hashed_slots);
+        }
+    }
+
+    /// Returns an iterator that yields chunks of the specified size.
+    ///
+    /// See [`ChunkedMultiProofTargets`] for more information.
+    pub fn chunks(self, size: usize) -> ChunkedMultiProofTargets {
+        ChunkedMultiProofTargets::new(self, size)
+    }
+}
+
+/// An iterator that yields chunks of the proof targets of at most `size` account and storage
+/// targets.
+///
+/// For example, for the following proof targets:
+/// ```text
+/// - 0x1: [0x10, 0x20, 0x30]
+/// - 0x2: [0x40]
+/// - 0x3: []
+/// ```
+///
+/// and `size = 2`, the iterator will yield the following chunks:
+/// ```text
+/// - { 0x1: [0x10, 0x20] }
+/// - { 0x1: [0x30], 0x2: [0x40] }
+/// - { 0x3: [] }
+/// ```
+///
+/// It follows two rules:
+/// - If account has associated storage slots, each storage slot is counted towards the chunk size.
+/// - If account has no associated storage slots, the account is counted towards the chunk size.
+#[derive(Debug)]
+pub struct ChunkedMultiProofTargets {
+    flattened_targets: alloc::vec::IntoIter<(B256, Option<B256>)>,
+    size: usize,
+}
+
+impl ChunkedMultiProofTargets {
+    fn new(targets: MultiProofTargets, size: usize) -> Self {
+        let flattened_targets = targets
+            .into_iter()
+            .flat_map(|(address, slots)| {
+                if slots.is_empty() {
+                    // If the account has no storage slots, we still need to yield the account
+                    // address with empty storage slots. `None` here means that
+                    // there's no storage slot to fetch.
+                    itertools::Either::Left(core::iter::once((address, None)))
+                } else {
+                    itertools::Either::Right(
+                        slots.into_iter().map(move |slot| (address, Some(slot))),
+                    )
+                }
+            })
+            .sorted();
+        Self { flattened_targets, size }
+    }
+}
+
+impl Iterator for ChunkedMultiProofTargets {
+    type Item = MultiProofTargets;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let chunk = self.flattened_targets.by_ref().take(self.size).fold(
+            MultiProofTargets::default(),
+            |mut acc, (address, slot)| {
+                let entry = acc.entry(address).or_default();
+                if let Some(slot) = slot {
+                    entry.insert(slot);
+                }
+                acc
+            },
+        );
+
+        if chunk.is_empty() {
+            None
+        } else {
+            Some(chunk)
+        }
+    }
+}
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
@@ -117,6 +258,119 @@ impl MultiProof {
             storage_proofs.push(proof);
         }
         Ok(AccountProof { address, info, proof, storage_root, storage_proofs })
+    }
+
+    /// Extends this multiproof with another one, merging both account and storage
+    /// proofs.
+    pub fn extend(&mut self, other: Self) {
+        self.account_subtree.extend_from(other.account_subtree);
+
+        self.branch_node_hash_masks.extend(other.branch_node_hash_masks);
+        self.branch_node_tree_masks.extend(other.branch_node_tree_masks);
+
+        for (hashed_address, storage) in other.storages {
+            match self.storages.entry(hashed_address) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    debug_assert_eq!(entry.get().root, storage.root);
+                    let entry = entry.get_mut();
+                    entry.subtree.extend_from(storage.subtree);
+                    entry.branch_node_hash_masks.extend(storage.branch_node_hash_masks);
+                    entry.branch_node_tree_masks.extend(storage.branch_node_tree_masks);
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(storage);
+                }
+            }
+        }
+    }
+}
+
+/// This is a type of [`MultiProof`] that uses decoded proofs, meaning these proofs are stored as a
+/// collection of [`TrieNode`]s instead of RLP-encoded bytes.
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct DecodedMultiProof {
+    /// State trie multiproof for requested accounts.
+    pub account_subtree: DecodedProofNodes,
+    /// The hash masks of the branch nodes in the account proof.
+    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+    /// The tree masks of the branch nodes in the account proof.
+    pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// Storage trie multiproofs.
+    pub storages: B256Map<DecodedStorageMultiProof>,
+}
+
+impl DecodedMultiProof {
+    /// Return the account proof nodes for the given account path.
+    pub fn account_proof_nodes(&self, path: &Nibbles) -> Vec<(Nibbles, TrieNode)> {
+        self.account_subtree.matching_nodes_sorted(path)
+    }
+
+    /// Return the storage proof nodes for the given storage slots of the account path.
+    pub fn storage_proof_nodes(
+        &self,
+        hashed_address: B256,
+        slots: impl IntoIterator<Item = B256>,
+    ) -> Vec<(B256, Vec<(Nibbles, TrieNode)>)> {
+        self.storages
+            .get(&hashed_address)
+            .map(|storage_mp| {
+                slots
+                    .into_iter()
+                    .map(|slot| {
+                        let nibbles = Nibbles::unpack(slot);
+                        (slot, storage_mp.subtree.matching_nodes_sorted(&nibbles))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Construct the account proof from the multiproof.
+    pub fn account_proof(
+        &self,
+        address: Address,
+        slots: &[B256],
+    ) -> Result<DecodedAccountProof, alloy_rlp::Error> {
+        let hashed_address = keccak256(address);
+        let nibbles = Nibbles::unpack(hashed_address);
+
+        // Retrieve the account proof.
+        let proof = self
+            .account_proof_nodes(&nibbles)
+            .into_iter()
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
+
+        // Inspect the last node in the proof. If it's a leaf node with matching suffix,
+        // then the node contains the encoded trie account.
+        let info = 'info: {
+            if let Some(TrieNode::Leaf(leaf)) = proof.last() {
+                if nibbles.ends_with(&leaf.key) {
+                    let account = TrieAccount::decode(&mut &leaf.value[..])?;
+                    break 'info Some(Account {
+                        balance: account.balance,
+                        nonce: account.nonce,
+                        bytecode_hash: (account.code_hash != KECCAK_EMPTY)
+                            .then_some(account.code_hash),
+                    })
+                }
+            }
+            None
+        };
+
+        // Retrieve proofs for requested storage slots.
+        let storage_multiproof = self.storages.get(&hashed_address);
+        let storage_root = storage_multiproof.map(|m| m.root).unwrap_or(EMPTY_ROOT_HASH);
+        let mut storage_proofs = Vec::with_capacity(slots.len());
+        for slot in slots {
+            let proof = if let Some(multiproof) = &storage_multiproof {
+                multiproof.storage_proof(*slot)?
+            } else {
+                DecodedStorageProof::new(*slot)
+            };
+            storage_proofs.push(proof);
+        }
+        Ok(DecodedAccountProof { address, info, proof, storage_root, storage_proofs })
     }
 
     /// Extends this multiproof with another one, merging both account and storage
@@ -334,6 +588,41 @@ impl AccountProof {
     }
 }
 
+/// The merkle proof with the relevant account info.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DecodedAccountProof {
+    /// The address associated with the account.
+    pub address: Address,
+    /// Account info.
+    pub info: Option<Account>,
+    /// Array of merkle trie nodes which starting from the root node and following the path of the
+    /// hashed address as key.
+    pub proof: Vec<TrieNode>,
+    /// The storage trie root.
+    pub storage_root: B256,
+    /// Array of storage proofs as requested.
+    pub storage_proofs: Vec<DecodedStorageProof>,
+}
+
+impl Default for DecodedAccountProof {
+    fn default() -> Self {
+        Self::new(Address::default())
+    }
+}
+
+impl DecodedAccountProof {
+    /// Create new account proof entity.
+    pub const fn new(address: Address) -> Self {
+        Self {
+            address,
+            info: None,
+            proof: Vec::new(),
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: Vec::new(),
+        }
+    }
+}
+
 /// The merkle proof of the storage entry.
 #[derive(Clone, PartialEq, Eq, Default, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
@@ -527,5 +816,113 @@ mod tests {
         assert_eq!(storage.root, root);
         assert!(storage.subtree.contains_key(&Nibbles::from_nibbles(vec![0])));
         assert!(storage.subtree.contains_key(&Nibbles::from_nibbles(vec![1])));
+    }
+
+    #[test]
+    fn test_multi_proof_retain_difference() {
+        let mut empty = MultiProofTargets::default();
+        empty.retain_difference(&Default::default());
+        assert!(empty.is_empty());
+
+        let targets = MultiProofTargets::accounts((0..10).map(B256::with_last_byte));
+
+        let mut diffed = targets.clone();
+        diffed.retain_difference(&MultiProofTargets::account(B256::with_last_byte(11)));
+        assert_eq!(diffed, targets);
+
+        diffed.retain_difference(&MultiProofTargets::accounts((0..5).map(B256::with_last_byte)));
+        assert_eq!(diffed, MultiProofTargets::accounts((5..10).map(B256::with_last_byte)));
+
+        diffed.retain_difference(&targets);
+        assert!(diffed.is_empty());
+
+        let mut targets = MultiProofTargets::default();
+        let (account1, account2, account3) =
+            (1..=3).map(B256::with_last_byte).collect_tuple().unwrap();
+        let account2_slots = (1..5).map(B256::with_last_byte).collect::<B256Set>();
+        targets.insert(account1, B256Set::from_iter([B256::with_last_byte(1)]));
+        targets.insert(account2, account2_slots.clone());
+        targets.insert(account3, B256Set::from_iter([B256::with_last_byte(1)]));
+
+        let mut diffed = targets.clone();
+        diffed.retain_difference(&MultiProofTargets::accounts((1..=3).map(B256::with_last_byte)));
+        assert_eq!(diffed, targets);
+
+        // remove last 3 slots for account 2
+        let mut account2_slots_expected_len = account2_slots.len();
+        for slot in account2_slots.iter().skip(1) {
+            diffed.retain_difference(&MultiProofTargets::account_with_slots(account2, [*slot]));
+            account2_slots_expected_len -= 1;
+            assert_eq!(
+                diffed.get(&account2).map(|slots| slots.len()),
+                Some(account2_slots_expected_len)
+            );
+        }
+
+        diffed.retain_difference(&targets);
+        assert!(diffed.is_empty());
+    }
+
+    #[test]
+    fn test_multi_proof_retain_difference_no_overlap() {
+        let mut targets = MultiProofTargets::default();
+
+        // populate some targets
+        let (addr1, addr2) = (B256::random(), B256::random());
+        let (slot1, slot2) = (B256::random(), B256::random());
+        targets.insert(addr1, vec![slot1].into_iter().collect());
+        targets.insert(addr2, vec![slot2].into_iter().collect());
+
+        let mut retained = targets.clone();
+        retained.retain_difference(&Default::default());
+        assert_eq!(retained, targets);
+
+        // add a different addr and slot to fetched proof targets
+        let mut other_targets = MultiProofTargets::default();
+        let addr3 = B256::random();
+        let slot3 = B256::random();
+        other_targets.insert(addr3, B256Set::from_iter([slot3]));
+
+        // check that the prefetch proof targets are the same because the fetched proof targets
+        // don't overlap with the prefetch targets
+        let mut retained = targets.clone();
+        retained.retain_difference(&other_targets);
+        assert_eq!(retained, targets);
+    }
+
+    #[test]
+    fn test_get_prefetch_proof_targets_remove_subset() {
+        // populate some targets
+        let mut targets = MultiProofTargets::default();
+        let (addr1, addr2) = (B256::random(), B256::random());
+        let (slot1, slot2) = (B256::random(), B256::random());
+        targets.insert(addr1, B256Set::from_iter([slot1]));
+        targets.insert(addr2, B256Set::from_iter([slot2]));
+
+        // add a subset of the first target to other proof targets
+        let other_targets = MultiProofTargets::account_with_slots(addr1, [slot1]);
+
+        let mut retained = targets.clone();
+        retained.retain_difference(&other_targets);
+
+        // check that the prefetch proof targets do not include the subset
+        assert_eq!(retained.len(), 1);
+        assert!(!retained.contains_key(&addr1));
+        assert!(retained.contains_key(&addr2));
+
+        // now add one more slot to the prefetch targets
+        let slot3 = B256::random();
+        targets.get_mut(&addr1).unwrap().insert(slot3);
+
+        let mut retained = targets.clone();
+        retained.retain_difference(&other_targets);
+
+        // check that the prefetch proof targets do not include the subset
+        // but include the new slot
+        assert_eq!(retained.len(), 2);
+        assert!(retained.contains_key(&addr1));
+        assert_eq!(retained.get(&addr1), Some(&B256Set::from_iter([slot3])));
+        assert!(retained.contains_key(&addr2));
+        assert_eq!(retained.get(&addr2), Some(&B256Set::from_iter([slot2])));
     }
 }

@@ -7,12 +7,17 @@ use alloy_rpc_types_eth::{
     Block, BlockTransactionsKind, Header,
 };
 use jsonrpsee_types::ErrorObject;
-use reth_primitives::RecoveredBlock;
+use reth_evm::{
+    execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
+    Evm,
+};
+use reth_primitives::{Recovered, RecoveredBlock, TxTy};
 use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
-use revm::Database;
-use revm_primitives::{Address, Bytes, ExecutionResult, TxKind};
+use reth_storage_api::noop::NoopProvider;
+use revm::{context_interface::result::ExecutionResult, Database};
+use revm_primitives::{Address, Bytes, TxKind};
 
 use crate::{
     error::{
@@ -48,6 +53,54 @@ impl ToRpcError for EthSimulateError {
     }
 }
 
+/// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
+/// given [`BlockExecutor`].
+///
+/// Returns all executed transactions and the result of the execution.
+#[expect(clippy::type_complexity)]
+pub fn execute_transactions<S, T>(
+    mut builder: S,
+    calls: Vec<TransactionRequest>,
+    validation: bool,
+    default_gas_limit: u64,
+    chain_id: u64,
+    tx_resp_builder: &T,
+) -> Result<
+    (
+        BlockBuilderOutcome<S::Primitives>,
+        Vec<ExecutionResult<<<S::Executor as BlockExecutor>::Evm as Evm>::HaltReason>>,
+    ),
+    EthApiError,
+>
+where
+    S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
+    T: TransactionCompat<TxTy<S::Primitives>>,
+{
+    builder.apply_pre_execution_changes()?;
+
+    let mut results = Vec::with_capacity(calls.len());
+    for call in calls {
+        // Resolve transaction, populate missing fields and enforce calls
+        // correctness.
+        let tx = resolve_transaction(
+            call,
+            validation,
+            default_gas_limit,
+            chain_id,
+            builder.evm_mut().db_mut(),
+            tx_resp_builder,
+        )?;
+
+        builder
+            .execute_transaction_with_result_closure(tx, |result| results.push(result.clone()))?;
+    }
+
+    // Pass noop provider to skip state root calculations.
+    let result = builder.finish(NoopProvider::default())?;
+
+    Ok((result, results))
+}
+
 /// Goes over the list of [`TransactionRequest`]s and populates missing fields trying to resolve
 /// them into primitive transactions.
 ///
@@ -60,9 +113,9 @@ pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
     chain_id: u64,
     db: &mut DB,
     tx_resp_builder: &T,
-) -> Result<Tx, EthApiError>
+) -> Result<Recovered<Tx>, EthApiError>
 where
-    EthApiError: From<DB::Error>,
+    DB::Error: Into<EthApiError>,
 {
     if tx.buildable_type().is_none() && validation {
         return Err(EthApiError::TransactionConversionError);
@@ -79,7 +132,8 @@ where
     };
 
     if tx.nonce.is_none() {
-        tx.nonce = Some(db.basic(from)?.map(|acc| acc.nonce).unwrap_or_default());
+        tx.nonce =
+            Some(db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default());
     }
 
     if tx.gas.is_none() {
@@ -108,20 +162,23 @@ where
         }
     }
 
-    tx_resp_builder.build_simulate_v1_transaction(tx).map_err(|e| EthApiError::other(e.into()))
+    let tx = tx_resp_builder
+        .build_simulate_v1_transaction(tx)
+        .map_err(|e| EthApiError::other(e.into()))?;
+
+    Ok(Recovered::new_unchecked(tx, from))
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
 #[expect(clippy::type_complexity)]
-pub fn build_simulated_block<T, B>(
-    senders: Vec<Address>,
-    results: Vec<ExecutionResult>,
+pub fn build_simulated_block<T, B, Halt: Clone>(
+    block: RecoveredBlock<B>,
+    results: Vec<ExecutionResult<Halt>>,
     full_transactions: bool,
     tx_resp_builder: &T,
-    block: B,
 ) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
 where
-    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError + FromEvmHalt>,
+    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError + FromEvmHalt<Halt>>,
     B: reth_primitives_traits::Block,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
@@ -130,7 +187,7 @@ where
     for (index, (result, tx)) in results.iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error = T::Error::from_evm_halt(*reason, tx.gas_limit());
+                let error = T::Error::from_evm_halt(reason.clone(), tx.gas_limit());
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
@@ -180,8 +237,6 @@ where
 
         calls.push(call);
     }
-
-    let block = RecoveredBlock::new_unhashed(block, senders);
 
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };

@@ -13,10 +13,16 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-engine-primitives.workspace = true
 
 # alloy
-alloy-rpc-types = { workspace = true, features = ["engine"] }
+alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "alloy-consensus/std",
+    "alloy-rpc-types-engine/std",
+    "reth-primitives-traits/std",
+]

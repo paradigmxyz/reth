@@ -2,7 +2,6 @@
 
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::BlockId;
-use op_alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::BlockBody;
@@ -12,6 +11,7 @@ use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
+    types::RpcTypes,
     RpcReceipt,
 };
 
@@ -21,7 +21,7 @@ impl<N> EthBlocks for OpEthApi<N>
 where
     Self: LoadBlock<
         Error = OpEthApiError,
-        NetworkTypes: Network<ReceiptResponse = OpTransactionReceipt>,
+        NetworkTypes: RpcTypes<Receipt = OpTransactionReceipt>,
         Provider: BlockReader<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     >,
     N: OpNodeCore<Provider: ChainSpecProvider<ChainSpec = OpChainSpec> + HeaderProvider>,

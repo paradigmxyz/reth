@@ -147,7 +147,7 @@ impl RlpxSubProtocols {
 
 /// A set of additional RLPx-based sub-protocol connection handlers.
 #[derive(Default)]
-pub(crate) struct RlpxSubProtocolHandlers(Vec<Box<dyn DynConnectionHandler>>);
+pub(crate) struct RlpxSubProtocolHandlers(pub(crate) Vec<Box<dyn DynConnectionHandler>>);
 
 impl RlpxSubProtocolHandlers {
     /// Returns all handlers.
@@ -200,6 +200,13 @@ impl<T: ProtocolHandler> DynProtocolHandler for T {
 pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
     fn protocol(&self) -> Protocol;
 
+    fn on_unsupported_by_peer(
+        self: Box<Self>,
+        supported: &SharedCapabilities,
+        direction: Direction,
+        peer_id: PeerId,
+    ) -> OnNotSupported;
+
     fn into_connection(
         self: Box<Self>,
         direction: Direction,
@@ -211,6 +218,15 @@ pub(crate) trait DynConnectionHandler: Send + Sync + 'static {
 impl<T: ConnectionHandler> DynConnectionHandler for T {
     fn protocol(&self) -> Protocol {
         T::protocol(self)
+    }
+
+    fn on_unsupported_by_peer(
+        self: Box<Self>,
+        supported: &SharedCapabilities,
+        direction: Direction,
+        peer_id: PeerId,
+    ) -> OnNotSupported {
+        T::on_unsupported_by_peer(*self, supported, direction, peer_id)
     }
 
     fn into_connection(

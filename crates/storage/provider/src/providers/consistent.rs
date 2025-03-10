@@ -17,8 +17,7 @@ use alloy_primitives::{
 };
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
-use reth_db::models::BlockNumberAddress;
-use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives::{Account, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry};
@@ -30,7 +29,7 @@ use reth_storage_api::{
     StateProvider, StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
-use revm::db::states::PlainStorageRevert;
+use revm_database::states::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
@@ -845,14 +844,14 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.get_in_memory_or_storage_by_block(
             id,
-            |db_provider| db_provider.block_with_senders(id, transaction_kind),
+            |db_provider| db_provider.recovered_block(id, transaction_kind),
             |block_state| Ok(Some(block_state.block().recovered_block().clone())),
         )
     }
@@ -890,13 +889,13 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         )
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
-            |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
+            |db_provider, range, _| db_provider.recovered_block_range(range),
             |block_state, _| Some(block_state.block().recovered_block().clone()),
             |_| true,
         )
@@ -1164,7 +1163,7 @@ impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
             id,
             |db_provider| db_provider.ommers(id),
             |block_state| {
-                if self.chain_spec().final_paris_total_difficulty(block_state.number()).is_some() {
+                if self.chain_spec().is_paris_active_at_block(block_state.number()) {
                     return Ok(Some(Vec::new()))
                 }
 
@@ -1485,14 +1484,14 @@ mod tests {
     use itertools::Itertools;
     use rand::Rng;
     use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, NewCanonicalChain};
-    use reth_db::models::AccountBeforeTx;
+    use reth_db_api::models::AccountBeforeTx;
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
     };
-    use revm::db::BundleState;
+    use revm_database::BundleState;
     use std::{
         ops::{Bound, Range, RangeBounds},
         sync::Arc,

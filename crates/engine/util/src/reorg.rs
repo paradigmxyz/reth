@@ -1,32 +1,24 @@
 //! Stream wrapper that simulates reorgs.
 
-use alloy_consensus::{Header, Transaction};
-use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
-};
+use alloy_consensus::{BlockHeader, Transaction};
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, ExecutionData,
-    ExecutionPayload as _, OnForkChoiceUpdated,
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, ExecutionPayload as _,
+    OnForkChoiceUpdated, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
-use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
-    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm, Evm, EvmError,
+    execute::{BlockBuilder, BlockBuilderOutcome},
+    ConfigureEvm,
 };
-use reth_payload_primitives::EngineApiMessageVersion;
-use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt};
-use reth_primitives_traits::{block::Block as _, proofs, SignedTransaction};
-use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
-use reth_revm::{
-    database::StateProviderDatabase,
-    db::{states::bundle_state::BundleRetention, State},
-    DatabaseCommit,
-};
+use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
+use reth_primitives::{BlockTy, HeaderTy, SealedBlock};
+use reth_primitives_traits::{block::Block as _, BlockBody as _, SignedTransaction};
+use reth_provider::{BlockReader, ChainSpecProvider, ProviderError, StateProviderFactory};
+use reth_revm::{database::StateProviderDatabase, db::State};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -52,7 +44,7 @@ type ReorgResponseFut = Pin<Box<dyn Future<Output = EngineReorgResponse> + Send 
 /// Engine API stream wrapper that simulates reorgs with specified frequency.
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Spec> {
+pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Validator> {
     /// Underlying stream
     #[pin]
     stream: S,
@@ -61,7 +53,7 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Spec> {
     /// Evm configuration.
     evm_config: Evm,
     /// Payload validator.
-    payload_validator: ExecutionPayloadValidator<Spec>,
+    payload_validator: Validator,
     /// The frequency of reorgs.
     frequency: usize,
     /// The depth of reorgs.
@@ -77,13 +69,15 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Spec> {
     reorg_responses: FuturesUnordered<ReorgResponseFut>,
 }
 
-impl<S, Engine: EngineTypes, Provider, Evm, Spec> EngineReorg<S, Engine, Provider, Evm, Spec> {
+impl<S, Engine: EngineTypes, Provider, Evm, Validator>
+    EngineReorg<S, Engine, Provider, Evm, Validator>
+{
     /// Creates new [`EngineReorg`] stream wrapper.
     pub fn new(
         stream: S,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator<Spec>,
+        payload_validator: Validator,
         frequency: usize,
         depth: usize,
     ) -> Self {
@@ -102,13 +96,17 @@ impl<S, Engine: EngineTypes, Provider, Evm, Spec> EngineReorg<S, Engine, Provide
     }
 }
 
-impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider, Evm, Spec>
+impl<S, Engine, Provider, Evm, Validator> Stream
+    for EngineReorg<S, Engine, Provider, Evm, Validator>
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: EngineTypes<ExecutionData = ExecutionData>,
-    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
-    Spec: EthChainSpec + EthereumHardforks,
+    Engine: EngineTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
+    Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
+        + StateProviderFactory
+        + ChainSpecProvider,
+    Evm: ConfigureEvm,
+    Validator:
+        PayloadValidator<ExecutionData = Engine::ExecutionData, Block = BlockTy<Evm::Primitives>>,
 {
     type Item = S::Item;
 
@@ -163,7 +161,7 @@ where
                     // forkchoice state. We will rely on CL to reorg us back to canonical chain.
                     // TODO: This is an expensive blocking operation, ideally it's spawned as a task
                     // so that the stream could yield the control back.
-                    let reorg_payload = match create_reorg_head(
+                    let reorg_block = match create_reorg_head(
                         this.provider,
                         this.evm_config,
                         this.payload_validator,
@@ -184,7 +182,7 @@ where
                     let reorg_forkchoice_state = ForkchoiceState {
                         finalized_block_hash: last_forkchoice_state.finalized_block_hash,
                         safe_block_hash: last_forkchoice_state.safe_block_hash,
-                        head_block_hash: reorg_payload.block_hash(),
+                        head_block_hash: reorg_block.hash(),
                     };
 
                     let (reorg_payload_tx, reorg_payload_rx) = oneshot::channel();
@@ -199,7 +197,7 @@ where
                         BeaconEngineMessage::NewPayload { payload, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
-                            payload: reorg_payload,
+                            payload: Engine::block_to_payload(reorg_block),
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state
@@ -241,195 +239,86 @@ where
     }
 }
 
-fn create_reorg_head<Provider, Evm, Spec>(
+fn create_reorg_head<Provider, Evm, Validator>(
     provider: &Provider,
     evm_config: &Evm,
-    payload_validator: &ExecutionPayloadValidator<Spec>,
+    payload_validator: &Validator,
     mut depth: usize,
-    next_payload: ExecutionData,
-) -> RethResult<ExecutionData>
+    next_payload: Validator::ExecutionData,
+) -> RethResult<SealedBlock<BlockTy<Evm::Primitives>>>
 where
-    Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
-    Spec: EthChainSpec + EthereumHardforks,
+    Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
+        + StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthChainSpec>,
+    Evm: ConfigureEvm,
+    Validator: PayloadValidator<Block = BlockTy<Evm::Primitives>>,
 {
-    let chain_spec = payload_validator.chain_spec();
-
     // Ensure next payload is valid.
     let next_block =
         payload_validator.ensure_well_formed_payload(next_payload).map_err(RethError::msg)?;
 
     // Fetch reorg target block depending on its depth and its parent.
-    let mut previous_hash = next_block.parent_hash;
-    let mut candidate_transactions = next_block.into_body().transactions;
+    let mut previous_hash = next_block.parent_hash();
+    let mut candidate_transactions = next_block.into_body().transactions().to_vec();
     let reorg_target = 'target: {
         loop {
             let reorg_target = provider
                 .block_by_hash(previous_hash)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(previous_hash.into()))?;
             if depth == 0 {
-                break 'target reorg_target
+                break 'target reorg_target.seal_slow()
             }
 
             depth -= 1;
-            previous_hash = reorg_target.parent_hash;
-            candidate_transactions = reorg_target.body.transactions;
+            previous_hash = reorg_target.header().parent_hash();
+            candidate_transactions = reorg_target.into_body().into_transactions();
         }
     };
     let reorg_target_parent = provider
-        .block_by_hash(reorg_target.parent_hash)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(reorg_target.parent_hash.into()))?;
+        .sealed_header_by_hash(reorg_target.header().parent_hash())?
+        .ok_or_else(|| ProviderError::HeaderNotFound(reorg_target.header().parent_hash().into()))?;
 
-    debug!(target: "engine::stream::reorg", number = reorg_target.number, hash = %previous_hash, "Selected reorg target");
+    debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
     // Configure state
-    let state_provider = provider.state_by_block_hash(reorg_target.parent_hash)?;
+    let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))
         .with_bundle_update()
         .build();
 
-    // Configure EVM
-    let mut evm = evm_config.evm_for_block(&mut state, &reorg_target.header);
+    let ctx = evm_config.context_for_block(&reorg_target);
+    let evm = evm_config.evm_for_block(&mut state, &reorg_target);
+    let mut builder = evm_config.create_block_builder(evm, &reorg_target_parent, ctx);
 
-    // apply eip-4788 pre block contract call
-    let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-
-    system_caller.apply_beacon_root_contract_call(
-        reorg_target.timestamp,
-        reorg_target.number,
-        reorg_target.parent_beacon_block_root,
-        &mut evm,
-    )?;
+    builder.apply_pre_execution_changes()?;
 
     let mut cumulative_gas_used = 0;
-    let mut sum_blob_gas_used = 0;
-    let mut transactions = Vec::new();
-    let mut receipts = Vec::new();
-    let mut versioned_hashes = Vec::new();
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
-        if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit {
+        if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit() {
             continue
         }
 
-        // Configure the environment for the block.
         let tx_recovered =
             tx.try_clone_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
-        let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
-        let exec_result = match evm.transact(tx_env) {
-            Ok(result) => result,
-            Err(err) if err.is_invalid_tx_err() => {
-                trace!(target: "engine::stream::reorg", hash = %tx.tx_hash(), ?err, "Error executing transaction from next block");
+        let gas_used = match builder.execute_transaction(tx_recovered) {
+            Ok(gas_used) => gas_used,
+            Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                hash,
+                error,
+            })) => {
+                trace!(target: "engine::stream::reorg", hash = %hash, ?error, "Error executing transaction from next block");
                 continue
             }
             // Treat error as fatal
-            Err(error) => {
-                return Err(RethError::Execution(BlockExecutionError::Validation(
-                    BlockValidationError::EVM { hash: *tx.tx_hash(), error: Box::new(error) },
-                )))
-            }
-        };
-        evm.db_mut().commit(exec_result.state);
-
-        if let Some(blob_tx) = tx.as_eip4844() {
-            sum_blob_gas_used += blob_tx.blob_gas();
-            versioned_hashes.extend(blob_tx.blob_versioned_hashes.clone());
-        }
-
-        cumulative_gas_used += exec_result.result.gas_used();
-        #[allow(clippy::needless_update)] // side-effect of optimism fields
-        receipts.push(Receipt {
-            tx_type: tx.tx_type(),
-            success: exec_result.result.is_success(),
-            cumulative_gas_used,
-            logs: exec_result.result.into_logs().into_iter().collect(),
-            ..Default::default()
-        });
-
-        // append transaction to the list of executed transactions
-        transactions.push(tx);
-    }
-    drop(evm);
-
-    if let Some(withdrawals) = &reorg_target.body.withdrawals {
-        state.increment_balances(post_block_withdrawals_balance_increments(
-            chain_spec,
-            reorg_target.timestamp,
-            withdrawals,
-        ))?;
-    }
-
-    // merge all transitions into bundle state, this would apply the withdrawal balance changes
-    // and 4788 contract call
-    state.merge_transitions(BundleRetention::PlainState);
-
-    let outcome: ExecutionOutcome = ExecutionOutcome::new(
-        state.take_bundle(),
-        vec![receipts],
-        reorg_target.number,
-        Default::default(),
-    );
-    let hashed_state = state_provider.hashed_post_state(outcome.state());
-
-    let (blob_gas_used, excess_blob_gas) =
-        if let Some(blob_params) = chain_spec.blob_params_at_timestamp(reorg_target.timestamp) {
-            (Some(sum_blob_gas_used), reorg_target_parent.next_block_excess_blob_gas(blob_params))
-        } else {
-            (None, None)
+            Err(error) => return Err(RethError::Execution(error)),
         };
 
-    let reorg_block = Block {
-        header: Header {
-            // Set same fields as the reorg target
-            parent_hash: reorg_target.header.parent_hash,
-            ommers_hash: reorg_target.header.ommers_hash,
-            beneficiary: reorg_target.header.beneficiary,
-            difficulty: reorg_target.header.difficulty,
-            number: reorg_target.header.number,
-            gas_limit: reorg_target.header.gas_limit,
-            timestamp: reorg_target.header.timestamp,
-            extra_data: reorg_target.header.extra_data,
-            mix_hash: reorg_target.header.mix_hash,
-            nonce: reorg_target.header.nonce,
-            base_fee_per_gas: reorg_target.header.base_fee_per_gas,
-            parent_beacon_block_root: reorg_target.header.parent_beacon_block_root,
-            withdrawals_root: reorg_target.header.withdrawals_root,
-
-            // Compute or add new fields
-            transactions_root: proofs::calculate_transaction_root(&transactions),
-            receipts_root: outcome.ethereum_receipts_root(reorg_target.header.number).unwrap(),
-            logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
-            gas_used: cumulative_gas_used,
-            blob_gas_used,
-            excess_blob_gas,
-            state_root: state_provider.state_root(hashed_state)?,
-            requests_hash: None, // TODO(prague)
-        },
-        body: BlockBody {
-            transactions,
-            ommers: reorg_target.body.ommers,
-            withdrawals: reorg_target.body.withdrawals,
-        },
+        cumulative_gas_used += gas_used;
     }
-    .seal_slow();
 
-    Ok(ExecutionData {
-        payload: ExecutionPayload::from_block_unchecked(
-            reorg_block.hash(),
-            &reorg_block.into_block(),
-        )
-        .0,
-        // todo(onbjerg): how do we support execution requests?
-        sidecar: reorg_target
-            .header
-            .parent_beacon_block_root
-            .map(|root| {
-                ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                    parent_beacon_block_root: root,
-                    versioned_hashes,
-                })
-            })
-            .unwrap_or_else(ExecutionPayloadSidecar::none),
-    })
+    let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider)?;
+
+    Ok(block.into_sealed_block())
 }

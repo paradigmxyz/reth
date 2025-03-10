@@ -48,6 +48,17 @@ impl OpReceipt {
         }
     }
 
+    /// Returns a mutable reference to the inner [`Receipt`],
+    pub const fn as_receipt_mut(&mut self) -> &mut Receipt {
+        match self {
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => receipt,
+            Self::Deposit(receipt) => &mut receipt.inner,
+        }
+    }
+
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
         match self {
@@ -241,6 +252,7 @@ mod compact {
         tx_type: OpTxType,
         success: bool,
         cumulative_gas_used: u64,
+        #[allow(clippy::owned_cow)]
         logs: Cow<'a, Vec<Log>>,
         deposit_nonce: Option<u64>,
         deposit_receipt_version: Option<u64>,
@@ -319,6 +331,129 @@ mod compact {
     }
 }
 
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+pub(super) mod serde_bincode_compat {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::OpReceipt`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_optimism_primitives::{serde_bincode_compat, OpReceipt};
+    /// use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::OpReceipt<'_>")]
+    ///     receipt: OpReceipt,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub enum OpReceipt<'a> {
+        /// Legacy receipt
+        Legacy(alloy_consensus::serde_bincode_compat::Receipt<'a, alloy_primitives::Log>),
+        /// EIP-2930 receipt
+        Eip2930(alloy_consensus::serde_bincode_compat::Receipt<'a, alloy_primitives::Log>),
+        /// EIP-1559 receipt
+        Eip1559(alloy_consensus::serde_bincode_compat::Receipt<'a, alloy_primitives::Log>),
+        /// EIP-7702 receipt
+        Eip7702(alloy_consensus::serde_bincode_compat::Receipt<'a, alloy_primitives::Log>),
+        /// Deposit receipt
+        Deposit(
+            op_alloy_consensus::serde_bincode_compat::OpDepositReceipt<'a, alloy_primitives::Log>,
+        ),
+    }
+
+    impl<'a> From<&'a super::OpReceipt> for OpReceipt<'a> {
+        fn from(value: &'a super::OpReceipt) -> Self {
+            match value {
+                super::OpReceipt::Legacy(receipt) => Self::Legacy(receipt.into()),
+                super::OpReceipt::Eip2930(receipt) => Self::Eip2930(receipt.into()),
+                super::OpReceipt::Eip1559(receipt) => Self::Eip1559(receipt.into()),
+                super::OpReceipt::Eip7702(receipt) => Self::Eip7702(receipt.into()),
+                super::OpReceipt::Deposit(receipt) => Self::Deposit(receipt.into()),
+            }
+        }
+    }
+
+    impl<'a> From<OpReceipt<'a>> for super::OpReceipt {
+        fn from(value: OpReceipt<'a>) -> Self {
+            match value {
+                OpReceipt::Legacy(receipt) => Self::Legacy(receipt.into()),
+                OpReceipt::Eip2930(receipt) => Self::Eip2930(receipt.into()),
+                OpReceipt::Eip1559(receipt) => Self::Eip1559(receipt.into()),
+                OpReceipt::Eip7702(receipt) => Self::Eip7702(receipt.into()),
+                OpReceipt::Deposit(receipt) => Self::Deposit(receipt.into()),
+            }
+        }
+    }
+
+    impl SerializeAs<super::OpReceipt> for OpReceipt<'_> {
+        fn serialize_as<S>(source: &super::OpReceipt, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            OpReceipt::<'_>::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::OpReceipt> for OpReceipt<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::OpReceipt, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            OpReceipt::<'_>::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for super::OpReceipt {
+        type BincodeRepr<'a> = OpReceipt<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::{receipt::serde_bincode_compat, OpReceipt};
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_tx_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::OpReceipt<'_>")]
+                reseipt: OpReceipt,
+            }
+
+            let mut bytes = [0u8; 1024];
+            rand::thread_rng().fill(bytes.as_mut_slice());
+            let mut data = Data {
+                reseipt: OpReceipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
+            };
+            let success = data.reseipt.as_receipt_mut().status.coerce_status();
+            // // ensure we don't have an invalid poststate variant
+            data.reseipt.as_receipt_mut().status = success.into();
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,10 +480,10 @@ mod tests {
                 status: Eip658Value::Eip658(false),
                 cumulative_gas_used: 0x1,
                 logs: vec![Log::new_unchecked(
-                    address!("0000000000000000000000000000000000000011"),
+                    address!("0x0000000000000000000000000000000000000011"),
                     vec![
-                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
-                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
+                        b256!("0x000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("0x000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
                     bytes!("0100ff"),
                 )],
@@ -374,10 +509,10 @@ mod tests {
                 status: Eip658Value::Eip658(false),
                 cumulative_gas_used: 0x1,
                 logs: vec![Log::new_unchecked(
-                    address!("0000000000000000000000000000000000000011"),
+                    address!("0x0000000000000000000000000000000000000011"),
                     vec![
-                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
-                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
+                        b256!("0x000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("0x000000000000000000000000000000000000000000000000000000000000beef"),
                     ],
                     bytes!("0100ff"),
                 )],
@@ -448,13 +583,17 @@ mod tests {
             cumulative_gas_used: 16747627,
             logs: vec![
                 Log::new_unchecked(
-                    address!("4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
-                    vec![b256!("c69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9")],
+                    address!("0x4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
+                    vec![b256!(
+                        "0xc69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9"
+                    )],
                     Bytes::from(vec![1; 0xffffff]),
                 ),
                 Log::new_unchecked(
-                    address!("faca325c86bf9c2d5b413cd7b90b209be92229c2"),
-                    vec![b256!("8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2")],
+                    address!("0xfaca325c86bf9c2d5b413cd7b90b209be92229c2"),
+                    vec![b256!(
+                        "0x8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2"
+                    )],
                     Bytes::from(vec![1; 0xffffff]),
                 ),
             ],

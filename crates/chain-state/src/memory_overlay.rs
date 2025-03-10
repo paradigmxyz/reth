@@ -1,10 +1,8 @@
 use super::ExecutedBlockWithTrieUpdates;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{
-    keccak256, map::B256Map, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
-};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_errors::ProviderResult;
-use reth_primitives::{Account, Bytecode, NodePrimitives};
+use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
     StateRootProvider, StorageRootProvider,
@@ -13,13 +11,16 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
-use revm::db::BundleState;
+use revm_database::BundleState;
 use std::sync::OnceLock;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
 /// reference of the historical state provider for fallback lookups.
 #[allow(missing_debug_implementations)]
-pub struct MemoryOverlayStateProviderRef<'a, N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct MemoryOverlayStateProviderRef<
+    'a,
+    N: NodePrimitives = reth_ethereum_primitives::EthPrimitives,
+> {
     /// Historical state provider for state lookups that are not found in in-memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
@@ -199,11 +200,7 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
         self.historical.multiproof(input, targets)
     }
 
-    fn witness(
-        &self,
-        mut input: TrieInput,
-        target: HashedPostState,
-    ) -> ProviderResult<B256Map<Bytes>> {
+    fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
         input.prepend_cached(nodes, state);
         self.historical.witness(input, target)

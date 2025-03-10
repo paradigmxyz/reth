@@ -1,18 +1,17 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
-use alloy_consensus::BlockHeader;
+use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
+use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
-use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, Recovered, RecoveredBlock, SealedHeader,
+use reth_primitives_traits::{
+    transaction::signed::SignedTransaction, Block, BlockBody, NodePrimitives, RecoveredBlock,
+    SealedHeader,
 };
-use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SignedTransaction};
-use reth_trie::updates::TrieUpdates;
-use revm::db::BundleState;
+use reth_trie_common::updates::TrieUpdates;
+use revm_database::BundleState;
 
 /// A chain of blocks and their final state.
 ///
@@ -26,7 +25,7 @@ use revm::db::BundleState;
 /// A chain of blocks should not be empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Chain<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// All blocks in this chain.
     blocks: BTreeMap<BlockNumber, RecoveredBlock<N::Block>>,
     /// The outcome of block execution for this chain.
@@ -131,7 +130,7 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns the block with matching hash.
-    pub fn block_with_senders(&self, block_hash: BlockHash) -> Option<&RecoveredBlock<N::Block>> {
+    pub fn recovered_block(&self, block_hash: BlockHash) -> Option<&RecoveredBlock<N::Block>> {
         self.blocks.iter().find_map(|(_num, block)| (block.hash() == block_hash).then_some(block))
     }
 
@@ -272,15 +271,14 @@ impl<N: NodePrimitives> Chain<N> {
     /// Merge two chains by appending the given chain into the current one.
     ///
     /// The state of accounts for this chain is set to the state of the newest chain.
-    pub fn append_chain(&mut self, other: Self) -> Result<(), BlockExecutionError> {
+    ///
+    /// Returns the passed `other` chain in [`Result::Err`] variant if the chains could not be
+    /// connected.
+    pub fn append_chain(&mut self, other: Self) -> Result<(), Self> {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
         if chain_tip.hash() != other_fork_block.hash {
-            return Err(InternalBlockExecutionError::AppendChainDoesntConnect {
-                chain_tip: Box::new(chain_tip.num_hash()),
-                other_chain_fork: Box::new(other_fork_block),
-            }
-            .into())
+            return Err(other)
         }
 
         // Insert blocks from other chain
@@ -470,7 +468,7 @@ impl<B: Block> IntoIterator for ChainBlocks<'_, B> {
 
 /// Used to hold receipts and their attachment.
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
-pub struct BlockReceipts<T = reth_primitives::Receipt> {
+pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
     /// Block identifier
     pub block: BlockNumHash,
     /// Transaction identifier and receipt.
@@ -500,7 +498,8 @@ impl From<BlockHash> for ChainSplitTarget {
 
 /// Result of a split chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ChainSplit<N: NodePrimitives = reth_primitives::EthPrimitives> {
+#[allow(clippy::large_enum_variant)]
+pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// Chain is not split. Pending chain is returned.
     /// Given block split is higher than last block.
     /// Or in case of split by hash when hash is unknown.
@@ -526,11 +525,14 @@ pub enum ChainSplit<N: NodePrimitives = reth_primitives::EthPrimitives> {
 /// Bincode-compatible [`Chain`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use crate::ExecutionOutcome;
+    use crate::{serde_bincode_compat, ExecutionOutcome};
     use alloc::borrow::Cow;
     use alloy_primitives::BlockNumber;
-    use reth_primitives::{serde_bincode_compat::RecoveredBlock, EthPrimitives, NodePrimitives};
-    use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, Block};
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_primitives_traits::{
+        serde_bincode_compat::{RecoveredBlock, SerdeBincodeCompat},
+        Block, NodePrimitives,
+    };
     use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -559,7 +561,7 @@ pub(super) mod serde_bincode_compat {
         >,
     {
         blocks: RecoveredBlocks<'a, N::Block>,
-        execution_outcome: Cow<'a, ExecutionOutcome<N::Receipt>>,
+        execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
         trie_updates: Option<TrieUpdates<'a>>,
     }
 
@@ -568,7 +570,7 @@ pub(super) mod serde_bincode_compat {
         'a,
         B: reth_primitives_traits::Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>
             + 'static,
-    >(Cow<'a, BTreeMap<BlockNumber, reth_primitives::RecoveredBlock<B>>>);
+    >(Cow<'a, BTreeMap<BlockNumber, reth_primitives_traits::RecoveredBlock<B>>>);
 
     impl<B> Serialize for RecoveredBlocks<'_, B>
     where
@@ -612,7 +614,7 @@ pub(super) mod serde_bincode_compat {
         fn from(value: &'a super::Chain<N>) -> Self {
             Self {
                 blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
-                execution_outcome: Cow::Borrowed(&value.execution_outcome),
+                execution_outcome: value.execution_outcome.as_repr(),
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
         }
@@ -627,7 +629,7 @@ pub(super) mod serde_bincode_compat {
         fn from(value: Chain<'a, N>) -> Self {
             Self {
                 blocks: value.blocks.0.into_owned(),
-                execution_outcome: value.execution_outcome.into_owned(),
+                execution_outcome: ExecutionOutcome::from_repr(value.execution_outcome),
                 trie_updates: value.trie_updates.map(Into::into),
             }
         }
@@ -666,7 +668,7 @@ pub(super) mod serde_bincode_compat {
         use super::super::{serde_bincode_compat, Chain};
         use arbitrary::Arbitrary;
         use rand::Rng;
-        use reth_primitives::RecoveredBlock;
+        use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
@@ -703,25 +705,11 @@ mod tests {
     use alloy_consensus::TxType;
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
-    use revm::primitives::{AccountInfo, HashMap};
-
-    // TODO: this is temporary, until we fully switch over to `reth_ethereum_primitives` for the
-    // `Receipt` type in `EthPrimitives`.
-    #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[non_exhaustive]
-    struct TestPrimitives;
-
-    impl reth_primitives_traits::NodePrimitives for TestPrimitives {
-        type Block = reth_primitives::Block;
-        type BlockHeader = alloy_consensus::Header;
-        type BlockBody = reth_primitives::BlockBody;
-        type SignedTx = reth_primitives::TransactionSigned;
-        type Receipt = Receipt;
-    }
+    use revm::{primitives::HashMap, state::AccountInfo};
 
     #[test]
     fn chain_append() {
-        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
+        let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
@@ -785,13 +773,13 @@ mod tests {
             vec![],
         );
 
-        let mut block1: RecoveredBlock<reth_primitives::Block> = Default::default();
+        let mut block1: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
         let block1_hash = B256::new([15; 32]);
         block1.set_block_number(1);
         block1.set_hash(block1_hash);
         block1.push_sender(Address::new([4; 20]));
 
-        let mut block2: RecoveredBlock<reth_primitives::Block> = Default::default();
+        let mut block2: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
         let block2_hash = B256::new([16; 32]);
         block2.set_block_number(2);
         block2.set_hash(block2_hash);
@@ -852,7 +840,7 @@ mod tests {
     #[test]
     fn receipts_by_block_hash() {
         // Create a default RecoveredBlock object
-        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
+        let block: RecoveredBlock<reth_ethereum_primitives::Block> = Default::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);
@@ -896,7 +884,7 @@ mod tests {
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
-        let chain: Chain<TestPrimitives> = Chain {
+        let chain: Chain = Chain {
             blocks: BTreeMap::from([(10, block1), (11, block2)]),
             execution_outcome: execution_outcome.clone(),
             ..Default::default()

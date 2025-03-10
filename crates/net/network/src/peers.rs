@@ -788,7 +788,7 @@ impl PeersManager {
         self.add_and_connect_kind(peer_id, PeerKind::Basic, addr, fork_id)
     }
 
-    ///  Connects a peer and its address with the given kind.
+    /// Connects a peer and its address with the given kind.
     ///
     /// Note: This is invoked on demand via an external command received by the manager
     pub(crate) fn add_and_connect_kind(
@@ -803,6 +803,20 @@ impl PeersManager {
         }
 
         match self.peers.entry(peer_id) {
+            Entry::Occupied(mut entry) => {
+                let peer = entry.get_mut();
+                peer.kind = kind;
+                peer.fork_id = fork_id;
+                peer.addr = addr;
+
+                if peer.state == PeerConnectionState::Idle {
+                    // Try connecting again.
+                    peer.state = PeerConnectionState::PendingOut;
+                    self.connection_info.inc_pending_out();
+                    self.queued_actions
+                        .push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
+                }
+            }
             Entry::Vacant(entry) => {
                 trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "connects new node");
                 let mut peer = Peer::with_kind(addr, kind);
@@ -813,7 +827,6 @@ impl PeersManager {
                 self.queued_actions
                     .push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
             }
-            _ => return,
         }
 
         if kind.is_trusted() {
@@ -2791,7 +2804,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_add_pending_onnect() {
+    async fn test_add_pending_connect() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();

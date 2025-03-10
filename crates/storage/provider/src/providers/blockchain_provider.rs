@@ -21,9 +21,12 @@ use reth_chain_state::{
     MemoryOverlayStateProvider,
 };
 use reth_chainspec::{ChainInfo, EthereumHardforks};
-use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
-use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
+use reth_db_api::{
+    models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
+    transaction::DbTx,
+    Database,
+};
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
@@ -40,10 +43,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::StateCommitment;
-use revm::{
-    db::BundleState,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-};
+use revm_database::BundleState;
 use std::{
     ops::{Add, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
@@ -316,12 +316,12 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
     /// hashes, since they would need to be calculated on the spot, and we want fast querying.**
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.consistent_provider()?.block_with_senders(id, transaction_kind)
+        self.consistent_provider()?.recovered_block(id, transaction_kind)
     }
 
     fn sealed_block_with_senders(
@@ -343,11 +343,11 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         self.consistent_provider()?.block_with_senders_range(range)
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        self.consistent_provider()?.sealed_block_with_senders_range(range)
+        self.consistent_provider()?.recovered_block_range(range)
     }
 }
 
@@ -792,11 +792,12 @@ mod tests {
     use reth_chainspec::{
         ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
     };
-    use reth_db::{
+    use reth_db_api::{
+        cursor::DbCursorRO,
         models::{AccountBeforeTx, StoredBlockBodyIndices},
         tables,
+        transaction::DbTx,
     };
-    use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock, SealedBlock, StaticFileSegment};
@@ -811,7 +812,7 @@ mod tests {
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
         random_receipt, BlockParams, BlockRangeParams,
     };
-    use revm::db::BundleState;
+    use revm_database::BundleState;
     use std::{
         ops::{Bound, Deref, Range, RangeBounds},
         sync::Arc,
@@ -2357,10 +2358,7 @@ mod tests {
             (sealed_headers_range, |block: &SealedBlock| block.clone_sealed_header()),
             (block_range, |block: &SealedBlock| block.clone().into_block()),
             (block_with_senders_range, |block: &SealedBlock| block.clone().try_recover().unwrap()),
-            (sealed_block_with_senders_range, |block: &SealedBlock| block
-                .clone()
-                .try_recover()
-                .unwrap()),
+            (recovered_block_range, |block: &SealedBlock| block.clone().try_recover().unwrap()),
             (transactions_by_block_range, |block: &SealedBlock| block.body().transactions.clone()),
         ]);
 
@@ -2548,7 +2546,7 @@ mod tests {
             ),
             (
                 TWO,
-                block_with_senders,
+                recovered_block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
                     block.clone().try_recover().ok()
@@ -2557,7 +2555,7 @@ mod tests {
             ),
             (
                 TWO,
-                block_with_senders,
+                recovered_block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
                     block.clone().try_recover().ok()

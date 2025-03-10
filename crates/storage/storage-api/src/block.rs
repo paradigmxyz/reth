@@ -6,7 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use core::ops::RangeInclusive;
-use reth_primitives::{RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 
 /// A helper enum that represents the origin of the requested block.
@@ -117,7 +117,7 @@ pub trait BlockReader:
     /// Returns the block's transactions in the requested variant.
     ///
     /// Returns `None` if block is not found.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
@@ -148,7 +148,7 @@ pub trait BlockReader:
 
     /// Returns a range of sealed blocks from the database, along with the senders of each
     /// transaction in the blocks.
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>>;
@@ -184,12 +184,12 @@ impl<T: BlockReader> BlockReader for Arc<T> {
     fn block_by_number(&self, num: u64) -> ProviderResult<Option<Self::Block>> {
         T::block_by_number(self, num)
     }
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        T::block_with_senders(self, id, transaction_kind)
+        T::recovered_block(self, id, transaction_kind)
     }
     fn sealed_block_with_senders(
         &self,
@@ -207,11 +207,11 @@ impl<T: BlockReader> BlockReader for Arc<T> {
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::block_with_senders_range(self, range)
     }
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        T::sealed_block_with_senders_range(self, range)
+        T::recovered_block_range(self, range)
     }
 }
 
@@ -245,12 +245,12 @@ impl<T: BlockReader> BlockReader for &T {
     fn block_by_number(&self, num: u64) -> ProviderResult<Option<Self::Block>> {
         T::block_by_number(self, num)
     }
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        T::block_with_senders(self, id, transaction_kind)
+        T::recovered_block(self, id, transaction_kind)
     }
     fn sealed_block_with_senders(
         &self,
@@ -268,11 +268,11 @@ impl<T: BlockReader> BlockReader for &T {
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::block_with_senders_range(self, range)
     }
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        T::sealed_block_with_senders_range(self, range)
+        T::recovered_block_range(self, range)
     }
 }
 
@@ -342,13 +342,10 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         match id {
-            BlockId::Hash(hash) => {
-                self.block_with_senders(hash.block_hash.into(), transaction_kind)
-            }
-            BlockId::Number(num) => self.convert_block_number(num)?.map_or_else(
-                || Ok(None),
-                |num| self.block_with_senders(num.into(), transaction_kind),
-            ),
+            BlockId::Hash(hash) => self.recovered_block(hash.block_hash.into(), transaction_kind),
+            BlockId::Number(num) => self
+                .convert_block_number(num)?
+                .map_or_else(|| Ok(None), |num| self.recovered_block(num.into(), transaction_kind)),
         }
     }
 

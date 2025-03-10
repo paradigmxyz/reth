@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 use crate::{
     in_memory::ExecutedBlockWithTrieUpdates, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
@@ -14,20 +12,22 @@ use alloy_eips::{
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
+use core::marker::PhantomData;
 use rand::{thread_rng, Rng};
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
-use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, BlockBody, EthPrimitives, NodePrimitives,
-    Receipt, Recovered, RecoveredBlock, SealedBlock, SealedHeader, Transaction, TransactionSigned,
+use reth_ethereum_primitives::{
+    Block, BlockBody, EthPrimitives, Receipt, Transaction, TransactionSigned,
 };
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives_traits::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    Account,
+    Account, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
+    SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
-use revm::{db::BundleState, primitives::AccountInfo};
+use revm_database::BundleState;
+use revm_state::AccountInfo;
 use std::{
     collections::HashMap,
     ops::Range,
@@ -95,7 +95,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         &mut self,
         number: BlockNumber,
         parent_hash: B256,
-    ) -> RecoveredBlock<reth_primitives::Block> {
+    ) -> RecoveredBlock<reth_ethereum_primitives::Block> {
         let mut rng = thread_rng();
 
         let mock_tx = |nonce: u64| -> Recovered<_> {
@@ -149,7 +149,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_tx()).collect::<Vec<_>>(),
+                &transactions.clone().into_iter().map(|tx| tx.into_inner()).collect::<Vec<_>>(),
             ),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
@@ -175,7 +175,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let block = SealedBlock::from_sealed_parts(
             SealedHeader::seal_slow(header),
             BlockBody {
-                transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
+                transactions: transactions.into_iter().map(|tx| tx.into_inner()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
@@ -188,9 +188,9 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     /// Creates a fork chain with the given base block.
     pub fn create_fork(
         &mut self,
-        base_block: &SealedBlock,
+        base_block: &SealedBlock<Block>,
         length: u64,
-    ) -> Vec<RecoveredBlock<reth_primitives::Block>> {
+    ) -> Vec<RecoveredBlock<Block>> {
         let mut fork = Vec::with_capacity(length as usize);
         let mut parent = base_block.clone();
 
@@ -264,7 +264,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     /// updated.
     pub fn get_execution_outcome(
         &mut self,
-        block: RecoveredBlock<reth_primitives::Block>,
+        block: RecoveredBlock<reth_ethereum_primitives::Block>,
     ) -> ExecutionOutcome {
         let receipts = block
             .body()
@@ -312,7 +312,8 @@ impl TestBlockBuilder {
 }
 /// A test `ChainEventSubscriptions`
 #[derive(Clone, Debug, Default)]
-pub struct TestCanonStateSubscriptions<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct TestCanonStateSubscriptions<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives>
+{
     canon_notif_tx: Arc<Mutex<Vec<Sender<CanonStateNotification<N>>>>>,
 }
 
