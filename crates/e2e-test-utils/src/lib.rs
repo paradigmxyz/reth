@@ -211,8 +211,7 @@ where
             Engine: PayloadTypes<
                 PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
             >,
-        >
-        + Node<
+        > + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             Primitives: NodePrimitives<
                 BlockHeader = alloy_consensus::Header,
@@ -247,8 +246,7 @@ where
             Engine: PayloadTypes<
                 PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
             >,
-        >
-        + Node<
+        > + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             Primitives: NodePrimitives<
                 BlockHeader = alloy_consensus::Header,
