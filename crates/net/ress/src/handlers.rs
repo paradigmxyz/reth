@@ -31,6 +31,11 @@ pub enum ProtocolEvent {
         /// Sender part for forwarding commands.
         to_connection: mpsc::UnboundedSender<RessPeerRequest>,
     },
+    /// Number of max active connections exceeded. New connection was rejected.
+    MaxActiveConnectionsExceeded {
+        /// The current number
+        num_active: u64,
+    },
 }
 
 /// Protocol state is an helper struct to store the protocol events.
@@ -82,18 +87,17 @@ where
     type ConnectionHandler = Self;
 
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Self::ConnectionHandler> {
-        let num_connections = self.state.active_connections.load(Ordering::Relaxed);
-        trace!(
-            target: "ress::net",
-            num_connections, max_connections = self.max_active_connections, %socket_addr,
-            "COMPARING"
-        );
-        if num_connections >= self.max_active_connections {
+        let num_active = self.state.active_connections.load(Ordering::Relaxed);
+        if num_active >= self.max_active_connections {
             trace!(
                 target: "ress::net",
-                num_connections, max_connections = self.max_active_connections, %socket_addr,
+                num_active, max_connections = self.max_active_connections, %socket_addr,
                 "ignoring incoming connection, max active reached"
             );
+            let _ = self
+                .state
+                .events_sender
+                .send(ProtocolEvent::MaxActiveConnectionsExceeded { num_active });
             None
         } else {
             Some(self.clone())
@@ -105,18 +109,17 @@ where
         socket_addr: SocketAddr,
         peer_id: PeerId,
     ) -> Option<Self::ConnectionHandler> {
-        let num_connections = self.state.active_connections.load(Ordering::Relaxed);
-        trace!(
-            target: "ress::net",
-            num_connections, max_connections = self.max_active_connections, %socket_addr, %peer_id,
-            "COMPARING"
-        );
-        if num_connections >= self.max_active_connections {
+        let num_active = self.state.active_connections.load(Ordering::Relaxed);
+        if num_active >= self.max_active_connections {
             trace!(
                 target: "ress::net",
-                num_connections, max_connections = self.max_active_connections, %socket_addr, %peer_id,
+                num_active, max_connections = self.max_active_connections, %socket_addr, %peer_id,
                 "ignoring outgoing connection, max active reached"
             );
+            let _ = self
+                .state
+                .events_sender
+                .send(ProtocolEvent::MaxActiveConnectionsExceeded { num_active });
             None
         } else {
             Some(self.clone())
@@ -161,7 +164,7 @@ where
             .ok();
 
         let active_connections = self.state.active_connections.clone();
-        active_connections.fetch_add(1, Ordering::Relaxed);
+        let prev = active_connections.fetch_add(1, Ordering::Relaxed);
 
         RessProtocolConnection::new(
             self.provider.clone(),

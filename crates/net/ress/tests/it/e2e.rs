@@ -1,9 +1,6 @@
 use alloy_primitives::{Bytes, B256};
 use futures::StreamExt;
-use reth_network::{
-    test_utils::{NetworkEventStream, Testnet},
-    NetworkEventListenerProvider, Peers,
-};
+use reth_network::{test_utils::Testnet, NetworkEventListenerProvider, Peers};
 use reth_network_api::{
     events::{NetworkEvent, PeerEvent},
     test_utils::PeersHandleProvider,
@@ -50,10 +47,16 @@ async fn disconnect_on_stateful_pair() {
         ProtocolEvent::Established { peer_id, .. } => {
             assert_eq!(peer_id, *handle.peers()[1].peer_id());
         }
+        ev => {
+            panic!("unexpected event: {ev:?}");
+        }
     };
     match from_peer1.recv().await.unwrap() {
         ProtocolEvent::Established { peer_id, .. } => {
             assert_eq!(peer_id, *handle.peers()[0].peer_id());
+        }
+        ev => {
+            panic!("unexpected event: {ev:?}");
         }
     };
 
@@ -114,12 +117,18 @@ async fn message_exchange() {
             assert_eq!(peer_id, *handle.peers()[1].peer_id());
             to_connection
         }
+        ev => {
+            panic!("unexpected event: {ev:?}");
+        }
     };
 
     let peer1_to_peer0 = from_peer1.recv().await.unwrap();
     match peer1_to_peer0 {
         ProtocolEvent::Established { peer_id, .. } => {
             assert_eq!(peer_id, *handle.peers()[0].peer_id());
+        }
+        ev => {
+            panic!("unexpected event: {ev:?}");
         }
     };
 
@@ -187,12 +196,18 @@ async fn witness_fetching_does_not_block() {
             assert_eq!(peer_id, *handle.peers()[1].peer_id());
             to_connection
         }
+        ev => {
+            panic!("unexpected event: {ev:?}");
+        }
     };
 
     let peer1_to_peer0 = from_peer1.recv().await.unwrap();
     match peer1_to_peer0 {
         ProtocolEvent::Established { peer_id, .. } => {
             assert_eq!(peer_id, *handle.peers()[0].peer_id());
+        }
+        ev => {
+            panic!("unexpected event: {ev:?}");
         }
     };
 
@@ -231,7 +246,7 @@ async fn max_active_connections() {
         state: ProtocolState::new(tx),
     });
 
-    let (tx, mut from_peer1) = mpsc::unbounded_channel();
+    let (tx, _from_peer1) = mpsc::unbounded_channel();
     let peer1 = &mut net.peers_mut()[1];
     let peer1_id = peer1.peer_id();
     let peer1_addr = peer1.local_addr();
@@ -243,7 +258,7 @@ async fn max_active_connections() {
         state: ProtocolState::new(tx),
     });
 
-    let (tx, mut from_peer2) = mpsc::unbounded_channel();
+    let (tx, _from_peer2) = mpsc::unbounded_channel();
     let peer2 = &mut net.peers_mut()[2];
     let peer2_id = peer2.peer_id();
     let peer2_addr = peer2.local_addr();
@@ -257,22 +272,28 @@ async fn max_active_connections() {
 
     let handle = net.spawn();
 
-    let peer0_handle = &handle.peers()[0];
-    let mut peer0_event_stream = NetworkEventStream::new(peer0_handle.event_listener());
-
     // connect peers 0 and 1
+    let peer0_handle = &handle.peers()[0];
     peer0_handle.network().add_peer(peer1_id, peer1_addr);
-    assert_eq!(peer0_event_stream.take_session_established(2).await, vec![peer1_id, peer1_id]);
 
-    match from_peer0.recv().await.unwrap() {
-        ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
+    let _peer0_to_peer1 = match from_peer0.recv().await.unwrap() {
+        ProtocolEvent::Established { peer_id, to_connection, .. } => {
             assert_eq!(peer_id, *peer1_id);
+            to_connection
+        }
+        ev => {
+            panic!("unexpected event: {ev:?}");
         }
     };
 
-    // tokio::time::sleep(Duration::from_secs(10)).await;
-
-    // attempt to connect peers 0 and 2
+    // connect peers 0 and 2, max active connections exceeded.
     peer0_handle.network().add_peer(peer2_id, peer2_addr);
-    assert_eq!(peer0_event_stream.take_session_established(1).await, vec![peer2_id]);
+    match from_peer0.recv().await.unwrap() {
+        ProtocolEvent::MaxActiveConnectionsExceeded { num_active } => {
+            assert_eq!(num_active, 1);
+        }
+        ev => {
+            panic!("unexpected event: {ev:?}");
+        }
+    };
 }
