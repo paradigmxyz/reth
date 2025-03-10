@@ -24,7 +24,7 @@ pub struct EngineArgs {
     pub legacy_state_root_task_enabled: bool,
 
     /// Enable cross-block caching and parallel prewarming
-    #[arg(long = "engine.caching-and-prewarming")]
+    #[arg(long = "engine.caching-and-prewarming", default_value = "true")]
     pub caching_and_prewarming_enabled: bool,
 
     /// Configure the size of cross-block cache in megabytes
@@ -44,7 +44,7 @@ impl Default for EngineArgs {
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             legacy_state_root_task_enabled: false,
             state_root_task_compare_updates: false,
-            caching_and_prewarming_enabled: false,
+            caching_and_prewarming_enabled: true,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
         }
     }
