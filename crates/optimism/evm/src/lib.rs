@@ -14,8 +14,7 @@ use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_evm::FromRecoveredTx;
 use alloy_op_evm::{
-    block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx, OpBlockExecutorFactory,
-    OpEvmFactory,
+    block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx,
 };
 use alloy_primitives::U256;
 use core::fmt::Debug;
@@ -47,6 +46,8 @@ pub use build::OpBlockAssembler;
 
 mod error;
 pub use error::OpBlockExecutionError;
+
+pub use alloy_op_evm::{OpBlockExecutorFactory, OpEvm, OpEvmFactory};
 
 /// Optimism-related EVM configuration.
 #[derive(Debug)]
