@@ -2,7 +2,10 @@
 
 use crate::message::NewBlockMessage;
 use reth_network_peers::PeerId;
-use std::task::{Context, Poll};
+use std::{
+    error::Error,
+    task::{Context, Poll},
+};
 
 /// Abstraction over block import.
 pub trait BlockImport<B = reth_primitives::Block>: std::fmt::Debug + Send + Sync {
@@ -51,6 +54,9 @@ pub enum BlockImportError {
     /// Consensus error
     #[error(transparent)]
     Consensus(#[from] reth_consensus::ConsensusError),
+    /// Other error
+    #[error(transparent)]
+    Other(#[from] Box<dyn Error>),
 }
 
 /// An implementation of `BlockImport` used in Proof-of-Stake consensus that does nothing.
