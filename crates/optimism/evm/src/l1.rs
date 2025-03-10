@@ -72,6 +72,7 @@ pub fn parse_l1_info(input: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError>
     // calldata as an Ecotone hardfork L1BlockInfo transaction. Otherwise, we parse it as a
     // Bedrock hardfork L1BlockInfo transaction.
     if input[0..4] == L1_BLOCK_INTEROP_SELECTOR {
+        // TODO: update once interop is compatible with isthmus, for now it only works with ecotone: <https://github.com/paradigmxyz/reth/pull/14869/files#r1987107404>
         parse_l1_info_tx_ecotone(input[4..].as_ref())
     } else if input[0..4] == L1_BLOCK_ISTHMUS_SELECTOR {
         parse_l1_info_tx_isthmus(input[4..].as_ref())
@@ -328,8 +329,8 @@ where
     // If the canyon hardfork is active at the current timestamp, and it was not active at the
     // previous block timestamp (heuristically, block time is not perfectly constant at 2s), and the
     // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
-    if chain_spec.is_canyon_active_at_timestamp(timestamp)
-        && !chain_spec.is_canyon_active_at_timestamp(timestamp.saturating_sub(2))
+    if chain_spec.is_canyon_active_at_timestamp(timestamp) &&
+        !chain_spec.is_canyon_active_at_timestamp(timestamp.saturating_sub(2))
     {
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 
