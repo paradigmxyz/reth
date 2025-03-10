@@ -23,20 +23,17 @@ reth-primitives-traits.workspace = true
 reth-tracing.workspace = true
 
 # alloy
-alloy-consensus = { workspace = true }
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
 alloy-primitives.workspace = true
 alloy-provider = { workspace = true, features = ["engine-api", "reqwest-rustls-tls"], default-features = false }
 alloy-pubsub.workspace = true
 alloy-rpc-client.workspace = true
-alloy-rpc-types = { workspace = true }
-alloy-rpc-types-engine = { workspace = true }
+alloy-rpc-types-engine.workspace = true
 alloy-transport-http.workspace = true
 alloy-transport-ipc.workspace = true
 alloy-transport-ws.workspace = true
 alloy-transport.workspace = true
-op-alloy-rpc-types.workspace = true
 op-alloy-consensus = { workspace = true, features = ["alloy-compat"] }
 
 # reqwest
@@ -59,7 +56,6 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 
 # misc
 clap = { workspace = true, features = ["derive", "env"] }
-delegate.workspace = true
 eyre.workspace = true
 thiserror.workspace = true
 
