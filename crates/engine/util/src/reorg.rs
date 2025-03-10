@@ -1,6 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
@@ -15,7 +15,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
-use reth_primitives::{NodePrimitives, SealedBlock};
+use reth_primitives::{BlockTy, HeaderTy, SealedBlock};
 use reth_primitives_traits::{block::Block as _, BlockBody as _, SignedTransaction};
 use reth_provider::{BlockReader, ChainSpecProvider, ProviderError, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, db::State};
@@ -96,22 +96,17 @@ impl<S, Engine: EngineTypes, Provider, Evm, Validator>
     }
 }
 
-impl<S, Engine, Provider, Evm, Validator, N, T> Stream
+impl<S, Engine, Provider, Evm, Validator> Stream
     for EngineReorg<S, Engine, Provider, Evm, Validator>
 where
-    T: SignedTransaction,
-    N: NodePrimitives<
-        BlockHeader = alloy_consensus::Header,
-        SignedTx = T,
-        BlockBody = alloy_consensus::BlockBody<T>,
-    >,
     S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: EngineTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    Provider: BlockReader<Header = N::BlockHeader, Block = N::Block>
+    Engine: EngineTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
+    Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
         + ChainSpecProvider,
-    Evm: ConfigureEvm<Primitives = N>,
-    Validator: PayloadValidator<ExecutionData = Engine::ExecutionData, Block = N::Block>,
+    Evm: ConfigureEvm,
+    Validator:
+        PayloadValidator<ExecutionData = Engine::ExecutionData, Block = BlockTy<Evm::Primitives>>,
 {
     type Item = S::Item;
 
@@ -244,33 +239,27 @@ where
     }
 }
 
-fn create_reorg_head<Provider, Evm, Validator, N, T>(
+fn create_reorg_head<Provider, Evm, Validator>(
     provider: &Provider,
     evm_config: &Evm,
     payload_validator: &Validator,
     mut depth: usize,
     next_payload: Validator::ExecutionData,
-) -> RethResult<SealedBlock<N::Block>>
+) -> RethResult<SealedBlock<BlockTy<Evm::Primitives>>>
 where
-    T: SignedTransaction,
-    N: NodePrimitives<
-        BlockHeader = alloy_consensus::Header,
-        SignedTx = T,
-        BlockBody = alloy_consensus::BlockBody<T>,
-    >,
-    Provider: BlockReader<Header = N::BlockHeader, Block = N::Block>
+    Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec>,
-    Evm: ConfigureEvm<Primitives = N>,
-    Validator: PayloadValidator<Block = N::Block>,
+    Evm: ConfigureEvm,
+    Validator: PayloadValidator<Block = BlockTy<Evm::Primitives>>,
 {
     // Ensure next payload is valid.
     let next_block =
         payload_validator.ensure_well_formed_payload(next_payload).map_err(RethError::msg)?;
 
     // Fetch reorg target block depending on its depth and its parent.
-    let mut previous_hash = next_block.parent_hash;
-    let mut candidate_transactions = next_block.into_body().transactions;
+    let mut previous_hash = next_block.parent_hash();
+    let mut candidate_transactions = next_block.into_body().transactions().to_vec();
     let reorg_target = 'target: {
         loop {
             let reorg_target = provider
@@ -286,13 +275,13 @@ where
         }
     };
     let reorg_target_parent = provider
-        .sealed_header_by_hash(reorg_target.header().parent_hash)?
-        .ok_or_else(|| ProviderError::HeaderNotFound(reorg_target.header().parent_hash.into()))?;
+        .sealed_header_by_hash(reorg_target.header().parent_hash())?
+        .ok_or_else(|| ProviderError::HeaderNotFound(reorg_target.header().parent_hash().into()))?;
 
-    debug!(target: "engine::stream::reorg", number = reorg_target.header().number, hash = %previous_hash, "Selected reorg target");
+    debug!(target: "engine::stream::reorg", number = reorg_target.header().number(), hash = %previous_hash, "Selected reorg target");
 
     // Configure state
-    let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash)?;
+    let state_provider = provider.state_by_block_hash(reorg_target.header().parent_hash())?;
     let mut state = State::builder()
         .with_database_ref(StateProviderDatabase::new(&state_provider))
         .with_bundle_update()
@@ -307,7 +296,7 @@ where
     let mut cumulative_gas_used = 0;
     for tx in candidate_transactions {
         // ensure we still have capacity for this transaction
-        if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit {
+        if cumulative_gas_used + tx.gas_limit() > reorg_target.gas_limit() {
             continue
         }
 
