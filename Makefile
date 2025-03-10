@@ -238,7 +238,7 @@ docker-build-push-latest: ## Build and push a cross-arch Docker image tagged wit
 # `docker buildx create --use --name cross-builder`
 .PHONY: docker-build-push-nightly
 docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
-	$(call docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
+	$(call docker_build_push,nightly,nightly)
 
 # Create a cross-arch Docker image with the given tags and push it
 define docker_build_push
@@ -290,7 +290,7 @@ op-docker-build-push-latest: ## Build and push a cross-arch Docker image tagged 
 # `docker buildx create --use --name cross-builder`
 .PHONY: op-docker-build-push-nightly
 op-docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
-	$(call op_docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
+	$(call op_docker_build_push,nightly,nightly)
 
 # Create a cross-arch Docker image with the given tags and push it
 define op_docker_build_push
