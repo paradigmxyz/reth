@@ -20,7 +20,6 @@ pub mod root;
 /// Implementation of parallel proof computation.
 pub mod proof;
 
-/// Implementation of parallel proof computation that uses a fixed number of dedicated io tasks.
 pub mod proof_task;
 
 /// Parallel state root metrics.

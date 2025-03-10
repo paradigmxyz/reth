@@ -26,7 +26,7 @@ use std::{
     collections::VecDeque,
     sync::{
         mpsc::{channel, Receiver, Sender, TryRecvError},
-        Arc, Condvar,
+        Arc,
     },
     time::Instant,
 };
@@ -71,10 +71,10 @@ impl<Tx> ProofTaskManager<Tx> {
     {
         // initialize proof task txs
         let mut proof_task_txs = Vec::with_capacity(max_concurrency);
-        for item in &mut proof_task_txs {
+        for _ in 0..max_concurrency {
             let provider_ro = view.provider_ro()?;
             let tx = provider_ro.into_tx();
-            *item = ProofTaskTx::new(tx, task_ctx.clone());
+            proof_task_txs.push(ProofTaskTx::new(tx, task_ctx.clone()));
         }
 
         Ok(Self {
@@ -118,12 +118,14 @@ where
             let output = proof_task_tx.storage_proof(pending_proof);
             let _ = tx.send(output);
         });
+
         self.running_proof_tasks.push(RunningProofTask::new(rx, sender));
     }
 
     /// Loops, managing the proof tasks, and sending new tasks to the executor.
     pub fn run(mut self) {
         loop {
+            // TODO: condvar for
             // * either running or proof tasks have stuff
             // * otherwise yield thread
             let message = match self.proof_task_rx.try_recv() {
@@ -142,19 +144,32 @@ where
             // try spawning the next task
             self.try_spawn_next();
 
-            for running_task in &self.running_proof_tasks {
+            // tracks the disconnected senders
+            let mut tasks_to_remove = Vec::new();
+
+            // poll each task
+            for (idx, running_task) in self.running_proof_tasks.iter().enumerate() {
                 let RunningProofTask { task_receiver, sender } = running_task;
                 match task_receiver.try_recv() {
                     Ok(ProofTaskOutput { tx, result }) => {
                         let _ = sender.send(result);
                         self.proof_task_txs.push(tx);
                     }
+                    // If the result is empty or the sender is disconnected, we cannot really do
+                    // anything, so
                     Err(TryRecvError::Empty) => {}
                     Err(TryRecvError::Disconnected) => {
-                        // TODO: error
-                        todo!()
+                        tracing::debug!(target: "trie::parallel_proof", "Proof task disconnected");
+                        // This means the sender from the task panicked, while this is likely not
+                        // normal, we should at least stop polling this task.
+                        tasks_to_remove.push(idx);
                     }
                 }
+            }
+
+            // remove any panicked tasks
+            for idx in tasks_to_remove {
+                self.running_proof_tasks.swap_remove(idx);
             }
         }
     }
@@ -186,7 +201,7 @@ where
         debug!(
             target: "trie::parallel_proof",
             hashed_address=?input.hashed_address,
-            "Starting proof calculation"
+            "Starting storage proof task calculation"
         );
 
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -218,7 +233,7 @@ where
             prefix_set = ?input.prefix_set.len(),
             target_slots = ?target_slots_len,
             proof_time = ?proof_start.elapsed(),
-            "Completed proof calculation"
+            "Completed storage proof task calculation"
         );
 
         ProofTaskOutput { tx: self, result }
