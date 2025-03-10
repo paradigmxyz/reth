@@ -207,6 +207,11 @@ pub trait NodeBuilderHelper
 where
     Self: Default
         + NodeTypesForProvider
+        + NodeTypesWithEngine<
+            Engine: PayloadTypes<
+                PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
+            >,
+        >
         + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             Primitives: NodePrimitives<
@@ -238,6 +243,11 @@ impl<T> NodeBuilderHelper for T
 where
     Self: Default
         + NodeTypesForProvider
+        + NodeTypesWithEngine<
+            Engine: PayloadTypes<
+                PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
+            >,
+        >
         + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             Primitives: NodePrimitives<

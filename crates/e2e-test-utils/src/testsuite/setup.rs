@@ -121,8 +121,6 @@ impl<I> Setup<I> {
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
             <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
         >,
-        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes:
-            From<EthPayloadBuilderAttributes>,
     {
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
