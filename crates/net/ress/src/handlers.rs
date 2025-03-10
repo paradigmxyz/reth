@@ -52,6 +52,11 @@ impl ProtocolState {
     pub fn new(events_sender: mpsc::UnboundedSender<ProtocolEvent>) -> Self {
         Self { events_sender, active_connections: Arc::default() }
     }
+
+    /// Returns the current number of active connections.
+    pub fn active_connections(&self) -> u64 {
+        self.active_connections.load(Ordering::Relaxed)
+    }
 }
 
 /// The protocol handler takes care of incoming and outgoing connections.
@@ -87,7 +92,7 @@ where
     type ConnectionHandler = Self;
 
     fn on_incoming(&self, socket_addr: SocketAddr) -> Option<Self::ConnectionHandler> {
-        let num_active = self.state.active_connections.load(Ordering::Relaxed);
+        let num_active = self.state.active_connections();
         if num_active >= self.max_active_connections {
             trace!(
                 target: "ress::net",
@@ -109,7 +114,7 @@ where
         socket_addr: SocketAddr,
         peer_id: PeerId,
     ) -> Option<Self::ConnectionHandler> {
-        let num_active = self.state.active_connections.load(Ordering::Relaxed);
+        let num_active = self.state.active_connections();
         if num_active >= self.max_active_connections {
             trace!(
                 target: "ress::net",

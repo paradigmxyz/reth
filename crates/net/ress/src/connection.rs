@@ -252,6 +252,14 @@ where
     }
 }
 
+impl<P> Drop for RessProtocolConnection<P> {
+    fn drop(&mut self) {
+        let _ = self
+            .active_connections
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| Some(c.saturating_sub(1)));
+    }
+}
+
 impl<P> Stream for RessProtocolConnection<P>
 where
     P: RessProtocolProvider + Clone + Unpin + 'static,
@@ -314,9 +322,6 @@ where
 
         // Terminating the connection.
         this.terminated = true;
-        let _ = this
-            .active_connections
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| Some(c.saturating_sub(1)));
         Poll::Ready(None)
     }
 }
