@@ -255,8 +255,7 @@ where
             input.hashed_address,
         )
         .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().cloned()))
-        // TODO: does this need to ever be false?
-        .with_branch_node_masks(true)
+        .with_branch_node_masks(input.with_branch_node_masks)
         .storage_multiproof(input.target_slots)
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
@@ -294,13 +293,20 @@ pub struct StorageProofInput {
     prefix_set: PrefixSet,
     /// The target slots for the proof calculation.
     target_slots: B256Set,
+    /// Whether or not to collect branch node masks
+    with_branch_node_masks: bool,
 }
 
 impl StorageProofInput {
     /// Creates a new [`StorageProofInput`] with the given hashed address, prefix set, and target
     /// slots.
-    pub const fn new(hashed_address: B256, prefix_set: PrefixSet, target_slots: B256Set) -> Self {
-        Self { hashed_address, prefix_set, target_slots }
+    pub const fn new(
+        hashed_address: B256,
+        prefix_set: PrefixSet,
+        target_slots: B256Set,
+        with_branch_node_masks: bool,
+    ) -> Self {
+        Self { hashed_address, prefix_set, target_slots, with_branch_node_masks }
     }
 }
 

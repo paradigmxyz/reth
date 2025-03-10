@@ -161,7 +161,12 @@ where
                 let prefix_set_len = prefix_set.len();
                 let target_slots_len = target_slots.len();
 
-                let input = StorageProofInput::new(hashed_address, prefix_set, target_slots);
+                let input = StorageProofInput::new(
+                    hashed_address,
+                    prefix_set,
+                    target_slots,
+                    self.collect_branch_node_masks,
+                );
                 let (sender, receiver) = std::sync::mpsc::channel();
                 let _ = proof_task_sender.send(ProofTaskMessage::StorageProof((input, sender)));
                 let result = receiver.recv().unwrap();
@@ -409,19 +414,34 @@ mod tests {
         // after we compute the state root
         let join_handle = rt.spawn_blocking(move || proof_task.run());
 
-        assert_eq!(
-            ParallelProof::new(
-                consistent_view,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                rt.handle().clone(),
-                proof_task_sender,
-            )
-            .multiproof(targets.clone())
-            .unwrap(),
-            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap()
-        );
+        let parallel_result = ParallelProof::new(
+            consistent_view,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            rt.handle().clone(),
+            proof_task_sender,
+        )
+        .multiproof(targets.clone())
+        .unwrap();
+
+        let sequential_result =
+            Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap();
+
+        // to help narrow down what is wrong - first compare account subtries
+        assert_eq!(parallel_result.account_subtree, sequential_result.account_subtree,);
+
+        // then compare length of all storage subtries
+        assert_eq!(parallel_result.storages.len(), sequential_result.storages.len(),);
+
+        // then compare each storage subtrie
+        for (hashed_address, storage_proof) in &parallel_result.storages {
+            let sequential_storage_proof = sequential_result.storages.get(hashed_address).unwrap();
+            assert_eq!(storage_proof, sequential_storage_proof,);
+        }
+
+        // then compare the entire thing for any mask differences
+        assert_eq!(parallel_result, sequential_result,);
 
         // make sure the join handle does not return any errors either
         rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
