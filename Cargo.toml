@@ -445,7 +445,7 @@ op-revm = { version = "1.0.0-alpha.1", default-features = false }
 revm-inspectors = "0.16"
 
 # eth
-alloy-chains = { version = "0.1.32", default-features = false }
+alloy-chains = { version = "0.1.64", default-features = false }
 alloy-dyn-abi = "0.8.20"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
 alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "f9ed4d3", default-features = false }
