@@ -6834,6 +6834,7 @@ dependencies = [
  "delegate",
  "eyre",
  "futures",
+ "op-alloy-consensus",
  "op-alloy-rpc-types",
  "reqwest",
  "reth-cli-runner",
