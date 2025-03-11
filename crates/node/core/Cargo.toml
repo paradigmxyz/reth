@@ -78,4 +78,4 @@ asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo"] }
-vergen-git2 = {workspace = true}
+vergen-git2.workspace = true
