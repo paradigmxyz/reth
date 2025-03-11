@@ -34,7 +34,7 @@ pub(super) struct SparseTrieTask<F> {
     #[allow(unused)] // TODO use this for spawning trie tasks
     pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
-    pub(super) updates: mpsc::Receiver<SparseTrieEvent>,
+    pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,
     // TODO: ideally we need a way to create multiple readers on demand.
     pub(super) config: MultiProofConfig<F>,
     pub(super) metrics: MultiProofTaskMetrics,
@@ -114,18 +114,6 @@ pub struct StateRootComputeOutcome {
     /// The trie updates.
     pub trie_updates: TrieUpdates,
 }
-
-/// Aliased for now to not introduce too many changes at once.
-pub(super) type SparseTrieEvent = SparseTrieUpdate;
-
-// /// The event type the sparse trie task operates on.
-// pub(crate) enum SparseTrieEvent {
-//     /// Updates received from the multiproof task.
-//     ///
-//     /// This represents a stream of [`SparseTrieUpdate`] where a `None` indicates that all
-// updates     /// have been received.
-//     Update(Option<SparseTrieUpdate>),
-// }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 pub(crate) fn update_sparse_trie<BPF>(
