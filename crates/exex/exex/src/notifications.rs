@@ -405,7 +405,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        // 1. Check once whether we need to retrieve a notifiaction gap from the WAL.
+        // 1. Check once whether we need to retrieve a notification gap from the WAL.
         if this.pending_check_canonical {
             if let Some(canonical_notification) = this.check_canonical()? {
                 return Poll::Ready(Some(Ok(canonical_notification)))

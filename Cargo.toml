@@ -430,25 +430,24 @@ reth-trie-sparse = { path = "crates/trie/sparse" }
 reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
 
 # revm
-revm = { version = "20.0.0-alpha.1", default-features = false }
-revm-bytecode = { version = "1.0.0-alpha.1", default-features = false }
-revm-database = { version = "1.0.0-alpha.1", default-features = false }
-revm-state = { version = "1.0.0-alpha.1", default-features = false }
-revm-primitives = { version = "16.0.0-alpha.1", default-features = false }
-revm-interpreter = { version = "16.0.0-alpha.1", default-features = false }
-revm-inspector = { version = "1.0.0-alpha.1", default-features = false }
-revm-context = { version = "1.0.0-alpha.1", default-features = false }
-revm-context-interface = { version = "1.0.0-alpha.1", default-features = false }
-revm-database-interface = { version = "1.0.0-alpha.1", default-features = false }
-revm-specification = { version = "1.0.0-alpha.1", default-features = false }
-op-revm = { version = "1.0.0-alpha.1", default-features = false }
+revm = { version = "20.0.0-alpha.3", default-features = false }
+revm-bytecode = { version = "1.0.0-alpha.2", default-features = false }
+revm-database = { version = "1.0.0-alpha.2", default-features = false }
+revm-state = { version = "1.0.0-alpha.2", default-features = false }
+revm-primitives = { version = "16.0.0-alpha.2", default-features = false }
+revm-interpreter = { version = "16.0.0-alpha.3", default-features = false }
+revm-inspector = { version = "1.0.0-alpha.3", default-features = false }
+revm-context = { version = "1.0.0-alpha.2", default-features = false }
+revm-context-interface = { version = "1.0.0-alpha.2", default-features = false }
+revm-database-interface = { version = "1.0.0-alpha.2", default-features = false }
+op-revm = { version = "1.0.0-alpha.2", default-features = false }
 revm-inspectors = "0.16"
 
 # eth
 alloy-chains = { version = "0.1.64", default-features = false }
 alloy-dyn-abi = "0.8.20"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "f9ed4d3", default-features = false }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "8402f9c", default-features = false }
 alloy-primitives = { version = "0.8.20", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-types = { version = "0.8.20", default-features = false }
@@ -486,7 +485,7 @@ alloy-transport-ipc = { version = "0.12.4", default-features = false }
 alloy-transport-ws = { version = "0.12.4", default-features = false }
 
 # op
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "f9ed4d3", default-features = false }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "8402f9c", default-features = false }
 alloy-op-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "ae4176c" }
 op-alloy-rpc-types = { version = "0.11.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.11.0", default-features = false }
@@ -678,20 +677,7 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-database = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-context = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-specification = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-op-revm = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "9219073" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3c6cca4" }
 
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }

@@ -18,7 +18,7 @@ use reth::{
         inspector::{Inspector, NoOpInspector},
         interpreter::{interpreter::EthInterpreter, InterpreterResult},
         precompile::PrecompileError,
-        specification::hardfork::SpecId,
+        primitives::hardfork::SpecId,
         MainBuilder, MainContext,
     },
     tasks::TaskManager,
