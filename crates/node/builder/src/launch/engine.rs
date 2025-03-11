@@ -12,10 +12,8 @@ use reth_engine_tree::{
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{
-    protocol::IntoRlpxSubProtocol, NetworkProtocols, NetworkSyncUpdater, SyncState,
-};
-use reth_network_api::{test_utils::PeersHandleProvider, BlockDownloaderProvider};
+use reth_network::{NetworkSyncUpdater, SyncState};
+use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypesWithDBAdapter,
     NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
@@ -259,41 +257,6 @@ where
         };
 
         info!(target: "reth::cli", "Consensus engine initialized");
-
-        // install ress subprotocol if enabled
-        // TODO: where should we keep the sender?
-        let (tx, mut _rx) = tokio::sync::mpsc::unbounded_channel();
-        if node_config.network.ress.enabled {
-            use reth_ress_protocol::*;
-            use reth_ress_provider::*;
-
-            let pending_state = PendingState::default();
-
-            // Spawn maintenance task for pending state.
-            let events = event_sender.new_listener();
-            let provider = ctx.blockchain_db().clone();
-            let pending_ = pending_state.clone();
-            ctx.task_executor().spawn(maintain_pending_state(events, provider, pending_));
-
-            let provider = RethRessProtocolProvider::new(
-                ctx.blockchain_db().clone(),
-                ctx.components().block_executor().clone(),
-                pending_state,
-                node_config.network.ress.witness_thread_pool_size,
-                node_config.network.ress.witness_cache_size,
-            )?;
-            ctx.components().network().add_rlpx_sub_protocol(
-                RessProtocolHandler {
-                    provider,
-                    node_type: NodeType::Stateful,
-                    peers_handle: ctx.components().network().peers_handle(),
-                    max_active_connections: node_config.network.ress.max_active_connections,
-                    state: ProtocolState::new(tx),
-                }
-                .into_rlpx_sub_protocol(),
-            );
-            info!(target: "reth::cli", "Ress subprotocol support enabled")
-        }
 
         let events = stream_select!(
             event_sender.new_listener().map(Into::into),

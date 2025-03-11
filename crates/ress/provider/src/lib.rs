@@ -5,8 +5,7 @@ use alloy_primitives::{Bytes, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProvider};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
-use reth_node_api::NodePrimitives;
-use reth_primitives::{BlockBody, EthPrimitives, Header, RecoveredBlock};
+use reth_primitives::{Block, BlockBody, EthPrimitives, Header, RecoveredBlock};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -50,14 +49,14 @@ impl<N: ProviderNodeTypes, E: Clone> Clone for RethRessProtocolProvider<N, E> {
 
 impl<N, E> RethRessProtocolProvider<N, E>
 where
-    N: ProviderNodeTypes<Primitives: NodePrimitives>,
+    N: ProviderNodeTypes<Primitives = EthPrimitives>,
     E: BlockExecutorProvider<Primitives = N::Primitives> + Clone,
 {
     /// Create new ress protocol provider.
     pub fn new(
         provider: BlockchainProvider<N>,
         block_executor: E,
-        pending_state: PendingState<N::Primitives>,
+        pending_state: PendingState<EthPrimitives>,
         pool_num_threads: usize,
         cache_size: u32,
     ) -> eyre::Result<Self> {
@@ -73,11 +72,10 @@ where
     }
 
     /// Retrieve a valid or invalid block by block hash.
-    #[allow(clippy::type_complexity)]
     pub fn block_by_hash(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<Arc<RecoveredBlock<<N::Primitives as NodePrimitives>::Block>>>> {
+    ) -> ProviderResult<Option<Arc<RecoveredBlock<Block>>>> {
         // NOTE: we keep track of the pending state locally because reth does not provider a way
         // to access non-canonical or invalid blocks via the provider.
         let maybe_block = if let Some(block) = self.pending_state.recovered_block(&block_hash) {
