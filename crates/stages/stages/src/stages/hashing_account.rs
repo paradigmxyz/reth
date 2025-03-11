@@ -8,7 +8,7 @@ use reth_db_api::{
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
 use reth_stages_api::{
     AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,

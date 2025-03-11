@@ -11,7 +11,6 @@ use reth_evm::{
 };
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives::StaticFileSegment;
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
@@ -25,6 +24,7 @@ use reth_stages_api::{
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use std::{
     cmp::Ordering,
     ops::RangeInclusive,

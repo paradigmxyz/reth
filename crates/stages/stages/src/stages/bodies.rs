@@ -6,7 +6,6 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
-use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
     StaticFileProviderFactory, StatsReader, StorageLocation,
@@ -15,6 +14,7 @@ use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     cmp::Ordering,

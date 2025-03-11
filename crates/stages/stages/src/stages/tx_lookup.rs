@@ -10,8 +10,7 @@ use reth_db_api::{
     RawKey, RawValue,
 };
 use reth_etl::Collector;
-use reth_primitives::NodePrimitives;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory, StatsReader, TransactionsProvider, TransactionsProviderExt,

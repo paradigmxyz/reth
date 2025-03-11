@@ -1,4 +1,7 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
+use reth_::{
+    Account, EthPrimitives, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
+};
 use reth_chainspec::MAINNET;
 use reth_db::{
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
@@ -13,9 +16,6 @@ use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
     DatabaseError as DbError,
-};
-use reth_primitives::{
-    Account, EthPrimitives, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
