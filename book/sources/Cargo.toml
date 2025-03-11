@@ -13,4 +13,4 @@ reth-tracing = { path = "../../crates/tracing" }
 reth-node-api = { path = "../../crates/node/api" }
 
 [patch.crates-io]
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3c6cca4" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "667180b" }
