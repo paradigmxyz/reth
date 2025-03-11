@@ -677,17 +677,17 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-revm-database = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-revm-context = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
-op-revm = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
+op-revm = { git = "https://github.com/bluealloy/revm", rev = "f11bbab" }
 
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3c6cca4" }
 
