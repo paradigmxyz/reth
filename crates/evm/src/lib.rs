@@ -50,7 +50,7 @@ pub mod test_utils;
 
 pub use alloy_evm::{
     block::{state_changes, system_calls, OnStateHook},
-    Database, Evm, EvmEnv, EvmError, FromRecoveredTx, InvalidTxError,
+    env, Database, Evm, EvmEnv, EvmError, FromRecoveredTx, InvalidTxError,
 };
 
 pub use alloy_evm::block::state_changes as state_change;
