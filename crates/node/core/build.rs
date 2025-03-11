@@ -5,15 +5,29 @@ use vergen::{Emitter, BuildBuilder, CargoBuilder};
 use vergen_git2::Git2Builder;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Emit the instructions
+let mut emitter = Emitter::default();
+    let build_builder = BuildBuilder::default()
+    .build_timestamp(true) 
+    .build()?; 
+
+    emitter.add_instructions(&build_builder)?;
+
+    let cargo_builder = CargoBuilder::default()
+        .features(true)       
+        .target_triple(true) 
+        .build()?; 
+
+    emitter.add_instructions(&cargo_builder)?;
+
+    let git_builder = Git2Builder::default()
+        .describe(true, true, None) 
+        .dirty(true)               
+        .sha(false)                  
+        .build()?; 
     
-    let mut emitter = Emitter::default();
-    emitter.add_instructions(&BuildBuilder::default().build()?)?;
-    emitter.add_instructions(&CargoBuilder::default().build()?)?;
-    
-    let git_builder = Git2Builder::default().build()?;
     emitter.add_instructions(&git_builder)?;
-    emitter.emit()?;
+
+    emitter.emit_and_set()?;
     
     let sha = env::var("VERGEN_GIT_SHA")?;
     let sha_short = &sha[0..7];
