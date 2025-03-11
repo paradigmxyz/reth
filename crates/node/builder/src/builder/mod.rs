@@ -372,6 +372,7 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
     ) -> WithLaunchContext<NodeBuilderWithComponents<T, CB, ()>>
     where
         CB: NodeComponentsBuilder<T>,
+        T: Debug,
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
@@ -403,7 +404,7 @@ where
 
 impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + Debug,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {

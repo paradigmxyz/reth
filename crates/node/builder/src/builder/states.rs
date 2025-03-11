@@ -183,7 +183,7 @@ where
 
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + Debug,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
 {
@@ -249,7 +249,7 @@ where
 
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + Debug,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
