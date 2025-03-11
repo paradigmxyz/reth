@@ -1,6 +1,6 @@
 //! Miscellaneous test utilities.
 
-use crate::{RessProtocolProvider, StateWitnessNet};
+use crate::RessProtocolProvider;
 use alloy_consensus::Header;
 use alloy_primitives::{map::B256HashMap, Bytes, B256};
 use reth_ethereum_primitives::BlockBody;
@@ -27,8 +27,8 @@ impl RessProtocolProvider for NoopRessProtocolProvider {
         Ok(None)
     }
 
-    async fn witness(&self, _block_hash: B256) -> ProviderResult<Option<StateWitnessNet>> {
-        Ok(None)
+    async fn witness(&self, _block_hash: B256) -> ProviderResult<Vec<Bytes>> {
+        Ok(Vec::new())
     }
 }
 
@@ -38,7 +38,7 @@ pub struct MockRessProtocolProvider {
     headers: Arc<Mutex<B256HashMap<Header>>>,
     block_bodies: Arc<Mutex<B256HashMap<BlockBody>>>,
     bytecodes: Arc<Mutex<B256HashMap<Bytes>>>,
-    witnesses: Arc<Mutex<B256HashMap<StateWitnessNet>>>,
+    witnesses: Arc<Mutex<B256HashMap<Vec<Bytes>>>>,
     witness_delay: Option<Duration>,
 }
 
@@ -80,12 +80,12 @@ impl MockRessProtocolProvider {
     }
 
     /// Insert witness.
-    pub fn add_witness(&self, block_hash: B256, witness: StateWitnessNet) {
+    pub fn add_witness(&self, block_hash: B256, witness: Vec<Bytes>) {
         self.witnesses.lock().unwrap().insert(block_hash, witness);
     }
 
     /// Extend witnesses from iterator.
-    pub fn extend_witnesses(&self, witnesses: impl IntoIterator<Item = (B256, StateWitnessNet)>) {
+    pub fn extend_witnesses(&self, witnesses: impl IntoIterator<Item = (B256, Vec<Bytes>)>) {
         self.witnesses.lock().unwrap().extend(witnesses);
     }
 }
@@ -103,10 +103,10 @@ impl RessProtocolProvider for MockRessProtocolProvider {
         Ok(self.bytecodes.lock().unwrap().get(&code_hash).cloned())
     }
 
-    async fn witness(&self, block_hash: B256) -> ProviderResult<Option<StateWitnessNet>> {
+    async fn witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
         if let Some(delay) = self.witness_delay {
             tokio::time::sleep(delay).await;
         }
-        Ok(self.witnesses.lock().unwrap().get(&block_hash).cloned())
+        Ok(self.witnesses.lock().unwrap().get(&block_hash).cloned().unwrap_or_default())
     }
 }

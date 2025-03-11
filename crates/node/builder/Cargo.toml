@@ -55,6 +55,8 @@ reth-tokio-util.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 reth-basic-payload-builder.workspace = true
+reth-ress-protocol.workspace = true
+reth-ress-provider.workspace = true
 
 ## ethereum
 alloy-consensus.workspace = true

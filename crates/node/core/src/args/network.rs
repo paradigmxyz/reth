@@ -38,6 +38,8 @@ use tracing::error;
 
 use crate::version::P2P_CLIENT_VERSION;
 
+use super::RessArgs;
+
 /// Parameters for configuring the network more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "Networking")]
@@ -154,6 +156,10 @@ pub struct NetworkArgs {
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
+
+    /// Ress subprotocol args.
+    #[clap(flatten)]
+    pub ress: RessArgs,
 }
 
 impl NetworkArgs {
@@ -333,6 +339,7 @@ impl Default for NetworkArgs {
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
+            ress: RessArgs::default(),
         }
     }
 }
