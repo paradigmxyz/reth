@@ -15,6 +15,7 @@ use reth_evm_ethereum::{
 };
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{Block, BlockWithSenders};
+use tracing::{debug, error, info, trace};
 
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider as _, ExecutionOutcome, ProviderFactory,
@@ -62,15 +63,24 @@ where
     /// Execute the block and send the confirmation request to the EVM.
     pub async fn confirm_blocks(&self, blocks: &[Block]) -> eyre::Result<()> {
         if blocks.is_empty() {
+            debug!(target: "bitfinity_block_confirmation::BitfinityBlokConfirmation", "No blocks to confirm");
             return Ok(());
         }
 
         let execution_result = self.execute_blocks(blocks)?;
         let last_block = blocks.iter().last().expect("no blocks");
 
+        debug!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Calculating confirmation data for block: {}", last_block.number
+        );
         let confirmation_data =
             self.calculate_confirmation_data(last_block, execution_result).await?;
 
+        info!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Sending confirmation request for block: {}", last_block.number
+        );
         self.send_confirmation_request(confirmation_data).await?;
 
         Ok(())
@@ -81,14 +91,31 @@ where
         &self,
         confirmation_data: BlockConfirmationData,
     ) -> eyre::Result<()> {
+        let block_number = confirmation_data.block_number;
+        debug!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Sending confirmation request for block: {}", block_number
+        );
         match self
             .evm_client
             .send_confirm_block(confirmation_data)
             .await
             .map_err(|e| eyre!("{e}"))?
         {
-            BlockConfirmationResult::NotConfirmed => Err(eyre!("confirmation request rejected")),
-            _ => Ok(()),
+            BlockConfirmationResult::NotConfirmed => {
+                error!(
+                    target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+                    "Block confirmation request rejected for block: {}", block_number
+                );
+                Err(eyre!("confirmation request rejected"))
+            }
+            result => {
+                debug!(
+                    target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+                    "Block confirmation request accepted with result: {:?}", result
+                );
+                Ok(())
+            }
         }
     }
 
@@ -98,7 +125,15 @@ where
         block: &Block,
         execution_result: ExecutionOutcome,
     ) -> eyre::Result<BlockConfirmationData> {
+        debug!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Computing PoW hash for block: {}", block.number
+        );
         let proof_of_work = self.compute_pow_hash(block, execution_result).await?;
+        debug!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "PoW hash computed successfully for block: {}", block.number
+        );
         Ok(BlockConfirmationData {
             block_number: block.number,
             hash: block.hash_slow().into(),
@@ -111,10 +146,18 @@ where
 
     /// Execute block and return execution result.
     fn execute_blocks(&self, blocks: &[Block]) -> eyre::Result<ExecutionOutcome> {
+        debug!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Executing {} blocks", blocks.len()
+        );
         let executor = self.executor();
         let blocks_with_senders: Vec<_> = blocks.iter().map(Self::convert_block).collect();
 
         let output = executor.execute_and_verify_batch(&blocks_with_senders)?;
+        debug!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Blocks executed successfully"
+        );
 
         Ok(output)
     }
@@ -125,7 +168,11 @@ where
 
         let senders: HashSet<_> =
             block.body.transactions.iter().filter_map(|tx| tx.recover_signer()).collect();
-        tracing::debug!("Found {} unique senders in block", senders.len());
+        debug!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Block {}: Found {} unique senders in block with {} transactions",
+            block.number, senders.len(), block.body.transactions.len()
+        );
 
         BlockWithSenders { block: block.clone(), senders: senders.into_iter().collect() }
     }
@@ -157,6 +204,11 @@ where
         block: &Block,
         execution_result: ExecutionOutcome,
     ) -> eyre::Result<did::hash::Hash<alloy_primitives::FixedBytes<32>>> {
+        debug!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Computing PoW hash for block: {}, hash: {}",
+            block.number, block.hash_slow()
+        );
         let exec_state = execution_result.bundle;
 
         let state_provider = self.provider_factory.latest()?;
@@ -164,6 +216,10 @@ where
             &state_provider,
         )));
 
+        trace!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Building state with bundle prestate for block: {}", block.number
+        );
         let mut state = StateBuilder::new()
             .with_database_ref(&cache)
             .with_bundle_prestate(exec_state)
@@ -178,6 +234,10 @@ where
 
         let base_fee = block.base_fee_per_gas.map(Into::into);
 
+        trace!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Fetching genesis balances for PoW calculation"
+        );
         let genesis_accounts =
             self.evm_client.get_genesis_balances().await.map_err(|e| eyre!("{e}"))?;
 
@@ -202,26 +262,61 @@ where
 
         {
             // Setup EVM
+            trace!(
+                target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+                "Setting up EVM for PoW transaction execution"
+            );
             let mut evm = evm_config.evm_with_env(
                 &mut state,
                 EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, tx),
             );
 
+            debug!(
+                target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+                "Executing PoW transaction for block: {}", block.number
+            );
             let res = evm.transact()?;
 
-            eyre::ensure!(res.result.is_success(), "POW transaction failed: {:?}", res.result);
+            if !res.result.is_success() {
+                error!(
+                    target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+                    "PoW transaction failed for block {}: {:?}", block.number, res.result
+                );
+                eyre::bail!("PoW transaction failed: {:?}", res.result);
+            }
 
+            trace!(
+                target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+                "Committing PoW transaction state changes"
+            );
             evm.db_mut().commit(res.state);
         }
+
+        trace!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Merging state transitions for block: {}", block.number
+        );
         state.merge_transitions(BundleRetention::PlainState);
         let bundle = state.take_bundle();
 
+        trace!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Creating hashed post state from bundle state"
+        );
         let post_hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state());
 
+        debug!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "Calculating state root for block: {}", block.number
+        );
         let state_root =
             StateRoot::overlay_root(self.provider_factory.provider()?.tx_ref(), post_hashed_state)?;
 
+        info!(
+            target: "bitfinity_block_confirmation::BitfinityBlokConfirmation",
+            "PoW hash computed successfully for block: {}", block.number
+        );
         Ok(state_root.into())
     }
 }
@@ -789,15 +884,15 @@ mod tests {
         let computed_pow =
             block_validator.compute_pow_hash(&block.block, outcome.clone()).await.unwrap();
 
-        let post_execution_state =
-            StateRoot::from_tx(block_validator.provider_factory.provider().unwrap().tx_ref())
-                .root()
-                .unwrap();
-
         assert_eq!(
             expected_pow_hash, computed_pow,
             "POW hash should be deterministic given the same state"
         );
+
+        let post_execution_state =
+            StateRoot::from_tx(block_validator.provider_factory.provider().unwrap().tx_ref())
+                .root()
+                .unwrap();
 
         assert_eq!(
             inital_state, post_execution_state,
