@@ -1,9 +1,6 @@
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloc::vec::Vec;
-use alloy_eips::{
-    eip4895::Withdrawal,
-    eip7685::{Requests, RequestsOrHash},
-};
+use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
@@ -183,10 +180,7 @@ where
     /// Returns `None` in all other cases.
     pub fn execution_requests(&self) -> Option<&Requests> {
         if let Self::ExecutionPayload(payload) = self {
-            payload.sidecar.prague().and_then(|prague_fields| match &prague_fields.requests {
-                RequestsOrHash::Requests(requests) => Some(requests),
-                _ => None,
-            })
+            payload.sidecar.requests()
         } else {
             None
         }
