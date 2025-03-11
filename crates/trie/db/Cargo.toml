@@ -78,7 +78,6 @@ serde = [
 ]
 test-utils = [
     "triehash",
-    "revm/test-utils",
     "reth-trie-common/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-chainspec/test-utils",

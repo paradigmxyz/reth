@@ -2,7 +2,7 @@
 
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
-use alloy_primitives::U256;
+use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -17,7 +17,6 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use revm::context_interface::{result::ExecutionResult, Transaction};
-use revm_primitives::TxKind;
 use tracing::trace;
 
 /// Gas execution estimates

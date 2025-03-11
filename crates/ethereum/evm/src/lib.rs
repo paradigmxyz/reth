@@ -32,7 +32,7 @@ use reth_primitives::{EthPrimitives, SealedBlock, SealedHeader, TransactionSigne
 use revm::{
     context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
-    specification::hardfork::SpecId,
+    primitives::hardfork::SpecId,
 };
 
 mod config;

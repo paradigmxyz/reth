@@ -19,8 +19,7 @@ use reth::{
     revm::{
         context::{result::ExecutionResult, TxEnv},
         db::State,
-        primitives::{address, Address},
-        specification::hardfork::SpecId,
+        primitives::{address, hardfork::SpecId, Address},
         DatabaseCommit,
     },
 };
