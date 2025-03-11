@@ -250,7 +250,7 @@ impl BitfinityImportCommand {
         remote_client: Arc<BitfinityEvmClient>,
         provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
-        debug!(target: "reth::cli - BitfinityImportCommand", "Configurming block {block}");
+        debug!(target: "reth::cli - BitfinityImportCommand", "Confirming block {block}");
 
         let config = self.rpc_config();
         let client = BitfinityEvmClient::client(config).await?;

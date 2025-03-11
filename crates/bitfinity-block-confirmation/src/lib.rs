@@ -3,12 +3,13 @@ use alloy_primitives::TxKind;
 use did::{BlockConfirmationData, BlockConfirmationResult};
 use ethereum_json_rpc_client::{Client, EthJsonRpcClient};
 
-use eyre::eyre;
-use eyre::Ok;
+use eyre::{eyre, Ok};
 use reth_chain_state::MemoryOverlayStateProvider;
-use reth_evm::env::EvmEnv;
-use reth_evm::execute::{BasicBatchExecutor, BatchExecutor};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{
+    env::EvmEnv,
+    execute::{BasicBatchExecutor, BatchExecutor},
+    ConfigureEvm, ConfigureEvmEnv,
+};
 use reth_evm_ethereum::{
     execute::{EthExecutionStrategy, EthExecutionStrategyFactory},
     EthEvmConfig,
@@ -21,15 +22,15 @@ use reth_provider::{
 };
 use reth_revm::db::states::bundle_state::BundleRetention;
 
-use reth_revm::primitives::{EnvWithHandlerCfg, TxEnv};
-use reth_revm::{batch::BlockBatchRecord, database::StateProviderDatabase};
-use reth_revm::{DatabaseCommit, StateBuilder};
-use reth_rpc_eth_types::cache::db::StateProviderTraitObjWrapper;
-use reth_rpc_eth_types::StateCacheDb;
+use reth_revm::{
+    batch::BlockBatchRecord,
+    database::StateProviderDatabase,
+    primitives::{EnvWithHandlerCfg, TxEnv},
+    DatabaseCommit, StateBuilder,
+};
+use reth_rpc_eth_types::{cache::db::StateProviderTraitObjWrapper, StateCacheDb};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
-
-use std::collections::HashSet;
 
 /// Block confirmation for Bitfinity.
 ///
@@ -112,22 +113,33 @@ where
     /// Execute block and return execution result.
     fn execute_blocks(&self, blocks: &[Block]) -> eyre::Result<ExecutionOutcome> {
         let executor = self.executor();
-        let blocks_with_senders: Vec<_> = blocks.iter().map(Self::convert_block).collect();
+        let blocks_with_senders: eyre::Result<Vec<_>> = blocks.iter().map(Self::convert_block).collect();
+        let blocks_with_senders = blocks_with_senders?;
 
         let output = executor.execute_and_verify_batch(&blocks_with_senders)?;
+        tracing::debug!("Blocks executed");
 
         Ok(output)
     }
 
     /// Convert [`Block`] to [`BlockWithSenders`].
-    fn convert_block(block: &Block) -> BlockWithSenders {
+    fn convert_block(block: &Block) -> eyre::Result<BlockWithSenders> {
         use reth_primitives_traits::SignedTransaction;
 
-        let senders: HashSet<_> =
-            block.body.transactions.iter().filter_map(|tx| tx.recover_signer()).collect();
-        tracing::debug!("Found {} unique senders in block", senders.len());
+        let senders: eyre::Result<Vec<_>> = block
+            .body
+            .transactions
+            .iter()
+            .enumerate()
+            .map(|(index, tx)| {
+                tx.recover_signer().ok_or_else(|| {
+                    eyre!("Failed to recover sender for transaction {index} with hash {:?}", tx.hash)
+                })
+            })
+            .collect();
+        let senders = senders?;
 
-        BlockWithSenders { block: block.clone(), senders: senders.into_iter().collect() }
+        Ok(BlockWithSenders { block: block.clone(), senders })
     }
 
     /// Get the block executor for the latest block.
@@ -233,27 +245,23 @@ mod tests {
     use alloy_genesis::{Genesis, GenesisAccount};
 
     use alloy_network::TxSignerSync;
-    use alloy_primitives::hex::FromHex;
-    use alloy_primitives::Address;
+    use alloy_primitives::{hex::FromHex, Address};
 
     use alloy_signer::Signer;
-    use did::constant::EIP1559_INITIAL_BASE_FEE;
-    use did::U256;
+    use did::{constant::EIP1559_INITIAL_BASE_FEE, U256};
 
     use jsonrpc_core::{Output, Request, Response, Success, Version};
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::{
         BaseFeeParams, ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS,
     };
-    use reth_db::test_utils::TempDatabase;
-    use reth_db::DatabaseEnv;
+    use reth_db::{test_utils::TempDatabase, DatabaseEnv};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::execute::{BlockExecutorProvider, Executor};
     use reth_evm_ethereum::execute::EthExecutorProvider;
 
-    use std::future::Future;
-    use std::sync::Arc;
+    use std::{future::Future, sync::Arc};
 
     use super::*;
 
@@ -261,10 +269,10 @@ mod tests {
     use reth_primitives::{
         BlockBody, BlockExt, EthPrimitives, Receipt, SealedBlockWithSenders, TransactionSigned,
     };
-    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
     use reth_provider::{
-        BlockExecutionOutput, BlockReader, BlockWriter, DatabaseProviderFactory, EthStorage,
-        HashedPostStateProvider, LatestStateProviderRef, StorageLocation, TransactionVariant,
+        test_utils::create_test_provider_factory_with_chain_spec, BlockExecutionOutput,
+        BlockReader, BlockWriter, DatabaseProviderFactory, EthStorage, HashedPostStateProvider,
+        LatestStateProviderRef, StorageLocation, TransactionVariant,
     };
     use reth_revm::primitives::KECCAK_EMPTY;
 

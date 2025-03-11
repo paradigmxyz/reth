@@ -7211,7 +7211,6 @@ dependencies = [
  "evm-canister-client",
  "eyre",
  "futures",
- "hex",
  "ic-agent",
  "jsonrpsee",
  "lightspeed_scheduler",
