@@ -635,7 +635,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_primitives::{address, U256};
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;

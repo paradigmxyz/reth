@@ -21,6 +21,7 @@ reth-trie-common.workspace = true
 
 # scroll
 reth-scroll-forks.workspace = true
+scroll-alloy-hardforks.workspace = true
 
 # ethereum
 alloy-chains.workspace = true

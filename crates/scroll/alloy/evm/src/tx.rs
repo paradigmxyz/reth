@@ -1,8 +1,7 @@
-use alloy_evm::{FromRecoveredTx, IntoTxEnv};
+use alloy_evm::IntoTxEnv;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use core::ops::{Deref, DerefMut};
-use reth_scroll_primitives::ScrollTransactionSigned;
-use revm::context::{Transaction, TxEnv};
+use revm::context::Transaction;
 use revm_scroll::ScrollTransaction;
 
 /// This structure wraps around a [`ScrollTransaction`] and allows us to implement the [`IntoTxEnv`]
@@ -114,11 +113,5 @@ impl<T: Transaction> Transaction for ScrollTransactionIntoTxEnv<T> {
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
         self.0.max_priority_fee_per_gas()
-    }
-}
-
-impl FromRecoveredTx<ScrollTransactionSigned> for ScrollTransactionIntoTxEnv<TxEnv> {
-    fn from_recovered_tx(tx: &ScrollTransactionSigned, sender: Address) -> Self {
-        Self(ScrollTransaction::from_recovered_tx(tx, sender))
     }
 }

@@ -39,13 +39,6 @@ pub const CURIE_L1_GAS_PRICE_ORACLE_STORAGE: [(U256, U256); 4] = [
     (IS_CURIE_SLOT, IS_CURIE),
 ];
 
-/// L1 gas price oracle base fee slot.
-pub const L1_BASE_FEE_SLOT: U256 = U256::from_limbs([1, 0, 0, 0]);
-/// L1 gas price oracle over head slot.
-pub const OVER_HEAD_SLOT: U256 = U256::from_limbs([2, 0, 0, 0]);
-/// L1 gas price oracle scalar slot.
-pub const SCALAR_SLOT: U256 = U256::from_limbs([3, 0, 0, 0]);
-
 /// L1 gas price oracle blob base fee slot. Added in the Curie fork.
 pub const L1_BLOB_BASE_FEE_SLOT: U256 = U256::from_limbs([5, 0, 0, 0]);
 /// L1 gas price oracle commit scalar slot. Added in the Curie fork.
@@ -56,19 +49,19 @@ pub const BLOB_SCALAR_SLOT: U256 = U256::from_limbs([7, 0, 0, 0]);
 pub const IS_CURIE_SLOT: U256 = U256::from_limbs([8, 0, 0, 0]);
 
 /// The initial blob base fee used by the oracle contract.
-const INITIAL_L1_BLOB_BASE_FEE: U256 = U256::from_limbs([1, 0, 0, 0]);
+pub const INITIAL_L1_BLOB_BASE_FEE: U256 = U256::from_limbs([1, 0, 0, 0]);
 /// The initial commit scalar used by the oracle contract.
-const INITIAL_COMMIT_SCALAR: U256 = U256::from_limbs([230759955285, 0, 0, 0]);
+pub const INITIAL_COMMIT_SCALAR: U256 = U256::from_limbs([230759955285, 0, 0, 0]);
 /// The initial blob scalar used by the oracle contract.
-const INITIAL_BLOB_SCALAR: U256 = U256::from_limbs([417565260, 0, 0, 0]);
+pub const INITIAL_BLOB_SCALAR: U256 = U256::from_limbs([417565260, 0, 0, 0]);
 /// Curie slot is set to 1 (true) after the Curie block fork.
-const IS_CURIE: U256 = U256::from_limbs([1, 0, 0, 0]);
+pub const IS_CURIE: U256 = U256::from_limbs([1, 0, 0, 0]);
 
 /// Applies the Scroll Curie hard fork to the state:
 ///    - Updates the L1 oracle contract bytecode to reflect the DA cost reduction.
 ///    - Sets the initial blob base fee, commit and blob scalar and sets the `isCurie` slot to 1
 ///      (true).
-pub fn apply_curie_hard_fork<DB: Database>(state: &mut State<DB>) -> Result<(), DB::Error> {
+pub(super) fn apply_curie_hard_fork<DB: Database>(state: &mut State<DB>) -> Result<(), DB::Error> {
     let oracle = state.load_cache_account(L1_GAS_PRICE_ORACLE_ADDRESS)?;
 
     // compute the code hash
@@ -108,13 +101,7 @@ pub fn apply_curie_hard_fork<DB: Database>(state: &mut State<DB>) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        apply_curie_hard_fork,
-        curie::{
-            CURIE_L1_GAS_PRICE_ORACLE_BYTECODE, CURIE_L1_GAS_PRICE_ORACLE_STORAGE,
-            L1_GAS_PRICE_ORACLE_ADDRESS,
-        },
-    };
+    use super::*;
     use revm::{
         database::{
             states::{bundle_state::BundleRetention, plain_account::PlainStorage, StorageSlot},

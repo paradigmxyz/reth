@@ -383,7 +383,7 @@ impl PoolTransaction for ScrollPooledTransaction {
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
         let encoded_len = tx.encode_2718_len();
-        let tx = tx.map_transaction(|tx| tx.into());
+        let tx = tx.map(|tx| tx.into());
         Self::new(tx, encoded_len)
     }
 

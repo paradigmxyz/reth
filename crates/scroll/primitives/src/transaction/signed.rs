@@ -3,8 +3,8 @@
 use crate::ScrollTxType;
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930,
-    TxLegacy, Typed2718,
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -36,6 +36,7 @@ use revm_context::TxEnv;
 use scroll_alloy_consensus::{
     ScrollPooledTransaction, ScrollTypedTransaction, TxL1Message, L1_MESSAGE_TRANSACTION_TYPE,
 };
+use scroll_alloy_evm::ScrollTransactionIntoTxEnv;
 use std::ops::Deref;
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
@@ -448,7 +449,9 @@ pub const fn is_l1_message(tx: &ScrollTypedTransaction) -> bool {
     matches!(tx, ScrollTypedTransaction::L1Message(_))
 }
 
-impl<T: Into<ScrollTypedTransaction>> From<Signed<T>> for ScrollTransactionSigned {
+impl<T: Into<ScrollTypedTransaction> + RlpEcdsaEncodableTx> From<Signed<T>>
+    for ScrollTransactionSigned
+{
     fn from(value: Signed<T>) -> Self {
         let (tx, sig, hash) = value.into_parts();
         let this = Self::new(tx.into(), sig);
@@ -563,6 +566,82 @@ impl FromRecoveredTx<ScrollTransactionSigned> for revm_scroll::ScrollTransaction
         };
 
         Self { base, rlp_bytes: (!tx.is_l1_message()).then_some(envelope.into()) }
+    }
+}
+
+impl FromRecoveredTx<ScrollTransactionSigned> for ScrollTransactionIntoTxEnv<TxEnv> {
+    fn from_recovered_tx(tx: &ScrollTransactionSigned, sender: Address) -> Self {
+        let envelope = tx.encoded_2718();
+
+        let base = match &tx.transaction {
+            ScrollTypedTransaction::Legacy(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.gas_price,
+                gas_priority_fee: None,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: tx.chain_id,
+                nonce: tx.nonce,
+                access_list: Default::default(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 0,
+                caller: sender,
+            },
+            ScrollTypedTransaction::Eip2930(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.gas_price,
+                gas_priority_fee: None,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx.access_list.clone(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 1,
+                caller: sender,
+            },
+            ScrollTypedTransaction::Eip1559(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.max_fee_per_gas,
+                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx.access_list.clone(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 2,
+                caller: sender,
+            },
+            ScrollTypedTransaction::L1Message(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: 0,
+                gas_priority_fee: None,
+                kind: TxKind::Call(tx.to),
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: None,
+                nonce: 0,
+                access_list: Default::default(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: L1_MESSAGE_TRANSACTION_TYPE,
+                caller: sender,
+            },
+        };
+
+        let rlp_bytes = (!tx.is_l1_message()).then_some(envelope.into());
+        Self::new(base, rlp_bytes)
     }
 }
 

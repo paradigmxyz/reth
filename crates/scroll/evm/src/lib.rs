@@ -1,15 +1,103 @@
 //! Scroll evm execution implementation.
 
-pub use config::ScrollEvmConfig;
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+mod build;
+
 mod config;
 
-pub use error::{ForkError, ScrollBlockExecutionError};
-mod error;
-
-pub use execute::{
-    ScrollExecutionStrategy, ScrollExecutionStrategyFactory, ScrollExecutorProvider,
-};
+pub use execute::{ScrollBlockExecutionInput, ScrollExecutorProvider};
 mod execute;
 
+pub use receipt::ScrollRethReceiptBuilder;
 mod receipt;
-pub use receipt::{BasicScrollReceiptBuilder, ReceiptBuilderCtx, ScrollReceiptBuilder};
+
+use crate::build::ScrollBlockAssembler;
+use std::sync::Arc;
+
+use alloy_primitives::{BlockNumber, BlockTimestamp};
+use reth_primitives_traits::NodePrimitives;
+use reth_scroll_chainspec::ScrollChainSpec;
+use reth_scroll_primitives::ScrollPrimitives;
+use revm_scroll::ScrollSpecId;
+use scroll_alloy_evm::{ScrollBlockExecutorFactory, ScrollEvmFactory};
+use scroll_alloy_hardforks::{ScrollHardfork, ScrollHardforks};
+
+/// Scroll EVM configuration.
+#[derive(Debug)]
+pub struct ScrollEvmConfig<
+    ChainSpec = ScrollChainSpec,
+    N: NodePrimitives = ScrollPrimitives,
+    R = ScrollRethReceiptBuilder,
+> {
+    /// Executor factory.
+    executor_factory: ScrollBlockExecutorFactory<R, Arc<ChainSpec>>,
+    /// Block assembler.
+    block_assembler: ScrollBlockAssembler<ChainSpec>,
+    /// Node primitives marker.
+    _pd: core::marker::PhantomData<N>,
+}
+
+impl<ChainSpec: ScrollHardforks> ScrollEvmConfig<ChainSpec> {
+    /// Creates a new [`ScrollEvmConfig`] with the given chain spec for Scroll chains.
+    pub fn scroll(chain_spec: Arc<ChainSpec>) -> Self {
+        Self::new(chain_spec, ScrollRethReceiptBuilder::default())
+    }
+}
+
+impl<ChainSpec, N: NodePrimitives, R: Clone> Clone for ScrollEvmConfig<ChainSpec, N, R> {
+    fn clone(&self) -> Self {
+        Self {
+            executor_factory: self.executor_factory.clone(),
+            block_assembler: self.block_assembler.clone(),
+            _pd: self._pd,
+        }
+    }
+}
+
+impl<ChainSpec: ScrollHardforks, N: NodePrimitives, R> ScrollEvmConfig<ChainSpec, N, R> {
+    /// Creates a new [`ScrollEvmConfig`] with the given chain spec.
+    pub fn new(chain_spec: Arc<ChainSpec>, receipt_builder: R) -> Self {
+        Self {
+            block_assembler: ScrollBlockAssembler::new(chain_spec.clone()),
+            executor_factory: ScrollBlockExecutorFactory::new(
+                receipt_builder,
+                chain_spec,
+                ScrollEvmFactory::default(),
+            ),
+            _pd: core::marker::PhantomData,
+        }
+    }
+
+    /// Returns the chain spec associated with this configuration.
+    pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
+        self.executor_factory.spec()
+    }
+
+    /// Returns the spec id at the given head.
+    pub fn spec_id_at_timestamp_and_number(
+        &self,
+        timestamp: BlockTimestamp,
+        number: BlockNumber,
+    ) -> ScrollSpecId {
+        let chain_spec = self.chain_spec();
+        if chain_spec
+            .scroll_fork_activation(ScrollHardfork::DarwinV2)
+            .active_at_timestamp_or_number(timestamp, number) ||
+            chain_spec
+                .scroll_fork_activation(ScrollHardfork::Darwin)
+                .active_at_timestamp_or_number(timestamp, number)
+        {
+            ScrollSpecId::DARWIN
+        } else if chain_spec
+            .scroll_fork_activation(ScrollHardfork::Curie)
+            .active_at_timestamp_or_number(timestamp, number)
+        {
+            ScrollSpecId::CURIE
+        } else {
+            ScrollSpecId::BERNOULLI
+        }
+    }
+}
