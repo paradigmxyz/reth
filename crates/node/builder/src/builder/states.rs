@@ -16,7 +16,7 @@ use reth_exex::ExExContext;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_tasks::TaskExecutor;
-use std::{fmt, future::Future};
+use std::{fmt, fmt::Debug, future::Future};
 
 /// A node builder that also has the configured types.
 pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
@@ -145,7 +145,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
 ///
 /// Supports adding additional addons to the node.
 pub struct NodeBuilderWithComponents<
-    T: FullNodeTypes,
+    T: FullNodeTypes + Debug,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
 > {
