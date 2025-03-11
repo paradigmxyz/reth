@@ -8460,7 +8460,7 @@ dependencies = [
  "toml",
  "tracing",
  "vergen",
- "vergen-git2"
+ "vergen-git2",
 ]
 
 [[package]]
