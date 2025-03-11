@@ -375,8 +375,8 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{SealedBlock, TransactionSigned};
-    use reth_primitives_traits::SignedTransaction;
+    use reth_ethereum_primitives::{Block, TransactionSigned};
+    use reth_primitives_traits::{SealedBlock, SignedTransaction};
     use reth_provider::{
         providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
         PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
@@ -635,7 +635,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for SenderRecoveryTestRunner {
-        type Seed = Vec<SealedBlock>;
+        type Seed = Vec<SealedBlock<Block>>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let mut rng = generators::rng();

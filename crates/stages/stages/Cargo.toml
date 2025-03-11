@@ -67,6 +67,7 @@ reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
 reth-ethereum-consensus.workspace = true
+reth-evm-ethereum.workspace = true
 reth-execution-errors.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
@@ -97,26 +98,26 @@ pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterio
 
 [features]
 test-utils = [
-	"dep:reth-chainspec",
-	"reth-network-p2p/test-utils",
-	"reth-db/test-utils",
-	"reth-provider/test-utils",
-	"reth-stages-api/test-utils",
-	"dep:reth-testing-utils",
-	"dep:tempfile",
-	"reth-chainspec?/test-utils",
-	"reth-consensus/test-utils",
-	"reth-evm/test-utils",
-	"reth-downloaders/test-utils",
-	"reth-primitives-traits/test-utils",
-	"reth-revm/test-utils",
-	"reth-codecs/test-utils",
-	"reth-db-api/test-utils",
-	"reth-trie-db/test-utils",
-	"reth-trie/test-utils",
-	"reth-prune-types/test-utils",
-	"dep:reth-ethereum-primitives",
-	"reth-ethereum-primitives?/test-utils"
+    "dep:reth-chainspec",
+    "reth-network-p2p/test-utils",
+    "reth-db/test-utils",
+    "reth-provider/test-utils",
+    "reth-stages-api/test-utils",
+    "dep:reth-testing-utils",
+    "dep:tempfile",
+    "reth-chainspec?/test-utils",
+    "reth-consensus/test-utils",
+    "reth-evm/test-utils",
+    "reth-downloaders/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-revm/test-utils",
+    "reth-codecs/test-utils",
+    "reth-db-api/test-utils",
+    "reth-trie-db/test-utils",
+    "reth-trie/test-utils",
+    "reth-prune-types/test-utils",
+    "dep:reth-ethereum-primitives",
+    "reth-ethereum-primitives?/test-utils",
 ]
 
 [[bench]]

@@ -215,7 +215,7 @@ mod tests {
         ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
         UnwindStageTestRunner,
     };
-    use reth_primitives::SealedHeader;
+    use reth_primitives_traits::SealedHeader;
     use reth_testing_utils::{
         generators,
         generators::{random_header, random_header_range},

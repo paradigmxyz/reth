@@ -219,8 +219,8 @@ mod tests {
         cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };
-    use reth_primitives::SealedBlock;
-    use reth_primitives_traits::SignedTransaction;
+    use reth_ethereum_primitives::Block;
+    use reth_primitives_traits::{SealedBlock, SignedTransaction};
     use reth_provider::providers::StaticFileWriter;
     use reth_testing_utils::generators::{
         self, random_block_range, random_contract_account_range, BlockRangeParams,
@@ -329,7 +329,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for StorageHashingTestRunner {
-        type Seed = Vec<SealedBlock>;
+        type Seed = Vec<SealedBlock<Block>>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.next_block();

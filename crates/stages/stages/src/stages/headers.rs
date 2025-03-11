@@ -407,8 +407,9 @@ mod tests {
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
+    use reth_ethereum_primitives::BlockBody;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{BlockBody, RecoveredBlock, SealedBlock};
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
