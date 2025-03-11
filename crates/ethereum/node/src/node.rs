@@ -336,7 +336,7 @@ pub struct EthereumPoolBuilder {
 impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
-    Node: FullNodeTypes<Types = Types>,
+    Node: FullNodeTypes<Types = Types> + Debug,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
 

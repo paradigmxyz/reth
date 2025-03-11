@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
 use reth_node_api::{EngineTypes, FullNodeComponents};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -17,13 +18,12 @@ use reth_provider::ChainSpecProvider;
 use reth_rpc_api::EngineApiClient;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
-
-use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
+use std::fmt::Debug;
 
 /// A [`crate::Node`] is a [`NodeTypesWithEngine`] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
-pub trait Node<N: FullNodeTypes>: NodeTypesWithEngine + Clone {
+pub trait Node<N: FullNodeTypes + Debug>: NodeTypesWithEngine + Clone {
     /// The type that builds the node's components.
     type ComponentsBuilder: NodeComponentsBuilder<N>;
 
@@ -86,7 +86,7 @@ where
 
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
 where
-    N: FullNodeTypes + Clone,
+    N: FullNodeTypes + Clone + Debug,
     C: NodeComponentsBuilder<N> + Clone + Sync + Unpin + 'static,
     AO: NodeAddOns<NodeAdapter<N, C::Components>> + Clone + Sync + Unpin + 'static,
 {

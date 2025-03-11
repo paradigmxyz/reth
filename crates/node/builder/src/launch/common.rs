@@ -55,6 +55,7 @@ use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
+use std::fmt::Debug;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
@@ -653,7 +654,7 @@ where
         self,
         components_builder: CB,
         on_component_initialized: Box<
-            dyn OnComponentInitializedHook<NodeAdapter<T, CB::Components>>,
+            dyn OnComponentInitializedHook<NodeAdapter<T: Debug, CB::Components>>,
         >,
     ) -> eyre::Result<
         LaunchContextWith<
