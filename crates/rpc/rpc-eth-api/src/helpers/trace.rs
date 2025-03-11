@@ -13,8 +13,7 @@ use reth_evm::{
     InspectorFor, TxEnvFor,
 };
 use reth_node_api::NodePrimitives;
-use reth_primitives::RecoveredBlock;
-use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_primitives_traits::{BlockBody, RecoveredBlock, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
