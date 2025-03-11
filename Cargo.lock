@@ -3281,7 +3281,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-serde",
  "arbitrary",
- "derive_more",
+ "derive_more 2.0.1",
  "eyre",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
