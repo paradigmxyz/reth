@@ -81,13 +81,19 @@ pub struct NodeAdapter<T: FullNodeTypes + Debug, C: NodeComponents<T>> {
     pub provider: T::Provider,
 }
 
-impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
+impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C>
+where
+    T: Debug,
+{
     type Types = T::Types;
     type DB = T::DB;
     type Provider = T::Provider;
 }
 
-impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C> {
+impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C>
+where
+    T: Debug,
+{
     type Pool = C::Pool;
     type Evm = C::Evm;
     type Executor = C::Executor;
@@ -131,7 +137,10 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     }
 }
 
-impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
+impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C>
+where
+    T: Debug,
+{
     fn clone(&self) -> Self {
         Self {
             components: self.components.clone(),

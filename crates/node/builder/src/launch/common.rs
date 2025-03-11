@@ -654,7 +654,7 @@ where
         self,
         components_builder: CB,
         on_component_initialized: Box<
-            dyn OnComponentInitializedHook<NodeAdapter<T: Debug, CB::Components>>,
+            dyn OnComponentInitializedHook<NodeAdapter<T, CB::Components>>,
         >,
     ) -> eyre::Result<
         LaunchContextWith<
@@ -663,6 +663,7 @@ where
     >
     where
         CB: NodeComponentsBuilder<T>,
+        T: Debug,
     {
         // fetch the head block from the database
         let head = self.lookup_head()?;
@@ -711,7 +712,7 @@ impl<T, CB>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
     >
 where
-    T: FullNodeTypes<Types: NodeTypesForProvider>,
+    T: FullNodeTypes<Types: NodeTypesForProvider + Debug>,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -1029,7 +1030,7 @@ where
 #[allow(missing_debug_implementations)]
 pub struct WithComponents<T, CB>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + Debug,
     CB: NodeComponentsBuilder<T>,
 {
     db_provider_container: WithMeteredProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>,

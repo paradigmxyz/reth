@@ -249,7 +249,7 @@ where
         self,
     ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider + Debug,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
@@ -310,7 +310,7 @@ where
         self,
     ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider + Debug,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
         WithLaunchContext {
@@ -364,7 +364,7 @@ where
     }
 }
 
-impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
+impl<T: FullNodeTypes + Debug> WithLaunchContext<NodeBuilderWithTypes<T>> {
     /// Advances the state of the node builder to the next state where all components are configured
     pub fn with_components<CB>(
         self,
@@ -372,7 +372,6 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
     ) -> WithLaunchContext<NodeBuilderWithComponents<T, CB, ()>>
     where
         CB: NodeComponentsBuilder<T>,
-        T: Debug,
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
