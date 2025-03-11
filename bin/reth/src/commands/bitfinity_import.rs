@@ -24,7 +24,7 @@ use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, CanonChainTracker,
+    providers::BlockchainProvider, BlockHashReader, BlockNumReader, CanonChainTracker,
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory,
 };
 use reth_prune::PruneModes;
