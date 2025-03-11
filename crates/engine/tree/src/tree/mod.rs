@@ -34,9 +34,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
-use reth_primitives_traits::{
-    Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,

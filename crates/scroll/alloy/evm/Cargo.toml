@@ -19,7 +19,7 @@ alloy-evm.workspace = true
 alloy-primitives.workspace = true
 
 # revm
-revm.workspace = true
+revm = { workspace = true, features = ["optional_no_base_fee"] }
 
 # scroll
 revm-scroll.workspace = true

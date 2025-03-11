@@ -104,7 +104,9 @@ impl ScrollExecutorProvider {
 
 #[cfg(test)]
 mod tests {
-    use crate::ScrollRethReceiptBuilder;
+    use crate::{ScrollEvmConfig, ScrollRethReceiptBuilder};
+    use std::{convert::Infallible, sync::Arc};
+
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_evm::{
         block::{BlockExecutionResult, BlockExecutor},
@@ -114,7 +116,6 @@ mod tests {
     use reth_evm::ConfigureEvm;
     use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SignedTransaction};
     use reth_scroll_chainspec::{ScrollChainConfig, ScrollChainSpec, ScrollChainSpecBuilder};
-    use reth_scroll_evm::ScrollEvmConfig;
     use reth_scroll_primitives::{
         ScrollBlock, ScrollPrimitives, ScrollReceipt, ScrollTransactionSigned,
     };
@@ -138,7 +139,6 @@ mod tests {
         ScrollBlockExecutor, ScrollEvm,
     };
     use scroll_alloy_hardforks::ScrollHardforks;
-    use std::{convert::Infallible, sync::Arc};
 
     const BLOCK_GAS_LIMIT: u64 = 10_000_000;
     const SCROLL_CHAIN_ID: u64 = 534352;

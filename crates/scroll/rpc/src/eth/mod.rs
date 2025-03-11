@@ -85,7 +85,7 @@ where
         self.inner.eth_api()
     }
 
-    /// Build a [`ScrollEthApi`] using [`ScrollEthApiBuildlmn9 ,ner`].
+    /// Return a builder for the [`ScrollEthApi`].
     pub const fn builder() -> ScrollEthApiBuilder {
         ScrollEthApiBuilder::new()
     }
@@ -289,7 +289,7 @@ impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
 pub struct ScrollEthApiBuilder {}
 
 impl ScrollEthApiBuilder {
-    /// Creates a [`ScrollEthApiBuilder`] instance from [`EthApiBuilderCtx`].
+    /// Creates a [`ScrollEthApiBuilder`] instance.
     pub const fn new() -> Self {
         Self {}
     }
