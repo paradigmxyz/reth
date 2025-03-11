@@ -75,7 +75,6 @@ test-utils = [
     "dep:parking_lot",
     "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
-    "revm/test-utils",
     "reth-trie-common/test-utils",
 ]
 op = [

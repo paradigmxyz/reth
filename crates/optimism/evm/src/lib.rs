@@ -13,9 +13,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_evm::FromRecoveredTx;
-use alloy_op_evm::{
-    block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx,
-};
+use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use alloy_primitives::U256;
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
@@ -30,7 +28,7 @@ use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader, SignedTr
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
-    specification::hardfork::SpecId,
+    primitives::hardfork::SpecId,
 };
 
 mod config;
