@@ -28,6 +28,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
     + StageCheckpointReader
     + Clone
+    + Debug
     + Unpin
     + 'static
 {
@@ -50,6 +51,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
         + StageCheckpointReader
         + Clone
+        + Debug
         + Unpin
         + 'static
 {
