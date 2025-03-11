@@ -7212,6 +7212,7 @@ dependencies = [
  "eyre",
  "futures",
  "hex",
+ "ic-agent",
  "jsonrpsee",
  "lightspeed_scheduler",
  "parking_lot",

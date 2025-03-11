@@ -660,6 +660,7 @@ ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfini
 evm-canister-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "evm-canister-client", features = [
     "ic-agent-client",
 ], branch = "EPROD-1132_block_validation" }
+ic-agent = "0.39"
 ic-cbor = "3"
 ic-certificate-verification = "3"
 ic-certification = "3"
