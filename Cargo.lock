@@ -9517,7 +9517,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "jsonrpsee-types",
- "reth-primitives",
  "reth-primitives-traits",
  "serde",
 ]

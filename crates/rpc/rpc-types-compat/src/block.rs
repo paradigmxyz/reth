@@ -6,8 +6,9 @@ use alloy_primitives::U256;
 use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
-use reth_primitives::RecoveredBlock;
-use reth_primitives_traits::{Block as BlockTrait, BlockBody, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{
+    Block as BlockTrait, BlockBody, RecoveredBlock, SealedHeader, SignedTransaction,
+};
 
 /// Converts the given primitive block into a [`Block`] response with the given
 /// [`BlockTransactionsKind`]
