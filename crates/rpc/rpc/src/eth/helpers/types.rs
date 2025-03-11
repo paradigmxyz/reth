@@ -30,7 +30,7 @@ impl EthApiTypes for EthereumEthApiTypes {
 #[non_exhaustive]
 pub struct EthTxBuilder;
 
-impl TransactionCompat for EthTxBuilder
+impl TransactionCompat<TransactionSigned> for EthTxBuilder
 where
     Self: Send + Sync,
 {
