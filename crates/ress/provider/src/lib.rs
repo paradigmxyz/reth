@@ -17,11 +17,7 @@ use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWi
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{MultiProofTargets, Nibbles, TrieInput};
 use schnellru::{ByLength, LruMap};
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 use tracing::*;
 
 mod recorder;
@@ -77,6 +73,7 @@ where
     }
 
     /// Retrieve a valid or invalid block by block hash.
+    #[allow(clippy::type_complexity)]
     pub fn block_by_hash(
         &self,
         block_hash: B256,
