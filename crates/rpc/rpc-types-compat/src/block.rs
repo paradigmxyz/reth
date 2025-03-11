@@ -6,8 +6,9 @@ use alloy_primitives::U256;
 use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
-use reth_primitives::RecoveredBlock;
-use reth_primitives_traits::{Block as BlockTrait, BlockBody, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{
+    Block as BlockTrait, BlockBody, RecoveredBlock, SealedHeader, SignedTransaction,
+};
 
 /// Converts the given primitive block into a [`Block`] response with the given
 /// [`BlockTransactionsKind`]
@@ -29,7 +30,7 @@ where
     }
 }
 
-/// Create a new [`Block`] response from a [primitive block](reth_primitives::Block), using the
+/// Create a new [`Block`] response from a [`RecoveredBlock`], using the
 /// total difficulty to populate its field in the rpc response.
 ///
 /// This will populate the `transactions` field with only the hashes of the transactions in the
@@ -49,7 +50,7 @@ where
     )
 }
 
-/// Create a new [`Block`] response from a [primitive block](reth_primitives::Block), using the
+/// Create a new [`Block`] response from a [`RecoveredBlock`], using the
 /// total difficulty to populate its field in the rpc response.
 ///
 /// This will populate the `transactions` field with the _full_
