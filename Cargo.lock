@@ -7115,7 +7115,6 @@ dependencies = [
  "reth-libmdbx",
  "reth-metrics",
  "reth-nippy-jar",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-storage-errors",
