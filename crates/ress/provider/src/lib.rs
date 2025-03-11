@@ -8,7 +8,6 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_primitives::{Block, BlockBody, EthPrimitives, Header, RecoveredBlock};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
-    providers::{BlockchainProvider, ProviderNodeTypes},
     BlockReader, BlockSource, ProviderError, ProviderResult, StateProvider, StateProviderFactory,
 };
 use reth_ress_protocol::RessProtocolProvider;
@@ -27,15 +26,15 @@ pub use pending_state::*;
 
 /// Reth provider implementing [`RessProtocolProvider`].
 #[allow(missing_debug_implementations)]
-pub struct RethRessProtocolProvider<N: ProviderNodeTypes, E> {
-    provider: BlockchainProvider<N>,
+pub struct RethRessProtocolProvider<P, E> {
+    provider: P,
     block_executor: E,
-    pending_state: PendingState<N::Primitives>,
+    pending_state: PendingState<EthPrimitives>,
     witness_task_pool: BlockingTaskPool,
     witness_cache: Arc<Mutex<LruMap<B256, Arc<Vec<Bytes>>>>>,
 }
 
-impl<N: ProviderNodeTypes, E: Clone> Clone for RethRessProtocolProvider<N, E> {
+impl<P: Clone, E: Clone> Clone for RethRessProtocolProvider<P, E> {
     fn clone(&self) -> Self {
         Self {
             provider: self.provider.clone(),
@@ -47,14 +46,14 @@ impl<N: ProviderNodeTypes, E: Clone> Clone for RethRessProtocolProvider<N, E> {
     }
 }
 
-impl<N, E> RethRessProtocolProvider<N, E>
+impl<P, E> RethRessProtocolProvider<P, E>
 where
-    N: ProviderNodeTypes<Primitives = EthPrimitives>,
-    E: BlockExecutorProvider<Primitives = N::Primitives> + Clone,
+    P: BlockReader<Block = Block> + StateProviderFactory,
+    E: BlockExecutorProvider<Primitives = EthPrimitives> + Clone,
 {
     /// Create new ress protocol provider.
     pub fn new(
-        provider: BlockchainProvider<N>,
+        provider: P,
         block_executor: E,
         pending_state: PendingState<EthPrimitives>,
         pool_num_threads: usize,
@@ -187,10 +186,10 @@ where
     }
 }
 
-impl<N, E> RessProtocolProvider for RethRessProtocolProvider<N, E>
+impl<P, E> RessProtocolProvider for RethRessProtocolProvider<P, E>
 where
-    N: ProviderNodeTypes<Primitives = EthPrimitives>,
-    E: BlockExecutorProvider<Primitives = N::Primitives> + Clone,
+    P: BlockReader<Block = Block> + StateProviderFactory + Clone + 'static,
+    E: BlockExecutorProvider<Primitives = EthPrimitives> + Clone,
 {
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
         trace!(target: "reth::ress_provider", %block_hash, "Serving header");

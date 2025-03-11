@@ -7,11 +7,8 @@ use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_node_api::{BeaconConsensusEngineEvent, NodePrimitives};
-use reth_primitives::{Bytecode, RecoveredBlock};
-use reth_provider::{
-    providers::{BlockchainProvider, ProviderNodeTypes},
-    BlockNumReader,
-};
+use reth_primitives::{Bytecode, EthPrimitives, RecoveredBlock};
+use reth_provider::BlockNumReader;
 use reth_tokio_util::EventStream;
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::*;
@@ -94,12 +91,12 @@ impl<N: NodePrimitives> PendingState<N> {
 }
 
 /// A task to maintain pending state based on consensus engine events.
-pub async fn maintain_pending_state<N>(
-    mut events: EventStream<BeaconConsensusEngineEvent<N::Primitives>>,
-    provider: BlockchainProvider<N>,
-    pending_state: PendingState<N::Primitives>,
+pub async fn maintain_pending_state<P>(
+    mut events: EventStream<BeaconConsensusEngineEvent<EthPrimitives>>,
+    provider: P,
+    pending_state: PendingState<EthPrimitives>,
 ) where
-    N: ProviderNodeTypes<Primitives: NodePrimitives>,
+    P: BlockNumReader,
 {
     while let Some(event) = events.next().await {
         match event {

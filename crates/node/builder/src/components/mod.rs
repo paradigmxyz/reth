@@ -26,7 +26,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network::{NetworkHandle, NetworkPrimitives, NetworkProtocols};
+use reth_network::{NetworkHandle, NetworkPrimitives};
 use reth_network_api::FullNetwork;
 use reth_node_api::{
     BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PrimitivesTy, TxTy,
@@ -55,7 +55,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
         + 'static;
 
     /// Network API.
-    type Network: FullNetwork<Client: BlockClient<Block = BlockTy<T::Types>>> + NetworkProtocols;
+    type Network: FullNetwork<Client: BlockClient<Block = BlockTy<T::Types>>>;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
