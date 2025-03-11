@@ -53,6 +53,20 @@ tracing.workspace = true
 tempfile = { workspace = true, optional = true }
 itertools.workspace = true
 
+# trin-storage = { git = "https://github.com/ethereum/trin", rev = "a2071cc2bc5ea3002e213aef16a449ff60e4d729" }
+# trin-history = { git = "https://github.com/ethereum/trin", rev = "a2071cc2bc5ea3002e213aef16a449ff60e4d729" }
+# trin-validation = { git = "https://github.com/ethereum/trin", rev = "a2071cc2bc5ea3002e213aef16a449ff60e4d729" }
+# portalnet = { git = "https://github.com/ethereum/trin", rev = "a2071cc2bc5ea3002e213aef16a449ff60e4d729" }
+# ethportal-api = { git = "https://github.com/ethereum/trin", rev = "a2071cc2bc5ea3002e213aef16a449ff60e4d729" }
+
+trin-storage = { path = "../../../../trin/crates/storage" }
+trin-history = { path = "../../../../trin/crates/subnetworks/history" }
+trin-validation = { path = "../../../../trin/crates/validation" }
+portalnet = { path = "../../../../trin/crates/portalnet" }
+ethportal-api = { path = "../../../../trin/crates/ethportal-api" }
+utp-rs = { git = "https://github.com/ethereum/utp", tag = "v0.1.0-alpha.16" }
+serde_json.workspace = true
+
 [dev-dependencies]
 reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
@@ -62,6 +76,7 @@ reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
+reth-ethereum-primitives.workspace = true
 
 assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

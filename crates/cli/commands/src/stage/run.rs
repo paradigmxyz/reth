@@ -14,12 +14,13 @@ use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookup
 use reth_db_api::database_metrics::DatabaseMetrics;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder, trin_client::TrinClient,
 };
 use reth_eth_wire::NetPrimitivesFor;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
+use reth_node_api::BlockTy;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
     version::{
@@ -228,7 +229,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                     let default_peers_path = data_dir.known_peers();
 
-                    let network = self
+                    let _network = self
                         .network
                         .network_config::<P>(
                             &config,
@@ -239,7 +240,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         .build(provider_factory.clone())
                         .start_network()
                         .await?;
-                    let fetch_client = Arc::new(network.fetch_client().await?);
+
+                    let fetch_client =
+                        TrinClient::<BlockTy<N>>::new(data_dir.data_dir().join("trin"))
+                            .await
+                            .unwrap();
 
                     let stage = BodyStage::new(
                         BodiesDownloaderBuilder::default()

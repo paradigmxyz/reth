@@ -27,6 +27,9 @@ pub mod metrics;
 /// efficiently buffering headers and bodies for retrieval.
 pub mod file_client;
 
+/// Trin block bodies downloader client.
+pub mod trin_client;
+
 /// Module managing file-based data retrieval and buffering of receipts.
 ///
 /// Contains [`ReceiptFileClient`](receipt_file_client::ReceiptFileClient) to read receipt data from
