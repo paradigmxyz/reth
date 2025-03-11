@@ -40,6 +40,7 @@ reth-payload-primitives.workspace = true
 # ethereum
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
 # revm with required ethereum features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
