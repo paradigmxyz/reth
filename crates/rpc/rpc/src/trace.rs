@@ -38,16 +38,19 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 /// This type provides the functionality for handling `trace` related requests.
 pub struct TraceApi<Eth> {
     inner: Arc<TraceApiInner<Eth>>,
-    eth_config: EthConfig,
 }
 
 // === impl TraceApi ===
 
 impl<Eth> TraceApi<Eth> {
     /// Create a new instance of the [`TraceApi`]
-    pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        let inner = Arc::new(TraceApiInner { eth_api, blocking_task_guard });
-        Self { inner, eth_config: EthConfig::default() }
+    pub fn new(
+        eth_api: Eth,
+        blocking_task_guard: BlockingTaskGuard,
+        eth_config: EthConfig,
+    ) -> Self {
+        let inner = Arc::new(TraceApiInner { eth_api, blocking_task_guard, eth_config });
+        Self { inner }
     }
 
     /// Acquires a permit to execute a tracing call.
@@ -258,7 +261,7 @@ where
 
         // ensure that the range is not too large, since we need to fetch all blocks in the range
         let distance = end.saturating_sub(start);
-        if distance > self.eth_config.max_trace_filter_blocks {
+        if distance > self.inner.eth_config.max_trace_filter_blocks {
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
             )
@@ -677,7 +680,7 @@ impl<Eth> std::fmt::Debug for TraceApi<Eth> {
 }
 impl<Eth> Clone for TraceApi<Eth> {
     fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner), eth_config: self.eth_config }
+        Self { inner: Arc::clone(&self.inner) }
     }
 }
 
@@ -686,6 +689,8 @@ struct TraceApiInner<Eth> {
     eth_api: Eth,
     // restrict the number of concurrent calls to `trace_*`
     blocking_task_guard: BlockingTaskGuard,
+    // eth config settings
+    eth_config: EthConfig,
 }
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block

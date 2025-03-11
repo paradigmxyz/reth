@@ -954,6 +954,8 @@ pub struct RpcRegistryInner<
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
     modules: HashMap<RethRpcModule, Methods>,
+    /// eth config settings
+    eth_config: EthConfig,
 }
 
 // === impl RpcRegistryInner ===
@@ -1004,6 +1006,7 @@ where
             modules: Default::default(),
             blocking_pool_guard,
             block_executor,
+            eth_config: EthConfig::default(),
         }
     }
 }
@@ -1233,7 +1236,7 @@ where
     where
         EthApi: TraceExt,
     {
-        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
+        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone(), self.eth_config)
     }
 
     /// Instantiates [`EthBundle`] Api
@@ -1408,11 +1411,13 @@ where
                         RethRpcModule::Net => {
                             NetApi::new(self.network.clone(), eth_api.clone()).into_rpc().into()
                         }
-                        RethRpcModule::Trace => {
-                            TraceApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Trace => TraceApi::new(
+                            eth_api.clone(),
+                            self.blocking_pool_guard.clone(),
+                            self.eth_config,
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.eth.api.pool().clone(),
