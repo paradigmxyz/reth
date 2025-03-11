@@ -19,14 +19,14 @@ use reth_tasks::TaskExecutor;
 use std::{fmt, fmt::Debug, future::Future};
 
 /// A node builder that also has the configured types.
-pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
+pub struct NodeBuilderWithTypes<T: FullNodeTypes + Debug> {
     /// All settings for how the node should be configured.
     config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
     /// The configured database for the node.
     adapter: NodeTypesAdapter<T>,
 }
 
-impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
+impl<T: FullNodeTypes + Debug> NodeBuilderWithTypes<T> {
     /// Creates a new instance of the node builder with the given configuration and types.
     pub const fn new(
         config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
@@ -72,7 +72,7 @@ impl<T: FullNodeTypes> fmt::Debug for NodeTypesAdapter<T> {
 
 /// Container for the node's types and the components and other internals that can be used by
 /// addons of the node.
-pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
+pub struct NodeAdapter<T: FullNodeTypes + Debug, C: NodeComponents<T>> {
     /// The components of the node.
     pub components: C,
     /// The task executor for the node.
@@ -161,7 +161,7 @@ pub struct NodeBuilderWithComponents<
 
 impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + Debug,
     CB: NodeComponentsBuilder<T>,
 {
     /// Advances the state of the node builder to the next state where all customizable

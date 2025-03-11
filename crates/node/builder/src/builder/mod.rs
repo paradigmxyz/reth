@@ -383,7 +383,7 @@ impl<T: FullNodeTypes> WithLaunchContext<NodeBuilderWithTypes<T>> {
 
 impl<T, CB> WithLaunchContext<NodeBuilderWithComponents<T, CB, ()>>
 where
-    T: FullNodeTypes,
+    T: FullNodeTypes + Debug,
     CB: NodeComponentsBuilder<T>,
 {
     /// Advances the state of the node builder to the next state where all customizable
