@@ -257,7 +257,7 @@ where
         }
 
         // ensure that the range is not too large, since we need to fetch all blocks in the range
-        let distance: u64 = end.saturating_sub(start);
+        let distance = end.saturating_sub(start);
         if distance > self.eth_config.max_trace_filter_blocks {
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
