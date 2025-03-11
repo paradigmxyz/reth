@@ -105,6 +105,7 @@ members = [
     "crates/rpc/rpc/",
     "crates/scroll/alloy/consensus",
     "crates/scroll/alloy/evm",
+    "crates/scroll/alloy/hardforks",
     "crates/scroll/alloy/network",
     "crates/scroll/alloy/provider",
     "crates/scroll/alloy/rpc-types",
@@ -507,6 +508,7 @@ alloy-transport-ws = { version = "0.12.2", default-features = false }
 # scroll
 scroll-alloy-consensus = { path = "crates/scroll/alloy/consensus" }
 scroll-alloy-evm = { path = "crates/scroll/alloy/evm" }
+scroll-alloy-hardforks = { path = "crates/scroll/alloy/hardforks" }
 scroll-alloy-network = { path = "crates/scroll/alloy/network" }
 scroll-alloy-rpc-types = { path = "crates/scroll/alloy/rpc-types" }
 scroll-alloy-rpc-types-engine = { path = "crates/scroll/alloy/rpc-types-engine" }
