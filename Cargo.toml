@@ -447,7 +447,7 @@ revm-inspectors = "0.16"
 alloy-chains = { version = "0.1.64", default-features = false }
 alloy-dyn-abi = "0.8.20"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "8402f9c", default-features = false }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "03a3480", default-features = false }
 alloy-primitives = { version = "0.8.20", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-types = { version = "0.8.20", default-features = false }
@@ -485,7 +485,7 @@ alloy-transport-ipc = { version = "0.12.4", default-features = false }
 alloy-transport-ws = { version = "0.12.4", default-features = false }
 
 # op
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "8402f9c", default-features = false }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "03a3480", default-features = false }
 alloy-op-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "ae4176c" }
 op-alloy-rpc-types = { version = "0.11.0", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.11.0", default-features = false }
@@ -677,6 +677,18 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 
 [patch.crates-io]
+revm = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+op-revm = { git = "https://github.com/bluealloy/revm", rev = "ac21fc5" }
+
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3c6cca4" }
 
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
