@@ -57,10 +57,17 @@ pub struct BitfinityImportArgs {
     #[arg(long, value_name = "EVMC_PRINCIPAL", default_value = "4fe7g-7iaaa-aaaak-aegcq-cai")]
     pub evmc_principal: String,
 
-    /// Root key for the IC network
+    /// If set to true, the importer will fetch root certificate key from IC to validate EVM blocks
+    /// signed data.
+    ///
+    /// Set this flag to true for local deployment. For IC mainnet well known value must be used for
+    /// secure certificate validation.
     #[arg(long)]
     pub fetch_ic_root_key: bool,
 
+    /// Url of the ic the EVM is deployed into.
+    ///
+    /// If not set, mainnet IC connection is assumed.
     #[arg(long, value_name = "IC_URL")]
     pub ic_url: Option<String>,
 
