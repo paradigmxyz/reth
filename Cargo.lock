@@ -9417,7 +9417,6 @@ dependencies = [
  "reth-network-api",
  "reth-node-api",
  "reth-payload-builder",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
@@ -9429,7 +9428,6 @@ dependencies = [
  "reth-trie-common",
  "revm",
  "revm-inspectors",
- "revm-primitives",
  "tokio",
  "tracing",
 ]

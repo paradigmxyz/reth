@@ -6,17 +6,16 @@ use crate::{
     RpcReceipt,
 };
 use alloy_eips::BlockId;
-use alloy_primitives::Sealable;
+use alloy_primitives::{Sealable, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
 };
 use reth_rpc_types_compat::block::from_block;
-use revm_primitives::U256;
 use std::sync::Arc;
 
 /// Result type of the fetched block receipts.

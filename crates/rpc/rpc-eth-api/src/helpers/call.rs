@@ -21,8 +21,7 @@ use reth_evm::{
     TxEnvFor,
 };
 use reth_node_api::{BlockBody, NodePrimitives};
-use reth_primitives::{Recovered, SealedHeader};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
 use reth_provider::{BlockIdReader, ProviderHeader, ProviderTx};
 use reth_revm::{
     database::StateProviderDatabase,
