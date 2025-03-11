@@ -70,9 +70,6 @@ pub type BlockTy<N> = <N as NodePrimitives>::Block;
 
 /// Helper adapter type for accessing [`NodePrimitives`] receipt types.
 pub type ReceiptTy<N> = <N as NodePrimitives>::Receipt;
-<<<<<<< HEAD
 
 /// Helper adapter type for accessing [`NodePrimitives`] signed transaction types.
 pub type TxTy<N> = <N as NodePrimitives>::SignedTx;
-=======
->>>>>>> df9f58bee (fix)
