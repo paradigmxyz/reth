@@ -8,7 +8,7 @@ use alloc::sync::Arc;
 use alloy_chains::{Chain, NamedChain};
 use reth_chainspec::ChainSpec;
 use reth_primitives_traits::SealedHeader;
-use reth_scroll_forks::ScrollHardfork;
+use reth_scroll_forks::SCROLL_MAINNET_HARDFORKS;
 
 /// The Scroll Mainnet spec
 pub static SCROLL_MAINNET: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
@@ -23,7 +23,7 @@ pub static SCROLL_MAINNET: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
                 SCROLL_MAINNET_GENESIS_HASH,
             ),
             genesis,
-            hardforks: ScrollHardfork::scroll_mainnet(),
+            hardforks: SCROLL_MAINNET_HARDFORKS.clone(),
             ..Default::default()
         },
         config: ScrollChainConfig::mainnet(),
