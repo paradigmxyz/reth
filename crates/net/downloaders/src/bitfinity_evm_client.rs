@@ -283,7 +283,12 @@ impl BitfinityEvmClient {
         self.headers.get(&(self.safe_block_number + 1)).map(|h| h.hash_slow())
     }
 
-    /// Returns the has of the last safe block in the chain.
+    /// Returns the block number of the last safe block in the chain.
+    pub fn safe_block_number(&self) -> u64 {
+        self.safe_block_number
+    }
+
+    /// Returns the hash of the last safe block in the chain.
     pub fn safe_block(&self) -> Option<B256> {
         self.headers.get(&self.safe_block_number).map(|h| h.hash_slow())
     }

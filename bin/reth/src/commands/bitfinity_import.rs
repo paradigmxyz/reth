@@ -2,6 +2,7 @@
 
 use crate::{dirs::DataDirPath, version::SHORT_VERSION};
 use bitfinity_block_confirmation::BitfinityBlockConfirmation;
+use eyre::eyre;
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -23,8 +24,8 @@ use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
 use reth_provider::{
-    providers::BlockchainProvider, BlockNumReader, CanonChainTracker, ChainSpecProvider,
-    DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory,
+    providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, CanonChainTracker,
+    ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -146,7 +147,8 @@ impl BitfinityImportCommand {
         let provider_factory = self.provider_factory.clone();
 
         // Get the local block number
-        let start_block = provider_factory.provider()?.last_block_number()? + 1;
+        let last_imported_block = provider_factory.provider()?.last_block_number()?;
+        let start_block = last_imported_block + 1;
 
         debug!(target: "reth::cli - BitfinityImportCommand", "Starting block: {}", start_block);
 
@@ -168,19 +170,33 @@ impl BitfinityImportCommand {
 
         // override the tip
         let safe_block = if let Some(safe_block) = remote_client.safe_block() {
+            self.import_to_block(
+                safe_block,
+                remote_client.clone(),
+                provider_factory.clone(),
+                consensus.clone(),
+            )
+            .await?;
+
             safe_block
         } else {
-            error!(target: "reth::cli - BitfinityImportCommand", "No safe block found, skipping import");
-            return Ok(());
+            // Safe block is not in the client, meaning that the last block in the provider is the
+            // safe one.
+            let safe_block_number = remote_client.safe_block_number();
+            match safe_block_number == last_imported_block {
+                true => match provider_factory.provider()?.block_hash(safe_block_number)? {
+                    Some(v) => v,
+                    None => {
+                        error!(target: "reth::cli - BitfinityImportCommand", "Hash of latest safe block ({}) is not in the blockchain state", safe_block_number);
+                        return Err(eyre!("Hash of latest safe block ({}) is not in the blockchain state", safe_block_number));
+                    }
+                },
+                false => {
+                    error!(target: "reth::cli - BitfinityImportCommand", "Last imported block ({}) is not the last safe block ({})", last_imported_block, safe_block_number);
+                    return Err(eyre!("Last imported block ({}) is not the last safe block ({})", last_imported_block, safe_block_number));
+                }
+            }
         };
-
-        self.import_to_block(
-            safe_block,
-            remote_client.clone(),
-            provider_factory.clone(),
-            consensus.clone(),
-        )
-        .await?;
 
         if self.bitfinity.confirm_unsafe_blocks {
             let Some(mut tip) = remote_client.tip() else {
