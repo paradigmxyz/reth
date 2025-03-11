@@ -18,8 +18,8 @@ use jsonrpsee::{
     rpc_params,
     types::error::ErrorCode,
 };
+use reth_ethereum_primitives::Receipt;
 use reth_network_peers::NodeRecord;
-use reth_primitives::Receipt;
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
     DebugApiClient, EthCallBundleApiClient, EthFilterApiClient, NetApiClient, OtterscanClient,
