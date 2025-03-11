@@ -11,13 +11,7 @@ use crate::{
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
-use alloy_consensus::{Block, BlockBody, Transaction};
-use alloy_primitives::B256;
-use alloy_provider::{
-    network::{AnyHeader, AnyRpcBlock},
-    Provider,
-};
-use alloy_rpc_types::{BlockTransactions, Header as RpcHeader};
+use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ExecutionPayload, ForkchoiceState};
 use clap::Parser;
 use csv::Writer;
@@ -25,8 +19,6 @@ use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
-
-use super::rpc_transaction::RpcTransaction;
 
 /// `reth benchmark new-payload-fcu` command
 #[derive(Debug, Parser)]
@@ -50,8 +42,24 @@ impl Command {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
-                let (header, versioned_hashes, payload) = from_any_rpc_block(block).unwrap();
-                let head_block_hash = header.hash;
+
+                let block = block
+                    .into_inner()
+                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+                    .try_map_transactions(|tx| {
+                        // try to convert unknowns into op type so that we can also support optimism
+                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
+                    })
+                    .unwrap()
+                    .into_consensus();
+
+                let blob_versioned_hashes =
+                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
+
+                // Convert to execution payload
+                let payload = ExecutionPayload::from_block_slow(&block).0;
+                let header = block.header;
+                let head_block_hash = payload.block_hash();
                 let safe_block_hash =
                     block_provider.get_block_by_number(header.number.saturating_sub(32).into());
 
@@ -68,7 +76,7 @@ impl Command {
                 sender
                     .send((
                         header,
-                        versioned_hashes,
+                        blob_versioned_hashes,
                         payload,
                         head_block_hash,
                         safe_block_hash,
@@ -173,44 +181,4 @@ impl Command {
 
         Ok(())
     }
-}
-
-// TODO(mattsse): integrate in alloy
-pub(crate) fn from_any_rpc_block(
-    block: AnyRpcBlock,
-) -> eyre::Result<(RpcHeader<AnyHeader>, Vec<B256>, ExecutionPayload)> {
-    let block = block.into_inner().try_map_transactions(|tx| {
-        // TODO: convert without json roundtrip
-        serde_json::to_value(tx).and_then(serde_json::from_value::<RpcTransaction>)
-    })?;
-
-    let header = block.header.clone();
-
-    // Extract transactions
-    let transactions = match block.transactions {
-        BlockTransactions::Hashes(_) => {
-            return Err(eyre::eyre!("Block must include full transaction data. Send the eth_getBlockByHash request with full: `true`"));
-        }
-        BlockTransactions::Full(txs) => txs,
-        BlockTransactions::Uncle => {
-            return Err(eyre::eyre!("Cannot process uncle blocks"));
-        }
-    };
-
-    // Extract blob versioned hashes
-    let blob_versioned_hashes = transactions
-        .iter()
-        .filter_map(|tx| tx.blob_versioned_hashes().map(|v| v.to_vec()))
-        .flatten()
-        .collect::<Vec<_>>();
-    let execution_payload = ExecutionPayload::from_block_unchecked(
-        block.header.hash,
-        &Block::new(
-            block.header,
-            BlockBody { transactions, ommers: vec![], withdrawals: block.withdrawals },
-        ),
-    )
-    .0;
-
-    Ok((header, blob_versioned_hashes, execution_payload))
 }

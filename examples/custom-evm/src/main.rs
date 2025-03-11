@@ -23,7 +23,7 @@ use reth::{
         precompile::{
             PrecompileError, PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles,
         },
-        specification::hardfork::SpecId,
+        primitives::hardfork::SpecId,
         MainBuilder, MainContext,
     },
     rpc::types::engine::PayloadAttributes,

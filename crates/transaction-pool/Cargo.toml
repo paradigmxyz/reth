@@ -23,7 +23,7 @@ reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
 revm-interpreter.workspace = true
-revm-specification.workspace = true
+revm-primitives.workspace = true
 
 # ethereum
 alloy-eips = { workspace = true, features = ["kzg"] }
@@ -86,7 +86,7 @@ serde = [
     "rand?/serde",
     "smallvec/serde",
     "revm-interpreter/serde",
-    "revm-specification/serde",
+    "revm-primitives/serde",
     "reth-primitives-traits/serde",
 ]
 test-utils = [
@@ -112,6 +112,7 @@ arbitrary = [
     "smallvec/arbitrary",
     "revm-interpreter/arbitrary",
     "reth-ethereum-primitives/arbitrary",
+    "revm-primitives/arbitrary",
 ]
 
 [[bench]]

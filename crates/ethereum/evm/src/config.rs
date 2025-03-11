@@ -1,7 +1,7 @@
 use alloy_consensus::Header;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_ethereum_forks::EthereumHardfork;
-use revm::specification::hardfork::SpecId;
+use revm::primitives::hardfork::SpecId;
 
 /// Map the latest active hardfork at the given header to a revm [`SpecId`].
 pub fn revm_spec(chain_spec: &ChainSpec, header: &Header) -> SpecId {

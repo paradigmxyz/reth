@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_node_api::NodePrimitives;
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
     ProviderReceipt, ProviderTx, StateProviderFactory,
@@ -28,10 +28,10 @@ where
             Error: FromEvmError<Self::Evm>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<
-                Transaction = reth_primitives::TransactionSigned,
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                Header = reth_primitives::Header,
+                Transaction = reth_ethereum_primitives::TransactionSigned,
+                Block = reth_ethereum_primitives::Block,
+                Receipt = reth_ethereum_primitives::Receipt,
+                Header = alloy_consensus::Header,
             > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                           + StateProviderFactory,
             Pool: TransactionPool<
@@ -47,7 +47,10 @@ where
                 NextBlockEnvCtx = NextBlockEnvAttributes,
             >,
         >,
-    Provider: BlockReader<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
+    Provider: BlockReader<
+        Block = reth_ethereum_primitives::Block,
+        Receipt = reth_ethereum_primitives::Receipt,
+    >,
 {
     #[inline]
     fn pending_block(
