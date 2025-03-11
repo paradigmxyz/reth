@@ -5,12 +5,12 @@ use reth_node_api::BeaconConsensusEngineEvent;
 use reth_node_core::args::RessArgs;
 use reth_primitives::EthPrimitives;
 use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
-use reth_ress_protocol::{NodeType, ProtocolEvent, ProtocolState, RessProtocolHandler};
+use reth_ress_protocol::{NodeType, ProtocolState, RessProtocolHandler};
 use reth_ress_provider::{maintain_pending_state, PendingState, RethRessProtocolProvider};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventStream;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::*;
 
 /// Install `ress` subprotocol if it's enabled.
 pub fn install_ress_subprotocol<P, E, N>(
@@ -20,16 +20,12 @@ pub fn install_ress_subprotocol<P, E, N>(
     network: N,
     task_executor: TaskExecutor,
     engine_events: EventStream<BeaconConsensusEngineEvent<EthPrimitives>>,
-) -> eyre::Result<Option<mpsc::UnboundedReceiver<ProtocolEvent>>>
+) -> eyre::Result<()>
 where
     P: ProviderNodeTypes<Primitives = EthPrimitives>,
     E: BlockExecutorProvider<Primitives = EthPrimitives> + Clone,
     N: FullNetwork + NetworkProtocols,
 {
-    if !args.enabled {
-        return Ok(None)
-    }
-
     let pending_state = PendingState::default();
 
     // Spawn maintenance task for pending state.
@@ -37,7 +33,7 @@ where
     let pending_ = pending_state.clone();
     task_executor.spawn(maintain_pending_state(engine_events, provider_, pending_));
 
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let provider = RethRessProtocolProvider::new(
         provider,
         block_executor,
@@ -56,5 +52,11 @@ where
         .into_rlpx_sub_protocol(),
     );
     info!(target: "reth::cli", "Ress subprotocol support enabled");
-    Ok(Some(rx))
+
+    task_executor.spawn(async move {
+        while let Some(event) = rx.recv().await {
+            trace!(target: "reth::ress", ?event, "Received ress event");
+        }
+    });
+    Ok(())
 }

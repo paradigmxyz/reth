@@ -25,14 +25,16 @@ fn main() {
                 builder.node(EthereumNode::default()).launch_with_debug_capabilities().await?;
 
             // Install ress subprotocol.
-            let _ress_events = install_ress_subprotocol(
-                ress_args,
-                node.provider,
-                node.block_executor,
-                node.network,
-                node.task_executor,
-                node.add_ons_handle.engine_events.new_listener(),
-            )?;
+            if ress_args.enabled {
+                install_ress_subprotocol(
+                    ress_args,
+                    node.provider,
+                    node.block_executor,
+                    node.network,
+                    node.task_executor,
+                    node.add_ons_handle.engine_events.new_listener(),
+                )?;
+            }
 
             node_exit_future.await
         })
