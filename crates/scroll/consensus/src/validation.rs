@@ -15,8 +15,8 @@ use reth_primitives_traits::{
     receipt::gas_spent_by_transactions, Block, BlockBody, BlockHeader, GotExpected, NodePrimitives,
     RecoveredBlock, SealedBlock, SealedHeader,
 };
-use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
 use reth_scroll_primitives::ScrollReceipt;
+use scroll_alloy_hardforks::{ScrollHardfork, ScrollHardforks};
 
 /// Scroll consensus implementation.
 ///

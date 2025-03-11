@@ -118,7 +118,7 @@ where
             (ScrollExecutorProvider::scroll(spec), NoopConsensus::default())
         };
 
-        let runner = CliRunner::default();
+        let runner = CliRunner::try_default_runtime()?;
         match self.command {
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))

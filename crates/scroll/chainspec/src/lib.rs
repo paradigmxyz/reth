@@ -22,7 +22,7 @@ use reth_ethereum_forks::{
     ChainHardforks, EthereumHardfork, ForkCondition, ForkFilterKey, ForkHash, Hardfork,
 };
 use reth_network_peers::NodeRecord;
-use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
+use scroll_alloy_hardforks::{ScrollHardfork, ScrollHardforks};
 
 use alloy_eips::eip7840::BlobParams;
 #[cfg(not(feature = "std"))]
@@ -50,6 +50,7 @@ pub use genesis::{ScrollChainConfig, ScrollChainInfo};
 
 // convenience re-export of the chain spec provider.
 pub use reth_chainspec::ChainSpecProvider;
+use reth_scroll_forks::SCROLL_MAINNET_HARDFORKS;
 
 mod scroll;
 pub use scroll::SCROLL_MAINNET;
@@ -112,7 +113,7 @@ impl ScrollChainSpecBuilder {
     }
 
     /// Remove the given fork from the spec.
-    pub fn without_fork(mut self, fork: reth_scroll_forks::ScrollHardfork) -> Self {
+    pub fn without_fork(mut self, fork: ScrollHardfork) -> Self {
         self.inner = self.inner.without_fork(fork);
         self
     }
@@ -120,9 +121,7 @@ impl ScrollChainSpecBuilder {
     /// Enable Archimedes at genesis
     pub fn archimedes_activated(mut self) -> Self {
         self.inner = self.inner.london_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_scroll_forks::ScrollHardfork::Archimedes, ForkCondition::Block(0));
+        self.inner = self.inner.with_fork(ScrollHardfork::Archimedes, ForkCondition::Block(0));
         self
     }
 
@@ -130,35 +129,28 @@ impl ScrollChainSpecBuilder {
     pub fn bernoulli_activated(mut self) -> Self {
         self = self.archimedes_activated();
         self.inner = self.inner.with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
-        self.inner = self
-            .inner
-            .with_fork(reth_scroll_forks::ScrollHardfork::Bernoulli, ForkCondition::Block(0));
+        self.inner = self.inner.with_fork(ScrollHardfork::Bernoulli, ForkCondition::Block(0));
         self
     }
 
     /// Enable Curie at genesis
     pub fn curie_activated(mut self) -> Self {
         self = self.bernoulli_activated();
-        self.inner =
-            self.inner.with_fork(reth_scroll_forks::ScrollHardfork::Curie, ForkCondition::Block(0));
+        self.inner = self.inner.with_fork(ScrollHardfork::Curie, ForkCondition::Block(0));
         self
     }
 
     /// Enable Darwin at genesis
     pub fn darwin_activated(mut self) -> Self {
         self = self.curie_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_scroll_forks::ScrollHardfork::Darwin, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(ScrollHardfork::Darwin, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable `DarwinV2` at genesis
     pub fn darwin_v2_activated(mut self) -> Self {
         self = self.darwin_activated();
-        self.inner = self
-            .inner
-            .with_fork(reth_scroll_forks::ScrollHardfork::DarwinV2, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(ScrollHardfork::DarwinV2, ForkCondition::Timestamp(0));
         self
     }
 
@@ -248,6 +240,10 @@ impl EthChainSpec for ScrollChainSpec {
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.inner.bootnodes()
     }
+
+    fn final_paris_total_difficulty(&self) -> Option<U256> {
+        self.inner.final_paris_total_difficulty()
+    }
 }
 
 fn make_genesis_header(genesis: &Genesis) -> Header {
@@ -295,7 +291,7 @@ impl Hardforks for ScrollChainSpec {
             if let ForkCondition::Block(block) |
             ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
-                if cond.active_at_head(head) {
+                if head.number >= block {
                     // skip duplicated hardforks: hardforks enabled at genesis block
                     if block != current_applied {
                         forkhash += block;
@@ -334,14 +330,6 @@ impl EthereumHardforks for ScrollChainSpec {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
         self.fork(fork)
     }
-
-    fn get_final_paris_total_difficulty(&self) -> Option<U256> {
-        self.inner.get_final_paris_total_difficulty()
-    }
-
-    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<U256> {
-        self.inner.final_paris_total_difficulty(block_number)
-    }
 }
 
 impl ScrollHardforks for ScrollChainSpec {
@@ -352,7 +340,6 @@ impl ScrollHardforks for ScrollChainSpec {
 
 impl From<Genesis> for ScrollChainSpec {
     fn from(genesis: Genesis) -> Self {
-        use reth_scroll_forks::ScrollHardfork;
         let scroll_chain_info = ScrollConfigInfo::extract_from(&genesis);
         let hard_fork_info =
             scroll_chain_info.scroll_chain_info.hard_fork_info.expect("load scroll hard fork info");
@@ -394,7 +381,7 @@ impl From<Genesis> for ScrollChainSpec {
         block_hardforks.append(&mut time_hardforks);
 
         // Ordered Hardforks
-        let mainnet_hardforks = ScrollHardfork::scroll_mainnet();
+        let mainnet_hardforks = SCROLL_MAINNET_HARDFORKS.clone();
         let mainnet_order = mainnet_hardforks.forks_iter();
 
         let mut ordered_hardforks = Vec::with_capacity(block_hardforks.len());
@@ -440,7 +427,6 @@ mod tests {
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, ForkFilterKey};
     use reth_ethereum_forks::{EthereumHardfork, ForkHash};
-    use reth_scroll_forks::ScrollHardfork;
 
     #[test]
     fn scroll_mainnet_genesis_hash() {

@@ -30,9 +30,9 @@ alloy-rpc-types-engine.workspace = true
 
 # scroll
 reth-scroll-chainspec.workspace = true
-reth-scroll-forks.workspace = true
 reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 scroll-alloy-rpc-types-engine.workspace = true
+scroll-alloy-hardforks.workspace = true
 
 # misc
 serde.workspace = true

@@ -3,8 +3,9 @@ use reth_node_builder::{components::ConsensusBuilder, BuilderContext, FullNodeTy
 use reth_node_types::{NodeTypes, NodeTypesWithEngine};
 use reth_primitives_traits::NodePrimitives;
 use reth_scroll_consensus::ScrollBeaconConsensus;
-use reth_scroll_forks::ScrollHardforks;
 use reth_scroll_primitives::ScrollReceipt;
+use scroll_alloy_hardforks::ScrollHardforks;
+use std::sync::Arc;
 
 /// The consensus builder for Scroll.
 #[derive(Debug, Default, Clone, Copy)]
@@ -19,9 +20,9 @@ where
         >,
     >,
 {
-    type Consensus = ScrollBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>;
+    type Consensus = Arc<ScrollBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(ScrollBeaconConsensus::new(ctx.chain_spec()))
+        Ok(Arc::new(ScrollBeaconConsensus::new(ctx.chain_spec())))
     }
 }

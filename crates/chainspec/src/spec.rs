@@ -27,8 +27,8 @@ use reth_ethereum_forks::{
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::{
-    base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
-    scroll_nodes, scroll_sepolia_nodes, sepolia_nodes, NodeRecord,
+    holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, scroll_nodes, scroll_sepolia_nodes,
+    sepolia_nodes, NodeRecord,
 };
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 

@@ -1,8 +1,11 @@
 use crate::{ScrollEngineValidator, ScrollEngineValidatorBuilder, ScrollStorage};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_node_api::{AddOnsContext, NodeAddOns};
 use reth_node_builder::{
-    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
+    rpc::{
+        BasicEngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder,
+        RethRpcAddOns, RpcAddOns, RpcHandle,
+    },
     FullNodeComponents,
 };
 use reth_node_types::{NodeTypes, NodeTypesWithEngine};
@@ -10,27 +13,42 @@ use reth_rpc_eth_types::error::FromEvmError;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::ScrollEngineTypes;
 use reth_scroll_primitives::ScrollPrimitives;
-use reth_scroll_rpc::{ScrollEthApi, ScrollEthApiError};
+use reth_scroll_rpc::{eth::ScrollEthApiBuilder, ScrollEthApi, ScrollEthApiError};
 use revm::context::TxEnv;
 use scroll_alloy_evm::ScrollTransactionIntoTxEnv;
 
 /// Add-ons for the Scroll follower node.
 #[derive(Debug)]
-pub struct ScrollAddOns<N: FullNodeComponents> {
+pub struct ScrollAddOns<N>
+where
+    N: FullNodeComponents,
+    ScrollEthApiBuilder: EthApiBuilder<N>,
+{
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
     /// and eth-api.
-    pub rpc_add_ons: RpcAddOns<N, ScrollEthApi<N>, ScrollEngineValidatorBuilder>,
+    pub rpc_add_ons: RpcAddOns<
+        N,
+        ScrollEthApiBuilder,
+        ScrollEngineValidatorBuilder,
+        BasicEngineApiBuilder<ScrollEngineValidatorBuilder>,
+    >,
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = ScrollPrimitives>>> Default
-    for ScrollAddOns<N>
+impl<N> Default for ScrollAddOns<N>
+where
+    N: FullNodeComponents<Types: NodeTypes<Primitives = ScrollPrimitives>>,
+    ScrollEthApiBuilder: EthApiBuilder<N>,
 {
     fn default() -> Self {
         Self::builder().build()
     }
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = ScrollPrimitives>>> ScrollAddOns<N> {
+impl<N> ScrollAddOns<N>
+where
+    N: FullNodeComponents<Types: NodeTypes<Primitives = ScrollPrimitives>>,
+    ScrollEthApiBuilder: EthApiBuilder<N>,
+{
     /// Build a [`ScrollAddOns`] using [`ScrollAddOnsBuilder`].
     pub fn builder() -> ScrollAddOnsBuilder {
         ScrollAddOnsBuilder::default()
@@ -46,7 +64,10 @@ where
             Storage = ScrollStorage,
             Engine = ScrollEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<TxEnv = ScrollTransactionIntoTxEnv<TxEnv>>,
+        Evm: ConfigureEvmEnv<
+            TxEnv = ScrollTransactionIntoTxEnv<TxEnv>,
+            NextBlockEnvCtx = NextBlockEnvAttributes,
+        >,
     >,
     ScrollEthApiError: FromEvmError<N::Evm>,
 {
@@ -70,7 +91,10 @@ where
             Storage = ScrollStorage,
             Engine = ScrollEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = ScrollTransactionIntoTxEnv<TxEnv>>,
+        Evm: ConfigureEvm<
+            TxEnv = ScrollTransactionIntoTxEnv<TxEnv>,
+            NextBlockEnvCtx = NextBlockEnvAttributes,
+        >,
     >,
     ScrollEthApiError: FromEvmError<N::Evm>,
 {
@@ -90,6 +114,7 @@ where
             Engine = ScrollEngineTypes,
         >,
     >,
+    ScrollEthApiBuilder: EthApiBuilder<N>,
 {
     type Validator = ScrollEngineValidator;
 
@@ -108,10 +133,11 @@ impl ScrollAddOnsBuilder {
     pub fn build<N>(self) -> ScrollAddOns<N>
     where
         N: FullNodeComponents<Types: NodeTypes<Primitives = ScrollPrimitives>>,
+        ScrollEthApiBuilder: EthApiBuilder<N>,
     {
         ScrollAddOns {
             rpc_add_ons: RpcAddOns::new(
-                move |ctx| ScrollEthApi::<N>::builder().build(ctx),
+                ScrollEthApi::<N>::builder(),
                 Default::default(),
                 Default::default(),
             ),

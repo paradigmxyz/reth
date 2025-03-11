@@ -57,10 +57,22 @@ impl<Types> EngineValidator<Types> for ScrollEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = ScrollPayloadAttributes, ExecutionData = ExecutionData>,
 {
+    fn validate_execution_requests(
+        &self,
+        requests: &alloy_eips::eip7685::Requests,
+    ) -> Result<(), EngineObjectValidationError> {
+        if !requests.is_empty() {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "NonEmptyExecutionRequests".to_string().into(),
+            ))
+        }
+        Ok(())
+    }
+
     fn validate_version_specific_fields(
         &self,
         _version: EngineApiMessageVersion,
-        _payload_or_attrs: PayloadOrAttributes<'_, ScrollPayloadAttributes>,
+        _payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, ScrollPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         Ok(())
     }

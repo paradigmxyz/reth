@@ -1,5 +1,8 @@
+use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_node_builder::{components::PayloadServiceBuilder, BuilderContext, FullNodeTypes};
 use reth_node_types::{NodeTypesWithEngine, TxTy};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_provider::CanonStateSubscriptions;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::ScrollEngineTypes;
 use reth_scroll_payload::ScrollPayloadTransactions;
@@ -26,13 +29,31 @@ where
         + 'static,
     Txs: ScrollPayloadTransactions<Pool::Transaction>,
 {
-    type PayloadBuilder = reth_scroll_payload::ScrollEmptyPayloadBuilder;
-
-    async fn build_payload_builder(
-        &self,
-        _ctx: &BuilderContext<Node>,
+    async fn spawn_payload_builder_service(
+        self,
+        ctx: &BuilderContext<Node>,
         _pool: Pool,
-    ) -> eyre::Result<Self::PayloadBuilder> {
-        Ok(reth_scroll_payload::ScrollEmptyPayloadBuilder::default())
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
+        let payload_builder = reth_scroll_payload::ScrollEmptyPayloadBuilder::default();
+
+        let conf = ctx.config().builder.clone();
+
+        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+            .interval(conf.interval)
+            .deadline(conf.deadline)
+            .max_payload_tasks(conf.max_payload_tasks);
+
+        let payload_generator = BasicPayloadJobGenerator::with_builder(
+            ctx.provider().clone(),
+            ctx.task_executor().clone(),
+            payload_job_config,
+            payload_builder,
+        );
+        let (payload_service, payload_service_handle) =
+            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
+
+        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
+
+        Ok(payload_service_handle)
     }
 }
