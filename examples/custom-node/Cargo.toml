@@ -57,12 +57,6 @@ serde.workspace = true
 
 [features]
 default = []
-optimism = [
-	"reth-optimism-primitives/optimism",
-	"revm-primitives/optimism",
-	"revm/optimism",
-	"reth-optimism-node/optimism"
-]
 arbitrary = [
 	"dep:arbitrary",
 	"alloy-consensus/arbitrary",
