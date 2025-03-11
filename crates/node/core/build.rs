@@ -21,7 +21,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     emitter.add_instructions(&git_builder)?;
 
     emitter.emit_and_set()?;
-    
     let sha = env::var("VERGEN_GIT_SHA")?;
     let sha_short = &sha[0..7];
 
