@@ -20,7 +20,7 @@
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
 //! # use reth_evm::execute::BlockExecutorProvider;
-//! # use reth_primitives::EthPrimitives;
+//! # use reth_ethereum_primitives::EthPrimitives;
 //! # use std::sync::Arc;
 //! # use reth_consensus::{FullConsensus, ConsensusError};
 //!
