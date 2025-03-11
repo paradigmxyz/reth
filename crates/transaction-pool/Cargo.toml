@@ -112,6 +112,7 @@ arbitrary = [
     "smallvec/arbitrary",
     "revm-interpreter/arbitrary",
     "reth-ethereum-primitives/arbitrary",
+    "revm-primitives/arbitrary",
 ]
 
 [[bench]]
