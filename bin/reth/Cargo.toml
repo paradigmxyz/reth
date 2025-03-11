@@ -92,7 +92,7 @@ similar-asserts.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc"]
+default = ["jemalloc", "reth-revm/portable"]
 
 dev = ["reth-cli-commands/arbitrary"]
 

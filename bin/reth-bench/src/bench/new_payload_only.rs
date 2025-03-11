@@ -3,7 +3,6 @@
 use crate::{
     bench::{
         context::BenchContext,
-        new_payload_fcu::from_any_rpc_block,
         output::{
             NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX,
             NEW_PAYLOAD_OUTPUT_SUFFIX,
@@ -12,6 +11,7 @@ use crate::{
     valid_payload::call_new_payload,
 };
 use alloy_provider::Provider;
+use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
@@ -43,10 +43,21 @@ impl Command {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
-                let response = from_any_rpc_block(block).unwrap();
+                let block = block
+                    .into_inner()
+                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+                    .try_map_transactions(|tx| {
+                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
+                    })
+                    .unwrap()
+                    .into_consensus();
+
+                let blob_versioned_hashes =
+                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
+                let payload = ExecutionPayload::from_block_slow(&block).0;
 
                 next_block += 1;
-                sender.send(response).await.unwrap();
+                sender.send((block.header, blob_versioned_hashes, payload)).await.unwrap();
             }
         });
 

@@ -10,7 +10,7 @@ use crate::tree::{
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnvFor, Evm};
+use reth_evm::{ConfigureEvm, Evm};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, SignedTransaction};
 use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
@@ -52,10 +52,7 @@ impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
-    Evm: ConfigureEvmEnvFor<N>
-        + 'static
-        + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
-        + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
     pub(super) fn new(
@@ -204,10 +201,7 @@ impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
-    Evm: ConfigureEvmEnvFor<N>
-        + 'static
-        + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
-        + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Transacts the transactions and transform the state into [`MultiProofTargets`].
     fn prepare_multiproof_targets(self, tx: Recovered<N::SignedTx>) -> Option<MultiProofTargets> {
