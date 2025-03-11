@@ -1,6 +1,5 @@
 //! Validates execution payload wrt Ethereum Execution Engine API version.
 
-use alloy_eips::eip7685::RequestsOrHash;
 use alloy_rpc_types_engine::ExecutionData;
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -57,15 +56,11 @@ where
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, EthPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        if let PayloadOrAttributes::ExecutionPayload(payload) = &payload_or_attrs {
-            if let Some(prague_fields) = payload.sidecar.prague() {
-                if let RequestsOrHash::Requests(requests) = &prague_fields.requests {
-                    validate_execution_requests(requests)?;
-                }
-            }
-        }
+        payload_or_attrs
+            .execution_requests()
+            .map(|requests| validate_execution_requests(requests))
+            .transpose()?;
 
-        // Validate base fields using the existing function
         validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
 
