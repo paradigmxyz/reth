@@ -1,5 +1,6 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
+    metrics::SparseStateTrieMetrics,
     RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloy_primitives::{
@@ -34,6 +35,8 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
+    /// Metrics for the sparse state trie.
+    metrics: SparseStateTrieMetrics,
 }
 
 impl Default for SparseStateTrie {
@@ -46,6 +49,7 @@ impl Default for SparseStateTrie {
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            metrics: Default::default(),
         }
     }
 }
@@ -81,6 +85,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            metrics: Default::default(),
         }
     }
 
@@ -260,8 +265,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
             // Reveal the remaining proof nodes.
             for (path, bytes) in account_nodes {
+                self.metrics.increment_total_account_nodes();
                 // If the node is already revealed, skip it.
                 if self.revealed_account_paths.contains(&path) {
+                    self.metrics.increment_skipped_account_nodes();
                     continue
                 }
                 let node = TrieNode::decode(&mut &bytes[..])?;
@@ -307,8 +314,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
                 // Reveal the remaining proof nodes.
                 for (path, bytes) in nodes {
+                    self.metrics.increment_total_storage_nodes();
                     // If the node is already revealed, skip it.
                     if revealed_nodes.contains(&path) {
+                        self.metrics.increment_skipped_storage_nodes();
                         continue
                     }
                     let node = TrieNode::decode(&mut &bytes[..])?;
@@ -521,11 +530,17 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     ///
     /// If the trie has not been revealed, this function reveals the root node and returns its hash.
     pub fn root(&mut self) -> SparseStateTrieResult<B256> {
+        // record revealed node metrics
+        self.metrics.record();
+
         Ok(self.revealed_trie_mut()?.root())
     }
 
     /// Returns sparse trie root and trie updates if the trie has been revealed.
     pub fn root_with_updates(&mut self) -> SparseStateTrieResult<(B256, TrieUpdates)> {
+        // record revealed node metrics
+        self.metrics.record();
+
         let storage_tries = self.storage_trie_updates();
         let revealed = self.revealed_trie_mut()?;
 
