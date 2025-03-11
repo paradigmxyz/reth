@@ -7,6 +7,7 @@ use crate::{
     block::curie::{apply_curie_hard_fork, L1_GAS_PRICE_ORACLE_ADDRESS},
     ScrollEvm, ScrollEvmFactory, ScrollTransactionIntoTxEnv,
 };
+use alloc::{boxed::Box, format, vec::Vec};
 
 use alloy_consensus::{transaction::Recovered, Transaction, TxReceipt, Typed2718};
 use alloy_eips::Encodable2718;
@@ -254,8 +255,8 @@ pub struct ScrollBlockExecutorFactory<R, Spec = ScrollHardfork, EvmFactory = Scr
 }
 
 impl<R, Spec, EvmFactory> ScrollBlockExecutorFactory<R, Spec, EvmFactory> {
-    /// Creates a new [`ScrollBlockExecutorFactory`] with the given spec, [`EvmFactory`], and
-    /// [`ScrollReceiptBuilder`].
+    /// Creates a new [`ScrollBlockExecutorFactory`] with the given receipt builder, spec and
+    /// factory.
     pub const fn new(receipt_builder: R, spec: Spec, evm_factory: EvmFactory) -> Self {
         Self { receipt_builder, spec, evm_factory }
     }

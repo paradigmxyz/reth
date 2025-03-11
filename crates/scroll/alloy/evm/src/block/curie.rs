@@ -17,6 +17,7 @@
 //!
 //! More details on the Curie update: <https://scroll.io/blog/compressing-the-gas-scrolls-curie-upgrade>
 
+use alloc::vec;
 use revm::{
     bytecode::Bytecode,
     database::{states::StorageSlot, State},
