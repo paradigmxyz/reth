@@ -1,6 +1,6 @@
 //! Multiproof task related functionality.
 
-use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::SparseTrieEvent};
+use crate::tree::payload_processor::executor::WorkloadExecutor;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use derive_more::derive::Deref;
@@ -449,7 +449,7 @@ pub(super) struct MultiProofTask<Factory> {
     /// Sender for state root related messages.
     tx: Sender<MultiProofMessage>,
     /// Sender for state updates emitted by this type.
-    to_sparse_trie: Sender<SparseTrieEvent>,
+    to_sparse_trie: Sender<SparseTrieUpdate>,
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
     /// Proof sequencing handler.
@@ -469,7 +469,7 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
-        to_sparse_trie: Sender<SparseTrieEvent>,
+        to_sparse_trie: Sender<SparseTrieUpdate>,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
