@@ -40,8 +40,8 @@ impl ForkchoiceStateTracker {
     /// Returns the [`ForkchoiceStatus`] of the latest received FCU.
     ///
     /// Caution: this can be invalid.
-    pub(crate) fn latest_status(&self) -> Option<ForkchoiceStatus> {
-        self.latest.as_ref().map(|s| s.status)
+    pub const fn latest_state(&self) -> Option<ForkchoiceState> {
+        self.latest.as_ref().map(|received| received.state)
     }
 
     /// Returns whether the latest received FCU is valid: [`ForkchoiceStatus::Valid`]
