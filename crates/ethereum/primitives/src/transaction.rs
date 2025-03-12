@@ -293,7 +293,6 @@ impl From<TypedTransaction> for Transaction {
 }
 
 impl RlpEcdsaEncodableTx for Transaction {
-
     fn rlp_encoded_fields_length(&self) -> usize {
         delegate!(self => tx.rlp_encoded_fields_length())
     }
