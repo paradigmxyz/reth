@@ -118,25 +118,6 @@ impl<Pool, Client, Evm, Txs> OpPayloadBuilder<Pool, Client, Evm, Txs> {
     pub const fn is_compute_pending_block(&self) -> bool {
         self.compute_pending_block
     }
-
-    /// Returns the configured [`EvmEnv`] for the targeted payload
-    /// (that has the `parent` as its parent).
-    pub fn evm_env(
-        &self,
-        attributes: &OpPayloadBuilderAttributes<N::SignedTx>,
-        parent: &N::BlockHeader,
-    ) -> Result<EvmEnv<EvmConfig::Spec>, EvmConfig::Error>
-    where
-        EvmConfig: ConfigureEvmFor<N>,
-    {
-        let next_attributes = NextBlockEnvAttributes {
-            timestamp: attributes.timestamp(),
-            suggested_fee_recipient: attributes.suggested_fee_recipient(),
-            prev_randao: attributes.prev_randao(),
-            gas_limit: attributes.gas_limit.unwrap_or(parent.gas_limit()),
-        };
-        self.evm_config.next_evm_env(parent, next_attributes)
-    }
 }
 
 impl<Pool, Client, Evm, N, T> OpPayloadBuilder<Pool, Client, Evm, T>
@@ -304,7 +285,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let Self { best } = self;
-        debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number(), "building new payload");
+        debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         let mut db = State::builder().with_database(db).with_bundle_update().build();
 
@@ -501,7 +482,7 @@ where
     ChainSpec: EthChainSpec + OpHardforks,
 {
     /// Returns the parent block the payload will be build on.
-    pub fn parent(&self) -> &SealedHeader<N::BlockHeader> {
+    pub fn parent(&self) -> &SealedHeader {
         &self.config.parent_header
     }
 
