@@ -77,4 +77,5 @@ jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
 
 [build-dependencies]
-vergen = { workspace = true, features = ["build", "cargo", "git", "gitcl"] }
+vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }
+vergen-git2.workspace = true

@@ -675,9 +675,10 @@ tracing-logfmt = "0.3.3"
 tracing-subscriber = { version = "0.3", default-features = false }
 triehash = "0.8"
 typenum = "1.15.0"
-vergen = "8.0.0"
+vergen = "9.0.4"
 visibility = "0.1.1"
 walkdir = "2.3.3"
+vergen-git2 = "1.0.5"
 
 [patch.crates-io]
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "667180b" }
