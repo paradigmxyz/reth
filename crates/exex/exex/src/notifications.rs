@@ -132,14 +132,16 @@ where
             ExExNotificationsInner::WithoutHead(notifications) => {
                 Box::new(notifications.with_head(exex_head))
             }
-            ExExNotificationsInner::WithHead(notifications) => Box::new(ExExNotificationsWithHead::new(
-                notifications.initial_local_head,
-                notifications.provider,
-                notifications.executor,
-                notifications.notifications,
-                notifications.wal_handle,
-                exex_head,
-            )),
+            ExExNotificationsInner::WithHead(notifications) => {
+                Box::new(ExExNotificationsWithHead::new(
+                    notifications.initial_local_head,
+                    notifications.provider,
+                    notifications.executor,
+                    notifications.notifications,
+                    notifications.wal_handle,
+                    exex_head,
+                ))
+            }
             ExExNotificationsInner::Invalid => unreachable!(),
         });
     }
