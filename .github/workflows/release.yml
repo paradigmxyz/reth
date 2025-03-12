@@ -47,7 +47,7 @@ jobs:
             os: macos-14
             profile: maxperf
           - target: x86_64-pc-windows-gnu
-            os: ubuntu-20.04
+            os: ubuntu-24.04
             profile: maxperf
         build:
           - command: build
