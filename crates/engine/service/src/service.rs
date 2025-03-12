@@ -14,11 +14,11 @@ pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
     engine::EngineApiEvent,
 };
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_p2p::BlockClient;
 use reth_node_types::{BlockTy, NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::{BlockchainProvider, EngineNodeTypes},
     ProviderFactory,
@@ -168,7 +168,7 @@ mod tests {
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_node_ethereum::EthereumEngineValidator;
-    use reth_primitives::SealedHeader;
+    use reth_primitives_traits::SealedHeader;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
