@@ -41,6 +41,9 @@ pub use event::*;
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
+pub mod config;
+pub use config::*;
+
 /// This type defines the versioned types of the engine API.
 ///
 /// This includes the execution payload types and payload attributes that are used to trigger a

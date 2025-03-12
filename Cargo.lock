@@ -8431,6 +8431,7 @@ dependencies = [
  "reth-db",
  "reth-discv4",
  "reth-discv5",
+ "reth-engine-primitives",
  "reth-ethereum-forks",
  "reth-net-nat",
  "reth-network",
