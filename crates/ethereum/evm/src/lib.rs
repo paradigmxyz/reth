@@ -27,8 +27,9 @@ use alloy_evm::{
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
+use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, NextBlockEnvAttributes, TransactionEnv};
-use reth_primitives::{EthPrimitives, SealedBlock, SealedHeader, TransactionSigned};
+use reth_primitives_traits::{SealedBlock, SealedHeader};
 use revm::{
     context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
@@ -207,7 +208,7 @@ where
         Ok((cfg, block_env).into())
     }
 
-    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> EthBlockExecutionCtx<'a> {
+    fn context_for_block<'a>(&self, block: &'a SealedBlock<Block>) -> EthBlockExecutionCtx<'a> {
         EthBlockExecutionCtx {
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,

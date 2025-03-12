@@ -11,13 +11,10 @@ pub use cursor::StaticFileCursor;
 mod mask;
 pub use mask::*;
 use reth_nippy_jar::{NippyJar, NippyJarError};
-use reth_primitives::{
-    static_file::{SegmentHeader, SegmentRangeInclusive},
-    StaticFileSegment,
-};
 
 mod masks;
 pub use masks::*;
+use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
 
 /// Alias type for a map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
 type SortedStaticFiles =

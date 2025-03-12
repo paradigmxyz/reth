@@ -21,7 +21,7 @@ pub use alloy_rpc_types_engine::{
 };
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -39,17 +39,17 @@ impl<T: PayloadTypes> PayloadTypes for EthEngineTypes<T> {
 impl<T> EngineTypes for EthEngineTypes<T>
 where
     T: PayloadTypes,
-    T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = reth_primitives::Block>>
+    T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>>
         + TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
         + TryInto<ExecutionPayloadEnvelopeV3>
         + TryInto<ExecutionPayloadEnvelopeV4>,
 {
-    type ExecutionData = ExecutionData;
     type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
+    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
