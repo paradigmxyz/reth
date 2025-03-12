@@ -72,6 +72,7 @@ impl<T: FullNodeTypes> fmt::Debug for NodeTypesAdapter<T> {
 
 /// Container for the node's types and the components and other internals that can be used by
 /// addons of the node.
+#[derive(Debug)]
 pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
     /// The components of the node.
     pub components: C,

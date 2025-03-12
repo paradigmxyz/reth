@@ -6,10 +6,11 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::PayloadBuilderFor;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_transaction_pool::TransactionPool;
-use std::future::Future;
-
+use std::{fmt::Debug, future::Future};
 /// A type that knows how to spawn the payload service.
-pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send + Sized {
+pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>:
+    Send + Debug + Sized
+{
     /// Spawns the [`PayloadBuilderService`] and returns the handle to it for use by the engine.
     ///
     /// We provide default implementation via [`BasicPayloadJobGenerator`] but it can be overridden
@@ -27,7 +28,7 @@ impl<Node, F, Fut, Pool> PayloadServiceBuilder<Node, Pool> for F
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
+    F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send + Debug,
     Fut: Future<
             Output = eyre::Result<
                 PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
@@ -64,7 +65,10 @@ pub trait PayloadBuilderBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
 #[derive(Debug, Default, Clone)]
 pub struct BasicPayloadServiceBuilder<PB>(PB);
 
-impl<PB> BasicPayloadServiceBuilder<PB> {
+impl<PB> BasicPayloadServiceBuilder<PB>
+where
+    PB: Debug,
+{
     /// Create a new [`BasicPayloadServiceBuilder`].
     pub fn new(payload_builder_builder: PB) -> Self {
         Self(payload_builder_builder)
@@ -75,7 +79,7 @@ impl<Node, Pool, PB> PayloadServiceBuilder<Node, Pool> for BasicPayloadServiceBu
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    PB: PayloadBuilderBuilder<Node, Pool>,
+    PB: PayloadBuilderBuilder<Node, Pool> + Debug,
 {
     async fn spawn_payload_builder_service(
         self,

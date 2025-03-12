@@ -25,7 +25,7 @@ use reth_trie_db::StateCommitment;
 /// This includes the primitive types of a node and chain specification.
 ///
 /// This trait is intended to be stateless and only define the types of the node.
-pub trait NodeTypes: Send + Sync + Unpin + 'static {
+pub trait NodeTypes: Send + Debug + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The type used for configuration of the EVM.
@@ -80,7 +80,7 @@ impl<Types, DB> Clone for NodeTypesWithDBAdapter<Types, DB> {
 impl<Types, DB> NodeTypes for NodeTypesWithDBAdapter<Types, DB>
 where
     Types: NodeTypes,
-    DB: Send + Sync + Unpin + 'static,
+    DB: Send + Sync + Unpin + Debug + 'static,
 {
     type Primitives = Types::Primitives;
     type ChainSpec = Types::ChainSpec;
@@ -91,7 +91,7 @@ where
 impl<Types, DB> NodeTypesWithEngine for NodeTypesWithDBAdapter<Types, DB>
 where
     Types: NodeTypesWithEngine,
-    DB: Send + Sync + Unpin + 'static,
+    DB: Send + Sync + Unpin + Debug + 'static,
 {
     type Engine = Types::Engine;
 }

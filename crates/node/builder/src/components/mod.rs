@@ -32,13 +32,13 @@ use reth_node_api::{
     BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PrimitivesTy, TxTy,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-
+use std::fmt::Debug;
 /// An abstraction over the components of a node, consisting of:
 ///  - evm and executor
 ///  - transaction pool
 ///  - network
 ///  - payload builder.
-pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'static {
+pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Debug + Sync + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<T::Types>>> + Unpin;
 
@@ -103,17 +103,21 @@ impl<Node, Pool, EVM, Executor, Cons, N> NodeComponents<Node>
 where
     Node: FullNodeTypes,
     N: NetworkPrimitives<
-        BlockHeader = HeaderTy<Node::Types>,
-        BlockBody = BodyTy<Node::Types>,
-        Block = BlockTy<Node::Types>,
-    >,
+            BlockHeader = HeaderTy<Node::Types>,
+            BlockBody = BodyTy<Node::Types>,
+            Block = BlockTy<Node::Types>,
+        > + Debug,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
+        + Debug
         + 'static,
-    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
-    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
-    Cons:
-        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
+    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + Debug + 'static,
+    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>> + Debug,
+    Cons: FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError>
+        + Clone
+        + Debug
+        + Unpin
+        + 'static,
 {
     type Pool = Pool;
     type Evm = EVM;
