@@ -277,8 +277,7 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } =
-        builder.finish(&state_provider).map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+    let BlockBuilderOutcome { execution_result, block, .. } = builder.finish(&state_provider)?;
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
