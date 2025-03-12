@@ -84,11 +84,11 @@ This is the response to GetBytecode, providing the requested bytecode. Response 
 
 `[request-id: P, [blockhash: B_32]]`
 
-Require peer to return a state witness message containing the witness of the given block hash. 
+Require peer to return a state witness message containing the state witness of the given block hash. 
 
 ### Witness (0x08)
 
-`[request-id: P, [statewitness]]`
+`[request-id: P, [node₁: bytes, node₂: bytes, ...]]`
 
 This is the response to GetWitness, providing the requested state witness. Response corresponds to a block hash of the GetWitness request.
 
