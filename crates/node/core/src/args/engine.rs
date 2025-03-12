@@ -23,9 +23,9 @@ pub struct EngineArgs {
     #[arg(long = "engine.legacy-state-root", default_value = "false")]
     pub legacy_state_root_task_enabled: bool,
 
-    /// Enable cross-block caching and parallel prewarming
-    #[arg(long = "engine.caching-and-prewarming", default_value = "true")]
-    pub caching_and_prewarming_enabled: bool,
+    /// Disable cross-block caching and parallel prewarming
+    #[arg(long = "engine.disable-caching-and-prewarming", default_value = "false")]
+    pub disable_caching_and_prewarming: bool,
 
     /// Configure the size of cross-block cache in megabytes
     #[arg(long = "engine.cross-block-cache-size", default_value_t = DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB)]
@@ -44,7 +44,7 @@ impl Default for EngineArgs {
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             legacy_state_root_task_enabled: false,
             state_root_task_compare_updates: false,
-            caching_and_prewarming_enabled: true,
+            disable_caching_and_prewarming: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
         }
     }
@@ -67,5 +67,15 @@ mod tests {
         let default_args = EngineArgs::default();
         let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_disable_caching_and_prewarming() {
+        let args = CommandParser::<EngineArgs>::parse_from([
+            "reth",
+            "--engine.disable-caching-and-prewarming",
+        ])
+        .args;
+        assert!(args.disable_caching_and_prewarming);
     }
 }
