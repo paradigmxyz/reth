@@ -68,7 +68,7 @@ impl Default for TreeConfig {
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             legacy_state_root: false,
             always_compare_trie_updates: false,
-            use_caching_and_prewarming: false,
+            use_caching_and_prewarming: true,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE,
             has_enough_parallelism: has_enough_parallelism(),
         }
