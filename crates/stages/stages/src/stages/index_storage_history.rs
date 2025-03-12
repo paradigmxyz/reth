@@ -164,7 +164,7 @@ mod tests {
         transaction::DbTx,
         BlockNumberList,
     };
-    use reth_primitives::StorageEntry;
+    use reth_primitives_traits::StorageEntry;
     use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_contract_account_range,

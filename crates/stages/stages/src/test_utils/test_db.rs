@@ -14,14 +14,14 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DatabaseError as DbError,
 };
-use reth_primitives::{
-    Account, EthPrimitives, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
-};
+use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
+use reth_primitives_traits::{Account, SealedBlock, SealedHeader, StorageEntry};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     test_utils::MockNodeTypesWithDB,
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use reth_testing_utils::generators::ChangeSet;
 use std::{collections::BTreeMap, fmt::Debug, path::Path};
@@ -220,7 +220,7 @@ impl TestStageDB {
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
     pub fn insert_blocks<'a, I>(&self, blocks: I, storage_kind: StorageKind) -> ProviderResult<()>
     where
-        I: IntoIterator<Item = &'a SealedBlock>,
+        I: IntoIterator<Item = &'a SealedBlock<Block>>,
     {
         let provider = self.factory.static_file_provider();
 
