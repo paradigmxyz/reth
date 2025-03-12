@@ -6,9 +6,10 @@ use alloy_eips::merge::BEACON_NONCE;
 use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
 use alloy_primitives::Bytes;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives::{logs_bloom, Receipt, TransactionSigned};
+use reth_primitives_traits::logs_bloom;
 
 /// Block builder for Ethereum.
 #[derive(Debug, Clone)]
