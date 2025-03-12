@@ -2,7 +2,7 @@
 
 use alloy_consensus::transaction::TransactionMeta;
 use reth_chainspec::EthChainSpec;
-use reth_primitives::{Receipt, TransactionSigned};
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_provider::{BlockReader, ChainSpecProvider, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
@@ -13,7 +13,7 @@ impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, 
 where
     Self: RpcNodeCoreExt<
         Provider: TransactionsProvider<Transaction = TransactionSigned>
-                      + ReceiptProvider<Receipt = reth_primitives::Receipt>,
+                      + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
     >,
     Provider: BlockReader + ChainSpecProvider,
 {

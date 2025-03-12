@@ -6,7 +6,7 @@ use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{GotExpected, SealedHeader};
+use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
     StatsReader, TrieWriter,
@@ -374,9 +374,10 @@ mod tests {
     use alloy_primitives::{keccak256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_primitives::{SealedBlock, StaticFileSegment, StorageEntry};
+    use reth_primitives_traits::{SealedBlock, StorageEntry};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
+    use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range,
         random_contract_account_range, BlockParams, BlockRangeParams,
@@ -491,7 +492,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for MerkleTestRunner {
-        type Seed = Vec<SealedBlock>;
+        type Seed = Vec<SealedBlock<reth_ethereum_primitives::Block>>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
@@ -536,7 +537,7 @@ mod tests {
                     .into_iter()
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
-            let sealed_head = SealedBlock::<reth_primitives::Block>::from_sealed_parts(
+            let sealed_head = SealedBlock::<reth_ethereum_primitives::Block>::from_sealed_parts(
                 SealedHeader::seal_slow(header),
                 body,
             );

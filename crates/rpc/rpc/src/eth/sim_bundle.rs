@@ -10,8 +10,7 @@ use alloy_rpc_types_mev::{
 };
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, Evm};
-use reth_primitives::Recovered;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{Recovered, SignedTransaction};
 use reth_provider::ProviderTx;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::MevSimApiServer;

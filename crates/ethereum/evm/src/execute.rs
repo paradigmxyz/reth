@@ -36,10 +36,12 @@ mod tests {
     use alloy_evm::block::BlockValidationError;
     use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
+    use reth_ethereum_primitives::{Block, BlockBody, Transaction};
     use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutorProvider, Executor};
     use reth_execution_types::BlockExecutionResult;
-    use reth_primitives::{Block, BlockBody, RecoveredBlock, Transaction};
-    use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Block as _};
+    use reth_primitives_traits::{
+        crypto::secp256k1::public_key_to_address, Block as _, RecoveredBlock,
+    };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use revm::{
         database::{CacheDB, EmptyDB, TransitionState},

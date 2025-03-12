@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 
 # ethereum
