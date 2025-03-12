@@ -72,6 +72,8 @@ impl<T: FullNodeTypes> fmt::Debug for NodeTypesAdapter<T> {
 
 /// Container for the node's types and the components and other internals that can be used by
 /// addons of the node.
+
+#[derive(Debug)]
 pub struct NodeAdapter<T: FullNodeTypes + Debug, C: NodeComponents<T>> {
     /// The components of the node.
     pub components: C,
@@ -93,6 +95,7 @@ where
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C>
 where
     T: Debug,
+    C: Debug,
 {
     type Pool = C::Pool;
     type Evm = C::Evm;

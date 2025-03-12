@@ -404,7 +404,7 @@ where
 impl<T, CB, AO> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
     T: FullNodeTypes + Debug,
-    CB: NodeComponentsBuilder<T>,
+    CB: NodeComponentsBuilder<T> + Debug,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {
     /// Returns a reference to the node builder's config.
@@ -574,7 +574,7 @@ where
         self,
     ) -> eyre::Result<<DebugNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Node>
     where
-        T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
+        T::Types: DebugNode<NodeAdapter<T, CB::Components>> + Debug,
         DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
         let Self { builder, task_executor } = self;

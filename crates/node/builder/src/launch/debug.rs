@@ -6,11 +6,12 @@ use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
 use reth_node_api::{BlockTy, FullNodeComponents};
+use std::fmt::Debug;
 use tracing::info;
 
 /// [`Node`] extension with support for debugging utilities, see [`DebugNodeLauncher`] for more
 /// context.
-pub trait DebugNode<N: FullNodeComponents>: Node<N> {
+pub trait DebugNode<N: FullNodeComponents + Debug>: Node<N> {
     /// RPC block type. Used by [`DebugConsensusClient`] to fetch blocks and submit them to the
     /// engine.
     type RpcBlock: Serialize + DeserializeOwned + 'static;
@@ -34,7 +35,7 @@ impl<L> DebugNodeLauncher<L> {
 
 impl<L, Target, N, AddOns> LaunchNode<Target> for DebugNodeLauncher<L>
 where
-    N: FullNodeComponents<Types: DebugNode<N>>,
+    N: FullNodeComponents<Types: DebugNode<N>> + Debug,
     AddOns: RethRpcAddOns<N>,
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>>,
 {

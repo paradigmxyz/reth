@@ -712,7 +712,8 @@ impl<T, CB>
         Attached<WithConfigs<<T::Types as NodeTypes>::ChainSpec>, WithComponents<T, CB>>,
     >
 where
-    T: FullNodeTypes<Types: NodeTypesForProvider + Debug>,
+    T: FullNodeTypes + Debug,
+    T::Types: NodeTypesForProvider,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the configured `ProviderFactory`.
@@ -872,9 +873,9 @@ impl<T, CB>
     >
 where
     T: FullNodeTypes<
-        Provider: StateProviderFactory + ChainSpecProvider,
-        Types: NodeTypesForProvider,
-    >,
+            Provider: StateProviderFactory + ChainSpecProvider,
+            Types: NodeTypesForProvider,
+        > + Debug,
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the [`InvalidBlockHook`] to use for the node.

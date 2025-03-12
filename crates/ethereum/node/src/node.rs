@@ -41,7 +41,7 @@ use reth_transaction_pool::{
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -59,7 +59,8 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>
+            + Debug,
         <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
@@ -181,7 +182,7 @@ where
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
-        >,
+        > + Debug,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
@@ -255,7 +256,7 @@ where
 
 impl<N> Node<N> for EthereumNode
 where
-    N: FullNodeTypes<Types = Self>,
+    N: FullNodeTypes<Types = Self> + Debug,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -279,7 +280,7 @@ where
     }
 }
 
-impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
+impl<N: FullNodeComponents<Types = Self> + Debug> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
@@ -305,8 +306,8 @@ pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
-    Node: FullNodeTypes<Types = Types>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives> + Debug,
+    Node: FullNodeTypes<Types = Types> + Debug,
 {
     type EVM = EthEvmConfig;
     type Executor = BasicBlockExecutorProvider<EthEvmConfig>;

@@ -12,7 +12,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkPrimitives;
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{future::Future, marker::PhantomData};
+use std::{fmt::Debug, future::Future, marker::PhantomData};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
 ///
@@ -135,7 +135,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
     ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes + Debug,
 {
     /// Configures the pool builder.
     ///
@@ -170,7 +170,7 @@ where
 impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
     ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes + Debug,
     PoolB: PoolBuilder<Node>,
 {
     /// Configures the network builder.
@@ -294,27 +294,20 @@ where
 impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
     for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
-    Node: FullNodeTypes,
-    PoolB: PoolBuilder<
-        Node,
-        Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Pooled = <NetworkB::Primitives as NetworkPrimitives>::PooledTransaction,
-            >,
-        >,
-    >,
-    NetworkB: NetworkBuilder<
-        Node,
-        PoolB::Pool,
-        Primitives: NetworkPrimitives<
+    Node: FullNodeTypes + Debug,
+    PoolB: PoolBuilder<Node> + Debug,
+    PoolB::Pool: TransactionPool + Debug,
+    <PoolB::Pool as TransactionPool>::Transaction: PoolTransaction<Pooled = <NetworkB::Primitives as NetworkPrimitives>::PooledTransaction>
+        + Debug,
+    NetworkB: NetworkBuilder<Node, PoolB::Pool> + Debug,
+    NetworkB::Primitives: NetworkPrimitives<
             BlockHeader = HeaderTy<Node::Types>,
             BlockBody = BodyTy<Node::Types>,
             Block = BlockTy<Node::Types>,
-        >,
-    >,
-    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
-    ExecB: ExecutorBuilder<Node>,
-    ConsB: ConsensusBuilder<Node>,
+        > + Debug,
+    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool> + Debug,
+    ExecB: ExecutorBuilder<Node> + Debug,
+    ConsB: ConsensusBuilder<Node> + Debug,
 {
     type Components = Components<
         Node,
@@ -378,17 +371,15 @@ impl Default for ComponentsBuilder<(), (), (), (), (), ()> {
 /// used to customize certain components of the node using the builder pattern and defaults, e.g.
 /// Ethereum and Optimism.
 /// A type that's responsible for building the components of the node.
-pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
+pub trait NodeComponentsBuilder<Node: FullNodeTypes + Debug>: Send + Debug {
     /// The components for the node with the given types
-    type Components: NodeComponents<Node>;
-
+    type Components: NodeComponents<Node> + Debug;
     /// Consumes the type and returns the created components.
     fn build_components(
         self,
         ctx: &BuilderContext<Node>,
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
 }
-
 impl<Node, N, F, Fut, Pool, EVM, Executor, Cons> NodeComponentsBuilder<Node> for F
 where
     N: NetworkPrimitives<
@@ -396,16 +387,21 @@ where
         BlockBody = BodyTy<Node::Types>,
         Block = BlockTy<Node::Types>,
     >,
-    Node: FullNodeTypes,
-    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    Node: FullNodeTypes + Debug,
+    Node::Types: Debug,
+    F: FnOnce(&BuilderContext<Node>) -> Fut + Send + Debug,
     Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
-        + 'static,
-    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
-    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
-    Cons:
-        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
+        + 'static
+        + Debug,
+    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static + Debug,
+    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>> + Debug,
+    Cons: FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError>
+        + Clone
+        + Unpin
+        + 'static
+        + Debug,
 {
     type Components = Components<Node, N, Pool, EVM, Executor, Cons>;
 
