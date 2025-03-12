@@ -130,6 +130,12 @@ where
 
     // Reveal new accounts and storage slots.
     trie.reveal_multiproof(multiproof)?;
+    let reveal_multiproof_elapsed = started_at.elapsed();
+    trace!(
+        target: "engine::root::sparse",
+        ?reveal_multiproof_elapsed,
+        "Done revealing multiproof"
+    );
 
     // Update storage slots with new values and calculate storage roots.
     let (tx, rx) = mpsc::channel();
@@ -190,8 +196,22 @@ where
         trie.update_account(address, account.unwrap_or_default())?;
     }
 
+    let elapsed_before = started_at.elapsed();
+    trace!(
+        target: "engine::root:sparse",
+        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
+        "Calculating intermediate nodes below trie level"
+    );
     trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+
     let elapsed = started_at.elapsed();
+    let below_level_elapsed = elapsed - elapsed_before;
+    trace!(
+        target: "engine::root:sparse",
+        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
+        ?below_level_elapsed,
+        "Intermediate nodes calculated"
+    );
 
     Ok(elapsed)
 }
