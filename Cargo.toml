@@ -635,7 +635,7 @@ alloy-sol-macro = "0.8.9"
 anyhow = "1.0"
 bindgen = { version = "0.70", default-features = false }
 block-padding = "0.3.2"
-cc = "1.0"
+cc = "=1.2.15"
 cipher = "0.4.3"
 comfy-table = "7.0"
 concat-kdf = "0.1.0"
