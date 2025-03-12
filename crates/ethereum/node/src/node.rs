@@ -9,7 +9,10 @@ use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{
+    execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
+    NextBlockEnvAttributes,
+};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, BlockTy, FullNodeComponents, NodeAddOns, ReceiptTy, TxTy};
 use reth_node_builder::{
@@ -179,9 +182,10 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type Handle = RpcHandle<N, EthApiFor<N>>;
 
@@ -219,9 +223,10 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type EthApi = EthApiFor<N>;
 
@@ -282,7 +287,10 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
         reth_ethereum_primitives::Block {
             header: header.inner,
             body: reth_ethereum_primitives::BlockBody {
-                transactions: transactions.into_transactions().map(|tx| tx.inner.into()).collect(),
+                transactions: transactions
+                    .into_transactions()
+                    .map(|tx| tx.inner.into_inner().into())
+                    .collect(),
                 ommers: Default::default(),
                 withdrawals,
             },

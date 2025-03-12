@@ -335,12 +335,12 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Header, TxEip4844};
+    use alloy_consensus::{BlockBody, Header, TxEip4844};
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{BlockBody, Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_primitives_traits::proofs;
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {

@@ -6,17 +6,16 @@ use crate::{
     RpcReceipt,
 };
 use alloy_eips::BlockId;
-use alloy_primitives::Sealable;
+use alloy_primitives::{Sealable, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
 };
 use reth_rpc_types_compat::block::from_block;
-use revm_primitives::U256;
 use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
@@ -58,7 +57,7 @@ pub trait EthBlocks: LoadBlock {
         Self: FullEthApiTypes,
     {
         async move {
-            let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
+            let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
             let block = from_block((*block).clone(), full.into(), self.tx_resp_builder())?;
             Ok(Some(block))
@@ -205,7 +204,7 @@ pub trait EthBlocks: LoadBlock {
 pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         block_id: BlockId,
     ) -> impl Future<

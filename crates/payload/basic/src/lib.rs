@@ -36,9 +36,11 @@ use tokio::{
 };
 use tracing::{debug, trace, warn};
 
+mod better_payload_emitter;
 mod metrics;
 mod stack;
 
+pub use better_payload_emitter::BetterPayloadEmitter;
 pub use stack::PayloadBuilderStack;
 
 /// Helper to access [`NodePrimitives::BlockHeader`] from [`PayloadBuilder::BuiltPayload`].

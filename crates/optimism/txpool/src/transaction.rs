@@ -101,8 +101,7 @@ where
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
         let encoded_len = tx.encode_2718_len();
-        let tx = tx.map_transaction(|tx| tx.into());
-        Self::new(tx, encoded_len)
+        Self::new(tx.convert(), encoded_len)
     }
 
     fn hash(&self) -> &TxHash {
@@ -243,6 +242,17 @@ where
     ) -> Result<(), BlobTransactionValidationError> {
         Err(BlobTransactionValidationError::NotBlobTransaction(self.ty()))
     }
+}
+
+/// Helper trait to provide payload builder with access to conditionals and encoded bytes of
+/// transaction.
+pub trait OpPooledTx: MaybeConditionalTransaction + PoolTransaction {}
+
+impl<Cons, Pooled> OpPooledTx for OpPooledTransaction<Cons, Pooled>
+where
+    Cons: SignedTransaction + From<Pooled>,
+    Pooled: SignedTransaction + TryFrom<Cons, Error: core::error::Error>,
+{
 }
 
 #[cfg(test)]

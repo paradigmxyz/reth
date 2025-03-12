@@ -15,7 +15,6 @@ workspace = true
 reth-execution-types.workspace = true
 reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-consensus.workspace = true
 
@@ -25,3 +24,7 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
 tracing.workspace = true
+
+[dev-dependencies]
+reth-ethereum-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["getrandom"] }

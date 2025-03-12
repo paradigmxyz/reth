@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::RecoveredBlock;
+use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderError, ProviderReceipt,

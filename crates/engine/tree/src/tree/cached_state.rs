@@ -1,5 +1,5 @@
 //! Implements a state provider that has a shared cache in front of it.
-use alloy_primitives::{map::B256Map, Address, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
 use mini_moka::sync::CacheBuilder;
 use reth_errors::ProviderResult;
@@ -206,7 +206,7 @@ impl<S: StateProofProvider> StateProofProvider for CachedStateProvider<S> {
         &self,
         input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<B256Map<alloy_primitives::Bytes>> {
+    ) -> ProviderResult<Vec<alloy_primitives::Bytes>> {
         self.state_provider.witness(input, target)
     }
 }

@@ -471,7 +471,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Disables all discovery.
     pub fn disable_discovery(self) -> Self {
-        self.disable_discv4_discovery().disable_dns_discovery().disable_nat()
+        self.disable_discv4_discovery().disable_discv5_discovery().disable_dns_discovery()
     }
 
     /// Disables all discovery if the given condition is true.
@@ -489,6 +489,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Disable the Discv5 discovery.
+    pub fn disable_discv5_discovery(mut self) -> Self {
+        self.discovery_v5_builder = None;
+        self
+    }
+
     /// Disable the DNS discovery if the given condition is true.
     pub fn disable_dns_discovery_if(self, disable: bool) -> Self {
         if disable {
@@ -502,6 +508,15 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     pub fn disable_discv4_discovery_if(self, disable: bool) -> Self {
         if disable {
             self.disable_discv4_discovery()
+        } else {
+            self
+        }
+    }
+
+    /// Disable the Discv5 discovery if the given condition is true.
+    pub fn disable_discv5_discovery_if(self, disable: bool) -> Self {
+        if disable {
+            self.disable_discv5_discovery()
         } else {
             self
         }

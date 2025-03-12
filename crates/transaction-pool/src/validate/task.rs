@@ -7,8 +7,7 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, SealedBlock};
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
