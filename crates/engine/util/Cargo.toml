@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-errors.workspace = true
 reth-chainspec.workspace = true

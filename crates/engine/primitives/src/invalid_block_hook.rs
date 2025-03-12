@@ -1,6 +1,6 @@
 use alloy_primitives::B256;
 use reth_execution_types::BlockExecutionOutput;
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_trie::updates::TrieUpdates;
 
 /// An invalid block hook.
