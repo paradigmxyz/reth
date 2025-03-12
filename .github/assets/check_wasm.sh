@@ -32,6 +32,7 @@ exclude_crates=(
   reth-exex-test-utils
   reth-ipc
   reth-net-nat
+  reth-network-ress
   reth-network
   reth-node-api
   reth-node-builder
@@ -43,9 +44,8 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
+  reth-optimism-storage
   reth-optimism-chain-registry
-  reth-optimism-consensus
-  reth-optimism-evm
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util

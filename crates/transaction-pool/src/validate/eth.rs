@@ -23,8 +23,9 @@ use alloy_eips::{
     eip7840::BlobParams,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_primitives::{InvalidTransactionError, SealedBlock};
-use reth_primitives_traits::{Block, GotExpected};
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
+};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -301,7 +302,7 @@ where
         }
 
         if transaction.is_eip7702() {
-            // Cancun fork is required for 7702 txs
+            // Prague fork is required for 7702 txs
             if !self.fork_tracker.is_prague_activated() {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
@@ -926,7 +927,8 @@ mod tests {
     use alloy_consensus::Transaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, PooledTransaction};
+    use reth_ethereum_primitives::PooledTransaction;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

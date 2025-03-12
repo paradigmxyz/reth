@@ -177,7 +177,7 @@ where
             } else {
                 None
             };
-            let ommers = if chain_spec.final_paris_total_difficulty(header.number()).is_some() {
+            let ommers = if chain_spec.is_paris_active_at_block(header.number()) {
                 Vec::new()
             } else {
                 provider.ommers(header.number().into())?.unwrap_or_default()

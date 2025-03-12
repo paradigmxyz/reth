@@ -27,15 +27,11 @@ reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits.workspace = true
 
 # scroll
-reth-scroll-forks.workspace = true
 reth-scroll-primitives = { workspace = true, features = ["serde", "reth-codec"] }
-
-# revm
-revm.workspace = true
+scroll-alloy-hardforks.workspace = true
 
 # misc
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-eyre.workspace = true

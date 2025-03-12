@@ -155,7 +155,9 @@ mod tx_serde {
     //! [`scroll_alloy_consensus::TxL1Message`].
     //!
     //! Additionally, we need similar logic for the `gasPrice` field
+
     use super::*;
+    use alloy_consensus::transaction::Recovered;
     use serde::de::Error;
 
     /// Helper struct which will be flattened into the transaction and will only contain `from`
@@ -193,18 +195,19 @@ mod tx_serde {
             let Transaction {
                 inner:
                     alloy_rpc_types_eth::Transaction {
-                        inner,
+                        inner: recovered,
                         block_hash,
                         block_number,
                         transaction_index,
                         effective_gas_price,
-                        from,
                     },
                 ..
             } = value;
 
             // if inner transaction has its own `gasPrice` don't serialize it in this struct.
-            let effective_gas_price = effective_gas_price.filter(|_| inner.gas_price().is_none());
+            let effective_gas_price =
+                effective_gas_price.filter(|_| recovered.gas_price().is_none());
+            let (inner, from) = recovered.into_parts();
 
             Self {
                 inner,
@@ -239,13 +242,14 @@ mod tx_serde {
             };
 
             let effective_gas_price = other.effective_gas_price.or_else(|| inner.gas_price());
+            let recovered = Recovered::new_unchecked(inner, from);
+
             Ok(Self {
                 inner: alloy_rpc_types_eth::Transaction {
-                    inner,
+                    inner: recovered,
                     block_hash,
                     block_number,
                     transaction_index,
-                    from,
                     effective_gas_price,
                 },
             })

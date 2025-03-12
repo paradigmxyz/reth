@@ -35,7 +35,7 @@ reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 # `test-utils` feature
-triehash = { version = "0.8", optional = true }
+triehash = { workspace = true, optional = true }
 
 # `serde` feature
 serde = { workspace = true, optional = true }
@@ -54,7 +54,7 @@ alloy-consensus.workspace = true
 revm-database.workspace = true
 
 # trie
-triehash = "0.8"
+triehash.workspace = true
 
 # misc
 proptest.workspace = true

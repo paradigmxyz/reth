@@ -8,7 +8,7 @@ use alloc::sync::Arc;
 use alloy_chains::{Chain, NamedChain};
 use reth_chainspec::ChainSpec;
 use reth_primitives_traits::SealedHeader;
-use reth_scroll_forks::ScrollHardfork;
+use reth_scroll_forks::SCROLL_SEPOLIA_HARDFORKS;
 
 /// The Scroll Sepolia spec
 pub static SCROLL_SEPOLIA: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
@@ -23,7 +23,7 @@ pub static SCROLL_SEPOLIA: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
                 SCROLL_SEPOLIA_GENESIS_HASH,
             ),
             genesis,
-            hardforks: ScrollHardfork::scroll_sepolia(),
+            hardforks: SCROLL_SEPOLIA_HARDFORKS.clone(),
             ..Default::default()
         },
         config: ScrollChainConfig::sepolia(),

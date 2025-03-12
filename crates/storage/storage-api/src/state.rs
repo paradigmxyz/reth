@@ -9,8 +9,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue
 use auto_impl::auto_impl;
 use reth_primitives_traits::Bytecode;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::HashedPostState;
-use reth_trie_db::StateCommitment;
+use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
 
 /// Type alias of boxed [`StateProvider`].
@@ -86,10 +85,13 @@ pub trait StateProvider:
     }
 }
 
-/// Trait implemented for database providers that can provide the [`StateCommitment`] type.
+/// Trait implemented for database providers that can provide the [`reth_trie_db::StateCommitment`]
+/// type.
+#[cfg(feature = "db-api")]
 pub trait StateCommitmentProvider: Send + Sync {
-    /// The [`StateCommitment`] type that can be used to perform state commitment operations.
-    type StateCommitment: StateCommitment;
+    /// The [`reth_trie_db::StateCommitment`] type that can be used to perform state commitment
+    /// operations.
+    type StateCommitment: reth_trie_db::StateCommitment;
 }
 
 /// Trait that provides the hashed state from various sources.

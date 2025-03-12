@@ -53,7 +53,7 @@ tracing.workspace = true
 thiserror.workspace = true
 itertools.workspace = true
 rayon.workspace = true
-num-traits = "0.2.15"
+num-traits.workspace = true
 tempfile = { workspace = true, optional = true }
 bincode.workspace = true
 blake3.workspace = true

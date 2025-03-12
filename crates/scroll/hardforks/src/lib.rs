@@ -2,42 +2,76 @@
 
 #![doc = include_str!("../docs/hardforks.md")]
 
-extern crate alloc;
+use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
+use scroll_alloy_hardforks::ScrollHardfork;
 
-pub mod hardfork;
+#[cfg(not(feature = "std"))]
+use once_cell::sync::Lazy as LazyLock;
+#[cfg(feature = "std")]
+use std::sync::LazyLock;
 
-mod dev;
+/// Scroll mainnet hardforks
+pub static SCROLL_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
+    ChainHardforks::new(vec![
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Dao.boxed(), ForkCondition::Never),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Never),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Never),
+        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Never),
+        (ScrollHardfork::Archimedes.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Block(0)),
+        (ScrollHardfork::Bernoulli.boxed(), ForkCondition::Block(5220340)),
+        (ScrollHardfork::Curie.boxed(), ForkCondition::Block(7096836)),
+        (ScrollHardfork::Darwin.boxed(), ForkCondition::Timestamp(1724227200)),
+        (ScrollHardfork::DarwinV2.boxed(), ForkCondition::Timestamp(1725264000)),
+    ])
+});
 
-pub use dev::DEV_HARDFORKS;
-pub use hardfork::ScrollHardfork;
+/// Scroll sepolia hardforks
+pub static SCROLL_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
+    ChainHardforks::new(vec![
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+        (ScrollHardfork::Archimedes.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Block(0)),
+        (ScrollHardfork::Bernoulli.boxed(), ForkCondition::Block(3747132)),
+        (ScrollHardfork::Curie.boxed(), ForkCondition::Block(4740239)),
+        (ScrollHardfork::Darwin.boxed(), ForkCondition::Timestamp(1723622400)),
+        (ScrollHardfork::DarwinV2.boxed(), ForkCondition::Timestamp(1724832000)),
+    ])
+});
 
-use reth_ethereum_forks::{EthereumHardforks, ForkCondition};
-
-/// Extends [`EthereumHardforks`] with scroll helper methods.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait ScrollHardforks: EthereumHardforks {
-    /// Retrieves [`ForkCondition`] by an [`ScrollHardfork`]. If `fork` is not present, returns
-    /// [`ForkCondition::Never`].
-    fn scroll_fork_activation(&self, fork: ScrollHardfork) -> ForkCondition;
-
-    /// Convenience method to check if [`Bernoulli`](ScrollHardfork::Bernoulli) is active at a given
-    /// block number.
-    fn is_bernoulli_active_at_block(&self, block_number: u64) -> bool {
-        self.scroll_fork_activation(ScrollHardfork::Bernoulli).active_at_block(block_number)
-    }
-
-    /// Returns `true` if [`Curie`](ScrollHardfork::Curie) is active at given block block number.
-    fn is_curie_active_at_block(&self, block_number: u64) -> bool {
-        self.scroll_fork_activation(ScrollHardfork::Curie).active_at_block(block_number)
-    }
-
-    /// Returns `true` if [`Darwin`](ScrollHardfork::Darwin) is active at given block timestamp.
-    fn is_darwin_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.scroll_fork_activation(ScrollHardfork::Darwin).active_at_timestamp(timestamp)
-    }
-
-    /// Returns `true` if [`DarwinV2`](ScrollHardfork::DarwinV2) is active at given block timestamp.
-    fn is_darwin_v2_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.scroll_fork_activation(ScrollHardfork::DarwinV2).active_at_timestamp(timestamp)
-    }
-}
+/// Dev hardforks
+pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
+    ChainHardforks::new(vec![
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+        (ScrollHardfork::Archimedes.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(0)),
+        (ScrollHardfork::Bernoulli.boxed(), ForkCondition::Block(0)),
+        (ScrollHardfork::Curie.boxed(), ForkCondition::Block(0)),
+        (ScrollHardfork::Darwin.boxed(), ForkCondition::Timestamp(0)),
+        (ScrollHardfork::DarwinV2.boxed(), ForkCondition::Timestamp(0)),
+    ])
+});

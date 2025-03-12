@@ -4,8 +4,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-mod tx;
+pub use block::{
+    curie, EvmExt, ReceiptBuilderCtx, ScrollBlockExecutionCtx, ScrollBlockExecutor,
+    ScrollBlockExecutorFactory, ScrollReceiptBuilder,
+};
+mod block;
+
 pub use tx::ScrollTransactionIntoTxEnv;
+mod tx;
 
 extern crate alloc;
 
@@ -77,6 +83,7 @@ where
     type Tx = ScrollTransactionIntoTxEnv<TxEnv>;
     type Error = EVMError<DB::Error>;
     type HaltReason = HaltReason;
+    type Spec = ScrollSpecId;
 
     fn block(&self) -> &BlockEnv {
         &self.block
@@ -154,6 +161,15 @@ where
     fn db_mut(&mut self) -> &mut Self::DB {
         &mut self.journaled_state.database
     }
+
+    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>)
+    where
+        Self: Sized,
+    {
+        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.data.ctx;
+
+        (journaled_state.database, EvmEnv { block_env, cfg_env })
+    }
 }
 
 /// Factory producing [`ScrollEvm`]s.
@@ -161,12 +177,13 @@ where
 #[non_exhaustive]
 pub struct ScrollEvmFactory;
 
-impl EvmFactory<EvmEnv<ScrollSpecId>> for ScrollEvmFactory {
+impl EvmFactory for ScrollEvmFactory {
     type Evm<DB: Database, I: Inspector<ScrollContext<DB>>> = ScrollEvm<DB, I>;
     type Context<DB: Database> = ScrollContext<DB>;
     type Tx = ScrollTransactionIntoTxEnv<TxEnv>;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
+    type Spec = ScrollSpecId;
 
     fn create_evm<DB: Database>(
         &self,

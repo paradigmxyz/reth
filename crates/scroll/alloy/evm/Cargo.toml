@@ -13,21 +13,45 @@ workspace = true
 
 [dependencies]
 # alloy
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-primitives.workspace = true
 
 # revm
-revm.workspace = true
+revm = { workspace = true, features = ["optional_no_base_fee"] }
 
 # scroll
 revm-scroll.workspace = true
 
 # scroll
-reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
+scroll-alloy-consensus.workspace = true
+scroll-alloy-hardforks.workspace = true
 
 # misc
+auto_impl.workspace = true
 serde = { workspace = true, default-features = false, features = ["derive"], optional = true }
 
+[dev-dependencies]
+eyre.workspace = true
+
 [features]
-std = ["alloy-evm/std", "alloy-primitives/std", "revm-scroll/std", "revm/std", "serde/std"]
-serde = ["dep:serde", "alloy-primitives/serde", "revm-scroll/serde", "revm/serde", "reth-scroll-primitives/serde"]
+std = [
+    "alloy-evm/std",
+    "alloy-primitives/std",
+    "revm-scroll/std",
+    "revm/std",
+    "serde/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+]
+serde = [
+    "dep:serde",
+    "alloy-primitives/serde",
+    "revm-scroll/serde",
+    "revm/serde",
+    "alloy-eips/serde",
+    "alloy-consensus/serde",
+    "scroll-alloy-consensus/serde",
+    "scroll-alloy-hardforks/serde",
+]

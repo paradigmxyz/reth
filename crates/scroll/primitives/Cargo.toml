@@ -28,6 +28,7 @@ revm-context.workspace = true
 
 # scroll
 scroll-alloy-consensus.workspace = true
+scroll-alloy-evm.workspace = true
 revm-scroll.workspace = true
 
 # codec
@@ -75,6 +76,7 @@ std = [
     "revm-scroll/std",
     "revm-context/std",
     "alloy-evm/std",
+    "scroll-alloy-evm/std",
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -100,6 +102,7 @@ serde = [
     "reth-primitives-traits/serde",
     "revm-scroll/serde",
     "revm-context/serde",
+    "scroll-alloy-evm/serde",
 ]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",

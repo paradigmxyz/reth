@@ -3,24 +3,13 @@
 pub mod common;
 mod exex;
 
+pub(crate) mod debug;
 pub(crate) mod engine;
 
 pub use common::LaunchContext;
 pub use exex::ExExLauncher;
 
 use std::future::Future;
-
-use reth_rpc::eth::RpcNodeCore;
-use reth_tasks::TaskExecutor;
-
-/// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`RpcNodeCore`].
-pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
-    <N as RpcNodeCore>::Provider,
-    <N as RpcNodeCore>::Pool,
-    <N as RpcNodeCore>::Evm,
-    <N as RpcNodeCore>::Network,
-    TaskExecutor,
->;
 
 /// A general purpose trait that launches a new node of any kind.
 ///

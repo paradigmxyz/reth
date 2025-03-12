@@ -10,7 +10,7 @@ use criterion::{
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
 
-/// Benchmarks EIP-48444 blob validation.
+/// Benchmarks EIP-4844 blob validation.
 fn blob_validation(c: &mut Criterion) {
     let mut group = c.benchmark_group("Blob Transaction KZG validation");
 

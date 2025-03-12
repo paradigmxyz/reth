@@ -23,21 +23,20 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-rpc.workspace = true
 reth-node-api.workspace = true
-reth-network-api.workspace = true
 reth-node-builder.workspace = true
+reth-network-api.workspace = true
 reth-chainspec.workspace = true
 
 # scroll
 reth-scroll-chainspec.workspace = true
-reth-scroll-forks.workspace = true
-reth-scroll-primitives.workspace = true
+reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 scroll-alloy-consensus.workspace = true
 scroll-alloy-evm.workspace = true
+scroll-alloy-hardforks.workspace = true
 scroll-alloy-network.workspace = true
 scroll-alloy-rpc-types.workspace = true
 
 # ethereum
-alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true

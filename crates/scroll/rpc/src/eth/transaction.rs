@@ -71,7 +71,7 @@ where
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let hash = *tx.tx_hash();
-        let ScrollTransactionSigned { transaction, signature, .. } = tx.into_tx();
+        let ScrollTransactionSigned { transaction, signature, .. } = tx.into_inner();
 
         let inner = match transaction {
             ScrollTypedTransaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
@@ -102,6 +102,7 @@ where
                 })
                 .unwrap_or_else(|| inner.max_fee_per_gas())
         };
+        let inner = Recovered::new_unchecked(inner, from);
 
         Ok(Transaction {
             inner: alloy_rpc_types_eth::Transaction {
@@ -109,7 +110,6 @@ where
                 block_hash,
                 block_number,
                 transaction_index,
-                from,
                 effective_gas_price: Some(effective_gas_price),
             },
         })
@@ -130,7 +130,8 @@ where
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = match &mut tx.inner.inner {
+        let mut tx = tx.inner.inner.inner_mut();
+        let input = match &mut tx {
             ScrollTxEnvelope::Eip1559(tx) => &mut tx.tx_mut().input,
             ScrollTxEnvelope::Eip2930(tx) => &mut tx.tx_mut().input,
             ScrollTxEnvelope::Legacy(tx) => &mut tx.tx_mut().input,

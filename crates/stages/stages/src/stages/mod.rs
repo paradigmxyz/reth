@@ -118,14 +118,14 @@ mod tests {
         provider_rw
             .tx_ref()
             .put::<tables::PlainAccountState>(
-                address!("1000000000000000000000000000000000000000"),
+                address!("0x1000000000000000000000000000000000000000"),
                 Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
             )
             .unwrap();
         provider_rw
             .tx_ref()
             .put::<tables::PlainAccountState>(
-                address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
+                address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
                 Account {
                     nonce: 0,
                     balance: U256::from(0x3635c9adc5dea00000u128),

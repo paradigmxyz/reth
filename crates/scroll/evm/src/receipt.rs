@@ -1,43 +1,21 @@
 use alloy_consensus::{Eip658Value, Receipt};
-use core::fmt;
+use alloy_evm::Evm;
 use reth_scroll_primitives::{ScrollReceipt, ScrollTransactionSigned};
-use revm::context::result::ExecutionResult;
-use revm_primitives::U256;
 use scroll_alloy_consensus::{ScrollTransactionReceipt, ScrollTxType};
-
-/// Context for building a receipt.
-#[derive(Debug)]
-pub struct ReceiptBuilderCtx<'a, T, Halt> {
-    /// Transaction
-    pub tx: &'a T,
-    /// Result of transaction execution.
-    pub result: ExecutionResult<Halt>,
-    /// Cumulative gas used.
-    pub cumulative_gas_used: u64,
-    /// L1 fee.
-    pub l1_fee: U256,
-}
-
-/// Type that knows how to build a receipt based on execution result.
-pub trait ScrollReceiptBuilder<T, Halt>: fmt::Debug + Send + Sync + Unpin + 'static {
-    /// Receipt type.
-    type Receipt: Send + Sync + Clone + Unpin + 'static;
-
-    /// Builds a receipt given a transaction and the result of the execution.
-    fn build_receipt(&self, ctx: ReceiptBuilderCtx<'_, T, Halt>) -> Self::Receipt;
-}
+use scroll_alloy_evm::{ReceiptBuilderCtx, ScrollReceiptBuilder};
 
 /// Basic builder for receipts of [`ScrollTransactionSigned`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
-pub struct BasicScrollReceiptBuilder;
+pub struct ScrollRethReceiptBuilder;
 
-impl<Halt> ScrollReceiptBuilder<ScrollTransactionSigned, Halt> for BasicScrollReceiptBuilder {
+impl ScrollReceiptBuilder for ScrollRethReceiptBuilder {
+    type Transaction = ScrollTransactionSigned;
     type Receipt = ScrollReceipt;
 
-    fn build_receipt(
+    fn build_receipt<E: Evm>(
         &self,
-        ctx: ReceiptBuilderCtx<'_, ScrollTransactionSigned, Halt>,
+        ctx: ReceiptBuilderCtx<'_, ScrollTransactionSigned, E>,
     ) -> Self::Receipt {
         let inner = Receipt {
             // Success flag was added in `EIP-658: Embedding transaction status code in

@@ -22,8 +22,8 @@ use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives::{Block, BlockBody, Header};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
 use reth_scroll_chainspec::ScrollChainSpec;
-use reth_scroll_forks::ScrollHardfork;
 use reth_scroll_primitives::ScrollBlock;
+use scroll_alloy_hardforks::ScrollHardfork;
 use scroll_alloy_rpc_types_engine::ScrollPayloadAttributes;
 
 /// The types used in the default Scroll beacon consensus engine.
