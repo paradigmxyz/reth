@@ -23,10 +23,6 @@ pub struct EngineArgs {
     #[arg(long = "engine.legacy-state-root", default_value = "false")]
     pub legacy_state_root_task_enabled: bool,
 
-    /// Enable state root task
-    #[arg(long = "engine.state-root-task", default_value = "false", hide = true)]
-    pub state_root_task_enabled: bool,
-
     /// Enable cross-block caching and parallel prewarming
     #[arg(long = "engine.caching-and-prewarming")]
     pub caching_and_prewarming_enabled: bool,
@@ -47,7 +43,6 @@ impl Default for EngineArgs {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             legacy_state_root_task_enabled: false,
-            state_root_task_enabled: false,
             state_root_task_compare_updates: false,
             caching_and_prewarming_enabled: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
