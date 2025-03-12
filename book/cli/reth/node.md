@@ -730,8 +730,8 @@ Ress:
 
           [default: 5]
 
-      --ress.witness-thread-pool-size <WITNESS_THREAD_POOL_SIZE>
-          The number of threads in witness thread pool
+      --ress.witness-max-parallel <WITNESS_MAX_PARALLEL>
+          The maximum number of witnesses to generate in parallel
 
           [default: 5]
 
