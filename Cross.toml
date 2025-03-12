@@ -1,7 +1,9 @@
 [build]
 pre-build = [
-    # rust-bindgen dependencies: llvm-dev libclang-dev (>= 5.0) clang (>= 5.0)
-    "apt-get update && apt-get install --assume-yes --no-install-recommends llvm-dev libclang-6.0-dev clang-6.0",
+    # rust-bindgen dependencies: llvm-dev libclang-dev (>= 10) clang (>= 10)
+    # See: https://github.com/cross-rs/cross/wiki/FAQ#using-clang--bindgen for
+    # recommended clang versions for the given cross and bindgen version.
+    "apt-get update && apt-get install --assume-yes --no-install-recommends llvm-dev libclang-10-dev clang-10",
 ]
 
 [build.env]
