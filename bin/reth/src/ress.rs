@@ -26,19 +26,23 @@ where
     E: BlockExecutorProvider<Primitives = EthPrimitives> + Clone,
     N: FullNetwork + NetworkProtocols,
 {
+    info!(target: "reth::cli", "Installing ress subprotocol");
     let pending_state = PendingState::default();
 
     // Spawn maintenance task for pending state.
-    let provider_ = provider.clone();
-    let pending_ = pending_state.clone();
-    task_executor.spawn(maintain_pending_state(engine_events, provider_, pending_));
+    task_executor.spawn(maintain_pending_state(
+        engine_events,
+        provider.clone(),
+        pending_state.clone(),
+    ));
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let provider = RethRessProtocolProvider::new(
         provider,
         block_executor,
+        Box::new(task_executor.clone()),
         pending_state,
-        args.witness_thread_pool_size,
+        args.witness_max_parallel,
         args.witness_cache_size,
     )?;
     network.add_rlpx_sub_protocol(

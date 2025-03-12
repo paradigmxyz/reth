@@ -22,7 +22,7 @@ reth-revm = { workspace = true, features = ["witness"] }
 reth-chain-state.workspace = true
 reth-trie.workspace = true
 reth-engine-primitives.workspace = true
-reth-tasks = { workspace = true, features = ["rayon"] }
+reth-tasks.workspace = true
 reth-tokio-util.workspace = true
 reth-node-api.workspace = true
 

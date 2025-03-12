@@ -3,8 +3,8 @@ use clap::Args;
 /// The default number of maximum active connections.
 const MAX_ACTIVE_CONNECTIONS_DEFAULT: u64 = 5;
 
-/// The default size of witness thread pool.
-const WITNESS_THREAD_POOL_SIZE_DEFAULT: usize = 5;
+/// The default maximum number of witnesses to generate in parallel.
+const WITNESS_MAX_PARALLEL_DEFAULT: usize = 5;
 
 /// The default witness cache size.
 const WITNESS_CACHE_SIZE_DEFAULT: u32 = 10;
@@ -21,9 +21,9 @@ pub struct RessArgs {
     #[arg(long = "ress.max-active-connections", default_value_t = MAX_ACTIVE_CONNECTIONS_DEFAULT)]
     pub max_active_connections: u64,
 
-    /// The number of threads in witness thread pool.
-    #[arg(long = "ress.witness-thread-pool-size", default_value_t = WITNESS_THREAD_POOL_SIZE_DEFAULT)]
-    pub witness_thread_pool_size: usize,
+    /// The maximum number of witnesses to generate in parallel.
+    #[arg(long = "ress.witness-max-parallel", default_value_t = WITNESS_MAX_PARALLEL_DEFAULT)]
+    pub witness_max_parallel: usize,
 
     /// Witness cache size.
     #[arg(long = "ress.witness-cache-size", default_value_t = WITNESS_CACHE_SIZE_DEFAULT)]
@@ -35,7 +35,7 @@ impl Default for RessArgs {
         Self {
             enabled: false,
             max_active_connections: MAX_ACTIVE_CONNECTIONS_DEFAULT,
-            witness_thread_pool_size: WITNESS_THREAD_POOL_SIZE_DEFAULT,
+            witness_max_parallel: WITNESS_MAX_PARALLEL_DEFAULT,
             witness_cache_size: WITNESS_CACHE_SIZE_DEFAULT,
         }
     }

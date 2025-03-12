@@ -12,10 +12,11 @@ use reth_provider::{
 };
 use reth_ress_protocol::RessProtocolProvider;
 use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
-use reth_tasks::pool::BlockingTaskPool;
+use reth_tasks::TaskSpawner;
 use reth_trie::{MultiProofTargets, Nibbles, TrieInput};
 use schnellru::{ByLength, LruMap};
 use std::{sync::Arc, time::Instant};
+use tokio::sync::{oneshot, Semaphore};
 use tracing::*;
 
 mod recorder;
@@ -29,8 +30,9 @@ pub use pending_state::*;
 pub struct RethRessProtocolProvider<P, E> {
     provider: P,
     block_executor: E,
+    task_spawner: Box<dyn TaskSpawner>,
     pending_state: PendingState<EthPrimitives>,
-    witness_task_pool: BlockingTaskPool,
+    witness_semaphore: Arc<Semaphore>,
     witness_cache: Arc<Mutex<LruMap<B256, Arc<Vec<Bytes>>>>>,
 }
 
@@ -39,8 +41,9 @@ impl<P: Clone, E: Clone> Clone for RethRessProtocolProvider<P, E> {
         Self {
             provider: self.provider.clone(),
             block_executor: self.block_executor.clone(),
+            task_spawner: self.task_spawner.clone(),
             pending_state: self.pending_state.clone(),
-            witness_task_pool: self.witness_task_pool.clone(),
+            witness_semaphore: self.witness_semaphore.clone(),
             witness_cache: self.witness_cache.clone(),
         }
     }
@@ -55,17 +58,17 @@ where
     pub fn new(
         provider: P,
         block_executor: E,
+        task_spawner: Box<dyn TaskSpawner>,
         pending_state: PendingState<EthPrimitives>,
-        pool_num_threads: usize,
+        witness_max_parallel: usize,
         cache_size: u32,
     ) -> eyre::Result<Self> {
         Ok(Self {
             provider,
             block_executor,
+            task_spawner,
             pending_state,
-            witness_task_pool: BlockingTaskPool::new(
-                BlockingTaskPool::builder().num_threads(pool_num_threads).build()?,
-            ),
+            witness_semaphore: Arc::new(Semaphore::new(witness_max_parallel)),
             witness_cache: Arc::new(Mutex::new(LruMap::new(ByLength::new(cache_size)))),
         })
     }
@@ -217,8 +220,14 @@ where
     async fn witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
         trace!(target: "reth::ress_provider", %block_hash, "Serving witness");
         let started_at = Instant::now();
+        let _permit = self.witness_semaphore.acquire().await.map_err(ProviderError::other)?;
         let this = self.clone();
-        match self.witness_task_pool.spawn(move || this.generate_witness(block_hash)).await {
+        let (tx, rx) = oneshot::channel();
+        self.task_spawner.spawn_blocking(Box::pin(async move {
+            let result = this.generate_witness(block_hash);
+            let _ = tx.send(result);
+        }));
+        match rx.await {
             Ok(Ok(witness)) => {
                 trace!(target: "reth::ress_provider", %block_hash, elapsed = ?started_at.elapsed(), "Computed witness");
                 Ok(witness)
