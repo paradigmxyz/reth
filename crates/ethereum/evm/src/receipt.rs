@@ -1,6 +1,6 @@
 use alloy_evm::eth::receipt_builder::{ReceiptBuilder, ReceiptBuilderCtx};
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::Evm;
-use reth_primitives::{Receipt, TransactionSigned};
 
 /// A builder that operates on Reth primitive types, specifically [`TransactionSigned`] and
 /// [`Receipt`].
