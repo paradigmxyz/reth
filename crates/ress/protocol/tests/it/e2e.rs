@@ -5,11 +5,11 @@ use reth_network_api::{
     events::{NetworkEvent, PeerEvent},
     test_utils::PeersHandleProvider,
 };
-use reth_network_ress::{
+use reth_provider::test_utils::MockEthProvider;
+use reth_ress_protocol::{
     test_utils::{MockRessProtocolProvider, NoopRessProtocolProvider},
     GetHeaders, NodeType, ProtocolEvent, ProtocolState, RessPeerRequest, RessProtocolHandler,
 };
-use reth_provider::test_utils::MockEthProvider;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 
@@ -150,7 +150,7 @@ async fn message_exchange() {
     // send get witness message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
     peer0_conn.send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx }).unwrap();
-    assert_eq!(rx.await.unwrap(), Default::default());
+    assert_eq!(rx.await.unwrap(), Vec::<Bytes>::new());
 
     // send get bytecode message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
@@ -226,7 +226,7 @@ async fn witness_fetching_does_not_block() {
     assert!(bytecode_requested_at.elapsed() < witness_delay);
 
     // await for witness response
-    assert_eq!(witness_rx.await.unwrap(), Default::default());
+    assert_eq!(witness_rx.await.unwrap(), Vec::<Bytes>::new());
     assert!(witness_requested_at.elapsed() >= witness_delay);
 }
 

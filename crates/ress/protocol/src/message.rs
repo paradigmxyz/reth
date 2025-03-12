@@ -3,7 +3,7 @@
 //!
 //! Examples include creating, encoding, and decoding protocol messages.
 
-use crate::{NodeType, StateWitnessNet};
+use crate::NodeType;
 use alloy_consensus::Header;
 use alloy_primitives::{
     bytes::{Buf, BufMut},
@@ -87,7 +87,7 @@ impl RessProtocolMessage {
     }
 
     /// Execution witness response.
-    pub fn witness(request_id: u64, witness: StateWitnessNet) -> Self {
+    pub fn witness(request_id: u64, witness: Vec<Bytes>) -> Self {
         RessMessage::Witness(RequestPair { request_id, message: witness }).into_protocol_message()
     }
 
@@ -211,7 +211,7 @@ pub enum RessMessage {
     /// Represents a witness request message.
     GetWitness(RequestPair<BlockHash>),
     /// Represents a witness response message.
-    Witness(RequestPair<StateWitnessNet>),
+    Witness(RequestPair<Vec<Bytes>>),
 }
 
 impl RessMessage {

@@ -1,4 +1,4 @@
-use crate::{GetHeaders, StateWitnessNet};
+use crate::GetHeaders;
 use alloy_consensus::Header;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
@@ -56,8 +56,5 @@ pub trait RessProtocolProvider: Send + Sync {
     fn bytecode(&self, code_hash: B256) -> ProviderResult<Option<Bytes>>;
 
     /// Return witness by block hash.
-    fn witness(
-        &self,
-        block_hash: B256,
-    ) -> impl Future<Output = ProviderResult<Option<StateWitnessNet>>> + Send;
+    fn witness(&self, block_hash: B256) -> impl Future<Output = ProviderResult<Vec<Bytes>>> + Send;
 }
