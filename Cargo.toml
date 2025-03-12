@@ -454,7 +454,7 @@ alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "a5722ee", default-
 alloy-primitives = { version = "0.8.20", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-types = { version = "0.8.20", default-features = false }
-alloy-trie = { version = "0.7", default-features = false }
+alloy-trie = { version = "0.7.9", default-features = false }
 
 alloy-hardforks = { git = "https://github.com/alloy-rs/hardforks", rev = "ae4176c" }
 
