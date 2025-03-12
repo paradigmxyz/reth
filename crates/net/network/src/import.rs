@@ -56,7 +56,7 @@ pub enum BlockImportError {
     Consensus(#[from] reth_consensus::ConsensusError),
     /// Other error
     #[error(transparent)]
-    Other(#[from] Box<dyn Error>),
+    Other(#[from] Box<dyn Error + Send + Sync>),
 }
 
 /// An implementation of `BlockImport` used in Proof-of-Stake consensus that does nothing.
