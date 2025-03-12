@@ -3162,6 +3162,7 @@ dependencies = [
  "reth-network",
  "reth-network-api",
  "reth-network-peers",
+ "reth-node-types",
  "reth-payload-primitives",
  "reth-primitives",
  "reth-primitives-traits",
