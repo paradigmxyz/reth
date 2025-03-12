@@ -11,6 +11,3 @@ reth-exex = { path = "../../crates/exex/exex" }
 reth-node-ethereum = { path = "../../crates/ethereum/node" }
 reth-tracing = { path = "../../crates/tracing" }
 reth-node-api = { path = "../../crates/node/api" }
-
-[patch.crates-io]
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "667180b" }
