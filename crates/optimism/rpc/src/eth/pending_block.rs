@@ -5,12 +5,12 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use reth_chainspec::EthChainSpec;
-use reth_evm::execute::BlockExecutionStrategyFactory;
+use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
-use reth_primitives::{RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
@@ -37,11 +37,11 @@ where
             Transaction = OpTransactionSigned,
             Block = OpBlock,
             Receipt = OpReceipt,
-            Header = reth_primitives::Header,
+            Header = alloy_consensus::Header,
         > + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
-        Evm: BlockExecutionStrategyFactory<
+        Evm: ConfigureEvm<
             Primitives: NodePrimitives<
                 SignedTx = ProviderTx<Self::Provider>,
                 BlockHeader = ProviderHeader<Self::Provider>,
@@ -64,7 +64,7 @@ where
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as reth_evm::ConfigureEvmEnv>::NextBlockEnvCtx, Self::Error> {
+    ) -> Result<<Self::Evm as reth_evm::ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
         Ok(OpNextBlockEnvAttributes {
             timestamp: parent.timestamp().saturating_add(12),
             suggested_fee_recipient: parent.beneficiary(),
@@ -94,7 +94,7 @@ where
         let block_id = latest.hash().into();
         let block = self
             .provider()
-            .block_with_senders(block_id, Default::default())
+            .recovered_block(block_id, Default::default())
             .map_err(Self::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 

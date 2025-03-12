@@ -12,7 +12,8 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
 
@@ -32,7 +33,7 @@ serde_json.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-primitives/std",
+    "reth-ethereum-primitives/std",
     "alloy-primitives/std",
     "alloy-eips/std",
     "alloy-rpc-types-engine/std",
@@ -41,4 +42,5 @@ std = [
     "sha2/std",
     "serde_json/std",
     "reth-engine-primitives/std",
+    "reth-primitives-traits/std",
 ]

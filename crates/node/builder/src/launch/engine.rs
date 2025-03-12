@@ -15,13 +15,13 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodePrimitives,
-    NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
+    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypesWithDBAdapter,
+    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    primitives::{Head, SignedTransaction},
+    primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::EthereumHardforks;
@@ -64,18 +64,9 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<Types, DB, T, CB, AO, Tx> LaunchNode<NodeBuilderWithComponents<T, CB, AO>>
-    for EngineNodeLauncher
+impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Tx: SignedTransaction,
-    Types: NodeTypesForProvider
-        + NodeTypesWithEngine<
-            Primitives: NodePrimitives<
-                SignedTx = Tx,
-                BlockHeader = alloy_consensus::Header,
-                BlockBody = alloy_consensus::BlockBody<Tx>,
-            >,
-        >,
+    Types: NodeTypesForProvider + NodeTypesWithEngine,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     T: FullNodeTypes<
         Types = Types,

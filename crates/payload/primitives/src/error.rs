@@ -4,7 +4,7 @@ use alloc::{boxed::Box, string::ToString};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceUpdateError, PayloadError, PayloadStatusEnum};
 use core::error;
-use reth_errors::{ProviderError, RethError};
+use reth_errors::{BlockExecutionError, ProviderError, RethError};
 use tokio::sync::oneshot;
 
 /// Possible error variants during payload building.
@@ -60,6 +60,12 @@ impl From<ProviderError> for PayloadBuilderError {
 impl From<oneshot::error::RecvError> for PayloadBuilderError {
     fn from(_: oneshot::error::RecvError) -> Self {
         Self::ChannelClosed
+    }
+}
+
+impl From<BlockExecutionError> for PayloadBuilderError {
+    fn from(error: BlockExecutionError) -> Self {
+        Self::evm(error)
     }
 }
 

@@ -24,15 +24,16 @@ reth-evm = { workspace = true, features = ["metrics"] }
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-network-p2p.workspace = true
-reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-primitives-traits = { workspace = true, features = ["serde-bincode-compat"] }
 reth-provider.workspace = true
 reth-execution-types.workspace = true
+reth-ethereum-primitives = { workspace = true, optional = true }
 reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-storage-errors.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
+reth-static-file-types.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 
@@ -63,10 +64,10 @@ serde = { workspace = true, features = ["derive"] }
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
-reth-evm-ethereum.workspace = true
+reth-ethereum-primitives = { workspace = true, features = ["test-utils"] }
 reth-ethereum-consensus.workspace = true
+reth-evm-ethereum.workspace = true
 reth-execution-errors.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
@@ -80,6 +81,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
 reth-tracing.workspace = true
 
+alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-rlp.workspace = true
 itertools.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
@@ -107,7 +109,6 @@ test-utils = [
     "reth-consensus/test-utils",
     "reth-evm/test-utils",
     "reth-downloaders/test-utils",
-    "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",
     "reth-codecs/test-utils",
@@ -115,6 +116,8 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-trie/test-utils",
     "reth-prune-types/test-utils",
+    "dep:reth-ethereum-primitives",
+    "reth-ethereum-primitives?/test-utils",
 ]
 
 [[bench]]
