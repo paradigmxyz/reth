@@ -19,7 +19,9 @@ pub mod error;
 pub mod events;
 /// Implementation of network traits for that does nothing.
 pub mod noop;
+
 pub mod test_utils;
+use test_utils::PeersHandleProvider;
 
 pub use alloy_rpc_types_admin::EthProtocolInfo;
 use reth_network_p2p::sync::NetworkSyncUpdater;
@@ -49,6 +51,7 @@ pub trait FullNetwork:
     + NetworkEventListenerProvider
     + PeersInfo
     + Peers
+    + PeersHandleProvider
     + Clone
     + 'static
 {
@@ -61,6 +64,7 @@ impl<T> FullNetwork for T where
         + NetworkEventListenerProvider
         + PeersInfo
         + Peers
+        + PeersHandleProvider
         + Clone
         + 'static
 {
