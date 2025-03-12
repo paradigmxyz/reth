@@ -28,7 +28,9 @@ pub enum EthStreamError {
     #[error("message size ({0}) exceeds max length (10MB)")]
     /// Received a message whose size exceeds the standard limit.
     MessageTooBig(usize),
-    #[error("TransactionHashes invalid len of fields: hashes_len={hashes_len} types_len={types_len} sizes_len={sizes_len}")]
+    #[error(
+        "TransactionHashes invalid len of fields: hashes_len={hashes_len} types_len={types_len} sizes_len={sizes_len}"
+    )]
     /// Received malformed transaction hashes message with discrepancies in field lengths.
     TransactionHashesInvalidLenOfFields {
         /// The number of transaction hashes.
