@@ -26,9 +26,9 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct CachedReads {
-    accounts: HashMap<Address, CachedAccount>,
-    contracts: HashMap<B256, Bytecode>,
-    block_hashes: HashMap<u64, B256>,
+    pub accounts: HashMap<Address, CachedAccount>,
+    pub contracts: HashMap<B256, Bytecode>,
+    pub block_hashes: HashMap<u64, B256>,
 }
 
 // === impl CachedReads ===
