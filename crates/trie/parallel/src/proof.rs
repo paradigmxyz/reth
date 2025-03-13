@@ -13,8 +13,8 @@ use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
-    StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
+    ProviderError, StateCommitmentProvider,
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -42,7 +42,7 @@ use tracing::{debug, trace};
 /// This can collect proof for many targets in parallel, spawning a task for each hashed address
 /// that has proof targets.
 #[derive(Debug)]
-pub struct ParallelProof<Factory> {
+pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Consistent view of the database.
     view: ConsistentDbView<Factory>,
     /// The sorted collection of cached in-memory intermediate trie nodes that
@@ -59,12 +59,12 @@ pub struct ParallelProof<Factory> {
     /// Handle to spawn blocking tasks to fetch data.
     executor: Handle,
     /// Sender to the storage proof task.
-    storage_proof_task: Sender<ProofTaskMessage>,
+    storage_proof_task: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
 
-impl<Factory> ParallelProof<Factory> {
+impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
     /// Create new state proof generator.
     pub fn new(
         view: ConsistentDbView<Factory>,
@@ -72,7 +72,7 @@ impl<Factory> ParallelProof<Factory> {
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
         executor: Handle,
-        storage_proof_task: Sender<ProofTaskMessage>,
+        storage_proof_task: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
     ) -> Self {
         Self {
             view,
@@ -401,14 +401,10 @@ mod tests {
         let rt = Runtime::new().unwrap();
 
         let task_ctx = ProofTaskCtx::new(Default::default(), Default::default());
-        let (proof_task_sender, proof_task_receiver) = std::sync::mpsc::channel();
-        let proof_task = ProofTaskManager::new(
-            rt.handle().clone(),
-            consistent_view.clone(),
-            task_ctx,
-            1,
-            proof_task_receiver,
-        );
+        let proof_task =
+            ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
+        let proof_task_handle = proof_task.handle();
+        let proof_task_sender = proof_task_handle.sender();
 
         // keep the join handle around to make sure it does not return any errors
         // after we compute the state root
@@ -429,21 +425,23 @@ mod tests {
             Proof::new(trie_cursor_factory, hashed_cursor_factory).multiproof(targets).unwrap();
 
         // to help narrow down what is wrong - first compare account subtries
-        assert_eq!(parallel_result.account_subtree, sequential_result.account_subtree,);
+        assert_eq!(parallel_result.account_subtree, sequential_result.account_subtree);
 
         // then compare length of all storage subtries
-        assert_eq!(parallel_result.storages.len(), sequential_result.storages.len(),);
+        assert_eq!(parallel_result.storages.len(), sequential_result.storages.len());
 
         // then compare each storage subtrie
         for (hashed_address, storage_proof) in &parallel_result.storages {
             let sequential_storage_proof = sequential_result.storages.get(hashed_address).unwrap();
-            assert_eq!(storage_proof, sequential_storage_proof,);
+            assert_eq!(storage_proof, sequential_storage_proof);
         }
 
         // then compare the entire thing for any mask differences
-        assert_eq!(parallel_result, sequential_result,);
+        assert_eq!(parallel_result, sequential_result);
 
-        // make sure the join handle does not return any errors either
+        // drop the handle to terminate the task and then block on the proof task handle to make
+        // sure it does not return any errors
+        drop(proof_task_handle);
         rt.block_on(join_handle).unwrap().expect("The proof task should not return an error");
     }
 }
