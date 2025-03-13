@@ -135,13 +135,13 @@ where
 
     fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
         reth_rpc::EthApiBuilder::new(
-            ctx.core_components.provider().clone(),
-            ctx.core_components.pool().clone(),
-            ctx.core_components.network().clone(),
-            ctx.core_components.evm_config().clone(),
+            ctx.eth_api_components.provider().clone(),
+            ctx.eth_api_components.pool().clone(),
+            ctx.eth_api_components.network().clone(),
+            ctx.eth_api_components.evm_config().clone(),
         )
         .eth_cache(ctx.cache)
-        .task_spawner(ctx.core_components.task_executor().clone())
+        .task_spawner(ctx.eth_api_components.task_executor().clone())
         .gas_cap(ctx.config.rpc_gas_cap.into())
         .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
         .eth_proof_window(ctx.config.eth_proof_window)

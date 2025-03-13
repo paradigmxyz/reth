@@ -472,7 +472,7 @@ where
             }),
         );
 
-        let ctx = EthApiCtx { core_components: &node, config: config.rpc.eth_config(), cache };
+        let ctx = EthApiCtx { eth_api_components: &node, config: config.rpc.eth_config(), cache };
         let eth_api = eth_api_builder.build_eth_api(ctx);
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -595,11 +595,13 @@ where
         &mut self.hooks
     }
 }
-#[derive(Debug)]
+
 /// `EthApiCtx` struct
+/// This struct is used to pass the necessary context to the `EthApiBuilder` to build the `EthApi`.
+#[derive(Debug)]
 pub struct EthApiCtx<'a, N: FullNodeTypes> {
     /// Reference to the node components
-    pub core_components: &'a N,
+    pub eth_api_components: &'a N,
     /// Eth API configuration
     pub config: EthConfig,
     /// Cache for eth state
