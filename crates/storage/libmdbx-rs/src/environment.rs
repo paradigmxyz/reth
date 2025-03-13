@@ -430,13 +430,13 @@ impl Info {
     #[inline]
     pub const fn mode(&self) -> Mode {
         let mode = self.0.mi_mode;
-        if (mode & ffi::MDBX_RDONLY) != 0 {
+        if (mode & ffi::MDBX_RDONLY as u32) != 0 {
             Mode::ReadOnly
-        } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
+        } else if (mode & ffi::MDBX_UTTERLY_NOSYNC as u32) != 0 {
             Mode::ReadWrite { sync_mode: SyncMode::UtterlyNoSync }
-        } else if (mode & ffi::MDBX_NOMETASYNC) != 0 {
+        } else if (mode & ffi::MDBX_NOMETASYNC as u32) != 0 {
             Mode::ReadWrite { sync_mode: SyncMode::NoMetaSync }
-        } else if (mode & ffi::MDBX_SAFE_NOSYNC) != 0 {
+        } else if (mode & ffi::MDBX_SAFE_NOSYNC as u32) != 0 {
             Mode::ReadWrite { sync_mode: SyncMode::SafeNoSync }
         } else {
             Mode::ReadWrite { sync_mode: SyncMode::Durable }

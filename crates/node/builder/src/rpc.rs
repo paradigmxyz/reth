@@ -596,11 +596,13 @@ where
     }
 }
 #[derive(Debug)]
+/// EthApiCtx struct
 pub struct EthApiCtx<'a, N: FullNodeTypes> {
+    /// Reference to the node components
     pub core_components: &'a N,
-
+    /// Eth API configuration
     pub config: EthConfig,
-
+    /// Cache for eth state
     pub cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
 }
 /// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].
