@@ -2399,7 +2399,7 @@ where
             self.metrics
                 .block_validation
                 .trie_input_duration
-                .set(trie_input_start.elapsed().as_secs_f64());
+                .record(trie_input_start.elapsed().as_secs_f64());
 
             self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
         } else {
