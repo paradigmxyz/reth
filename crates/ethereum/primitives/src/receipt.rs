@@ -195,7 +195,7 @@ impl reth_primitives_traits::Receipt for Receipt {}
 
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use alloc::borrow::Cow;
+    use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::TxType;
     use alloy_primitives::{Log, U8};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
