@@ -22,8 +22,8 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{
-        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns, RpcAddOns,
-        RpcHandle,
+        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, EthApiCtx, RethRpcAddOns,
+        RpcAddOns, RpcHandle,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
     PayloadTypes,
@@ -133,25 +133,20 @@ where
 {
     type EthApi = EthApiFor<N>;
 
-    fn build_eth_api(
-        self,
-        core_components: &N,
-        config: EthConfig,
-        cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
-    ) -> Self::EthApi {
+    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
         reth_rpc::EthApiBuilder::new(
-            core_components.provider().clone(),
-            core_components.pool().clone(),
-            core_components.network().clone(),
-            core_components.evm_config().clone(),
+            ctx.core_components.provider().clone(),
+            ctx.core_components.pool().clone(),
+            ctx.core_components.network().clone(),
+            ctx.core_components.evm_config().clone(),
         )
-        .eth_cache(cache)
-        .task_spawner(core_components.task_executor().clone())
-        .gas_cap(config.rpc_gas_cap.into())
-        .max_simulate_blocks(config.rpc_max_simulate_blocks)
-        .eth_proof_window(config.eth_proof_window)
-        .fee_history_cache_config(config.fee_history_cache)
-        .proof_permits(config.proof_permits)
+        .eth_cache(ctx.cache)
+        .task_spawner(ctx.core_components.task_executor().clone())
+        .gas_cap(ctx.config.rpc_gas_cap.into())
+        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+        .eth_proof_window(ctx.config.eth_proof_window)
+        .fee_history_cache_config(ctx.config.fee_history_cache)
+        .proof_permits(ctx.config.proof_permits)
         .build()
     }
 }

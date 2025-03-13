@@ -472,7 +472,8 @@ where
             }),
         );
 
-        let eth_api = eth_api_builder.build_eth_api(&node, config.rpc.eth_config(), cache);
+        let ctx = EthApiCtx { core_components: &node, config: config.rpc.eth_config(), cache };
+        let eth_api = eth_api_builder.build_eth_api(ctx);
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
@@ -594,7 +595,14 @@ where
         &mut self.hooks
     }
 }
+#[derive(Debug)]
+pub struct EthApiCtx<'a, N: FullNodeTypes> {
+    pub core_components: &'a N,
 
+    pub config: EthConfig,
+
+    pub cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
+}
 /// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].
 pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
@@ -605,12 +613,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
         + 'static;
 
     /// Builds the [`EthApiServer`](reth_rpc_api::eth::EthApiServer) from the given context.
-    fn build_eth_api(
-        self,
-        core_components: &N,
-        config: EthConfig,
-        cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
-    ) -> Self::EthApi;
+    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi;
 }
 
 /// Helper trait that provides the validator for the engine API
