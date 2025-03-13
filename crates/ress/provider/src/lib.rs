@@ -4,9 +4,9 @@ use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Bytes, B256};
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProvider};
+use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
-use reth_primitives::{Block, BlockBody, EthPrimitives, Header, RecoveredBlock};
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
 use reth_provider::{
     BlockReader, BlockSource, ProviderError, ProviderResult, StateProvider, StateProviderFactory,
 };
