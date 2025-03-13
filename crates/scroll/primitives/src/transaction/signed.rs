@@ -1,7 +1,15 @@
 //! A signed Scroll transaction.
 
 use crate::ScrollTxType;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
+use core::{
+    hash::{Hash, Hasher},
+    mem,
+    ops::Deref,
+};
+#[cfg(feature = "std")]
+use std::sync::OnceLock;
+
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
     SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxLegacy, Typed2718,
@@ -18,10 +26,6 @@ use alloy_primitives::{
 use alloy_rlp::Header;
 #[cfg(feature = "reth-codec")]
 use arbitrary as _;
-use core::{
-    hash::{Hash, Hasher},
-    mem,
-};
 use derive_more::{AsRef, Deref};
 #[cfg(not(feature = "std"))]
 use once_cell::sync::OnceCell as OnceLock;
@@ -37,9 +41,6 @@ use scroll_alloy_consensus::{
     ScrollPooledTransaction, ScrollTypedTransaction, TxL1Message, L1_MESSAGE_TRANSACTION_TYPE,
 };
 use scroll_alloy_evm::ScrollTransactionIntoTxEnv;
-use std::ops::Deref;
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
