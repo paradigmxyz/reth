@@ -11,7 +11,7 @@ use tokio::net::TcpStream;
 /// RLPx commands
 #[derive(Parser, Debug)]
 pub struct Command {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     subcommand: Subcommands,
 }
 
