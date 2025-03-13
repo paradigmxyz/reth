@@ -3,7 +3,7 @@
 use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
 use crate::Compact;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
-use op_alloy_consensus::{OpTxType, OpTypedTransaction, TxDeposit as AlloyTxDeposit};
+use op_alloy_consensus::{OpTxType, OpTypedTransaction, OpTxEnvelope, TxDeposit as AlloyTxDeposit};
 use reth_codecs_derive::add_arbitrary_tests;
 use crate::txtype::{COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930, COMPACT_IDENTIFIER_LEGACY};
 use crate::generate_tests;
@@ -161,3 +161,46 @@ impl Compact for OpTypedTransaction {
 }
 
 generate_tests!(#[crate, compact] OpTypedTransaction, OpTypedTransactionTests);
+
+#[cfg(feature = "reth-codec")]
+impl reth_codecs::Compact for OpTxEnvelope {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        match self {
+            Self::Legacy(tx) => tx.to_compact(buf),
+            Self::Eip2930(tx) => tx.to_compact(buf),
+            Self::Eip1559(tx) => tx.to_compact(buf),
+            Self::Eip7702(tx) => tx.to_compact(buf),
+            Self::Deposit(tx) => tx.to_compact(buf),
+        }
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        let (tx_type, buf) = OpTxType::from_compact(buf, identifier);
+        
+        match tx_type {
+            OpTxType::Legacy => {
+                let (tx, buf) = Compact::from_compact(buf, buf.len());
+                (Self::Legacy(tx), buf)
+            }
+            OpTxType::Eip2930 => {
+                let (tx, buf) = Compact::from_compact(buf, buf.len());
+                (Self::Eip2930(tx), buf)
+            }
+            OpTxType::Eip1559 => {
+                let (tx, buf) = Compact::from_compact(buf, buf.len());
+                (Self::Eip1559(tx), buf)
+            }
+            OpTxType::Eip7702 => {
+                let (tx, buf) = Compact::from_compact(buf, buf.len());
+                (Self::Eip7702(tx), buf)
+            }
+            OpTxType::Deposit => {
+                let (tx, buf) = Compact::from_compact(buf, buf.len());
+                (Self::Deposit(tx), buf)
+            }
+        }
+    }
+}
