@@ -95,9 +95,7 @@ impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + 'static,
 {
-    /// Spawns the proof task on the executor, with the input multiproof targets.
-    ///
-    /// If a task cannot be spawned immediately, this will be queued for completion later.
+    /// Inserts the storage proof input and sender into the pending proof queue.
     pub fn queue_proof_task(
         &mut self,
         input: StorageProofInput,
