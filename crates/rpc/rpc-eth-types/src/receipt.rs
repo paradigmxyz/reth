@@ -5,7 +5,7 @@ use alloy_consensus::{transaction::TransactionMeta, ReceiptEnvelope, TxReceipt};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
-use reth_primitives::{Receipt, TransactionSigned, TxType};
+use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
 use reth_primitives_traits::SignedTransaction;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
