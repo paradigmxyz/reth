@@ -77,7 +77,6 @@ impl ValidationJobSender {
 }
 
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
-///
 /// This validator is non-blocking, all validation work is done in a separate task.
 #[derive(Debug, Clone)]
 pub struct TransactionValidationTaskExecutor<V> {

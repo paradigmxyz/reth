@@ -16,10 +16,8 @@ mod constants;
 mod eth;
 mod task;
 
-/// A `TransactionValidator` implementation that validates ethereum transaction.
 pub use eth::*;
 
-/// A spawnable task that performs transaction validation.
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
