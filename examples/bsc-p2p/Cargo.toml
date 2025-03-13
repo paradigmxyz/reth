@@ -10,18 +10,29 @@ license.workspace = true
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-engine-primitives.workspace = true
+reth-engine-service.workspace = true
+reth-engine-tree = { workspace = true, features = ["test-utils"] }
+reth-ethereum-engine-primitives.workspace = true
+reth-evm-ethereum.workspace = true
 reth-errors.workspace = true
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
+reth-ethereum-consensus.workspace = true
+reth-exex-types.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
+reth-node-ethereum.workspace = true
+reth-node-events.workspace = true
 reth-node-types.workspace = true
+reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-provider.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-prune.workspace = true
+reth-tasks.workspace = true
 reth-tracing.workspace = true
 
 # alloy

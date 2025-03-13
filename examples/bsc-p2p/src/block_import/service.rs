@@ -35,7 +35,7 @@ type IncomingBlock<T> = (BlockMsg<T>, PeerId);
 /// Future that processes a block import and returns its outcome
 type ImportFuture<T> = Pin<Box<dyn Future<Output = Outcome<T>> + Send + Sync>>;
 
-pub(crate) struct ImportHandle<T: EngineTypes> {
+pub struct ImportHandle<T: EngineTypes> {
     /// Send the new block to the service
     to_import: UnboundedSender<IncomingBlock<T>>,
     /// Receive the outcome of the import
@@ -70,7 +70,7 @@ impl<T: EngineTypes> ImportHandle<T> {
 /// A service that handles bidirectional block import communication with the network.
 /// It receives new blocks from the network via `from_network` channel and sends back
 /// import outcomes via `to_network` channel.
-pub(crate) struct ImportService<Provider: BlockNumReader + Clone, T: EngineTypes> {
+pub struct ImportService<Provider: BlockNumReader + Clone, T: EngineTypes> {
     /// The handle to communicate with the engine service
     engine: BeaconConsensusEngineHandle<T>,
     /// The provider
@@ -85,7 +85,7 @@ pub(crate) struct ImportService<Provider: BlockNumReader + Clone, T: EngineTypes
 
 impl<Provider: BlockNumReader + Clone + 'static, T: EngineTypes> ImportService<Provider, T> {
     /// Create a new block import service
-    pub(crate) fn new(
+    pub fn new(
         provider: Provider,
         engine: BeaconConsensusEngineHandle<T>,
     ) -> (Self, ImportHandle<T>) {
