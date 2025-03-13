@@ -2611,6 +2611,7 @@ mod tests {
             capabilities: Arc::new(vec![].into()),
             status: Arc::new(Default::default()),
             version: EthVersion::Eth68,
+            peer_kind,
         };
         let messages: PeerRequestSender<PeerRequest> = PeerRequestSender::new(peer_id, tx);
         tx_manager
