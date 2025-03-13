@@ -280,7 +280,7 @@ where
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
         if !self.local_transactions_config.is_local(origin, transaction.sender_ref()) &&
-            transaction.is_eip1559() &&
+            transaction.is_dynamic_fee() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return TransactionValidationOutcome::Invalid(
