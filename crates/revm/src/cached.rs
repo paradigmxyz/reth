@@ -181,7 +181,7 @@ impl<DB: DatabaseRef> DatabaseRef for CachedReadsDBRef<'_, DB> {
     }
 }
 
-/// Cached account contains the account state with storage 
+/// Cached account contains the account state with storage
 /// but lacks the account status.
 #[derive(Debug, Clone)]
 pub struct CachedAccount {
