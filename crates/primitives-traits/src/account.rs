@@ -1,4 +1,3 @@
-use alloc::sync::Arc;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
@@ -50,9 +49,9 @@ impl Account {
     /// After `SpuriousDragon` empty account is defined as account with nonce == 0 && balance == 0
     /// && bytecode = None (or hash is [`KECCAK_EMPTY`]).
     pub fn is_empty(&self) -> bool {
-        self.nonce == 0
-            && self.balance.is_zero()
-            && self.bytecode_hash.is_none_or(|hash| hash == KECCAK_EMPTY)
+        self.nonce == 0 &&
+            self.balance.is_zero() &&
+            self.bytecode_hash.is_none_or(|hash| hash == KECCAK_EMPTY)
     }
 
     /// Returns an account bytecode's hash.
@@ -182,7 +181,7 @@ impl reth_codecs::Compact for Bytecode {
                 Self(RevmBytecode::new_analyzed(
                     bytes,
                     original_len,
-                    revm_bytecode::JumpTable(Arc::new(bitvec)),
+                    revm_bytecode::JumpTable(alloc::sync::Arc::new(bitvec)),
                 ))
             }
             EOF_BYTECODE_ID | EIP7702_BYTECODE_ID => {
