@@ -130,11 +130,11 @@ where
     /// This will return an error if a transaction must be created on-demand and the consistent view
     /// provider fails.
     pub fn try_spawn_next(&mut self) -> ProviderResult<()> {
-        let Some(proof_task_tx) = self.get_or_create_tx()? else { return Ok(()) };
+        let Some((pending_proof, sender)) = self.pending_proofs.pop_front() else { return Ok(()) };
 
-        let Some((pending_proof, sender)) = self.pending_proofs.pop_front() else {
-            // if there are no targets to do anything with put the tx back
-            self.proof_task_txs.push(proof_task_tx);
+        let Some(proof_task_tx) = self.get_or_create_tx()? else {
+            // if there are no txs available, requeue the proof task
+            self.pending_proofs.push_front((pending_proof, sender));
             return Ok(())
         };
 
@@ -195,7 +195,7 @@ impl<Tx> ProofTaskTx<Tx>
 where
     Tx: DbTx,
 {
-    /// Calcultes a storage proof for the given hashed address, and desired preficx set.
+    /// Calcultes a storage proof for the given hashed address, and desired prefix set.
     pub fn storage_proof(
         self,
         input: StorageProofInput,
