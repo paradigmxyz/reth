@@ -273,8 +273,7 @@ where
         }
 
         'conn: loop {
-            if let Poll::Ready(maybe_cmd) = this.commands.poll_next_unpin(cx) {
-                let Some(cmd) = maybe_cmd else { break 'conn };
+            if let Poll::Ready(Some(cmd)) = this.commands.poll_next_unpin(cx) {
                 let message = this.on_command(cmd);
                 let encoded = message.encoded();
                 trace!(target: "ress::net::connection", peer_id = %this.peer_id, ?message, encoded = alloy_primitives::hex::encode(&encoded), "Sending peer command");
