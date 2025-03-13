@@ -8,7 +8,8 @@ use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx,
+    StateCommitmentProvider,
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -17,7 +18,7 @@ use reth_trie::{
 };
 use reth_trie_parallel::{
     proof::ParallelProof,
-    proof_task::{ProofTaskCtx, ProofTaskManager, ProofTaskMessage},
+    proof_task::{ProofTaskCtx, ProofTaskManager, ProofTaskManagerHandle},
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -257,7 +258,7 @@ struct MultiproofInput<Factory> {
 /// concurrency, further calculation requests are queued and spawn later, after
 /// availability has been signaled.
 #[derive(Debug)]
-pub struct MultiproofManager<Factory> {
+pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     /// Maximum number of concurrent calculations.
     max_concurrent: usize,
     /// Currently running calculations.
@@ -267,7 +268,7 @@ pub struct MultiproofManager<Factory> {
     /// Executor for tasks
     executor: WorkloadExecutor,
     /// Sender to the storage proof task.
-    to_storage_proof_task: Sender<ProofTaskMessage>,
+    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
 }
@@ -281,7 +282,7 @@ where
     fn new(
         executor: WorkloadExecutor,
         metrics: MultiProofTaskMetrics,
-        to_storage_proof_task: Sender<ProofTaskMessage>,
+        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     ) -> Self {
         let max_concurrent = executor.rayon_pool().current_num_threads();
         Self {
@@ -290,7 +291,7 @@ where
             executor,
             inflight: 0,
             metrics,
-            to_storage_proof_task,
+            storage_proof_task_handle,
         }
     }
 
@@ -344,7 +345,7 @@ where
         }: MultiproofInput<Factory>,
     ) {
         let executor = self.executor.clone();
-        let to_storage_proof_task = self.to_storage_proof_task.clone();
+        let to_storage_proof_task = self.storage_proof_task_handle.sender();
 
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
@@ -457,7 +458,7 @@ pub(crate) struct MultiProofTaskMetrics {
 /// Then it updates relevant leaves according to the result of the transaction.
 /// This feeds updates to the sparse trie task.
 #[derive(Debug)]
-pub(super) struct MultiProofTask<Factory> {
+pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
     /// Task configuration.
     config: MultiProofConfig<Factory>,
     /// Receiver for state root related messages.
@@ -491,7 +492,6 @@ where
         let metrics = MultiProofTaskMetrics::default();
 
         // Create and spawn the storage proof task
-        let (proof_task_sender, proof_task_receiver) = channel();
         let task_ctx = ProofTaskCtx::new(config.nodes_sorted.clone(), config.state_sorted.clone());
         let max_concurrency = 32;
         let proof_task = ProofTaskManager::new(
@@ -499,8 +499,10 @@ where
             config.consistent_view.clone(),
             task_ctx,
             max_concurrency,
-            proof_task_receiver,
         );
+
+        // get proof task handle
+        let proof_task_handle = proof_task.handle();
 
         // spawn the proof task
         executor.spawn_blocking(move || {
@@ -524,7 +526,7 @@ where
             multiproof_manager: MultiproofManager::new(
                 executor,
                 metrics.clone(),
-                proof_task_sender,
+                proof_task_handle,
             ),
             metrics,
         }

@@ -9,10 +9,7 @@
 //! [`HashedPostStateCursorFactory`], which are each backed by a database transaction.
 
 use crate::root::ParallelStateRootError;
-use alloy_primitives::{
-    map::{B256Set, HashSet},
-    B256,
-};
+use alloy_primitives::{map::B256Set, B256};
 use reth_db_api::transaction::DbTx;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, FactoryTx,
@@ -28,7 +25,7 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{
     collections::VecDeque,
     sync::{
-        mpsc::{channel, Receiver, Sender, TryRecvError},
+        mpsc::{channel, Receiver, Sender},
         Arc,
     },
     time::Instant,
@@ -57,10 +54,10 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// The proof task transactions, containing owned cursor factories that are reused for proof
     /// calculation.
     proof_task_txs: Vec<ProofTaskTx<FactoryTx<Factory>>>,
-    /// The currently running proof tasks.
-    running_proof_tasks: Vec<RunningProofTask<FactoryTx<Factory>>>,
     /// A receiver for new proof tasks.
-    proof_task_rx: Receiver<ProofTaskMessage>,
+    proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
+    /// A sender for sending back transactions.
+    tx_sender: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
 }
 
 impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
@@ -73,8 +70,8 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
         view: ConsistentDbView<Factory>,
         task_ctx: ProofTaskCtx,
         max_concurrency: usize,
-        proof_task_rx: Receiver<ProofTaskMessage>,
     ) -> Self {
+        let (tx_sender, proof_task_rx) = channel();
         Self {
             max_concurrency,
             total_transactions: 0,
@@ -83,9 +80,14 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
             pending_proofs: VecDeque::new(),
             executor,
             proof_task_txs: Vec::new(),
-            running_proof_tasks: Vec::new(),
             proof_task_rx,
+            tx_sender,
         }
+    }
+
+    /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
+    pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
+        ProofTaskManagerHandle::new(self.tx_sender.clone())
     }
 }
 
@@ -136,29 +138,30 @@ where
             return Ok(())
         };
 
-        let (tx, rx) = channel();
+        let tx_sender = self.tx_sender.clone();
         self.executor.spawn_blocking(move || {
-            let output = proof_task_tx.storage_proof(pending_proof, sender);
-            let _ = tx.send(output);
+            proof_task_tx.storage_proof(pending_proof, sender, tx_sender);
         });
 
-        self.running_proof_tasks.push(RunningProofTask::new(rx));
         Ok(())
     }
 
     /// Loops, managing the proof tasks, and sending new tasks to the executor.
     pub fn run(mut self) -> ProviderResult<()> {
         loop {
-            // TODO: condvar for
-            // * either running or proof tasks have stuff
-            // * otherwise yield thread
-            let message = match self.proof_task_rx.try_recv() {
+            let message = match self.proof_task_rx.recv() {
                 Ok(message) => match message {
                     ProofTaskMessage::StorageProof(input) => Some(input),
+                    ProofTaskMessage::Transaction(tx) => {
+                        // return the transaction to the pool
+                        self.proof_task_txs.push(tx);
+                        None
+                    }
                     ProofTaskMessage::Terminate => return Ok(()),
                 },
-                Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => return Ok(()),
+                // All senders are disconnected, so we can terminate
+                // However this should never happen, as this struct stores a sender
+                Err(_) => return Ok(()),
             };
 
             if let Some((input, sender)) = message {
@@ -167,39 +170,6 @@ where
 
             // try spawning the next task
             self.try_spawn_next()?;
-
-            // tracks the disconnected senders
-            let mut tasks_to_remove = HashSet::new();
-
-            // poll each task
-            for (idx, running_task) in self.running_proof_tasks.iter().enumerate() {
-                let RunningProofTask { task_receiver } = running_task;
-                match task_receiver.try_recv() {
-                    Ok(ProofTaskOutput { tx }) => {
-                        // return the tx back to the pool
-                        self.proof_task_txs.push(tx);
-
-                        // remove the task from the running tasks
-                        tasks_to_remove.insert(idx);
-                    }
-                    // If the result is empty, we need to continue polling
-                    Err(TryRecvError::Empty) => {}
-                    Err(TryRecvError::Disconnected) => {
-                        // This means the sender from the task panicked, while this is likely not
-                        // normal, we should at least stop polling this task.
-                        tasks_to_remove.insert(idx);
-                    }
-                }
-            }
-
-            if !tasks_to_remove.is_empty() {
-                // remove any completed or panicked tasks from the list of running tasks
-                let mut current_idx = 0;
-                self.running_proof_tasks.retain(|_| {
-                    current_idx += 1;
-                    tasks_to_remove.contains(&current_idx)
-                });
-            }
         }
     }
 }
@@ -230,7 +200,8 @@ where
         self,
         input: StorageProofInput,
         result_sender: Sender<StorageProofResult>,
-    ) -> ProofTaskOutput<Tx> {
+        tx_sender: Sender<ProofTaskMessage<Tx>>,
+    ) {
         debug!(
             target: "trie::parallel_proof",
             hashed_address=?input.hashed_address,
@@ -271,17 +242,9 @@ where
         // send the result back
         let _ = result_sender.send(result);
 
-        // return the tx
-        ProofTaskOutput { tx: self }
+        // send the tx back
+        let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
     }
-}
-
-/// This contains the proof calculation result and transaction that was used in proof calculation,
-/// which will be reused.
-#[derive(Debug)]
-pub struct ProofTaskOutput<Tx> {
-    /// The tx to be returned back for later use.
-    tx: ProofTaskTx<Tx>,
 }
 
 /// This represents an input for a storage proof.
@@ -330,27 +293,43 @@ impl ProofTaskCtx {
     }
 }
 
-/// This represents a running proof task, holding a receiver that receives both a database tx and a
-/// proof result. This also contains a sender that will be used to send back the storage proof
-/// result to the caller.
+/// A message used to send a storage proof request to the [`ProofTaskManager`].
 #[derive(Debug)]
-pub struct RunningProofTask<Tx> {
-    /// The receiver for the database tx and proof result.
-    task_receiver: Receiver<ProofTaskOutput<Tx>>,
+pub enum ProofTaskMessage<Tx> {
+    /// A storage proof request.
+    StorageProof((StorageProofInput, Sender<StorageProofResult>)),
+    /// A returned database transaction.
+    Transaction(ProofTaskTx<Tx>),
+    /// A request to terminate the proof task manager.
+    Terminate,
 }
 
-impl<Tx> RunningProofTask<Tx> {
-    /// Creates a new [`RunningProofTask`].
-    pub const fn new(task_receiver: Receiver<ProofTaskOutput<Tx>>) -> Self {
-        Self { task_receiver }
+/// A handle that wraps a single proof task sender that sends a terminate message on `Drop`.
+#[derive(Debug)]
+pub struct ProofTaskManagerHandle<Tx> {
+    /// The sender for the proof task manager.
+    sender: Sender<ProofTaskMessage<Tx>>,
+}
+
+impl<Tx> ProofTaskManagerHandle<Tx> {
+    /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
+    pub const fn new(sender: Sender<ProofTaskMessage<Tx>>) -> Self {
+        Self { sender }
+    }
+
+    /// Clones and returns the inner sender.
+    pub fn sender(&self) -> Sender<ProofTaskMessage<Tx>> {
+        self.sender.clone()
+    }
+
+    /// Sends a terminate message to the proof task manager.
+    pub fn terminate(&self) {
+        let _ = self.sender.send(ProofTaskMessage::Terminate);
     }
 }
 
-/// A message used to send a storage proof request to the [`ProofTaskManager`].
-#[derive(Debug)]
-pub enum ProofTaskMessage {
-    /// A storage proof request.
-    StorageProof((StorageProofInput, Sender<StorageProofResult>)),
-    /// A request to terminate the proof task manager.
-    Terminate,
+impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
+    fn drop(&mut self) {
+        self.terminate();
+    }
 }
