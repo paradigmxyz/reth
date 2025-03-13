@@ -238,9 +238,10 @@ impl From<Account> for AccountInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::sync::Arc;
     use alloy_primitives::{hex_literal::hex, B256, U256};
     use reth_codecs::Compact;
-    use revm_bytecode::{JumpTable, LegacyAnalyzedBytecode};
+    use revm_bytecode::{bitvec::vec::BitVec, JumpTable, LegacyAnalyzedBytecode};
 
     #[test]
     fn test_account() {
@@ -296,10 +297,12 @@ mod tests {
         assert_eq!(len, 53);
 
         let mut buf = vec![];
+        let mut bitvec = BitVec::from_slice(&[0]);
+        unsafe { bitvec.set_len(2) };
         let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(LegacyAnalyzedBytecode::new(
             Bytes::from(&hex!("ff00")),
             2,
-            JumpTable::from_slice(&[0]),
+            JumpTable(Arc::new(bitvec)),
         )));
         let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
