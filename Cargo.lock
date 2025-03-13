@@ -3116,6 +3116,7 @@ dependencies = [
  "alloy-rpc-types",
  "bytes",
  "derive_more 2.0.1",
+ "eyre",
  "futures",
  "reth-chainspec",
  "reth-discv4",
