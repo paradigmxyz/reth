@@ -38,6 +38,7 @@ use std::{
 use tokio::sync::Mutex;
 
 /// Validator for Ethereum transactions.
+/// It is a [`TransactionValidator`] implementation that validates ethereum transaction.
 #[derive(Debug, Clone)]
 pub struct EthTransactionValidator<Client, T> {
     /// The type that performs the actual validation.
@@ -545,7 +546,7 @@ where
     }
 }
 
-/// A builder for [`TransactionValidationTaskExecutor`]
+/// A builder for [`EthTransactionValidator`] and [`TransactionValidationTaskExecutor`]
 #[derive(Debug)]
 pub struct EthTransactionValidatorBuilder<Client> {
     client: Client,
