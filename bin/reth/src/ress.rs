@@ -41,9 +41,10 @@ where
         provider,
         block_executor,
         Box::new(task_executor.clone()),
-        pending_state,
+        args.max_witness_window,
         args.witness_max_parallel,
         args.witness_cache_size,
+        pending_state,
     )?;
     network.add_rlpx_sub_protocol(
         RessProtocolHandler {
