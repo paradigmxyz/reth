@@ -472,7 +472,7 @@ where
             }),
         );
 
-        let ctx = EthApiCtx { eth_api_components: &node, config: config.rpc.eth_config(), cache };
+        let ctx = EthApiCtx { components: &node, config: config.rpc.eth_config(), cache };
         let eth_api = eth_api_builder.build_eth_api(ctx);
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -601,12 +601,13 @@ where
 #[derive(Debug)]
 pub struct EthApiCtx<'a, N: FullNodeTypes> {
     /// Reference to the node components
-    pub eth_api_components: &'a N,
+    pub components: &'a N,
     /// Eth API configuration
     pub config: EthConfig,
     /// Cache for eth state
     pub cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
 }
+
 /// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].
 pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
