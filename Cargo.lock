@@ -3321,6 +3321,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-exex-hello-world"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth",
+ "reth-ethereum",
+ "reth-tracing",
+]
+
+[[package]]
 name = "example-manual-p2p"
 version = "0.0.0"
 dependencies = [
@@ -7860,6 +7871,7 @@ dependencies = [
  "revm-context",
  "secp256k1",
  "serde",
+ "serde_with",
  "test-fuzz",
 ]
 
