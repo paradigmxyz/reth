@@ -7,8 +7,7 @@ use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
-    validate_against_parent_hash_number, validate_against_parent_timestamp,
-    validate_body_against_header, validate_header_gas,
+    validate_against_parent_hash_number, validate_body_against_header, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
@@ -167,6 +166,24 @@ fn validate_header_base_fee<H: BlockHeader, ChainSpec: ScrollHardforks>(
         header.base_fee_per_gas().is_none()
     {
         return Err(ConsensusError::BaseFeeMissing)
+    }
+    Ok(())
+}
+
+/// Validates the timestamp against the parent to make sure it is in the past.
+/// In Scroll, we can have parent.timestamp == header.timestamp which is why
+/// we modify this validation compared to
+/// [`reth_consensus_common::validation::validate_against_parent_timestamp`].
+#[inline]
+fn validate_against_parent_timestamp<H: BlockHeader>(
+    header: &H,
+    parent: &H,
+) -> Result<(), ConsensusError> {
+    if header.timestamp() < parent.timestamp() {
+        return Err(ConsensusError::TimestampIsInPast {
+            parent_timestamp: parent.timestamp(),
+            timestamp: header.timestamp(),
+        })
     }
     Ok(())
 }

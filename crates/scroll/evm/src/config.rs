@@ -151,7 +151,7 @@ mod tests {
                 pre_bernouilli_head.timestamp,
                 pre_bernouilli_head.number
             ),
-            ScrollSpecId::BERNOULLI
+            ScrollSpecId::SHANGHAI
         );
     }
 
@@ -190,7 +190,7 @@ mod tests {
 
         // check correct cfg env
         assert_eq!(env.cfg_env.chain_id, Scroll as u64);
-        assert_eq!(env.cfg_env.spec, ScrollSpecId::BERNOULLI);
+        assert_eq!(env.cfg_env.spec, ScrollSpecId::SHANGHAI);
     }
 
     #[test]

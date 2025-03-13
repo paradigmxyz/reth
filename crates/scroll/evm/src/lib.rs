@@ -96,8 +96,13 @@ impl<ChainSpec: ScrollHardforks, N: NodePrimitives, R> ScrollEvmConfig<ChainSpec
             .active_at_timestamp_or_number(timestamp, number)
         {
             ScrollSpecId::CURIE
-        } else {
+        } else if chain_spec
+            .scroll_fork_activation(ScrollHardfork::Bernoulli)
+            .active_at_timestamp_or_number(timestamp, number)
+        {
             ScrollSpecId::BERNOULLI
+        } else {
+            ScrollSpecId::SHANGHAI
         }
     }
 }
