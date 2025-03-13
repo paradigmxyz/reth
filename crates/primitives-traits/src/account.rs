@@ -4,7 +4,7 @@ use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
 use alloy_trie::TrieAccount;
 use derive_more::Deref;
-use revm_bytecode::{bitvec::vec::BitVec, Bytecode as RevmBytecode, BytecodeDecodeError};
+use revm_bytecode::{Bytecode as RevmBytecode, BytecodeDecodeError};
 use revm_state::AccountInfo;
 
 #[cfg(any(test, feature = "reth-codec"))]
@@ -50,9 +50,9 @@ impl Account {
     /// After `SpuriousDragon` empty account is defined as account with nonce == 0 && balance == 0
     /// && bytecode = None (or hash is [`KECCAK_EMPTY`]).
     pub fn is_empty(&self) -> bool {
-        self.nonce == 0 &&
-            self.balance.is_zero() &&
-            self.bytecode_hash.is_none_or(|hash| hash == KECCAK_EMPTY)
+        self.nonce == 0
+            && self.balance.is_zero()
+            && self.bytecode_hash.is_none_or(|hash| hash == KECCAK_EMPTY)
     }
 
     /// Returns an account bytecode's hash.
@@ -176,12 +176,12 @@ impl reth_codecs::Compact for Bytecode {
             }
             LEGACY_ANALYZED_BYTECODE_ID => {
                 let original_len = buf.read_u64::<byteorder::BigEndian>().unwrap() as usize;
-                let mut bitvec = BitVec::from_slice(buf);
+                let mut bitvec = revm_bytecode::bitvec::vec::BitVec::from_slice(buf);
                 let bit_len = if bitvec.len() >= bytes.len() { bytes.len() } else { original_len };
                 unsafe { bitvec.set_len(bit_len) };
                 Self(RevmBytecode::new_analyzed(
                     bytes,
-                    buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
+                    original_len,
                     revm_bytecode::JumpTable(Arc::new(bitvec)),
                 ))
             }
