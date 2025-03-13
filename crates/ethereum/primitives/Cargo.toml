@@ -71,6 +71,7 @@ std = [
     "alloy-rpc-types-eth?/std",
     "revm-context/std",
     "alloy-evm/std",
+    "serde_with?/std",
 ]
 reth-codec = [
     "std",
