@@ -1,11 +1,8 @@
 //! Actions that can be performed in tests.
 
 use crate::testsuite::Environment;
-use alloy_eips::BlockId;
-use alloy_primitives::{Address, BlockNumber, Bytes, B256};
-use alloy_rpc_types_engine::{
-    ExecutionPayload, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
-};
+use alloy_primitives::{Address, Bytes, B256};
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes, PayloadStatusEnum};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
 use futures_util::future::BoxFuture;
@@ -51,27 +48,6 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(self(env))
-    }
-}
-
-/// Advance a single block with the given transactions.
-#[derive(Debug)]
-pub struct MineBlock {
-    /// The node index to advance
-    pub node_idx: usize,
-    /// Transactions to include in the block
-    pub transactions: Vec<Vec<u8>>,
-}
-
-impl<I> Action<I> for MineBlock {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            // 1. Create a new payload with the given transactions
-            // 2. Execute forkchoiceUpdated with the new payload
-            // 3. Internal implementation would go here
-
-            Ok(())
-        })
     }
 }
 
@@ -174,176 +150,6 @@ where
                 }
                 _ => Err(eyre::eyre!("Payload status not valid: {:?}", fcu_result.payload_status)),
             }
-        })
-    }
-}
-
-/// Submit a transaction to the node.
-#[derive(Debug)]
-pub struct SubmitTransaction {
-    /// The node index to submit to
-    pub node_idx: usize,
-    /// The raw transaction bytes
-    pub raw_tx: Bytes,
-}
-
-impl<I: Sync> Action<I> for SubmitTransaction {
-    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            if self.node_idx >= env.node_clients.len() {
-                return Err(eyre::eyre!("Node index out of bounds: {}", self.node_idx));
-            }
-
-            let node_client = &env.node_clients[self.node_idx];
-            let rpc_client = &node_client.rpc;
-
-            let tx_hash =
-                EthApiClient::<Transaction, Block, Receipt, Header>::send_raw_transaction(
-                    rpc_client,
-                    self.raw_tx.clone(),
-                )
-                .await?;
-
-            debug!("Transaction submitted with hash: {}", tx_hash);
-
-            Ok(())
-        })
-    }
-}
-
-/// Create a new payload with specified attributes.
-#[derive(Debug)]
-pub struct CreatePayload {
-    /// The node index to use
-    pub node_idx: usize,
-    /// Payload attributes
-    pub attributes: PayloadAttributes,
-}
-
-impl<I> Action<I> for CreatePayload {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move { Ok(()) })
-    }
-}
-
-/// Execute newPayload with the given payload.
-#[derive(Debug)]
-pub struct NewPayload {
-    /// The node index to use
-    pub node_idx: usize,
-    /// Execution payload
-    pub payload: ExecutionPayload,
-}
-
-impl<I> Action<I> for NewPayload {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move { Ok(()) })
-    }
-}
-
-/// Get a block by number or hash.
-#[derive(Debug)]
-pub struct GetBlock {
-    /// The node index to use
-    pub node_idx: usize,
-    /// Block number
-    pub block_number: Option<BlockNumber>,
-    /// Block hash
-    pub block_hash: Option<B256>,
-}
-
-impl<I> Action<I> for GetBlock {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move { Ok(()) })
-    }
-}
-
-/// Get the transaction count for an address.
-#[derive(Debug)]
-pub struct GetTransactionCount {
-    /// The node index to use
-    pub node_idx: usize,
-    /// Account address
-    pub address: B256,
-    /// Block identifier
-    pub block_id: BlockId,
-}
-
-impl<I> Action<I> for GetTransactionCount {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move { Ok(()) })
-    }
-}
-
-/// Get the storage value at a specific slot.
-#[derive(Debug)]
-pub struct GetStorageAt {
-    /// The node index to use
-    pub node_idx: usize,
-    /// Account address
-    pub address: B256,
-    /// Storage slot
-    pub slot: B256,
-    /// Block Identifier
-    pub block_id: BlockId,
-}
-
-impl<I> Action<I> for GetStorageAt {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move { Ok(()) })
-    }
-}
-
-/// Call a contract method.
-#[derive(Debug)]
-pub struct Call {
-    /// The node index to use
-    pub node_idx: usize,
-    /// Call request (tx data)
-    pub request: Vec<u8>,
-    /// Block identifier
-    pub block_id: BlockId,
-}
-
-impl<I> Action<I> for Call {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move { Ok(()) })
-    }
-}
-
-/// Wait for a specified number of blocks.
-#[derive(Debug)]
-pub struct WaitForBlocks {
-    /// The node index to use
-    pub node_idx: usize,
-    /// Number of blocks to wait for
-    pub blocks: u64,
-}
-
-impl<I> Action<I> for WaitForBlocks {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move { Ok(()) })
-    }
-}
-
-/// Chain reorg action to test reorgs.
-#[derive(Debug)]
-pub struct ChainReorg {
-    /// The node index to use
-    pub node_idx: usize,
-    /// Number of blocks to reorg
-    pub depth: u64,
-    /// New blocks to add
-    pub new_blocks: Vec<Vec<u8>>,
-}
-
-impl<I> Action<I> for ChainReorg {
-    fn execute<'a>(&'a mut self, _env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            // 1. Reorg the chain to the specified depth
-            // 2. Add the new blocks
-
-            Ok(())
         })
     }
 }
