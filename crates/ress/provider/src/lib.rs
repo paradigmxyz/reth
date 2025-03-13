@@ -31,9 +31,10 @@ pub struct RethRessProtocolProvider<P, E> {
     provider: P,
     block_executor: E,
     task_spawner: Box<dyn TaskSpawner>,
-    pending_state: PendingState<EthPrimitives>,
+    max_witness_window: u64,
     witness_semaphore: Arc<Semaphore>,
     witness_cache: Arc<Mutex<LruMap<B256, Arc<Vec<Bytes>>>>>,
+    pending_state: PendingState<EthPrimitives>,
 }
 
 impl<P: Clone, E: Clone> Clone for RethRessProtocolProvider<P, E> {
@@ -42,9 +43,10 @@ impl<P: Clone, E: Clone> Clone for RethRessProtocolProvider<P, E> {
             provider: self.provider.clone(),
             block_executor: self.block_executor.clone(),
             task_spawner: self.task_spawner.clone(),
-            pending_state: self.pending_state.clone(),
+            max_witness_window: self.max_witness_window,
             witness_semaphore: self.witness_semaphore.clone(),
             witness_cache: self.witness_cache.clone(),
+            pending_state: self.pending_state.clone(),
         }
     }
 }
@@ -59,17 +61,19 @@ where
         provider: P,
         block_executor: E,
         task_spawner: Box<dyn TaskSpawner>,
-        pending_state: PendingState<EthPrimitives>,
+        max_witness_window: u64,
         witness_max_parallel: usize,
         cache_size: u32,
+        pending_state: PendingState<EthPrimitives>,
     ) -> eyre::Result<Self> {
         Ok(Self {
             provider,
             block_executor,
             task_spawner,
-            pending_state,
+            max_witness_window,
             witness_semaphore: Arc::new(Semaphore::new(witness_max_parallel)),
             witness_cache: Arc::new(Mutex::new(LruMap::new(ByLength::new(cache_size)))),
+            pending_state,
         })
     }
 
@@ -102,6 +106,13 @@ where
 
         let block =
             self.block_by_hash(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+
+        let best_block_number = self.provider.best_block_number()?;
+        if best_block_number.saturating_sub(block.number()) > self.max_witness_window {
+            return Err(ProviderError::TrieWitnessError(
+                "witness target block exceeds maximum witness window".to_owned(),
+            ))
+        }
 
         let mut executed_ancestors = Vec::new();
         let mut ancestor_hash = block.parent_hash();
