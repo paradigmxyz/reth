@@ -142,6 +142,7 @@ members = [
     "examples/custom-payload-builder/",
     "examples/custom-rlpx-subprotocol",
     "examples/db-access",
+    "examples/exex-hello-world",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
