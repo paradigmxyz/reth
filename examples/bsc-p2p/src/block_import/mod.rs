@@ -9,7 +9,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-mod service;
+pub mod service;
 
 pub struct BscBlockImport<EngineT: EngineTypes> {
     handle: ImportHandle<EngineT>,
