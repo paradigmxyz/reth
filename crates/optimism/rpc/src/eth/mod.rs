@@ -14,7 +14,7 @@ pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BlockTy, FullNodeComponents, NodePrimitives, ReceiptTy};
+use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{
@@ -30,7 +30,7 @@ use reth_rpc_eth_api::{
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcNodeCore, RpcNodeCoreExt,
 };
-use reth_rpc_eth_types::{EthConfig, EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,

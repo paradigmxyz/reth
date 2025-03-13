@@ -14,7 +14,7 @@ use reth_evm::{
     NextBlockEnvAttributes,
 };
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, BlockTy, FullNodeComponents, NodeAddOns, ReceiptTy, TxTy};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
@@ -32,7 +32,7 @@ use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, 
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
 use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
 use reth_rpc_builder::config::RethRpcServerConfig;
-use reth_rpc_eth_types::{error::FromEvmError, EthApiError, EthConfig, EthStateCache};
+use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
