@@ -596,7 +596,7 @@ where
     }
 }
 #[derive(Debug)]
-/// EthApiCtx struct
+/// `EthApiCtx` struct
 pub struct EthApiCtx<'a, N: FullNodeTypes> {
     /// Reference to the node components
     pub core_components: &'a N,
