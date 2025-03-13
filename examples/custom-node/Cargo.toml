@@ -28,6 +28,7 @@ reth-execution-types.workspace = true
 reth-optimism-consensus.workspace = true
 reth-payload-util.workspace = true
 reth-eth-wire-types.workspace = true
+reth-primitives.workspace = true
 
 revm.workspace = true
 
@@ -39,12 +40,15 @@ alloy-network = { workspace = true, optional = true }
 alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-serde = { workspace = true, optional = true }
 alloy-rlp.workspace = true
+alloy-evm.workspace = true
+alloy-op-evm.workspace = true
 alloy-rpc-types = { workspace = true, optional = true }
 revm-primitives.workspace = true
 reth-chain-state.workspace = true
 
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
+op-revm.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # misc

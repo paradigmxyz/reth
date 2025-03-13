@@ -7,24 +7,27 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 // The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
+//#![cfg(feature = "optimism")]
 
 use chainspec::CustomChainSpec;
 use engine::{CustomEngineTypes, CustomPayloadBuilder};
 use evm::CustomEvmConfig;
 use op_alloy_consensus::OpPooledTransaction;
 use primitives::{Block, BlockBody, CustomHeader, CustomNodePrimitives};
-use reth_chainspec::ChainSpecProvider;
 use reth_eth_wire_types::NetworkPrimitives;
 use reth_evm::execute::BasicBlockExecutorProvider;
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine, PrimitivesTy};
+use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 use reth_node_builder::{
     components::{ComponentsBuilder, ExecutorBuilder, PayloadServiceBuilder},
+    rpc::RpcAddOns,
     Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_node::{
-    node::{OpAddOns, OpConsensusBuilder, OpNetworkBuilder, OpPoolBuilder},
-    BasicOpReceiptBuilder, OpExecutionStrategyFactory, OpNode,
+    node::{
+        OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpNetworkBuilder, OpPoolBuilder,
+        OpStorage,
+    },
+    OpEngineApiBuilder, OpNode,
 };
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use txpool::CustomTxPool;
@@ -49,25 +52,36 @@ impl NodeTypesWithEngine for CustomNode {
     type Engine = CustomEngineTypes;
 }
 
-impl<N: FullNodeTypes<Types = Self>> Node<N> for CustomNode {
+type CustomAddOns<N> = OpAddOns<N>;
+
+impl<N> Node<N> for CustomNode
+where
+    N: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = CustomEngineTypes,
+            ChainSpec = CustomChainSpec,
+            Primitives = CustomNodePrimitives,
+            Storage = OpStorage,
+        >,
+    >,
+{
     type ComponentsBuilder = ComponentsBuilder<
         N,
         OpPoolBuilder,
         CustomPayloadServiceBuilder,
-        OpNetworkBuilder<CustomNetworkPrimitives>,
+        OpNetworkBuilder,
         CustomExecutorBuilder,
         OpConsensusBuilder,
     >;
 
-    type AddOns =
-        OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
+    type AddOns = CustomAddOns<N>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         todo!()
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        todo!()
+        CustomAddOns::default()
     }
 }
 
@@ -100,22 +114,14 @@ where
     Node: FullNodeTypes<Types = CustomNode>,
 {
     type EVM = CustomEvmConfig;
-    type Executor = BasicBlockExecutorProvider<
-        OpExecutionStrategyFactory<PrimitivesTy<Node::Types>, CustomChainSpec, CustomEvmConfig>,
-    >;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &reth_node_builder::BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let chain_spec = ctx.provider().chain_spec();
         let evm_config = CustomEvmConfig::new(ctx.chain_spec().clone());
-        let strategy_factory = OpExecutionStrategyFactory::new(
-            chain_spec,
-            evm_config.clone(),
-            BasicOpReceiptBuilder::default(),
-        );
-        let executor = BasicBlockExecutorProvider::new(strategy_factory);
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
     }

@@ -80,6 +80,10 @@ impl EthChainSpec for CustomChainSpec {
     fn genesis_header(&self) -> &Self::Header {
         &self.genesis_header
     }
+
+    fn final_paris_total_difficulty(&self) -> Option<revm_primitives::U256> {
+        self.inner.get_final_paris_total_difficulty()
+    }
 }
 
 impl EthereumHardforks for CustomChainSpec {
@@ -88,14 +92,6 @@ impl EthereumHardforks for CustomChainSpec {
         fork: reth_chainspec::EthereumHardfork,
     ) -> reth_chainspec::ForkCondition {
         self.inner.ethereum_fork_activation(fork)
-    }
-
-    fn get_final_paris_total_difficulty(&self) -> Option<revm_primitives::U256> {
-        self.inner.get_final_paris_total_difficulty()
-    }
-
-    fn final_paris_total_difficulty(&self, block_number: u64) -> Option<revm_primitives::U256> {
-        self.inner.final_paris_total_difficulty(block_number)
     }
 }
 
