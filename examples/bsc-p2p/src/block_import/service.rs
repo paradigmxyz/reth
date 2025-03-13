@@ -35,6 +35,11 @@ type IncomingBlock<T> = (BlockMsg<T>, PeerId);
 /// Future that processes a block import and returns its outcome
 type ImportFuture<T> = Pin<Box<dyn Future<Output = Outcome<T>> + Send + Sync>>;
 
+/// A handle for interacting with the block import service.
+///
+/// This handle provides a bidirectional communication channel with the [`ImportService`]:
+/// - Blocks can be sent to the service for import via [`send_block`](ImportHandle::send_block)
+/// - Import outcomes can be received via [`poll_outcome`](ImportHandle::poll_outcome)`
 pub struct ImportHandle<T: EngineTypes> {
     /// Send the new block to the service
     to_import: UnboundedSender<IncomingBlock<T>>,
@@ -51,14 +56,12 @@ impl<T: EngineTypes> ImportHandle<T> {
         Self { to_import, import_outcome }
     }
 
-    /// Sends the block to import to the service
-    pub fn send_block(
-        &self,
-        block: BlockMsg<T>,
-        peer_id: PeerId,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        self.to_import.send((block, peer_id))?;
-        Ok(())
+    /// Sends the block to import to the service.
+    /// Returns a [`BlockImportError`] if the channel to the import service is closed.
+    pub fn send_block(&self, block: BlockMsg<T>, peer_id: PeerId) -> Result<(), BlockImportError> {
+        self.to_import
+            .send((block, peer_id))
+            .map_err(|_| BlockImportError::Other("block import service channel closed".into()))
     }
 
     /// Poll for the next import outcome
@@ -70,7 +73,11 @@ impl<T: EngineTypes> ImportHandle<T> {
 /// A service that handles bidirectional block import communication with the network.
 /// It receives new blocks from the network via `from_network` channel and sends back
 /// import outcomes via `to_network` channel.
-pub struct ImportService<Provider: BlockNumReader + Clone, T: EngineTypes> {
+pub struct ImportService<Provider, T>
+where
+    Provider: BlockNumReader + Clone,
+    T: EngineTypes,
+{
     /// The handle to communicate with the engine service
     engine: BeaconConsensusEngineHandle<T>,
     /// The provider
@@ -83,7 +90,11 @@ pub struct ImportService<Provider: BlockNumReader + Clone, T: EngineTypes> {
     pending_imports: FuturesUnordered<ImportFuture<T>>,
 }
 
-impl<Provider: BlockNumReader + Clone + 'static, T: EngineTypes> ImportService<Provider, T> {
+impl<Provider, T> ImportService<Provider, T>
+where
+    Provider: BlockNumReader + Clone + 'static,
+    T: EngineTypes,
+{
     /// Create a new block import service
     pub fn new(
         provider: Provider,
@@ -198,8 +209,10 @@ impl<Provider: BlockNumReader + Clone + 'static, T: EngineTypes> ImportService<P
     }
 }
 
-impl<Provider: BlockNumReader + Clone + 'static + Unpin, T: EngineTypes> Future
-    for ImportService<Provider, T>
+impl<Provider, T> Future for ImportService<Provider, T>
+where
+    Provider: BlockNumReader + Clone + 'static + Unpin,
+    T: EngineTypes,
 {
     type Output = Result<(), Box<dyn std::error::Error>>;
 
