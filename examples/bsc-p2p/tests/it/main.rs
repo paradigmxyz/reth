@@ -2,4 +2,6 @@
 
 mod p2p;
 
+mod block_import;
+
 const fn main() {}

@@ -119,7 +119,7 @@ impl<Provider: BlockNumReader + Clone + 'static, T: EngineTypes> ImportService<P
             .ok_or_else(|| BlockImportError::Other("Current head hash not found".into()))?;
 
         let head_block_hash =
-            head_block_hash(block_hash, block_number, current_head, current_head_hash);
+            canonical_head(block_hash, block_number, current_head, current_head_hash);
 
         let state = ForkchoiceState {
             head_block_hash,
@@ -225,7 +225,7 @@ impl<Provider: BlockNumReader + Clone + 'static + Unpin, T: EngineTypes> Future
 /// Determines the head block hash according to Parlia consensus rules:
 /// 1. Follow the highest block number
 /// 2. For same height blocks, pick the one with lower hash
-pub(crate) fn head_block_hash(
+pub(crate) fn canonical_head(
     current_hash: B256,
     current_number: BlockNumber,
     head_number: BlockNumber,
@@ -237,13 +237,14 @@ pub(crate) fn head_block_hash(
         Ordering::Less => head_hash,
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_primitives::{hex, B256};
 
     #[test]
-    fn test_head_block_hash() {
+    fn test_canonical_head() {
         let hash1 = B256::from_slice(&hex!(
             "1111111111111111111111111111111111111111111111111111111111111111"
         ));
@@ -259,7 +260,7 @@ mod tests {
         ];
 
         for ((curr_hash, curr_num, head_num, head_hash), expected) in test_cases {
-            assert_eq!(head_block_hash(curr_hash, curr_num, head_num, head_hash), expected);
+            assert_eq!(canonical_head(curr_hash, curr_num, head_num, head_hash), expected);
         }
     }
 }
