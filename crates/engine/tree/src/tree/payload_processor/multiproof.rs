@@ -431,7 +431,7 @@ pub(crate) struct MultiProofTaskMetrics {
     pub proofs_processed_histogram: Histogram,
     /// Histogram of total time spent in the multiproof task.
     pub multiproof_task_total_duration_histogram: Histogram,
-    /// Total time spent waiting for the first state update
+    /// Total time spent waiting for the first state update or prefetch request.
     pub first_update_wait_time_histogram: Histogram,
 }
 
