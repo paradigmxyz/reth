@@ -289,12 +289,11 @@ where
 
         let parent_beacon_block_root = block.parent_beacon_block_root.unwrap_or_default();
 
+        let l2_withdrawals_root = block.withdrawals_root.unwrap_or_default();
         let payload_v3 = ExecutionPayloadV3::from_block_unchecked(
             block.hash(),
             &Arc::unwrap_or_clone(block).into_block(),
         );
-        // todo: return error if v4 block doesn't contain l2 withdrawals root
-        let l2_withdrawals_root = block.withdrawals_root.unwrap_or_default();
 
         Self {
             execution_payload: OpExecutionPayloadV4::from_v3_with_withdrawals_root(
