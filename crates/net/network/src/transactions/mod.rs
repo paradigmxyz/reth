@@ -1917,7 +1917,7 @@ mod tests {
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
-    use reth_network_api::NetworkInfo;
+    use reth_network_api::{NetworkInfo, PeerKind};
     use reth_network_p2p::{
         error::{RequestError, RequestResult},
         sync::{NetworkSyncUpdater, SyncState},
@@ -2604,6 +2604,7 @@ mod tests {
 
         // mock a peer
         let (tx, _rx) = mpsc::channel::<PeerRequest>(1);
+
         let session_info = SessionInfo {
             peer_id,
             remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
@@ -2611,6 +2612,7 @@ mod tests {
             capabilities: Arc::new(vec![].into()),
             status: Arc::new(Default::default()),
             version: EthVersion::Eth68,
+            peer_kind: PeerKind::Basic,
         };
         let messages: PeerRequestSender<PeerRequest> = PeerRequestSender::new(peer_id, tx);
         tx_manager
