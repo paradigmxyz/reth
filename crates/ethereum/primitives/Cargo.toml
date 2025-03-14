@@ -97,3 +97,14 @@ serde-bincode-compat = [
     "alloy-eips/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
 ]
+serde = [
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "alloy-rpc-types-eth?/serde",
+    "rand?/serde",
+    "reth-codecs?/serde",
+    "reth-primitives-traits/serde",
+    "revm-context/serde",
+    "secp256k1?/serde",
+]

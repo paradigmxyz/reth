@@ -106,6 +106,7 @@ serde = [
     "revm-database/serde",
     "revm-database-interface/serde",
     "revm-state?/serde",
+    "reth-ethereum-primitives/serde",
 ]
 test-utils = [
     "reth-db/test-utils",

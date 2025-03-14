@@ -331,7 +331,7 @@ impl RlpEcdsaEncodableTx for Transaction {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[cfg_attr(feature = "test-utils", derive(derive_more::DerefMut))]
-#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct TransactionSigned {
     /// Transaction hash
     #[serde(skip)]

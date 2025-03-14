@@ -210,14 +210,13 @@ pub(super) mod serde_bincode_compat {
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
-    /// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    /// #[derive(Serialize, Deserialize)]
     /// struct Data {
     ///     #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
     ///     receipt: Receipt,
     /// }
     /// ```
-    #[derive(Debug)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct Receipt<'a> {
         /// Receipt type.
         #[serde(deserialize_with = "deserde_txtype")]
