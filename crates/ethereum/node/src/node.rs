@@ -198,7 +198,7 @@ where
         );
 
         self.inner
-            .launch_add_ons_with(ctx, move |modules, _| {
+            .launch_add_ons_with(ctx, move |modules, _, _| {
                 modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
