@@ -1036,8 +1036,7 @@ pub(super) mod serde_bincode_compat {
 
         #[test]
         fn test_transaction_bincode_roundtrip() {
-            #[derive(Debug)]
-            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+            #[derive(Debug, Serialize, Deserialize)]
             struct Data<'a> {
                 transaction: serde_bincode_compat::Transaction<'a>,
             }
@@ -1054,8 +1053,7 @@ pub(super) mod serde_bincode_compat {
 
         #[test]
         fn test_transaction_signed_bincode_roundtrip() {
-            #[derive(Debug)]
-            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+            #[derive(Debug, Serialize, Deserialize)]
             struct Data<'a> {
                 transaction: serde_bincode_compat::TransactionSigned<'a>,
             }
