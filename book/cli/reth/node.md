@@ -337,6 +337,11 @@ RPC:
 
           [default: <NUM CPU CORES-2>]
 
+      --rpc.max-trace-filter-blocks <COUNT>
+          Maximum number of blocks for `trace_filter` requests
+
+          [default: 100]
+
       --rpc.max-blocks-per-filter <COUNT>
           Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
 
