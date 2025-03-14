@@ -2125,6 +2125,8 @@ mod tests {
         handle.terminate().await;
     }
 
+    // Ensure that the transaction manager correctly handles the `IncomingPooledTransactionHashes`
+    // event and is able to retrieve the corresponding transactions.
     #[tokio::test(flavor = "multi_thread")]
     async fn test_handle_incoming_transactions_hashes() {
         reth_tracing::init_test_tracing();
@@ -2204,6 +2206,7 @@ mod tests {
             })
             .collect();
 
+        // return the transactions corresponding to the transaction hashes.
         response
             .send(Ok(reth_eth_wire::PooledTransactions(message)))
             .expect("should send peer_1 response to tx manager");
@@ -2215,6 +2218,8 @@ mod tests {
         })
         .await;
 
+        // ensure that the transactions corresponding to the transaction hashes have been
+        // successfully retrieved and stored in the Pool.
         assert_eq!(pool.get_all(txs_hashes.clone()).len(), txs_hashes.len());
     }
 
