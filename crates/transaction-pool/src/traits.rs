@@ -125,7 +125,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns a new transaction change event stream for the given transaction.
     ///
-    /// Returns `None` if the transaction is not in the pool.
+    /// Returns `RecoveryError` if the transaction is not in the pool.
     fn transaction_event_listener(&self, tx_hash: TxHash) -> Option<TransactionEvents>;
 
     /// Returns a new transaction change event stream for _all_ transactions in the pool.
@@ -400,7 +400,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     ///
     /// For example, for a given on chain nonce of `5`, the next transaction must have that nonce.
     /// If the pool contains txs `[5,6,7]` this returns tx `7`.
-    /// If the pool contains txs `[6,7]` this returns `None` because the next valid nonce (5) is
+    /// If the pool contains txs `[6,7]` this returns `RecoveryError` because the next valid nonce (5) is
     /// missing, which means txs `[6,7]` are nonce gapped.
     fn get_highest_consecutive_transaction_by_sender(
         &self,
@@ -1080,7 +1080,7 @@ pub trait EthPoolTransaction: PoolTransaction {
 
     /// Tries to convert the `Consensus` type with a blob sidecar into the `Pooled` type.
     ///
-    /// Returns `None` if passed transaction is not a blob transaction.
+    /// Returns `RecoveryError` if passed transaction is not a blob transaction.
     fn try_from_eip4844(
         tx: Recovered<Self::Consensus>,
         sidecar: BlobTransactionSidecar,
