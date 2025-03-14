@@ -70,6 +70,7 @@ std = [
     "alloy-rpc-types-eth?/std",
     "revm-context/std",
     "alloy-evm/std",
+    "serde_with?/std",
 ]
 reth-codec = [
     "std",
@@ -90,6 +91,7 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
 ]
 serde-bincode-compat = [
+    "serde_with?/std",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
