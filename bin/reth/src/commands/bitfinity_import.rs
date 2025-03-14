@@ -4,7 +4,6 @@ use crate::{dirs::DataDirPath, version::SHORT_VERSION};
 use bitfinity_block_confirmation::BitfinityBlockConfirmation;
 use eyre::eyre;
 use futures::{Stream, StreamExt};
-use ic_agent::Agent;
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
@@ -20,7 +19,7 @@ use reth_downloaders::{
 };
 use reth_exex::ExExManagerHandle;
 use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_core::{args::{BitfinityImportArgs, IC_MAINNET_URL}, dirs::ChainPath};
+use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
@@ -118,11 +117,7 @@ impl BitfinityImportCommand {
                     Job::new("import", "block importer", None, move || {
                         let import = self.clone();
                         Box::pin(async move {
-                            import.single_execution().await.inspect_err(|err| {
-                                // The scheduler doesn't output the returned errors, so we must log
-                                // them before finishing the job
-                                error!(target: "reth::cli - BitfinityImportCommand", "import failed: {err:?}");
-                            })?;
+                            import.single_execution().await?;
                             import.update_chain_info()?;
                             Ok(())
                         })
@@ -157,12 +152,6 @@ impl BitfinityImportCommand {
 
         debug!(target: "reth::cli - BitfinityImportCommand", "Starting block: {}", start_block);
 
-        let ic_url = self.bitfinity.ic_url.clone().unwrap_or_else(|| IC_MAINNET_URL.into());
-        let ic_agent = Agent::builder().with_url(ic_url).build()?;
-        if self.bitfinity.fetch_ic_root_key {
-            ic_agent.fetch_root_key().await?;
-        }
-
         let remote_client = Arc::new(
             BitfinityEvmClient::from_rpc_url(
                 self.rpc_config(),
@@ -172,7 +161,7 @@ impl BitfinityImportCommand {
                 self.bitfinity.max_fetch_blocks,
                 Some(CertificateCheckSettings {
                     evmc_principal: self.bitfinity.evmc_principal.clone(),
-                    ic_root_key: ic_agent.read_root_key(),
+                    ic_root_key: self.bitfinity.ic_root_key.clone(),
                 }),
                 self.bitfinity.check_evm_state_before_importing,
             )

@@ -102,7 +102,7 @@ bitfinity-block-confirmation.workspace = true
 candid.workspace = true
 did.workspace = true
 evm-canister-client = { workspace = true, features = ["ic-agent-client"] }
-ic-agent.workspace = true
+hex.workspace = true
 lightspeed_scheduler = { workspace = true, features = ["tracing"] }
 # rlp = { workspace = true }
 

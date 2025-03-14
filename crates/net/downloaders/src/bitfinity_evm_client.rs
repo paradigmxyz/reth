@@ -94,7 +94,7 @@ pub struct CertificateCheckSettings {
     /// Principal of the EVM canister
     pub evmc_principal: String,
     /// Root key of the IC network
-    pub ic_root_key: Vec<u8>,
+    pub ic_root_key: String,
 }
 
 impl BitfinityEvmClient {
@@ -560,11 +560,14 @@ impl BlockCertificateChecker {
             Principal::from_text(certificate_settings.evmc_principal).map_err(|e| {
                 RemoteClientError::CertificateError(format!("failed to parse principal: {e}"))
             })?;
+        let ic_root_key = hex::decode(&certificate_settings.ic_root_key).map_err(|e| {
+            RemoteClientError::CertificateError(format!("failed to parse IC root key: {e}"))
+        })?;
         let certified_data = client
             .get_last_certified_block()
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
-        Ok(Self { certified_data, evmc_principal, ic_root_key: certificate_settings.ic_root_key })
+        Ok(Self { certified_data, evmc_principal, ic_root_key })
     }
 
     fn get_block_number(&self) -> u64 {
