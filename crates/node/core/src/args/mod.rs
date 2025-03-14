@@ -60,5 +60,9 @@ pub use benchmark_args::BenchmarkArgs;
 mod engine;
 pub use engine::EngineArgs;
 
+/// `RessArgs` for configuring ress subprotocol.
+mod ress_args;
+pub use ress_args::RessArgs;
+
 mod error;
 pub mod types;

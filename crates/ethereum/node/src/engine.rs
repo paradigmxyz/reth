@@ -8,11 +8,12 @@ pub use alloy_rpc_types_engine::{
 use reth_chainspec::ChainSpec;
 use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
+use reth_ethereum_primitives::Block;
 use reth_payload_primitives::{
     validate_execution_requests, validate_version_specific_fields, EngineApiMessageVersion,
     EngineObjectValidationError, NewPayloadError, PayloadOrAttributes,
 };
-use reth_primitives::{Block, RecoveredBlock};
+use reth_primitives_traits::RecoveredBlock;
 use std::sync::Arc;
 
 /// Validator for the ethereum engine API.

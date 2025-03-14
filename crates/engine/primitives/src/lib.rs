@@ -18,8 +18,7 @@ use reth_payload_primitives::{
     InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes, PayloadOrAttributes,
     PayloadTypes,
 };
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -40,6 +39,9 @@ pub use event::*;
 
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
+
+pub mod config;
+pub use config::*;
 
 /// This type defines the versioned types of the engine API.
 ///

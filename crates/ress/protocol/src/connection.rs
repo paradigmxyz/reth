@@ -1,6 +1,4 @@
-use crate::{
-    GetHeaders, NodeType, RessMessage, RessProtocolMessage, RessProtocolProvider, StateWitnessNet,
-};
+use crate::{GetHeaders, NodeType, RessMessage, RessProtocolMessage, RessProtocolProvider};
 use alloy_consensus::Header;
 use alloy_primitives::{bytes::BytesMut, BlockHash, Bytes, B256};
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
@@ -152,18 +150,14 @@ where
     fn on_witness_response(
         &self,
         request: RequestPair<B256>,
-        witness_result: ProviderResult<Option<StateWitnessNet>>,
+        witness_result: ProviderResult<Vec<Bytes>>,
     ) -> RessProtocolMessage {
         let peer_id = self.peer_id;
         let block_hash = request.message;
         let witness = match witness_result {
-            Ok(Some(witness)) => {
-                trace!(target: "ress::net::connection", %peer_id, %block_hash, "witness found");
+            Ok(witness) => {
+                trace!(target: "ress::net::connection", %peer_id, %block_hash, len = witness.len(), "witness found");
                 witness
-            }
-            Ok(None) => {
-                trace!(target: "ress::net::connection", %peer_id, %block_hash, "witness not found");
-                Default::default()
             }
             Err(error) => {
                 trace!(target: "ress::net::connection", %peer_id, %block_hash, %error, "error retrieving witness");
@@ -279,8 +273,7 @@ where
         }
 
         'conn: loop {
-            if let Poll::Ready(maybe_cmd) = this.commands.poll_next_unpin(cx) {
-                let Some(cmd) = maybe_cmd else { break 'conn };
+            if let Poll::Ready(Some(cmd)) = this.commands.poll_next_unpin(cx) {
                 let message = this.on_command(cmd);
                 let encoded = message.encoded();
                 trace!(target: "ress::net::connection", peer_id = %this.peer_id, ?message, encoded = alloy_primitives::hex::encode(&encoded), "Sending peer command");
@@ -326,9 +319,8 @@ where
     }
 }
 
-type WitnessFut = Pin<
-    Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<Option<StateWitnessNet>>)> + Send>,
->;
+type WitnessFut =
+    Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<Vec<Bytes>>)> + Send>>;
 
 /// Ress peer request.
 #[derive(Debug)]
@@ -359,7 +351,7 @@ pub enum RessPeerRequest {
         /// Target block hash that we want to get witness for.
         block_hash: BlockHash,
         /// The sender for the response.
-        tx: oneshot::Sender<StateWitnessNet>,
+        tx: oneshot::Sender<Vec<Bytes>>,
     },
 }
 

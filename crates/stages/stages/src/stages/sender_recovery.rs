@@ -9,8 +9,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt, RawValue,
 };
-use reth_primitives::{GotExpected, NodePrimitives, StaticFileSegment};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
     BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     StaticFileProviderFactory, StatsReader,
@@ -20,6 +19,7 @@ use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
     StageId, UnwindInput, UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
@@ -375,8 +375,8 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{SealedBlock, TransactionSigned};
-    use reth_primitives_traits::SignedTransaction;
+    use reth_ethereum_primitives::{Block, TransactionSigned};
+    use reth_primitives_traits::{SealedBlock, SignedTransaction};
     use reth_provider::{
         providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
         PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
@@ -635,7 +635,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for SenderRecoveryTestRunner {
-        type Seed = Vec<SealedBlock>;
+        type Seed = Vec<SealedBlock<Block>>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let mut rng = generators::rng();

@@ -42,4 +42,4 @@ jobs:
       - name: Build and push the nightly reth image
         run: make PROFILE=maxperf docker-build-push-nightly
       - name: Build and push the nightly op-reth image
-        run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf docker-build-push-nightly
+        run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push-nightly

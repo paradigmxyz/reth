@@ -20,11 +20,7 @@ extern crate alloc;
 use crate::execute::BasicBlockBuilder;
 use alloc::vec::Vec;
 use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
-pub use alloy_evm::evm::EvmFactory;
-use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
-    IntoTxEnv,
-};
+use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor};
 use alloy_primitives::{Address, B256};
 use core::{error::Error, fmt::Debug};
 use execute::{BlockAssembler, BlockBuilder};
@@ -50,7 +46,7 @@ pub mod test_utils;
 
 pub use alloy_evm::{
     block::{state_changes, system_calls, OnStateHook},
-    env, Database, Evm, EvmEnv, EvmError, FromRecoveredTx, InvalidTxError,
+    *,
 };
 
 pub use alloy_evm::block::state_changes as state_change;

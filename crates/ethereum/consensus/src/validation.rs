@@ -3,8 +3,9 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
-use reth_primitives::{gas_spent_by_transactions, GotExpected, RecoveredBlock};
-use reth_primitives_traits::{Block, Receipt};
+use reth_primitives_traits::{
+    receipt::gas_spent_by_transactions, Block, GotExpected, Receipt, RecoveredBlock,
+};
 
 /// Validate a block with regard to execution results:
 ///
@@ -109,10 +110,9 @@ fn compare_receipts_root_and_logs_bloom(
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{b256, hex};
-    use reth_primitives::Receipt;
-
     use super::*;
+    use alloy_primitives::{b256, hex};
+    use reth_ethereum_primitives::Receipt;
 
     #[test]
     fn test_verify_receipts_success() {
