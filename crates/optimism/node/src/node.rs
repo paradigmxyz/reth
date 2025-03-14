@@ -42,10 +42,9 @@ use reth_optimism_rpc::{
 };
 use reth_optimism_txpool::{conditional::MaybeConditionalTransaction, OpPooledTx};
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
-use reth_rpc_eth_api::ext::L2EthApiExtServer;
+use reth_rpc_eth_api::{ext::L2EthApiExtServer, EthApiServer};
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
-use reth_tasks::pool::BlockingTaskGuard;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
@@ -331,7 +330,7 @@ where
                 // install the debug namespace in the authenticated if configured
                 if modules.module_config().contains_any(&RethRpcModule::Debug) {
                     debug!(target: "reth::cli", "Installing debug rpc endpoint");
-                    auth_modules.merge_auth_methods(debug_api.into_rpc())?;
+                    auth_modules.merge_auth_methods(registry.debug_api().into_rpc())?;
                 }
 
                 if enable_tx_conditional {
