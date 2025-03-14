@@ -34,7 +34,7 @@ derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, features = ["rand"] }
-serde = { workspace = true, optional = true } 
+serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
