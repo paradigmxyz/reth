@@ -83,6 +83,7 @@ pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
+use reth_evm::execute::BlockExecutionOutput;
 
 /// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
 /// for more information.
@@ -2203,6 +2204,21 @@ where
         }
     }
 
+    /// Invoke the invalid block hook if this is a new invalid block.
+    fn on_invalid_block(
+        &mut self,
+        parent_header: &SealedHeader<N::BlockHeader>,
+        block: &RecoveredBlock<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        trie_updates: Option<(&TrieUpdates, B256)>,
+    ) {
+        if self.state.invalid_headers.get(&block.hash()).is_some() {
+            // we already marked this block as invalid
+            return;
+        }
+        self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
+    }
+
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
     ///
     /// This mainly compares the missing parent of the downloaded block with the current canonical
@@ -2314,7 +2330,6 @@ where
             .map_err(|kind| InsertBlockError::new(block.into_sealed_block(), kind))
     }
 
-    #[allow(unused)]
     fn insert_block_inner(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2432,7 +2447,7 @@ where
 
         if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            self.on_invalid_block(&parent_block, &block, &output, None);
             return Err(err.into())
         }
 
@@ -2443,7 +2458,7 @@ where
             .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
         {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            self.on_invalid_block(&parent_block, &block, &output, None);
             return Err(err.into())
         }
 
@@ -2517,12 +2532,7 @@ where
         // ensure state root matches
         if state_root != block.header().state_root() {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(
-                &parent_block,
-                &block,
-                &output,
-                Some((&trie_output, state_root)),
-            );
+            self.on_invalid_block(&parent_block, &block, &output, Some((&trie_output, state_root)));
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.header().state_root() }.into(),
             )
