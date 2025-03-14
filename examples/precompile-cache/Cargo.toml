@@ -1,5 +1,5 @@
 [package]
-name = "example-stateful-precompile"
+name = "example-precompile-cache"
 version = "0.0.0"
 publish = false
 edition.workspace = true
