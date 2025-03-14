@@ -194,15 +194,130 @@ impl InMemorySize for Receipt {
 impl reth_primitives_traits::Receipt for Receipt {}
 
 #[cfg(feature = "serde-bincode-compat")]
-impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for Receipt {
-    type BincodeRepr<'a> = alloc::borrow::Cow<'a, Self>;
+pub(super) mod serde_bincode_compat {
+    use alloc::{borrow::Cow, vec::Vec};
+    use alloy_consensus::TxType;
+    use alloy_primitives::{Log, U8};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
 
-    fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        alloc::borrow::Cow::Borrowed(self)
+    /// Bincode-compatible [`super::Receipt`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_ethereum_primitives::{serde_bincode_compat, Receipt};
+    /// use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
+    ///     receipt: Receipt,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Receipt<'a> {
+        /// Receipt type.
+        #[serde(deserialize_with = "deserde_txtype")]
+        pub tx_type: TxType,
+        /// If transaction is executed successfully.
+        ///
+        /// This is the `statusCode`
+        pub success: bool,
+        /// Gas used
+        pub cumulative_gas_used: u64,
+        /// Log send from contracts.
+        pub logs: Cow<'a, Vec<Log>>,
     }
 
-    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        repr.into_owned()
+    /// Ensures that txtype is deserialized symmetrically as U8
+    fn deserde_txtype<'de, D>(deserializer: D) -> Result<TxType, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = U8::deserialize(deserializer)?;
+        value.to::<u8>().try_into().map_err(serde::de::Error::custom)
+    }
+
+    impl<'a> From<&'a super::Receipt> for Receipt<'a> {
+        fn from(value: &'a super::Receipt) -> Self {
+            Self {
+                tx_type: value.tx_type,
+                success: value.success,
+                cumulative_gas_used: value.cumulative_gas_used,
+                logs: Cow::Borrowed(&value.logs),
+            }
+        }
+    }
+
+    impl<'a> From<Receipt<'a>> for super::Receipt {
+        fn from(value: Receipt<'a>) -> Self {
+            Self {
+                tx_type: value.tx_type,
+                success: value.success,
+                cumulative_gas_used: value.cumulative_gas_used,
+                logs: value.logs.into_owned(),
+            }
+        }
+    }
+
+    impl SerializeAs<super::Receipt> for Receipt<'_> {
+        fn serialize_as<S>(source: &super::Receipt, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Receipt::<'_>::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::Receipt> for Receipt<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::Receipt, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Receipt::<'_>::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for super::Receipt {
+        type BincodeRepr<'a> = Receipt<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::{receipt::serde_bincode_compat, Receipt};
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_receipt_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
+                reseipt: Receipt,
+            }
+
+            let mut bytes = [0u8; 1024];
+            rand::thread_rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                reseipt: Receipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
+            };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
     }
 }
 

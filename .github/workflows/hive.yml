@@ -113,35 +113,35 @@ jobs:
 
           # consume-engine
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/prague
+            limit: .*tests/prague.*blockchain_test_engine.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/cancun
+            limit: .*tests/cancun.*blockchain_test_engine.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/shanghai
+            limit: .*tests/shanghai.*blockchain_test_engine.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/berlin
+            limit: .*tests/berlin.*blockchain_test_engine.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/istanbul
+            limit: .*tests/istanbul.*blockchain_test_engine.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/homestead
+            limit: .*tests/homestead.*blockchain_test_engine.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/frontier
+            limit: .*tests/frontier.*blockchain_test_engine.*
 
           # consume-rlp
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/prague
+            limit: .*tests/prague.*blockchain_test(?!_engine).*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/cancun
+            limit: .*tests/cancun.*blockchain_test(?!_engine).*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/shanghai
+            limit: .*tests/shanghai.*blockchain_test(?!_engine).*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/berlin
+            limit: .*tests/berlin.*blockchain_test(?!_engine).*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/istanbul
+            limit: .*tests/istanbul.*blockchain_test(?!_engine).*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/homestead
+            limit: .*tests/homestead.*blockchain_test(?!_engine).*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/frontier
+            limit: .*tests/frontier.*blockchain_test(?!_engine).*
     needs:
       - prepare-reth
       - prepare-hive

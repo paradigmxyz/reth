@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 reth-ress-protocol.workspace = true
 reth-primitives-traits.workspace = true
-reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-network.workspace = true
 reth-network-api.workspace = true
@@ -22,6 +21,7 @@ reth-revm = { workspace = true, features = ["witness"] }
 reth-chain-state.workspace = true
 reth-trie.workspace = true
 reth-engine-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-tasks.workspace = true
 reth-tokio-util.workspace = true
 reth-node-api.workspace = true

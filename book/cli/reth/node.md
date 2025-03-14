@@ -730,6 +730,11 @@ Ress:
 
           [default: 5]
 
+      --ress.max-witness-window <MAX_WITNESS_WINDOW>
+          The maximum witness lookback window
+
+          [default: 1024]
+
       --ress.witness-max-parallel <WITNESS_MAX_PARALLEL>
           The maximum number of witnesses to generate in parallel
 

@@ -1,0 +1,15 @@
+[package]
+name = "example-exex-hello-world"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth.workspace = true
+reth-ethereum = { workspace = true, features = ["full"] }
+reth-tracing.workspace = true
+
+eyre.workspace = true
+futures.workspace = true

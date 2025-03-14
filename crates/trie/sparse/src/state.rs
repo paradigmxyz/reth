@@ -595,6 +595,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         path: Nibbles,
         value: Vec<u8>,
     ) -> SparseStateTrieResult<()> {
+        if !self.revealed_account_paths.contains(&path) {
+            self.revealed_account_paths.insert(path.clone());
+        }
+
         self.state.update_leaf(path, value)?;
         Ok(())
     }
@@ -606,6 +610,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         slot: Nibbles,
         value: Vec<u8>,
     ) -> SparseStateTrieResult<()> {
+        if !self.revealed_storage_paths.get(&address).is_some_and(|slots| slots.contains(&slot)) {
+            self.revealed_storage_paths.entry(address).or_default().insert(slot.clone());
+        }
+
         let storage_trie = self.storages.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
         storage_trie.update_leaf(slot, value)?;
         Ok(())
@@ -663,6 +671,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             .map(|v| TrieAccount::decode(&mut &v[..]))
             .transpose()?
         else {
+            trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
             return Ok(())
         };
 
