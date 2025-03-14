@@ -1,16 +1,18 @@
 //! Ethereum Node types config.
 
-pub use crate::payload::EthereumPayloadBuilder;
+pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
-pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_evm::{
+    execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
+    NextBlockEnvAttributes,
+};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
@@ -19,12 +21,16 @@ use reth_node_builder::{
         NetworkBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
-    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
+    rpc::{
+        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, EthApiCtx, RethRpcAddOns,
+        RpcAddOns, RpcHandle,
+    },
+    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
+    PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
-use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
+use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
@@ -116,13 +122,48 @@ impl NodeTypesWithEngine for EthereumNode {
     type Engine = EthEngineTypes;
 }
 
-/// Add-ons w.r.t. l1 ethereum.
-#[derive(Debug)]
-pub struct EthereumAddOns<N: FullNodeComponents> {
-    inner: RpcAddOns<N, EthApiFor<N>, EthereumEngineValidatorBuilder>,
+/// Builds [`EthApi`](reth_rpc::EthApi) for Ethereum.
+#[derive(Debug, Default)]
+pub struct EthereumEthApiBuilder;
+
+impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
+where
+    N: FullNodeComponents,
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
+    type EthApi = EthApiFor<N>;
+
+    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
+        reth_rpc::EthApiBuilder::new(
+            ctx.components.provider().clone(),
+            ctx.components.pool().clone(),
+            ctx.components.network().clone(),
+            ctx.components.evm_config().clone(),
+        )
+        .eth_cache(ctx.cache)
+        .task_spawner(ctx.components.task_executor().clone())
+        .gas_cap(ctx.config.rpc_gas_cap.into())
+        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+        .eth_proof_window(ctx.config.eth_proof_window)
+        .fee_history_cache_config(ctx.config.fee_history_cache)
+        .proof_permits(ctx.config.proof_permits)
+        .build()
+    }
 }
 
-impl<N: FullNodeComponents> Default for EthereumAddOns<N> {
+/// Add-ons w.r.t. l1 ethereum.
+#[derive(Debug)]
+pub struct EthereumAddOns<N: FullNodeComponents>
+where
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
+    inner: RpcAddOns<N, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>,
+}
+
+impl<N: FullNodeComponents> Default for EthereumAddOns<N>
+where
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+{
     fn default() -> Self {
         Self { inner: Default::default() }
     }
@@ -136,9 +177,10 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type Handle = RpcHandle<N, EthApiFor<N>>;
 
@@ -176,9 +218,10 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type EthApi = EthApiFor<N>;
 
@@ -196,6 +239,7 @@ where
             Engine = EthEngineTypes,
         >,
     >,
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
 {
     type Validator = EthereumEngineValidator;
 
@@ -238,7 +282,10 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
         reth_ethereum_primitives::Block {
             header: header.inner,
             body: reth_ethereum_primitives::BlockBody {
-                transactions: transactions.into_transactions().map(|tx| tx.inner.into()).collect(),
+                transactions: transactions
+                    .into_transactions()
+                    .map(|tx| tx.inner.into_inner().into())
+                    .collect(),
                 ommers: Default::default(),
                 withdrawals,
             },
@@ -263,7 +310,8 @@ where
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let evm_config = EthEvmConfig::new(ctx.chain_spec());
+        let evm_config = EthEvmConfig::new(ctx.chain_spec())
+            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
         let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
@@ -330,7 +378,10 @@ where
                     pool,
                     chain_events,
                     ctx.task_executor().clone(),
-                    Default::default(),
+                    reth_transaction_pool::maintain::MaintainPoolConfig {
+                        max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
+                        ..Default::default()
+                    },
                 ),
             );
             debug!(target: "reth::cli", "Spawned txpool maintenance task");

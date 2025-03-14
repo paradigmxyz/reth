@@ -10,8 +10,7 @@ use reth_db_api::{
     RawKey, RawValue,
 };
 use reth_etl::Collector;
-use reth_primitives::NodePrimitives;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory, StatsReader, TransactionsProvider, TransactionsProviderExt,
@@ -262,7 +261,8 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::transaction::DbTx;
-    use reth_primitives::SealedBlock;
+    use reth_ethereum_primitives::Block;
+    use reth_primitives_traits::SealedBlock;
     use reth_provider::{
         providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
         StaticFileProviderFactory,
@@ -502,7 +502,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for TransactionLookupTestRunner {
-        type Seed = Vec<SealedBlock>;
+        type Seed = Vec<SealedBlock<Block>>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;

@@ -150,19 +150,6 @@ where
     Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = OpExecutionData>,
     P: StateProviderFactory + Unpin + 'static,
 {
-    fn validate_execution_requests(
-        &self,
-        requests: &alloy_eips::eip7685::Requests,
-    ) -> Result<(), EngineObjectValidationError> {
-        // according to op spec, execution requests must be empty
-        if !requests.is_empty() {
-            return Err(EngineObjectValidationError::InvalidParams(
-                "NonEmptyExecutionRequests".to_string().into(),
-            ))
-        }
-        Ok(())
-    }
-
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
@@ -279,7 +266,6 @@ mod test {
     use reth_trie_common::KeccakKeyHasher;
 
     fn get_chainspec() -> Arc<OpChainSpec> {
-        let hardforks = OpHardfork::base_sepolia();
         Arc::new(OpChainSpec {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,
@@ -288,7 +274,7 @@ mod test {
                 paris_block_and_final_difficulty: BASE_SEPOLIA
                     .inner
                     .paris_block_and_final_difficulty,
-                hardforks,
+                hardforks: BASE_SEPOLIA.inner.hardforks.clone(),
                 base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
                 prune_delete_limit: 10000,
                 ..Default::default()

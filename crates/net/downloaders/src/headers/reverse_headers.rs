@@ -304,9 +304,9 @@ where
 
             // If the header is valid on its own, but not against its parent, we return it as
             // detached head error.
-            // In stage sync this will trigger an unwind because this means that the the local head
+            // In stage sync this will trigger an unwind because this means that the local head
             // is not part of the chain the sync target is on. In other words, the downloader was
-            // unable to connect the the sync target with the local head because the sync target and
+            // unable to connect the sync target with the local head because the sync target and
             // the local head or on different chains.
             if let Err(error) = self.consensus.validate_header_against_parent(&*last_header, head) {
                 let local_head = head.clone();

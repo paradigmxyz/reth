@@ -13,13 +13,13 @@ workspace = true
 [dependencies]
 reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
 revm-database.workspace = true
 
 # alloy
+alloy-evm.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
@@ -69,7 +69,7 @@ std = [
     "serde_with?/std",
     "derive_more/std",
     "reth-ethereum-primitives/std",
-    "reth-execution-errors/std",
     "reth-trie-common/std",
     "revm-database/std",
+    "alloy-evm/std",
 ]

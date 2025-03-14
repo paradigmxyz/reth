@@ -7,8 +7,7 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, SealedBlock};
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -78,7 +77,6 @@ impl ValidationJobSender {
 }
 
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
-///
 /// This validator is non-blocking, all validation work is done in a separate task.
 #[derive(Debug, Clone)]
 pub struct TransactionValidationTaskExecutor<V> {

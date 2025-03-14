@@ -1,5 +1,6 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::BlockId;
+use alloy_evm::block::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use alloy_primitives::{map::HashSet, Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
@@ -15,8 +16,7 @@ use alloy_rpc_types_trace::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
-use reth_consensus_common::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
@@ -110,7 +110,7 @@ where
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
         let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
-            .map_transaction(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
+            .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
         let tx_env = self.eth_api().evm_config().tx_env(tx);
@@ -267,7 +267,7 @@ where
         // fetch all blocks in that range
         let blocks = self
             .provider()
-            .sealed_block_with_senders_range(start..=end)
+            .recovered_block_range(start..=end)
             .map_err(Eth::Error::from_eth_err)?
             .into_iter()
             .map(Arc::new)
@@ -374,7 +374,7 @@ where
             },
         );
 
-        let block = self.eth_api().block_with_senders(block_id);
+        let block = self.eth_api().recovered_block(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
@@ -472,9 +472,7 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.eth_api().block_with_senders(block_id).await? else {
-            return Ok(None)
-        };
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),

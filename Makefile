@@ -238,7 +238,7 @@ docker-build-push-latest: ## Build and push a cross-arch Docker image tagged wit
 # `docker buildx create --use --name cross-builder`
 .PHONY: docker-build-push-nightly
 docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
-	$(call docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
+	$(call docker_build_push,nightly,nightly)
 
 # Create a cross-arch Docker image with the given tags and push it
 define docker_build_push
@@ -290,7 +290,7 @@ op-docker-build-push-latest: ## Build and push a cross-arch Docker image tagged 
 # `docker buildx create --use --name cross-builder`
 .PHONY: op-docker-build-push-nightly
 op-docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
-	$(call op_docker_build_push,$(GIT_TAG)-nightly,latest-nightly)
+	$(call op_docker_build_push,nightly,nightly)
 
 # Create a cross-arch Docker image with the given tags and push it
 define op_docker_build_push
@@ -345,6 +345,10 @@ update-book-cli: build-debug ## Update book cli documentation.
 profiling: ## Builds `reth` with optimisations, but also symbols.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak
 
+.PHONY: profiling-op
+profiling-op: ## Builds `op-reth` with optimisations, but also symbols.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml
+
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
@@ -372,7 +376,7 @@ clippy:
 	-- -D warnings
 
 lint-codespell: ensure-codespell
-	codespell --skip "*.json"
+	codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests"
 
 ensure-codespell:
 	@if ! command -v codespell &> /dev/null; then \

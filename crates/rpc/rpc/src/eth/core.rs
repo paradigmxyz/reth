@@ -10,10 +10,8 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_primitives::NodePrimitives;
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ProviderBlock,
-    ProviderReceipt,
+    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
 };
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -21,8 +19,7 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
-    PendingBlock,
+    EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -34,6 +31,14 @@ const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
 pub type EthApiFor<N> = EthApi<
+    <N as FullNodeTypes>::Provider,
+    <N as FullNodeComponents>::Pool,
+    <N as FullNodeComponents>::Network,
+    <N as FullNodeComponents>::Evm,
+>;
+
+/// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
+pub type EthApiBuilderFor<N> = EthApiBuilder<
     <N as FullNodeTypes>::Provider,
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Network,
@@ -146,48 +151,6 @@ where
     }
 }
 
-impl<N, Provider, Pool, EvmConfig, Network> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    N: NodePrimitives,
-    Provider: ChainSpecProvider
-        + BlockReaderIdExt<Block = N::Block, Receipt = N::Receipt>
-        + CanonStateSubscriptions<Primitives = N>
-        + Clone
-        + 'static,
-    Pool: Clone,
-    EvmConfig: Clone,
-    Network: Clone,
-{
-    /// Creates a new, shareable instance.
-    pub fn with_spawner<Tasks>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks>,
-    ) -> Self
-    where
-        Tasks: TaskSpawner + Clone + 'static,
-    {
-        let blocking_task_pool =
-            BlockingTaskPool::build().expect("failed to build blocking task pool");
-
-        let inner = EthApiInner::new(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.network.clone(),
-            ctx.cache.clone(),
-            ctx.new_gas_price_oracle(),
-            ctx.config.rpc_gas_cap,
-            ctx.config.rpc_max_simulate_blocks,
-            ctx.config.eth_proof_window,
-            blocking_task_pool,
-            ctx.new_fee_history_cache(),
-            ctx.evm_config.clone(),
-            Box::new(ctx.executor.clone()),
-            ctx.config.proof_permits,
-        );
-
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
-    }
-}
-
 impl<Provider, Pool, Network, EvmConfig> EthApiTypes for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: Send + Sync,
@@ -204,11 +167,12 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + Clone + Unpin,
+    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
 {
+    type Primitives = Provider::Primitives;
     type Provider = Provider;
     type Pool = Pool;
     type Evm = EvmConfig;
@@ -239,7 +203,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + Clone + Unpin,
+    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
@@ -499,18 +463,19 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{EthApi, EthApiBuilder};
-    use alloy_consensus::Header;
+    use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::{BaseFeeParams, ChainSpec};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
-        BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory,
+        BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
+        StateProviderFactory,
     };
     use reth_rpc_eth_api::EthApiServer;
     use reth_testing_utils::{generators, generators::Rng};
@@ -518,12 +483,13 @@ mod tests {
 
     fn build_test_eth_api<
         P: BlockReaderIdExt<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                Header = reth_primitives::Header,
+                Block = reth_ethereum_primitives::Block,
+                Receipt = reth_ethereum_primitives::Receipt,
+                Header = alloy_consensus::Header,
             > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + StateProviderFactory
+            + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
             + Unpin
             + Clone
             + 'static,
@@ -579,18 +545,20 @@ mod tests {
 
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
                     let transaction = TransactionSigned::new_unhashed(
-                        reth_primitives::Transaction::Eip1559(alloy_consensus::TxEip1559 {
-                            max_priority_fee_per_gas: random_fee,
-                            max_fee_per_gas: random_fee + base_fee_per_gas as u128,
-                            ..Default::default()
-                        }),
+                        reth_ethereum_primitives::Transaction::Eip1559(
+                            alloy_consensus::TxEip1559 {
+                                max_priority_fee_per_gas: random_fee,
+                                max_fee_per_gas: random_fee + base_fee_per_gas as u128,
+                                ..Default::default()
+                            },
+                        ),
                         Signature::test_signature(),
                     );
 
                     transactions.push(transaction);
                 } else {
                     let transaction = TransactionSigned::new_unhashed(
-                        reth_primitives::Transaction::Legacy(Default::default()),
+                        reth_ethereum_primitives::Transaction::Legacy(Default::default()),
                         Signature::test_signature(),
                     );
 

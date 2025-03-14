@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559,
-    TxEip2930, TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
-    Typed2718, TypedTransaction,
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844,
+    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
+    TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -12,7 +13,8 @@ use alloy_eips::{
 };
 use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{
-    keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
+    bytes::BufMut, keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash,
+    TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
@@ -98,9 +100,9 @@ pub enum Transaction {
     Eip4844(TxEip4844),
     /// EOA Set Code Transactions ([EIP-7702](https://eips.ethereum.org/EIPS/eip-7702)), type `0x4`.
     ///
-    /// EOA Set Code Transactions give the ability to temporarily set contract code for an
-    /// EOA for a single transaction. This allows for temporarily adding smart contract
-    /// functionality to the EOA.
+    /// EOA Set Code Transactions give the ability to set contract code for an EOA in perpetuity
+    /// until re-assigned by the same EOA. This allows for adding smart contract functionality to
+    /// the EOA.
     Eip7702(TxEip7702),
 }
 
@@ -179,14 +181,6 @@ impl alloy_consensus::Transaction for Transaction {
         delegate!(self => tx.kind())
     }
 
-    fn access_list(&self) -> Option<&alloy_eips::eip2930::AccessList> {
-        delegate!(self => tx.access_list())
-    }
-
-    fn authorization_list(&self) -> Option<&[alloy_eips::eip7702::SignedAuthorization]> {
-        delegate!(self => tx.authorization_list())
-    }
-
     fn is_create(&self) -> bool {
         delegate!(self => tx.is_create())
     }
@@ -199,8 +193,16 @@ impl alloy_consensus::Transaction for Transaction {
         delegate!(self => tx.input())
     }
 
+    fn access_list(&self) -> Option<&alloy_eips::eip2930::AccessList> {
+        delegate!(self => tx.access_list())
+    }
+
     fn blob_versioned_hashes(&self) -> Option<&[B256]> {
         delegate!(self => tx.blob_versioned_hashes())
+    }
+
+    fn authorization_list(&self) -> Option<&[alloy_eips::eip7702::SignedAuthorization]> {
+        delegate!(self => tx.authorization_list())
     }
 }
 
@@ -287,6 +289,40 @@ impl From<TypedTransaction> for Transaction {
             TypedTransaction::Eip4844(tx) => Self::Eip4844(tx.into()),
             TypedTransaction::Eip7702(tx) => Self::Eip7702(tx),
         }
+    }
+}
+
+impl RlpEcdsaEncodableTx for Transaction {
+    fn rlp_encoded_fields_length(&self) -> usize {
+        delegate!(self => tx.rlp_encoded_fields_length())
+    }
+
+    fn rlp_encode_fields(&self, out: &mut dyn BufMut) {
+        delegate!(self => tx.rlp_encode_fields(out))
+    }
+
+    fn eip2718_encode_with_type(&self, signature: &Signature, _ty: u8, out: &mut dyn BufMut) {
+        delegate!(self => tx.eip2718_encode_with_type(signature, tx.ty(), out))
+    }
+
+    fn eip2718_encode(&self, signature: &Signature, out: &mut dyn BufMut) {
+        delegate!(self => tx.eip2718_encode(signature, out))
+    }
+
+    fn network_encode_with_type(&self, signature: &Signature, _ty: u8, out: &mut dyn BufMut) {
+        delegate!(self => tx.network_encode_with_type(signature, tx.ty(), out))
+    }
+
+    fn network_encode(&self, signature: &Signature, out: &mut dyn BufMut) {
+        delegate!(self => tx.network_encode(signature, out))
+    }
+
+    fn tx_hash_with_type(&self, signature: &Signature, _ty: u8) -> TxHash {
+        delegate!(self => tx.tx_hash_with_type(signature, tx.ty()))
+    }
+
+    fn tx_hash(&self, signature: &Signature) -> TxHash {
+        delegate!(self => tx.tx_hash(signature))
     }
 }
 
@@ -905,7 +941,7 @@ impl From<PooledTransaction> for TransactionSigned {
 
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
-pub mod serde_bincode_compat {
+pub(super) mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_consensus::{
         transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
@@ -1132,7 +1168,7 @@ mod tests {
         let decoded = TransactionSigned::decode_2718(&mut &tx_bytes[..]).unwrap();
         assert_eq!(
             decoded.recover_signer().unwrap(),
-            Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap()
+            address!("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5")
         );
     }
 
@@ -1149,22 +1185,22 @@ mod tests {
 
         assert_eq!(
             decoded.recover_signer().ok(),
-            Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2"))
+            Some(address!("0xA83C816D4f9b2783761a22BA6FADB0eB0606D7B2"))
         );
 
         let tx = decoded.transaction;
 
-        assert_eq!(tx.to(), Some(address!("11E9CA82A3a762b4B5bd264d4173a242e7a77064")));
+        assert_eq!(tx.to(), Some(address!("0x11E9CA82A3a762b4B5bd264d4173a242e7a77064")));
 
         assert_eq!(
             tx.blob_versioned_hashes(),
             Some(
                 &[
-                    b256!("012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921a"),
-                    b256!("0152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4"),
-                    b256!("013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7"),
-                    b256!("01148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1"),
-                    b256!("011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e6549"),
+                    b256!("0x012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921a"),
+                    b256!("0x0152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4"),
+                    b256!("0x013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7"),
+                    b256!("0x01148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1"),
+                    b256!("0x011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e6549"),
                 ][..]
             )
         );
@@ -1201,7 +1237,7 @@ mod tests {
                 .unwrap(),
             false,
         );
-        let hash = b256!("a517b206d2223278f860ea017d3626cacad4f52ff51030dc9a96b432f17f8d34");
+        let hash = b256!("0xa517b206d2223278f860ea017d3626cacad4f52ff51030dc9a96b432f17f8d34");
         test_decode_and_encode(&bytes, transaction, signature, Some(hash));
 
         let bytes = hex!("f86b01843b9aca00830186a094d3e8763675e4c425df46cc3b5c0f6cbdac3960468702769bb01b2a00802ba0e24d8bd32ad906d6f8b8d7741e08d1959df021698b19ee232feba15361587d0aa05406ad177223213df262cb66ccbb2f46bfdccfdfbbb5ffdda9e2c02d977631da");
@@ -1360,7 +1396,7 @@ mod tests {
         let tx = TransactionSigned::fallback_decode(&mut data.as_slice()).unwrap();
         assert_eq!(tx.ty(), LEGACY_TX_TYPE_ID);
         let sender = tx.recover_signer().unwrap();
-        assert_eq!(sender, address!("a12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
+        assert_eq!(sender, address!("0xa12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));
     }
 
     // <https://github.com/alloy-rs/alloy/issues/141>
@@ -1370,8 +1406,8 @@ mod tests {
         let data = hex!("02f86f0102843b9aca0085029e7822d68298f094d9e1459a7a482635700cbc20bbaf52d495ab9c9680841b55ba3ac080a0c199674fcb29f353693dd779c017823b954b3c69dffa3cd6b2a6ff7888798039a028ca912de909e7e6cdef9cdcaf24c54dd8c1032946dfa1d85c206b32a9064fe8");
         let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer().unwrap();
-        assert_eq!(sender, address!("001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
-        assert_eq!(tx.to(), Some(address!("D9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
+        assert_eq!(sender, address!("0x001e2b7dE757bA469a57bF6b23d982458a07eFcE"));
+        assert_eq!(tx.to(), Some(address!("0xD9e1459A7A482635700cBc20BBAF52D495Ab9C96")));
         assert_eq!(tx.input().as_ref(), hex!("1b55ba3a"));
         let encoded = tx.encoded_2718();
         assert_eq!(encoded.as_ref(), data.to_vec());
@@ -1387,7 +1423,7 @@ mod tests {
         assert!(sender.is_err());
         let sender = tx.recover_signer_unchecked().unwrap();
 
-        assert_eq!(sender, address!("7e9e359edf0dbacf96a9952fa63092d919b0842b"));
+        assert_eq!(sender, address!("0x7e9e359edf0dbacf96a9952fa63092d919b0842b"));
     }
 
     #[test]

@@ -101,7 +101,7 @@ impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
         &self,
         input: reth_trie::TrieInput,
         target: reth_trie::HashedPostState,
-    ) -> reth_errors::ProviderResult<alloy_primitives::map::B256Map<alloy_primitives::Bytes>> {
+    ) -> reth_errors::ProviderResult<Vec<alloy_primitives::Bytes>> {
         self.0.witness(input, target)
     }
 }
@@ -110,7 +110,7 @@ impl reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'_> {
     fn basic_account(
         &self,
         address: &revm_primitives::Address,
-    ) -> reth_errors::ProviderResult<Option<reth_primitives::Account>> {
+    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Account>> {
         self.0.basic_account(address)
     }
 }
@@ -160,14 +160,14 @@ impl StateProvider for StateProviderTraitObjWrapper<'_> {
     fn bytecode_by_hash(
         &self,
         code_hash: &B256,
-    ) -> reth_errors::ProviderResult<Option<reth_primitives::Bytecode>> {
+    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         self.0.bytecode_by_hash(code_hash)
     }
 
     fn account_code(
         &self,
         addr: &revm_primitives::Address,
-    ) -> reth_errors::ProviderResult<Option<reth_primitives::Bytecode>> {
+    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         self.0.account_code(addr)
     }
 

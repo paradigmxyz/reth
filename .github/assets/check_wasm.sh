@@ -43,6 +43,7 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
+  reth-optimism-storage
   reth-optimism-chain-registry
   reth-rpc
   reth-rpc-api
@@ -54,6 +55,8 @@ exclude_crates=(
   reth-rpc-layer
   reth-stages
   reth-engine-local
+  reth-ress-protocol
+  reth-ress-provider
   # The following are not supposed to be working
   reth # all of the crates below
   reth-invalid-block-hooks # reth-provider

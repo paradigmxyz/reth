@@ -2,12 +2,12 @@
 
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
-use alloy_primitives::U256;
+use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvmEnv, Database, EvmEnv, TransactionEnv};
+use reth_evm::{Database, EvmEnvFor, TransactionEnv, TxEnvFor};
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
@@ -17,7 +17,6 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use revm::context_interface::{result::ExecutionResult, Transaction};
-use revm_primitives::TxKind;
 use tracing::trace;
 
 /// Gas execution estimates
@@ -35,7 +34,7 @@ pub trait EstimateCall: Call {
     ///  - `nonce` is set to `None`
     fn estimate_gas_with<S>(
         &self,
-        mut evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        mut evm_env: EvmEnvFor<Self::Evm>,
         mut request: TransactionRequest,
         state: S,
         state_override: Option<StateOverride>,
@@ -287,8 +286,8 @@ pub trait EstimateCall: Call {
     fn map_out_of_gas_err<DB>(
         &self,
         env_gas_limit: u64,
-        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
-        mut tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
+        evm_env: EvmEnvFor<Self::Evm>,
+        mut tx_env: TxEnvFor<Self::Evm>,
         db: &mut DB,
     ) -> Self::Error
     where

@@ -1,8 +1,7 @@
 //! Commonly used code snippets
 
 use super::{EthApiError, EthResult};
-use reth_primitives::Recovered;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::future::Future;
 
 /// Recovers a [`SignedTransaction`] from an enveloped encoded byte stream.

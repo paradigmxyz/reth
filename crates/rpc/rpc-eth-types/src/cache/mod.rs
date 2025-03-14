@@ -7,8 +7,7 @@ use futures::{future::Either, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
-use reth_primitives::{NodePrimitives, RecoveredBlock};
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::{Block, BlockBody, NodePrimitives, RecoveredBlock};
 use reth_storage_api::{BlockReader, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use schnellru::{ByLength, Limiter};
@@ -145,7 +144,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     /// Requests the  [`RecoveredBlock`] for the block hash
     ///
     /// Returns `None` if the block does not exist.
-    pub async fn get_sealed_block_with_senders(
+    pub async fn get_recovered_block(
         &self,
         block_hash: B256,
     ) -> ProviderResult<Option<Arc<RecoveredBlock<B>>>> {
@@ -168,7 +167,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         &self,
         block_hash: B256,
     ) -> ProviderResult<Option<(Arc<RecoveredBlock<B>>, Arc<Vec<R>>)>> {
-        let block = self.get_sealed_block_with_senders(block_hash);
+        let block = self.get_recovered_block(block_hash);
         let receipts = self.get_receipts(block_hash);
 
         let (block, receipts) = futures::try_join!(block, receipts)?;

@@ -8,6 +8,8 @@ pub use trie::*;
 
 pub mod blinded;
 
+mod metrics;
+
 /// Re-export sparse trie error types.
 pub mod errors {
     pub use reth_execution_errors::{

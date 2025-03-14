@@ -3,21 +3,20 @@
 use crate::tree::{
     cached_state::{CachedStateMetrics, ProviderCacheBuilder, ProviderCaches, SavedCache},
     payload_processor::{
-        executor::WorkloadExecutor,
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
-        sparse_trie::{SparseTrieTask, StateRootComputeOutcome},
+        sparse_trie::StateRootComputeOutcome,
     },
+    sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
+use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{
-    system_calls::{OnStateHook, StateChangeSource},
-    ConfigureEvm, ConfigureEvmEnvFor,
-};
+use reth_evm::{ConfigureEvm, OnStateHook};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -35,14 +34,14 @@ use std::{
     },
 };
 
-pub(crate) mod executor;
-pub(crate) mod sparse_trie;
-
-mod multiproof;
-mod prewarm;
+pub mod executor;
+pub mod multiproof;
+pub mod prewarm;
+pub mod sparse_trie;
 
 /// Entrypoint for executing the payload.
-pub(super) struct PayloadProcessor<N, Evm> {
+#[derive(Debug, Clone)]
+pub struct PayloadProcessor<N, Evm> {
     /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
@@ -59,7 +58,8 @@ pub(super) struct PayloadProcessor<N, Evm> {
 }
 
 impl<N, Evm> PayloadProcessor<N, Evm> {
-    pub(super) fn new(executor: WorkloadExecutor, evm_config: Evm, config: &TreeConfig) -> Self {
+    /// Creates a new payload processor.
+    pub fn new(executor: WorkloadExecutor, evm_config: Evm, config: &TreeConfig) -> Self {
         Self {
             executor,
             execution_cache: Default::default(),
@@ -75,10 +75,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
 impl<N, Evm> PayloadProcessor<N, Evm>
 where
     N: NodePrimitives,
-    Evm: ConfigureEvmEnvFor<N>
-        + 'static
-        + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
-        + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
@@ -112,7 +109,7 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    pub(super) fn spawn<P>(
+    pub fn spawn<P>(
         &self,
         header: SealedHeaderFor<N>,
         transactions: VecDeque<Recovered<N::SignedTx>>,
@@ -246,7 +243,8 @@ where
 }
 
 /// Handle to all the spawned tasks.
-pub(super) struct PayloadHandle {
+#[derive(Debug)]
+pub struct PayloadHandle {
     /// Channel for evm state updates
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
@@ -261,7 +259,7 @@ impl PayloadHandle {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
-    pub(super) fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()
             .expect("state_root is None")
@@ -272,7 +270,7 @@ impl PayloadHandle {
     /// Returns a state hook to be used to send state updates to this task.
     ///
     /// If a multiproof task is spawned the hook will notify it about new states.
-    pub(super) fn state_hook(&self) -> impl OnStateHook {
+    pub fn state_hook(&self) -> impl OnStateHook {
         // convert the channel into a `StateHookSender` that emits an event on drop
         let to_multi_proof = self.to_multi_proof.clone().map(StateHookSender::new);
 
@@ -308,6 +306,7 @@ impl PayloadHandle {
 }
 
 /// Access to the spawned [`PrewarmCacheTask`].
+#[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
     /// The shared cache the task operates with.
     cache: ProviderCaches,
@@ -388,12 +387,13 @@ mod tests {
         },
         StateProviderBuilder, TreeConfig,
     };
+    use alloy_evm::block::StateChangeSource;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_evm::system_calls::{OnStateHook, StateChangeSource};
+    use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{Account as RethAccount, StorageEntry};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, ConsistentDbView},
         test_utils::create_test_provider_factory_with_chain_spec,
@@ -402,21 +402,7 @@ mod tests {
     use reth_testing_utils::generators::{self, Rng};
     use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{
-        Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot,
-    };
-
-    fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> RethAccount {
-        RethAccount {
-            balance: revm_account.info.balance,
-            nonce: revm_account.info.nonce,
-            bytecode_hash: if revm_account.info.code_hash == KECCAK_EMPTY {
-                None
-            } else {
-                Some(revm_account.info.code_hash)
-            },
-        }
-    }
+    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
@@ -441,7 +427,7 @@ mod tests {
                     }
                 }
 
-                let account = RevmAccount {
+                let account = revm_state::Account {
                     info: AccountInfo {
                         balance: U256::from(rng.gen::<u64>()),
                         nonce: rng.gen::<u64>(),
@@ -470,7 +456,7 @@ mod tests {
 
         let state_updates = create_mock_state_updates(10, 10);
         let mut hashed_state = HashedPostState::default();
-        let mut accumulated_state: HashMap<Address, (RethAccount, HashMap<B256, U256>)> =
+        let mut accumulated_state: HashMap<Address, (Account, HashMap<B256, U256>)> =
             HashMap::default();
 
         {
@@ -478,7 +464,7 @@ mod tests {
 
             for update in &state_updates {
                 let account_updates = update.iter().map(|(address, account)| {
-                    (*address, Some(convert_revm_to_reth_account(account)))
+                    (*address, Some(Account::from_revm_account(account)))
                 });
                 provider_rw
                     .insert_account_for_hashing(account_updates)
@@ -508,13 +494,13 @@ mod tests {
                     .collect();
 
                 let entry = accumulated_state.entry(*address).or_default();
-                entry.0 = convert_revm_to_reth_account(account);
+                entry.0 = Account::from_revm_account(account);
                 entry.1.extend(storage);
             }
         }
 
         let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
-            WorkloadExecutor::new(),
+            WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
         );
@@ -534,12 +520,12 @@ mod tests {
         }
         drop(state_hook);
 
-        let root_from_task = handle.state_root().expect("task failed").state_root.0;
+        let root_from_task = handle.state_root().expect("task failed").state_root;
         let root_from_regular = state_root(accumulated_state);
 
         assert_eq!(
             root_from_task, root_from_regular,
-            "State root mismatch: task={root_from_task:?}, base={root_from_regular:?}"
+            "State root mismatch: task={root_from_task}, base={root_from_regular}"
         );
     }
 }
