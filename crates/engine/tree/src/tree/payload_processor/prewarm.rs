@@ -86,6 +86,9 @@ where
     fn spawn_next(&mut self) {
         while self.in_progress < self.max_concurrency {
             if let Some(tx) = self.pending.pop_front() {
+                // increment the in progress counter
+                self.in_progress += 1;
+
                 self.spawn_transaction(tx);
             } else {
                 break
@@ -99,6 +102,7 @@ where
         let metrics = self.ctx.metrics.clone();
         let actions_tx = self.actions_tx.clone();
         let prepare_proof_targets = self.should_prepare_multi_proof_targets();
+
         self.executor.spawn_blocking(move || {
             let start = Instant::now();
             // depending on whether this task needs he proof targets we either just transact or
