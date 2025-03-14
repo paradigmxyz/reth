@@ -19,15 +19,14 @@ use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 use reth_node_builder::{
     components::{ComponentsBuilder, ExecutorBuilder, PayloadServiceBuilder},
-    rpc::RpcAddOns,
-    Node, NodeAdapter, NodeComponentsBuilder,
+    Node,
 };
 use reth_optimism_node::{
     node::{
-        OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpNetworkBuilder, OpPoolBuilder,
+        OpAddOns, OpConsensusBuilder, OpNetworkBuilder, OpPoolBuilder,
         OpStorage,
     },
-    OpEngineApiBuilder, OpNode,
+    OpNode,
 };
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use txpool::CustomTxPool;

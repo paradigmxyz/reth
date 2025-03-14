@@ -14,7 +14,6 @@ reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"
 reth-optimism-chainspec.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true
-reth-trie-db.workspace = true
 reth-storage-api.workspace = true
 reth-network-peers.workspace = true
 reth-optimism-node.workspace = true
@@ -36,13 +35,10 @@ revm.workspace = true
 alloy-genesis.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-network = { workspace = true, optional = true }
 alloy-consensus = { workspace = true, features = ["serde"] }
-alloy-serde = { workspace = true, optional = true }
 alloy-rlp.workspace = true
 alloy-evm.workspace = true
 alloy-op-evm.workspace = true
-alloy-rpc-types = { workspace = true, optional = true }
 revm-primitives.workspace = true
 reth-chain-state.workspace = true
 
@@ -52,22 +48,16 @@ op-revm.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # misc
-arbitrary = { workspace = true, optional = true, features = ["derive"] }
 derive_more.workspace = true
 eyre.workspace = true
-rand = { workspace = true, optional = true }
-secp256k1 = { workspace = true, optional = true, features = ["rand"] }
 serde.workspace = true
 
 [features]
 default = []
 arbitrary = [
-	"dep:arbitrary",
 	"alloy-consensus/arbitrary",
 	"alloy-eips/arbitrary",
 	"alloy-primitives/arbitrary",
-	"alloy-rpc-types?/arbitrary",
-	"alloy-serde?/arbitrary",
 	"reth-codecs/arbitrary",
 	"reth-optimism-primitives/arbitrary",
 	"reth-primitives-traits/arbitrary",

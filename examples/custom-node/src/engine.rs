@@ -66,6 +66,22 @@ impl reth_node_api::ExecutionPayload for CustomExecutionData {
     fn parent_hash(&self) -> revm_primitives::B256 {
         self.inner.parent_hash()
     }
+
+    fn gas_used(&self) -> u64 {
+        self.inner.gas_used()
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.inner.timestamp()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<revm_primitives::B256> {
+        self.inner.parent_beacon_block_root()
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<alloy_eips::eip4895::Withdrawal>> {
+        self.inner.withdrawals()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -268,14 +284,7 @@ impl<Provider> CustomPayloadBuilder<Provider> {
         provider: Provider,
         chain_spec: Arc<CustomChainSpec>,
     ) -> Self {
-        Self {
-            inner: OpPayloadBuilder::new(
-                pool,
-                provider,
-                CustomEvmConfig::new(chain_spec),
-                BasicOpReceiptBuilder::default(),
-            ),
-        }
+        Self { inner: OpPayloadBuilder::new(pool, provider, CustomEvmConfig::new(chain_spec)) }
     }
 }
 
