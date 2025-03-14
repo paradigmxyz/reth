@@ -128,10 +128,11 @@ where
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
-    // Reveal new accounts and storage slots.
     let mut state = HashedPostState::default();
     for update in updates {
+        // Reveal new accounts and storage slots.
         trie.reveal_multiproof(update.multiproof)?;
+        // Extend the state with the new updates.
         state.extend(update.state);
     }
     let reveal_multiproof_elapsed = started_at.elapsed();
