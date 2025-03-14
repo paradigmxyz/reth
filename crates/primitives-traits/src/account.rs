@@ -173,11 +173,17 @@ impl reth_codecs::Compact for Bytecode {
             REMOVED_BYTECODE_ID => {
                 unreachable!("Junk data in database: checked Bytecode variant was removed")
             }
-            LEGACY_ANALYZED_BYTECODE_ID => Self(RevmBytecode::new_analyzed(
-                bytes,
-                buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
-                revm_bytecode::JumpTable::from_slice(buf),
-            )),
+            LEGACY_ANALYZED_BYTECODE_ID => {
+                let original_len = buf.read_u64::<byteorder::BigEndian>().unwrap() as usize;
+                let mut bitvec = revm_bytecode::bitvec::vec::BitVec::from_slice(buf);
+                let bit_len = if bitvec.len() >= bytes.len() { bytes.len() } else { original_len };
+                unsafe { bitvec.set_len(bit_len) };
+                Self(RevmBytecode::new_analyzed(
+                    bytes,
+                    original_len,
+                    revm_bytecode::JumpTable(alloc::sync::Arc::new(bitvec)),
+                ))
+            }
             EOF_BYTECODE_ID | EIP7702_BYTECODE_ID => {
                 // EOF and EIP-7702 bytecode objects will be decoded from the raw bytecode
                 Self(RevmBytecode::new_raw(bytes))
@@ -232,9 +238,10 @@ impl From<Account> for AccountInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::sync::Arc;
     use alloy_primitives::{hex_literal::hex, B256, U256};
     use reth_codecs::Compact;
-    use revm_bytecode::{JumpTable, LegacyAnalyzedBytecode};
+    use revm_bytecode::{bitvec::vec::BitVec, JumpTable, LegacyAnalyzedBytecode};
 
     #[test]
     fn test_account() {
@@ -290,10 +297,12 @@ mod tests {
         assert_eq!(len, 53);
 
         let mut buf = vec![];
+        let mut bitvec = BitVec::from_slice(&[0]);
+        unsafe { bitvec.set_len(2) };
         let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(LegacyAnalyzedBytecode::new(
             Bytes::from(&hex!("ff00")),
             2,
-            JumpTable::from_slice(&[0]),
+            JumpTable(Arc::new(bitvec)),
         )));
         let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
