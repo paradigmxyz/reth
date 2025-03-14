@@ -4,6 +4,9 @@ use clap::{arg, Args};
 /// IC advices to use a hardcoded value instead of querying it to avoid main-in-the middle attacks.
 pub const IC_MAINNET_KEY: &str = "308182301d060d2b0601040182dc7c0503010201060c2b0601040182dc7c05030201036100814c0e6ec71fab583b08bd81373c255c3c371b2e84863c98a4f1e08b74235d14fb5d9c0cd546d9685f913a0c0b2cc5341583bf4b4392e467db96d65b9bb4cb717112f8472e0d5a4d14505ffd7484b01291091c5f87b98883463f98091a0baaae";
 
+/// URL of the IC mainnet.
+pub const IC_MAINNET_URL: &str = "https://ic0.app";
+
 /// Bitfinity Related Args
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone)]
 #[clap(next_help_heading = "Bitfinity Args")]
@@ -65,6 +68,12 @@ pub struct BitfinityImportArgs {
     /// A flag to check the EVM state before importing blocks
     #[arg(long, default_value = "true")]
     pub check_evm_state_before_importing: bool,
+
+    /// If true, try to validate unsafe blocks before import.
+    ///
+    /// If validation is disabled, unsafe blocks will be ignored.
+    #[arg(long)]
+    pub confirm_unsafe_blocks: bool,
 }
 
 /// Bitfinity Related Args

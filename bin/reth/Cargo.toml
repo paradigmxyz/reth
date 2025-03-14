@@ -98,9 +98,11 @@ similar-asserts.workspace = true
 
 # bitfinity dependencies
 async-channel.workspace = true
+bitfinity-block-confirmation.workspace = true
 candid.workspace = true
 did.workspace = true
 evm-canister-client = { workspace = true, features = ["ic-agent-client"] }
+hex.workspace = true
 lightspeed_scheduler = { workspace = true, features = ["tracing"] }
 # rlp = { workspace = true }
 
@@ -108,6 +110,7 @@ lightspeed_scheduler = { workspace = true, features = ["tracing"] }
 tempfile.workspace = true
 
 # bitfinity dev dependencies
+alloy-genesis.workspace = true
 async-trait = { workspace = true }
 dirs.workspace = true
 ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
