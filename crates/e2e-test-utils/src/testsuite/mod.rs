@@ -99,7 +99,7 @@ impl<I: 'static> TestBuilder<I> {
         let actions = std::mem::take(&mut self.actions);
 
         for action in actions {
-            action.execute(&self.env).await?;
+            action.execute(&mut self.env).await?;
         }
 
         // explicitly drop the setup to shutdown the nodes
