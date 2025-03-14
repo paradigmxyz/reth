@@ -10,10 +10,11 @@ pub type NumTransactions = u64;
 ///
 /// It has the pointer to the transaction Number of the first
 /// transaction in the block and the total number of transactions.
-#[derive(Debug, Default, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Default, Eq, PartialEq, Clone, Copy)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StoredBlockBodyIndices {
     /// The number of the first transaction in this block
     ///
@@ -86,7 +87,7 @@ pub struct StaticFileBlockWithdrawals {
     pub withdrawals: Option<Withdrawals>,
 }
 
-#[cfg(feature = "reth-codec")]
+#[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for StaticFileBlockWithdrawals {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
