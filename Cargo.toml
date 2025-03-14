@@ -151,7 +151,7 @@ members = [
     "examples/node-event-hooks/",
     "examples/polygon-p2p/",
     "examples/rpc-db/",
-    "examples/stateful-precompile/",
+    "examples/precompile-cache/",
     "examples/txpool-tracing/",
     "examples/custom-beacon-withdrawals",
     "testing/ef-tests/",

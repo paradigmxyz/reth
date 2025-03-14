@@ -18,7 +18,7 @@ use tracing::debug;
 /// mine a block and assert it worked).
 pub trait Action<I>: Send + 'static {
     /// Executes the action
-    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>>;
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>>;
 }
 
 /// Simplified action container for storage in tests
@@ -32,7 +32,7 @@ impl<I: 'static> ActionBox<I> {
     }
 
     /// Executes an [`ActionBox`] with the given [`Environment`] reference.
-    pub async fn execute(mut self, env: &Environment<I>) -> Result<()> {
+    pub async fn execute(mut self, env: &mut Environment<I>) -> Result<()> {
         self.0.execute(env).await
     }
 }
@@ -46,7 +46,7 @@ where
     F: FnMut(&Environment<I>) -> Fut + Send + 'static,
     Fut: Future<Output = Result<()>> + Send + 'static,
 {
-    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(self(env))
     }
 }
@@ -77,7 +77,7 @@ where
     Engine: EngineTypes,
     Engine::PayloadAttributes: From<PayloadAttributes>,
 {
-    fn execute<'a>(&'a mut self, env: &'a Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             if self.node_idx >= env.node_clients.len() {
                 return Err(eyre::eyre!("Node index out of bounds: {}", self.node_idx));
@@ -168,14 +168,13 @@ impl<I> Sequence<I> {
     }
 }
 
-impl<I: Sync + 'static> Action<I> for Sequence<I> {
-    fn execute<'a>(&'a mut self, env: &'a Environment<I>) -> BoxFuture<'a, Result<()>> {
+impl<I: Sync + Send + 'static> Action<I> for Sequence<I> {
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // Execute each action in sequence
-            futures_util::future::try_join_all(
-                self.actions.iter_mut().map(|action| action.execute(env)),
-            )
-            .await?;
+            for action in &mut self.actions {
+                action.execute(env).await?;
+            }
 
             Ok(())
         })

@@ -7,7 +7,8 @@ use crate::{
 };
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
-    DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
+    DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_MAX_TRACE_FILTER_BLOCKS,
+    DEFAULT_PROOF_PERMITS,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +26,8 @@ pub struct EthConfig {
     pub eth_proof_window: u64,
     /// The maximum number of tracing calls that can be executed in concurrently.
     pub max_tracing_requests: usize,
+    /// Maximum number of blocks for `trace_filter` requests.
+    pub max_trace_filter_blocks: u64,
     /// Maximum number of blocks that could be scanned per filter request in `eth_getLogs` calls.
     pub max_blocks_per_filter: u64,
     /// Maximum number of logs that can be returned in a single response in `eth_getLogs` calls.
@@ -61,6 +64,7 @@ impl Default for EthConfig {
             gas_oracle: GasPriceOracleConfig::default(),
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             max_tracing_requests: default_max_tracing_requests(),
+            max_trace_filter_blocks: DEFAULT_MAX_TRACE_FILTER_BLOCKS,
             max_blocks_per_filter: DEFAULT_MAX_BLOCKS_PER_FILTER,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
@@ -94,6 +98,12 @@ impl EthConfig {
     /// Configures the maximum block length to scan per `eth_getLogs` request
     pub const fn max_blocks_per_filter(mut self, max_blocks: u64) -> Self {
         self.max_blocks_per_filter = max_blocks;
+        self
+    }
+
+    /// Configures the maximum number of blocks for `trace_filter` requests
+    pub const fn max_trace_filter_blocks(mut self, max_blocks: u64) -> Self {
+        self.max_trace_filter_blocks = max_blocks;
         self
     }
 
