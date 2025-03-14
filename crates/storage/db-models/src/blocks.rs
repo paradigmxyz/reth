@@ -1,7 +1,6 @@
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::TxNumber;
 use core::ops::Range;
-use serde::{Deserialize, Serialize};
 
 /// Total number of transactions.
 pub type NumTransactions = u64;
