@@ -1,5 +1,6 @@
 //!
 //! Utils for bitfinity integration tests
+//!
 use std::{
     fmt::{Debug, Display, Formatter},
     path::PathBuf,
@@ -13,7 +14,7 @@ use alloy_primitives::BlockNumber;
 use lightspeed_scheduler::JobExecutor;
 use parking_lot::Mutex;
 use reth::{
-    args::BitfinityImportArgs,
+    args::{BitfinityImportArgs, IC_MAINNET_KEY},
     commands::bitfinity_import::BitfinityImportCommand,
     dirs::{ChainPath, DataDirPath, PlatformPath},
 };
@@ -165,14 +166,13 @@ pub async fn bitfinity_import_config_data(
         batch_size: 1000,
         max_fetch_blocks: 10000,
         evmc_principal: LOCAL_EVM_CANISTER_ID.to_string(),
+        ic_root_key: IC_MAINNET_KEY.to_string(),
         backup_rpc_url: backup_evm_datasource_url,
         max_retries: 3,
         retry_delay_secs: 3,
         check_evm_state_before_importing: false,
         max_block_age_secs: 600,
         confirm_unsafe_blocks: false,
-        fetch_ic_root_key: false,
-        ic_url: None,
     };
 
     Ok((
