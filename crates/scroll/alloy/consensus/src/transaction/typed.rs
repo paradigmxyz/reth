@@ -4,8 +4,11 @@ use alloy_consensus::{
 };
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, TxKind, B256};
-use reth_codecs::{Compact, __private::bytes};
-use reth_codecs_derive::generate_tests;
+#[cfg(feature = "reth-codec")]
+use {
+    reth_codecs::{Compact, __private::bytes},
+    reth_codecs_derive::generate_tests,
+};
 
 /// The `TypedTransaction` enum represents all Ethereum transaction request types, modified for
 /// Scroll
@@ -300,6 +303,7 @@ impl Transaction for ScrollTypedTransaction {
     }
 }
 
+#[cfg(feature = "reth-codec")]
 impl Compact for ScrollTypedTransaction {
     fn to_compact<B>(&self, out: &mut B) -> usize
     where
@@ -338,6 +342,7 @@ impl Compact for ScrollTypedTransaction {
     }
 }
 
+#[cfg(feature = "reth-codec")]
 generate_tests!(
     #[compact]
     ScrollTypedTransaction,

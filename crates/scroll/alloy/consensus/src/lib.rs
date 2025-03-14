@@ -7,7 +7,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use serde_with as _;
+#[cfg(not(feature = "std"))]
+extern crate alloc as std;
 
 mod transaction;
 pub use transaction::{

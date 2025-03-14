@@ -10923,7 +10923,6 @@ dependencies = [
  "reth-codecs-derive",
  "serde",
  "serde_json",
- "serde_with",
  "test-fuzz",
 ]
 

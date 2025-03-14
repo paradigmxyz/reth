@@ -1,6 +1,8 @@
 //! Receipt envelope types for Scroll.
 
 use crate::ScrollTxType;
+use std::vec::Vec;
+
 use alloy_consensus::{Eip658Value, Receipt, ReceiptWithBloom, TxReceipt};
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},

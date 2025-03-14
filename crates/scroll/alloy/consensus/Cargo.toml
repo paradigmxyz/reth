@@ -31,7 +31,6 @@ reth-codecs-derive = { workspace = true, optional = true }
 modular-bitfield = { workspace = true, optional = true }
 
 # serde
-serde_with = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 
@@ -63,7 +62,6 @@ std = [
     "rand/std",
     "derive_more/std",
     "serde_json/std",
-    "serde_with/std",
 ]
 k256 = [
     "alloy-primitives/k256",
@@ -100,7 +98,6 @@ serde = [
     "reth-codecs/serde",
 ]
 serde-bincode-compat = [
-    "serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
 ]

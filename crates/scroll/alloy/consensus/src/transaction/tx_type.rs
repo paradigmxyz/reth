@@ -5,6 +5,7 @@ use alloy_eips::eip2718::Eip2718Error;
 use alloy_primitives::{U64, U8};
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use derive_more::Display;
+#[cfg(feature = "reth-codec")]
 use reth_codecs::{
     __private::bytes,
     txtype::{
@@ -122,6 +123,7 @@ impl Decodable for ScrollTxType {
     }
 }
 
+#[cfg(feature = "reth-codec")]
 impl Compact for ScrollTxType {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where

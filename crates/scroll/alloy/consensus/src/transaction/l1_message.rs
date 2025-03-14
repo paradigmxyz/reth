@@ -1,6 +1,8 @@
 //! Scroll L1 message transaction
 
 use crate::ScrollTxType;
+use std::vec::Vec;
+
 use alloy_consensus::{Sealable, Transaction, Typed2718};
 use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718};
 use alloy_primitives::{
@@ -9,7 +11,6 @@ use alloy_primitives::{
     Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::Decodable;
-use serde::{Deserialize, Serialize};
 #[cfg(any(test, feature = "reth-codec"))]
 use {reth_codecs::Compact, reth_codecs_derive::add_arbitrary_tests};
 
@@ -301,11 +302,12 @@ impl Sealable for TxL1Message {
 }
 
 /// Scroll specific transaction fields
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), serde(rename_all = "camelCase"))]
 pub struct ScrollL1MessageTransactionFields {
     /// The index of the transaction in the message queue.
-    #[serde(with = "alloy_serde::quantity")]
+    #[cfg_attr(any(test, feature = "serde"), serde(with = "alloy_serde::quantity"))]
     pub queue_index: u64,
     /// The sender of the transaction on the L1.
     pub sender: Address,
