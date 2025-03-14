@@ -3422,22 +3422,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "example-rpc-db"
-version = "0.0.0"
-dependencies = [
- "eyre",
- "futures",
- "jsonrpsee",
- "reth",
- "reth-chainspec",
- "reth-db",
- "reth-node-ethereum",
- "reth-provider",
- "tokio",
-]
-
-[[package]]
-name = "example-stateful-precompile"
+name = "example-precompile-cache"
 version = "0.0.0"
 dependencies = [
  "alloy-evm",
@@ -3454,6 +3439,21 @@ dependencies = [
  "reth-primitives",
  "reth-tracing",
  "schnellru",
+ "tokio",
+]
+
+[[package]]
+name = "example-rpc-db"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "jsonrpsee",
+ "reth",
+ "reth-chainspec",
+ "reth-db",
+ "reth-node-ethereum",
+ "reth-provider",
  "tokio",
 ]
 
