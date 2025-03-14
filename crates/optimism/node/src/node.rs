@@ -43,7 +43,7 @@ use reth_optimism_rpc::{
 use reth_optimism_txpool::{conditional::MaybeConditionalTransaction, OpPooledTx};
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc_api::DebugApiServer;
-use reth_rpc_eth_api::{ext::L2EthApiExtServer, EthApiServer};
+use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
