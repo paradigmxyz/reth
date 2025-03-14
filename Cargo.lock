@@ -6906,6 +6906,7 @@ dependencies = [
  "csv",
  "eyre",
  "futures",
+ "humantime",
  "op-alloy-consensus",
  "reqwest",
  "reth-cli-runner",
