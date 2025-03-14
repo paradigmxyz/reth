@@ -4143,8 +4143,8 @@ mod tests {
         test_harness = test_harness.with_blocks(blocks.clone());
 
         let last_persisted_block_number = 3;
-        test_harness.tree.persistence_state.last_persisted_block.number =
-            last_persisted_block_number;
+        test_harness.tree.persistence_state.last_persisted_block =
+            blocks[last_persisted_block_number as usize].recovered_block.num_hash();
 
         let persistence_threshold = 4;
         let memory_block_buffer_target = 3;
