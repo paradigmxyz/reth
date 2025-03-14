@@ -493,7 +493,7 @@ where
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(config.nodes_sorted.clone(), config.state_sorted.clone());
-        let max_concurrency = 32;
+        let max_concurrency = 256;
         let proof_task = ProofTaskManager::new(
             executor.handle().clone(),
             config.consistent_view.clone(),
