@@ -42,7 +42,6 @@ use reth_optimism_rpc::{
 };
 use reth_optimism_txpool::{conditional::MaybeConditionalTransaction, OpPooledTx};
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
-use reth_rpc::DebugApi;
 use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
@@ -311,9 +310,6 @@ where
             ctx.node.pool().clone(),
             ctx.node.provider().clone(),
         );
-
-        let debug_api =
-            DebugApi::new(rpc_add_ons.a, BlockingTaskGuard::new(10), ctx.node.block_executor());
 
         rpc_add_ons
             .launch_add_ons_with(ctx, move |modules, auth_modules, registry| {
