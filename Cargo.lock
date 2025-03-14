@@ -7871,6 +7871,7 @@ dependencies = [
  "revm-context",
  "secp256k1",
  "serde",
+ "serde_with",
  "test-fuzz",
 ]
 

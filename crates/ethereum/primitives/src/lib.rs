@@ -20,7 +20,7 @@ pub use transaction::*;
 mod alloy_compat;
 
 /// Bincode-compatible serde implementations.
-#[cfg(feature = "serde-bincode-compat")]
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
     pub use super::receipt::serde_bincode_compat::*;
 }

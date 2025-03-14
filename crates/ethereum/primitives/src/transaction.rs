@@ -941,7 +941,7 @@ impl From<PooledTransaction> for TransactionSigned {
 }
 
 /// Bincode-compatible transaction type serde implementations.
-#[cfg(feature = "serde-bincode-compat")]
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_consensus::{

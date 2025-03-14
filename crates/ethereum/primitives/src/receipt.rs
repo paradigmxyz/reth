@@ -193,7 +193,7 @@ impl InMemorySize for Receipt {
 
 impl reth_primitives_traits::Receipt for Receipt {}
 
-#[cfg(feature = "serde-bincode-compat")]
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::TxType;
@@ -210,13 +210,14 @@ pub(super) mod serde_bincode_compat {
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
-    /// #[derive(Serialize, Deserialize)]
+    /// #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     /// struct Data {
     ///     #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
     ///     receipt: Receipt,
     /// }
     /// ```
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct Receipt<'a> {
         /// Receipt type.
         #[serde(deserialize_with = "deserde_txtype")]
@@ -297,13 +298,13 @@ pub(super) mod serde_bincode_compat {
         use crate::{receipt::serde_bincode_compat, Receipt};
         use arbitrary::Arbitrary;
         use rand::Rng;
-        use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
         #[test]
         fn test_receipt_bincode_roundtrip() {
             #[serde_as]
-            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            #[derive(Debug, PartialEq, Eq)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
                 reseipt: Receipt,
