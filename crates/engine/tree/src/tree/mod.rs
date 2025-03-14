@@ -2134,7 +2134,7 @@ where
 
         debug!(target: "engine::tree", remove_above=persisted.number, "on-disk reorg detected");
 
-        return Ok(Some(persisted.number))
+        Ok(Some(persisted.number))
     }
 
     /// Invoked when we the canonical chain has been updated.
