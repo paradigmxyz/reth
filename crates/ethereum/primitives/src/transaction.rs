@@ -334,7 +334,7 @@ impl RlpEcdsaEncodableTx for Transaction {
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct TransactionSigned {
     /// Transaction hash
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     hash: OnceLock<TxHash>,
     /// The transaction signature values
     signature: Signature,
