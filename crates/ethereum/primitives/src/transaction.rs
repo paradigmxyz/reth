@@ -25,7 +25,6 @@ use reth_primitives_traits::{
     InMemorySize, SignedTransaction,
 };
 use revm_context::TxEnv;
-use serde::{Deserialize, Serialize};
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -55,7 +54,8 @@ macro_rules! impl_from_signed {
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub enum Transaction {
@@ -327,7 +327,8 @@ impl RlpEcdsaEncodableTx for Transaction {
 }
 
 /// Signed Ethereum transaction.
-#[derive(Debug, Clone, Eq, Serialize, Deserialize, derive_more::AsRef, derive_more::Deref)]
+#[derive(Debug, Clone, Eq, derive_more::AsRef, derive_more::Deref)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[cfg_attr(feature = "test-utils", derive(derive_more::DerefMut))]
 #[serde(rename_all = "camelCase")]
@@ -949,10 +950,10 @@ pub mod serde_bincode_compat {
     };
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
-    use serde::{Deserialize, Serialize};
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[allow(missing_docs)]
     pub enum Transaction<'a> {
         Legacy(TxLegacy<'a>),
@@ -987,7 +988,8 @@ pub mod serde_bincode_compat {
     }
 
     /// Bincode-compatible [`super::TransactionSigned`] serde implementation.
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct TransactionSigned<'a> {
         hash: TxHash,
         signature: Signature,
@@ -1031,11 +1033,11 @@ pub mod serde_bincode_compat {
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_testing_utils::generators;
-        use serde::{Deserialize, Serialize};
 
         #[test]
         fn test_transaction_bincode_roundtrip() {
-            #[derive(Debug, Serialize, Deserialize)]
+            #[derive(Debug)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             struct Data<'a> {
                 transaction: serde_bincode_compat::Transaction<'a>,
             }
@@ -1052,7 +1054,8 @@ pub mod serde_bincode_compat {
 
         #[test]
         fn test_transaction_signed_bincode_roundtrip() {
-            #[derive(Debug, Serialize, Deserialize)]
+            #[derive(Debug)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             struct Data<'a> {
                 transaction: serde_bincode_compat::TransactionSigned<'a>,
             }

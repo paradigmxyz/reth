@@ -27,7 +27,8 @@ pub type BlockBody = alloy_consensus::BlockBody<TransactionSigned>;
 
 /// Helper struct that specifies the ethereum
 /// [`NodePrimitives`](reth_primitives_traits::NodePrimitives) types.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct EthPrimitives;
 
