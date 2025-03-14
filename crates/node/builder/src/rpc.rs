@@ -448,7 +448,11 @@ where
         ext: F,
     ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
     where
-        F: FnOnce(&mut TransportRpcModules, &mut AuthRpcModule) -> eyre::Result<()>,
+        F: FnOnce(
+            &mut TransportRpcModules,
+            &mut AuthRpcModule,
+            &mut RpcRegistry<N, EthB::EthApi>,
+        ) -> eyre::Result<()>,
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
@@ -505,7 +509,7 @@ where
 
         let RpcHooks { on_rpc_started, extend_rpc_modules } = hooks;
 
-        ext(ctx.modules, ctx.auth_module)?;
+        ext(ctx.modules, ctx.auth_module, ctx.registry)?;
         extend_rpc_modules.extend_rpc_modules(ctx)?;
 
         let server_config = config.rpc.rpc_server_config();
@@ -568,7 +572,7 @@ where
     type Handle = RpcHandle<N, EthB::EthApi>;
 
     async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
-        self.launch_add_ons_with(ctx, |_, _| Ok(())).await
+        self.launch_add_ons_with(ctx, |_, _, _| Ok(())).await
     }
 }
 
