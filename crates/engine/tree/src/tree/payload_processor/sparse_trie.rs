@@ -9,7 +9,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_provider::{BlockReader, DBProvider, DatabaseProviderFactory, StateCommitmentProvider};
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, Nibbles,
+    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState, Nibbles,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -68,23 +68,23 @@ where
         let mut num_iterations = 0;
         let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
 
-        while let Ok(mut update) = self.updates.recv() {
+        while let Ok(update) = self.updates.recv() {
             num_iterations += 1;
-            let mut num_updates = 1;
+
+            let mut updates = vec![update];
             while let Ok(next) = self.updates.try_recv() {
-                update.extend(next);
-                num_updates += 1;
+                updates.push(next);
             }
 
             debug!(
                 target: "engine::root",
-                num_updates,
-                account_proofs = update.multiproof.account_subtree.len(),
-                storage_proofs = update.multiproof.storages.len(),
+                num_updates = updates.len(),
+                account_proofs = updates.iter().map(|u| u.multiproof.account_subtree.len()).sum::<usize>(),
+                storage_proofs = updates.iter().map(|u| u.multiproof.storages.len()).sum::<usize>(),
                 "Updating sparse trie"
             );
 
-            let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
+            let elapsed = update_sparse_trie(&mut trie, updates).map_err(|e| {
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
@@ -118,7 +118,7 @@ pub struct StateRootComputeOutcome {
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 pub(crate) fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
-    SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
+    updates: Vec<SparseTrieUpdate>,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,
@@ -129,7 +129,11 @@ where
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
-    trie.reveal_multiproof(multiproof)?;
+    let mut state = HashedPostState::default();
+    for update in updates {
+        trie.reveal_multiproof(update.multiproof)?;
+        state.extend(update.state);
+    }
     let reveal_multiproof_elapsed = started_at.elapsed();
     trace!(
         target: "engine::root::sparse",
