@@ -1006,7 +1006,7 @@ where
             modules: Default::default(),
             blocking_pool_guard,
             block_executor,
-            eth_config: EthConfig::default(),
+            eth_config: config.eth,
         }
     }
 }
