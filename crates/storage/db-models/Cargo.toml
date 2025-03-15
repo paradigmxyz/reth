@@ -50,7 +50,7 @@ std = [
     "alloy-primitives/std",
     "reth-primitives-traits/std",
     "bytes?/std",
-    "serde/std",
+    "serde?/std",
 ]
 serde = [
     "dep:serde",
