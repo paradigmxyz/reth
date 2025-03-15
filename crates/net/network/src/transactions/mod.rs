@@ -197,7 +197,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 
     /// Requests the transactions directly from the given peer.
     ///
-    /// Returns `None` if the peer is not connected.
+    /// Returns `RecoveryError` if the peer is not connected.
     ///
     /// **Note**: this returns the response from the peer as received.
     pub async fn get_pooled_transactions_from(
