@@ -1893,16 +1893,51 @@ impl TransportRpcModules {
         Ok(())
     }
 
-    pub fn filter_methods<F>(&self, filter: F) -> Methods
+    /// Filters HTTP methods based on the given filter function.
+    pub fn filter_http<F>(&self, filter: F) -> Methods
     where
         F: Fn(&str) -> bool,
     {
         let mut methods = Methods::new();
-        let method_names = self.existing_module.method_names().filter(|s| filter(s));
+        let method_names = self.http.as_ref().expect("REASON").method_names().filter(|s| filter(s));
 
         for name in method_names {
-            if let Some(matched_method) = self.existing_module.method(name).cloned() {
-                methods.verify_and_insert(name, matched_method);
+            if let Some(matched_method) = self.http.as_ref().and_then(|m| m.method(name)).cloned() {
+                let _ = methods.verify_and_insert(name, matched_method);
+            }
+        }
+
+        methods
+    }
+
+    /// Filters WS methods based on the given filter function
+    pub fn filter_ws<F>(&self, filter: F) -> Methods
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+        let method_names = self.ws.as_ref().expect("REASON").method_names().filter(|s| filter(s));
+
+        for name in method_names {
+            if let Some(matched_method) = self.ws.as_ref().and_then(|m| m.method(name)).cloned() {
+                let _ = methods.verify_and_insert(name, matched_method);
+            }
+        }
+
+        methods
+    }
+
+    /// Filters the IPC methods based on the given filter function
+    pub fn filter_ipc<F>(&self, filter: F) -> Methods
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+        let method_names = self.ipc.as_ref().expect("REASON").method_names().filter(|s| filter(s));
+
+        for name in method_names {
+            if let Some(matched_method) = self.ipc.as_ref().and_then(|m| m.method(name)).cloned() {
+                let _ = methods.verify_and_insert(name, matched_method);
             }
         }
 
