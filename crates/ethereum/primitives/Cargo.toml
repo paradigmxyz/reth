@@ -34,7 +34,7 @@ derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, features = ["rand"] }
-serde.workspace = true
+serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -63,7 +63,7 @@ std = [
     "alloy-rlp/std",
     "reth-primitives-traits/std",
     "reth-zstd-compressors?/std",
-    "serde/std",
+    "serde?/std",
     "alloy-eips/std",
     "derive_more/std",
     "secp256k1?/std",
@@ -96,4 +96,16 @@ serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
+]
+serde = [
+    "dep:serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "alloy-rpc-types-eth?/serde",
+    "rand?/serde",
+    "reth-codecs?/serde",
+    "reth-primitives-traits/serde",
+    "revm-context/serde",
+    "secp256k1?/serde",
 ]

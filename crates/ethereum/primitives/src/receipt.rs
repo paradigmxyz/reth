@@ -7,11 +7,11 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
-use serde::{Deserialize, Serialize};
 
 /// Typed ethereum transaction receipt.
 /// Receipt containing result of transaction execution.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "reth-codec", derive(reth_codecs::CompactZstd))]
 #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests)]
@@ -193,7 +193,7 @@ impl InMemorySize for Receipt {
 
 impl reth_primitives_traits::Receipt for Receipt {}
 
-#[cfg(feature = "serde-bincode-compat")]
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::TxType;
@@ -297,13 +297,13 @@ pub(super) mod serde_bincode_compat {
         use crate::{receipt::serde_bincode_compat, Receipt};
         use arbitrary::Arbitrary;
         use rand::Rng;
-        use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
 
         #[test]
         fn test_receipt_bincode_roundtrip() {
             #[serde_as]
-            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            #[derive(Debug, PartialEq, Eq)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
                 reseipt: Receipt,

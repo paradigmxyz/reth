@@ -49,6 +49,7 @@ serde = [
     "alloy-consensus/serde",
     "revm-database/serde",
     "reth-trie-common/serde",
+    "reth-ethereum-primitives/serde",
 ]
 serde-bincode-compat = [
     "serde",

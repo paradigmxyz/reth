@@ -78,6 +78,7 @@ serde = [
     "revm-database/serde",
     "reth-stages-types/serde",
     "revm-state/serde",
+    "reth-ethereum-primitives/serde",
 ]
 test-utils = [
     "triehash",
