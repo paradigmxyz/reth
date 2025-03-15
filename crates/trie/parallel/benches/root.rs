@@ -3,7 +3,7 @@ use alloy_primitives::{B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 use reth_provider::{
     providers::ConsistentDbView, test_utils::create_test_provider_factory, StateWriter, TrieWriter,
 };
