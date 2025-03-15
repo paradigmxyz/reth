@@ -566,10 +566,10 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::B256;
     use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion};
+    use reth_ethereum_primitives::BlockBody;
     use reth_network_api::PeerRequestSender;
     use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
     use reth_network_peers::PeerId;
-    use reth_primitives::BlockBody;
     use reth_storage_api::noop::NoopProvider;
     use std::{
         future::poll_fn,
