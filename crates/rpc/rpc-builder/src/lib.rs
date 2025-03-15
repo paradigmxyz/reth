@@ -1893,6 +1893,22 @@ impl TransportRpcModules {
         Ok(())
     }
 
+    pub fn filter_methods<F>(&self, filter: F) -> Methods
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+        let method_names = self.existing_module.method_names().filter(|s| filter(s));
+
+        for name in method_names {
+            if let Some(matched_method) = self.existing_module.method(name).cloned() {
+                methods.verify_and_insert(name, matched_method);
+            }
+        }
+
+        methods
+    }
+
     /// Merge the given [Methods] in the configured http methods.
     ///
     /// Fails if any of the methods in other is present already.
