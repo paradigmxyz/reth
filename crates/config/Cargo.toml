@@ -10,14 +10,23 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["serde"]
+serde = [
+    "dep:serde",
+    "reth-network-types/serde",
+    "reth-prune-types/serde",
+    "reth-stages-types/serde",
+]
+
 [dependencies]
 # reth
-reth-network-types = { workspace = true, features = ["serde"] }
-reth-prune-types = { workspace = true, features = ["serde"] }
-reth-stages-types = { workspace = true, features = ["serde"] }
+reth-network-types = { workspace = true }
+reth-prune-types = { workspace = true }
+reth-stages-types = { workspace = true }
 
 # serde
-serde.workspace = true
+serde = { workspace = true, optional = true }
 humantime-serde.workspace = true
 
 # toml
