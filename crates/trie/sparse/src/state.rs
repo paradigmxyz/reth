@@ -1069,8 +1069,15 @@ mod tests {
                     BranchNodeCompact {
                         state_mask: TrieMask::new(0b11),
                         tree_mask: TrieMask::default(),
-                        hash_mask: TrieMask::default(),
-                        hashes: Arc::new(vec![]),
+                        hash_mask: TrieMask::new(0b11),
+                        hashes: Arc::new(vec![
+                            b256!(
+                                "0x60a609d341cf463fbba963c8c0ee4e29561a1e6d63eaeb2e613b84b3734efa4d"
+                            ),
+                            b256!(
+                                "0x467e50cc243214ee52e747be078661fd75884c0ac83879818f4730c6146d75d1"
+                            )
+                        ]),
                         root_hash: None
                     }
                 )]),

@@ -924,7 +924,7 @@ impl<P> RevealedSparseTrie<P> {
                                 // is a blinded node that has its hash mask bit set according to the
                                 // database, set the hash mask bit and save the hash.
                                 let hash = child.as_hash().filter(|_| {
-                                    child_node_type.is_branch() ||
+                                    !child_node_type.is_hash() ||
                                         (child_node_type.is_hash() &&
                                             self.branch_node_hash_masks
                                                 .get(&path)
@@ -1742,6 +1742,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_empty_update_multiple_lower_nibbles() {
+        reth_tracing::init_test_tracing();
+
         let paths = (0..=16).map(|b| Nibbles::unpack(B256::with_last_byte(b))).collect::<Vec<_>>();
         let value = || Account::default();
         let value_encoded = || {
