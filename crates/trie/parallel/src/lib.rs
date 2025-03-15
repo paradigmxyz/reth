@@ -19,6 +19,8 @@ pub mod root;
 /// Implementation of parallel proof computation.
 pub mod proof;
 
+pub mod proof_task;
+
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]
 pub mod metrics;

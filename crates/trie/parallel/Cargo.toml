@@ -18,6 +18,7 @@ reth-storage-errors.workspace = true
 reth-trie.workspace = true
 reth-trie-common.workspace = true
 reth-trie-db.workspace = true
+reth-db-api.workspace = true
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
 
@@ -62,6 +63,7 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-provider/test-utils",
     "reth-trie-db/test-utils",
+    "reth-db-api/test-utils",
 ]
 
 [[bench]]
