@@ -1,7 +1,6 @@
 use std::{fmt, io};
 
 use futures::Future;
-use reth_primitives::Receipt;
 use tokio::io::AsyncReadExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, FramedRead};
@@ -203,9 +202,9 @@ where
     }
 }
 
-/// [`Receipt`] with block number.
+/// Receipt with block number.
 #[derive(Debug, PartialEq, Eq)]
-pub struct ReceiptWithBlockNumber<R = Receipt> {
+pub struct ReceiptWithBlockNumber<R> {
     /// Receipt.
     pub receipt: R,
     /// Block number.
@@ -220,7 +219,7 @@ mod test {
         hex, Bytes, Log, LogData,
     };
     use alloy_rlp::{Decodable, RlpDecodable};
-    use reth_primitives::{Receipt, TxType};
+    use reth_ethereum_primitives::{Receipt, TxType};
     use reth_tracing::init_test_tracing;
     use tokio_util::codec::Decoder;
 
@@ -240,7 +239,7 @@ mod test {
     #[rlp(trailing)]
     struct MockReceiptContainer(Option<MockReceipt>);
 
-    impl TryFrom<MockReceipt> for ReceiptWithBlockNumber {
+    impl TryFrom<MockReceipt> for ReceiptWithBlockNumber<Receipt> {
         type Error = FileClientError;
         fn try_from(exported_receipt: MockReceipt) -> Result<Self, Self::Error> {
             let MockReceipt { tx_type, status, cumulative_gas_used, logs, block_number: number } =
@@ -262,7 +261,7 @@ mod test {
     struct MockReceiptFileCodec;
 
     impl Decoder for MockReceiptFileCodec {
-        type Item = Option<ReceiptWithBlockNumber>;
+        type Item = Option<ReceiptWithBlockNumber<Receipt>>;
         type Error = FileClientError;
 
         fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -325,7 +324,7 @@ mod test {
         }
     }
 
-    fn receipt_block_1() -> ReceiptWithBlockNumber {
+    fn receipt_block_1() -> ReceiptWithBlockNumber<Receipt> {
         let log_1 = Log {
             address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
@@ -379,7 +378,7 @@ mod test {
         ReceiptWithBlockNumber { receipt, number: 1 }
     }
 
-    fn receipt_block_2() -> ReceiptWithBlockNumber {
+    fn receipt_block_2() -> ReceiptWithBlockNumber<Receipt> {
         let log_1 = Log {
             address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
@@ -417,7 +416,7 @@ mod test {
         ReceiptWithBlockNumber { receipt, number: 2 }
     }
 
-    fn receipt_block_3() -> ReceiptWithBlockNumber {
+    fn receipt_block_3() -> ReceiptWithBlockNumber<Receipt> {
         let log_1 = Log {
             address: address!("0x8ce8c13d816fe6daf12d6fd9e4952e1fc88850ae"),
             data: LogData::new(
