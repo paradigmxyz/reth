@@ -11,9 +11,11 @@ use alloy_consensus::{
 };
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
-use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
+use op_alloy_rpc_types_engine::{
+    OpExecutionData, OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4,
+};
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, PayloadBuilder, PayloadConfig,
 };
@@ -21,24 +23,23 @@ use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::ChainSpecProvider;
 use reth_execution_types::ExecutionOutcome;
 use reth_node_api::{
-    Block as _, BuiltPayload, EngineTypes, ExecutionData, NodePrimitives, PayloadAttributes,
+    Block as _, BuiltPayload, EngineTypes, NodePrimitives, PayloadAttributes,
     PayloadBuilderAttributes, PayloadBuilderError, PayloadTypes,
 };
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_node::{
-    BasicOpReceiptBuilder, OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilder,
-    OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilder, OpPayloadBuilderAttributes,
 };
 use reth_optimism_payload_builder::builder::{
     ExecutedPayload, OpBuilder, OpPayloadBuilderCtx, OpPayloadTransactions,
 };
 use reth_optimism_primitives::OpTransactionSigned;
+use reth_payload_primitives::ExecutionPayload;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
-use revm::db::State;
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 
@@ -50,11 +51,11 @@ pub struct CustomBuiltPayload(OpBuiltPayload<CustomNodePrimitives>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomExecutionData {
-    inner: ExecutionData,
+    inner: OpExecutionData,
     extension: u64,
 }
 
-impl reth_node_api::ExecutionPayload for CustomExecutionData {
+impl ExecutionPayload for CustomExecutionData {
     fn block_hash(&self) -> revm_primitives::B256 {
         self.inner.block_hash()
     }
@@ -267,15 +268,14 @@ impl EngineTypes for CustomEngineTypes {
         let extension = block.header().extension;
         let block_hash = block.hash();
         let block = block.into_block().map_header(|header| header.inner);
-        let (payload, sidecar) = ExecutionPayload::from_block_unchecked(block_hash, &block);
-        CustomExecutionData { inner: ExecutionData { payload, sidecar }, extension }
+        let inner = OpExecutionData::from_block_unchecked(block_hash, &block);
+        CustomExecutionData { inner, extension }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct CustomPayloadBuilder<Provider> {
-    inner:
-        OpPayloadBuilder<CustomTxPool<Provider>, Provider, CustomEvmConfig, CustomNodePrimitives>,
+    inner: OpPayloadBuilder<CustomTxPool<Provider>, Provider, CustomEvmConfig>,
 }
 
 impl<Provider> CustomPayloadBuilder<Provider> {
@@ -341,7 +341,7 @@ where
             (builder.execute(&mut db, &ctx)?, db.take_bundle(), db.database.db)
         };
 
-        let ExecutedPayload { info, withdrawals_root } = match executed {
+        let ExecutedPayload { info, withdrawals_root, .. } = match executed {
             BuildOutcomeKind::Better { payload } | BuildOutcomeKind::Freeze(payload) => payload,
             BuildOutcomeKind::Cancelled => {
                 return Ok(BuildOutcomeKind::Cancelled.with_cached_reads(cached_reads))
@@ -415,7 +415,7 @@ where
             BlockBody {
                 transactions: info.executed_transactions,
                 ommers: vec![],
-                withdrawals: ctx.withdrawals().cloned(),
+                withdrawals: ctx.config.attributes.withdrawals().cloned(),
             },
         );
 

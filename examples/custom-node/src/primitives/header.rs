@@ -185,5 +185,9 @@ mod serde_bincode_compat {
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             CustomHeader { inner: self.inner.as_repr(), extension: self.extension }
         }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
     }
 }

@@ -23,6 +23,8 @@ reth-optimism-forks.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
 reth-payload-util.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true

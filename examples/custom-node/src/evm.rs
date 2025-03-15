@@ -2,16 +2,67 @@ use crate::{
     chainspec::CustomChainSpec,
     primitives::{CustomHeader, CustomNodePrimitives},
 };
+use alloy_consensus::Block;
 use alloy_evm::block::BlockExecutorFor;
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm, OpEvmFactory};
 use op_revm::OpSpecId;
-use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, Database, EvmEnv, InspectorFor};
-use reth_optimism_node::{OpBlockAssembler, OpEvmConfig, OpNextBlockEnvAttributes};
+use reth_evm::{
+    block::{BlockExecutionError, BlockExecutor},
+    execute::BlockExecutorFactory,
+    ConfigureEvm, Database, Evm, EvmEnv, InspectorFor, OnStateHook,
+};
+use reth_execution_types::BlockExecutionResult;
+use reth_optimism_node::{
+    OpBlockAssembler, OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder,
+};
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives::SealedBlock;
+use reth_primitives::{Recovered, SealedBlock};
 use reth_primitives_traits::SealedHeader;
 use reth_revm::State;
+use revm::context::{result::ExecutionResult, TxEnv};
 use std::sync::Arc;
+
+pub struct CustomBlockExecutor<Evm> {
+    /// Inner Op execution strategy.
+    inner: OpBlockExecutor<Evm, OpRethReceiptBuilder, Arc<CustomChainSpec>>,
+}
+
+impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
+where
+    DB: Database + 'db,
+    E: Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
+{
+    type Transaction = OpTransactionSigned;
+    type Receipt = OpReceipt;
+    type Evm = E;
+
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        self.inner.apply_pre_execution_changes()
+    }
+
+    fn execute_transaction_with_result_closure(
+        &mut self,
+        tx: Recovered<&OpTransactionSigned>,
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
+    ) -> Result<u64, BlockExecutionError> {
+        self.inner.execute_transaction_with_result_closure(tx, f)
+    }
+
+    fn finish(
+        mut self,
+    ) -> Result<(Self::Evm, BlockExecutionResult<OpReceipt>), BlockExecutionError> {
+        // Invoke inner finish method to apply Ethereum post-execution changes
+        self.inner.finish()
+    }
+
+    fn set_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {
+        self.inner.set_state_hook(_hook)
+    }
+
+    fn evm_mut(&mut self) -> &mut Self::Evm {
+        self.inner.evm_mut()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CustomEvmConfig {
@@ -47,8 +98,8 @@ impl BlockExecutorFactory for CustomEvmConfig {
             inner: OpBlockExecutor::new(
                 evm,
                 ctx,
-                self.inner.chain_spec(),
-                self.inner.executor_factory.receipt_builder(),
+                self.inner.chain_spec().clone(),
+                *self.inner.executor_factory.receipt_builder(),
             ),
         }
     }
@@ -83,7 +134,7 @@ impl ConfigureEvm for CustomEvmConfig {
 
     fn context_for_block<'a>(
         &self,
-        block: &'a SealedBlock<OpTransactionSigned>,
+        block: &'a SealedBlock<Block<OpTransactionSigned, CustomHeader>>,
     ) -> OpBlockExecutionCtx {
         self.inner.context_for_block(block)
     }

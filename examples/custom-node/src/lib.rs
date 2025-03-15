@@ -10,25 +10,23 @@
 //#![cfg(feature = "optimism")]
 
 use chainspec::CustomChainSpec;
-use engine::{CustomEngineTypes, CustomPayloadBuilder};
+use engine::CustomEngineTypes;
 use evm::CustomEvmConfig;
 use op_alloy_consensus::OpPooledTransaction;
 use primitives::{Block, BlockBody, CustomHeader, CustomNodePrimitives};
 use reth_eth_wire_types::NetworkPrimitives;
 use reth_evm::execute::BasicBlockExecutorProvider;
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 use reth_node_builder::{
     components::{ComponentsBuilder, ExecutorBuilder, PayloadServiceBuilder},
     Node,
 };
 use reth_optimism_node::{
-    node::{
-        OpAddOns, OpConsensusBuilder, OpNetworkBuilder, OpPoolBuilder,
-        OpStorage,
-    },
+    node::{OpAddOns, OpConsensusBuilder, OpNetworkBuilder, OpPoolBuilder, OpStorage},
     OpNode,
 };
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_payload_builder::PayloadBuilderHandle;
 use txpool::CustomTxPool;
 
 pub mod chainspec;
@@ -56,13 +54,13 @@ type CustomAddOns<N> = OpAddOns<N>;
 impl<N> Node<N> for CustomNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<
-            Engine = CustomEngineTypes,
-            ChainSpec = CustomChainSpec,
-            Primitives = CustomNodePrimitives,
-            Storage = OpStorage,
-        >,
-    >,
+            Types: NodeTypesWithEngine<
+                Engine = CustomEngineTypes,
+                ChainSpec = CustomChainSpec,
+                Primitives = CustomNodePrimitives,
+                Storage = OpStorage,
+            >,
+        > + FullNodeComponents,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -94,14 +92,13 @@ impl<Node> PayloadServiceBuilder<Node, CustomTxPool<Node::Provider>> for CustomP
 where
     Node: FullNodeTypes<Types = CustomNode>,
 {
-    type PayloadBuilder = CustomPayloadBuilder<Node::Provider>;
-
-    async fn build_payload_builder(
-        &self,
+    async fn spawn_payload_builder_service(
+        self,
         ctx: &reth_node_builder::BuilderContext<Node>,
         pool: CustomTxPool<Node::Provider>,
-    ) -> eyre::Result<Self::PayloadBuilder> {
-        Ok(CustomPayloadBuilder::new(pool, ctx.provider().clone(), ctx.chain_spec().clone()))
+    ) -> eyre::Result<
+        PayloadBuilderHandle<<<Node as FullNodeTypes>::Types as NodeTypesWithEngine>::Engine>,
+    > {
     }
 }
 
