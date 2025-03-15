@@ -71,6 +71,9 @@ reth-stages = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
 reth-cli-commands.workspace = true
 
+[build-dependencies]
+reth-optimism-chainspec = { workspace = true, features = ["std"] }
+
 [features]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
