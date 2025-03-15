@@ -9,7 +9,7 @@ use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
-use reth_primitives::TxType;
+use reth_ethereum_primitives::TxType;
 use std::{fmt, fmt::Display, mem};
 use tracing::trace;
 
