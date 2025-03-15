@@ -40,18 +40,12 @@ use tokio::{
 use tracing::{error, trace};
 
 /// Limits for logs queries
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct QueryLimits {
     /// Maximum number of blocks that could be scanned per filter
     max_blocks_per_filter: Option<u64>,
     /// Maximum number of logs that can be returned in a response
     max_logs_per_response: Option<usize>,
-}
-
-impl Default for QueryLimits {
-    fn default() -> Self {
-        Self { max_blocks_per_filter: None, max_logs_per_response: None }
-    }
 }
 
 /// RPC interface for ETH filter API, implementing only the `eth_getLogs` method
