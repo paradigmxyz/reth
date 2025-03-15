@@ -63,7 +63,7 @@ std = [
     "alloy-rlp/std",
     "reth-primitives-traits/std",
     "reth-zstd-compressors?/std",
-    "serde/std",
+    "serde?/std",
     "alloy-eips/std",
     "derive_more/std",
     "secp256k1?/std",
@@ -98,6 +98,7 @@ serde-bincode-compat = [
     "reth-primitives-traits/serde-bincode-compat",
 ]
 serde = [
+    "dep:serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
