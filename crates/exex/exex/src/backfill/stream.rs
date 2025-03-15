@@ -5,9 +5,10 @@ use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
 use reth_node_api::NodePrimitives;
-use reth_primitives::{EthPrimitives, RecoveredBlock};
+use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{BlockReader, Chain, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
