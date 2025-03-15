@@ -89,8 +89,6 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
-    /// Execution data.
-    type ExecutionData: ExecutionPayload;
 
     /// Converts a [`BuiltPayload`] into an [`Self::ExecutionData`].
     fn block_to_payload(
