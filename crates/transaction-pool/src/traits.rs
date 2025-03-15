@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    fmt::Debug,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -56,7 +57,7 @@ pub type PoolPooledTx<P> = <<P as TransactionPool>::Transaction as PoolTransacti
 /// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
 /// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionPool: Send + Sync + Clone {
+pub trait TransactionPool: Send + Sync + Clone + Debug {
     /// The transaction type of the pool
     type Transaction: EthPoolTransaction;
 

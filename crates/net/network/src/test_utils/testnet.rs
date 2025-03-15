@@ -34,6 +34,7 @@ use reth_transaction_pool::{
 use secp256k1::SecretKey;
 use std::{
     fmt,
+    fmt::Debug,
     future::Future,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     pin::Pin,
@@ -180,6 +181,7 @@ where
         + BlockReaderIdExt
         + HeaderProvider
         + Clone
+        + Debug
         + 'static,
     Pool: TransactionPool,
 {

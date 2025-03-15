@@ -3,6 +3,7 @@ pub use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 
 use std::{
+    fmt::Debug,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     sync::Arc,
@@ -63,8 +64,8 @@ impl<N, C, AO> AnyNode<N, C, AO> {
 impl<N, C, AO> NodeTypes for AnyNode<N, C, AO>
 where
     N: FullNodeTypes,
-    C: Send + Sync + Unpin + 'static,
-    AO: Send + Sync + Unpin + Clone + 'static,
+    C: Send + Sync + Debug + Unpin + 'static,
+    AO: Send + Sync + Debug + Unpin + Clone + 'static,
 {
     type Primitives = <N::Types as NodeTypes>::Primitives;
 
@@ -78,8 +79,8 @@ where
 impl<N, C, AO> NodeTypesWithEngine for AnyNode<N, C, AO>
 where
     N: FullNodeTypes,
-    C: Send + Sync + Unpin + 'static,
-    AO: Send + Sync + Unpin + Clone + 'static,
+    C: Send + Sync + Unpin + Debug + 'static,
+    AO: Send + Sync + Unpin + Debug + Clone + 'static,
 {
     type Engine = <N::Types as NodeTypesWithEngine>::Engine;
 }
@@ -87,8 +88,8 @@ where
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
 where
     N: FullNodeTypes + Clone,
-    C: NodeComponentsBuilder<N> + Clone + Sync + Unpin + 'static,
-    AO: NodeAddOns<NodeAdapter<N, C::Components>> + Clone + Sync + Unpin + 'static,
+    C: NodeComponentsBuilder<N> + Debug + Clone + Sync + Unpin + 'static,
+    AO: NodeAddOns<NodeAdapter<N, C::Components>> + Clone + Debug + Sync + Unpin + 'static,
 {
     type ComponentsBuilder = C;
     type AddOns = AO;

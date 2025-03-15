@@ -6,12 +6,13 @@ use reth_transaction_pool::{PoolConfig, PoolTransaction, SubPoolLimit, Transacti
 use std::{collections::HashSet, future::Future};
 
 use crate::{BuilderContext, FullNodeTypes};
-
+use std::fmt::Debug;
 /// A type that knows how to build the transaction pool.
-pub trait PoolBuilder<Node: FullNodeTypes>: Send {
+pub trait PoolBuilder<Node: FullNodeTypes>: Send + Debug {
     /// The transaction pool to build.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
+        + Debug
         + 'static;
 
     /// Creates the transaction pool.
@@ -26,8 +27,9 @@ where
     Node: FullNodeTypes,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
+        + Debug
         + 'static,
-    F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
+    F: FnOnce(&BuilderContext<Node>) -> Fut + Send + Debug,
     Fut: Future<Output = eyre::Result<Pool>> + Send,
 {
     type Pool = Pool;

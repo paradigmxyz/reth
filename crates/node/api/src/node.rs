@@ -15,17 +15,16 @@ use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{future::Future, marker::PhantomData};
-
+use std::{fmt::Debug, future::Future, marker::PhantomData};
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds stateful
 /// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
+pub trait FullNodeTypes: Send + Sync + Unpin + Debug + 'static {
     /// Node's types with the database.
-    type Types: NodeTypesWithEngine;
+    type Types: NodeTypesWithEngine + Debug;
     /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
+    type DB: Database + DatabaseMetrics + Clone + Unpin + Debug + 'static;
     /// The provider type used to interact with the node.
     type Provider: FullProvider<NodeTypesWithDBAdapter<Self::Types, Self::DB>>;
 }
@@ -36,8 +35,8 @@ pub struct FullNodeTypesAdapter<Types, DB, Provider>(PhantomData<(Types, DB, Pro
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypesWithEngine,
-    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
+    Types: NodeTypesWithEngine + Debug,
+    DB: Database + DatabaseMetrics + Clone + Unpin + Debug + 'static,
     Provider: FullProvider<NodeTypesWithDBAdapter<Types, DB>>,
 {
     type Types = Types;
@@ -48,22 +47,22 @@ where
 /// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
 pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
     PayloadBuilder<
-    Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
-    BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
->
+        Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+    > + Debug
 {
 }
 
 impl<T, N: NodeTypesWithEngine> PayloadBuilderFor<N> for T where
     T: PayloadBuilder<
-        Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
-        BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
-    >
+            Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+            BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+        > + Debug
 {
 }
 
 /// Encapsulates all types and components of the node.
-pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
+pub trait FullNodeComponents: FullNodeTypes + Clone + Debug + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 

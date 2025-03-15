@@ -12,8 +12,7 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkPrimitives;
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{future::Future, marker::PhantomData};
-
+use std::{fmt::Debug, future::Future, marker::PhantomData};
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
 ///
 /// This type is stateful and captures the configuration of the node's components.
@@ -296,25 +295,25 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
 where
     Node: FullNodeTypes,
     PoolB: PoolBuilder<
-        Node,
-        Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Pooled = <NetworkB::Primitives as NetworkPrimitives>::PooledTransaction,
+            Node,
+            Pool: TransactionPool<
+                Transaction: PoolTransaction<
+                    Pooled = <NetworkB::Primitives as NetworkPrimitives>::PooledTransaction,
+                >,
             >,
-        >,
-    >,
+        > + Debug,
     NetworkB: NetworkBuilder<
-        Node,
-        PoolB::Pool,
-        Primitives: NetworkPrimitives<
-            BlockHeader = HeaderTy<Node::Types>,
-            BlockBody = BodyTy<Node::Types>,
-            Block = BlockTy<Node::Types>,
-        >,
-    >,
-    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
-    ExecB: ExecutorBuilder<Node>,
-    ConsB: ConsensusBuilder<Node>,
+            Node,
+            PoolB::Pool,
+            Primitives: NetworkPrimitives<
+                BlockHeader = HeaderTy<Node::Types>,
+                BlockBody = BodyTy<Node::Types>,
+                Block = BlockTy<Node::Types>,
+            >,
+        > + Debug,
+    PayloadB: PayloadServiceBuilder<Node, PoolB::Pool> + Debug,
+    ExecB: ExecutorBuilder<Node> + Debug,
+    ConsB: ConsensusBuilder<Node> + Debug,
 {
     type Components = Components<
         Node,
@@ -401,9 +400,10 @@ where
     Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
+        + Debug
         + 'static,
-    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
-    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
+    EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + Debug + 'static,
+    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>> + Debug,
     Cons:
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
 {
