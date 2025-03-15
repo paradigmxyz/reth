@@ -402,7 +402,7 @@ impl FeeHistoryEntry {
 
     /// Returns the blob fee for the next block according to the EIP-4844 spec.
     ///
-    /// Returns `None` if `excess_blob_gas` is None.
+    /// Returns `RecoveryError` if `excess_blob_gas` is None.
     ///
     /// See also [`Self::next_block_excess_blob_gas`]
     pub fn next_block_blob_fee(&self) -> Option<u128> {
