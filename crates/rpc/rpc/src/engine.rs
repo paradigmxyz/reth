@@ -1,3 +1,4 @@
+use crate::eth::EngineEthFilter;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, Bytes, B256, U256, U64};
 use alloy_rpc_types_eth::{
@@ -6,7 +7,7 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;
-use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
+use reth_rpc_api::{EngineEthApiServer, EthApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
 use reth_rpc_eth_api::{FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
@@ -43,7 +44,7 @@ where
             RpcReceipt<Eth::NetworkTypes>,
             RpcHeader<Eth::NetworkTypes>,
         > + FullEthApiTypes,
-    EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,
+    EthFilter: EngineEthFilter + Send + Sync + 'static,
 {
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
