@@ -842,6 +842,7 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
 mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
+    use alloy_eips::eip2124::ForkFilter;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
@@ -849,9 +850,9 @@ mod tests {
         HelloMessageWithProtocols, P2PStream, Status, StatusBuilder, UnauthedEthStream,
         UnauthedP2PStream,
     };
+    use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
-    use reth_primitives::{EthereumHardfork, ForkFilter};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::{
         net::{TcpListener, TcpStream},
