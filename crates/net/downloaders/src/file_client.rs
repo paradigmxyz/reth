@@ -1,5 +1,3 @@
-use std::{collections::HashMap, io, path::Path, sync::Arc};
-
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
@@ -15,8 +13,8 @@ use reth_network_p2p::{
     BlockClient,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{SealedBlock, SealedHeader};
-use reth_primitives_traits::{Block, BlockBody, FullBlock};
+use reth_primitives_traits::{Block, BlockBody, FullBlock, SealedBlock, SealedHeader};
+use std::{collections::HashMap, io, path::Path, sync::Arc};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
@@ -43,7 +41,7 @@ pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 1_000_000_000;
 ///
 /// This reads the entire file into memory, so it is not suitable for large files.
 #[derive(Debug, Clone)]
-pub struct FileClient<B: Block = reth_primitives::Block> {
+pub struct FileClient<B: Block> {
     /// The buffered headers retrieved when fetching new bodies.
     headers: HashMap<BlockNumber, B::Header>,
 
@@ -197,7 +195,7 @@ impl<B: FullBlock> FileClient<B> {
     }
 }
 
-struct FileClientBuilder<B: Block = reth_primitives::Block> {
+struct FileClientBuilder<B: Block> {
     pub consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
     pub parent_header: Option<SealedHeader<B::Header>>,
 }
@@ -576,11 +574,11 @@ mod tests {
     use futures_util::stream::StreamExt;
     use rand::Rng;
     use reth_consensus::{noop::NoopConsensus, test_utils::TestConsensus};
+    use reth_ethereum_primitives::Block;
     use reth_network_p2p::{
         bodies::downloader::BodyDownloader,
         headers::downloader::{HeaderDownloader, SyncTarget},
     };
-    use reth_primitives::Block;
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 
@@ -595,18 +593,17 @@ mod tests {
         // create an empty file
         let file = tempfile::tempfile().unwrap();
 
-        let client: Arc<FileClient> = Arc::new(
+        let client: Arc<FileClient<Block>> = Arc::new(
             FileClient::from_file(file.into(), NoopConsensus::arc())
                 .await
                 .unwrap()
                 .with_bodies(bodies.clone()),
         );
-        let mut downloader = BodiesDownloaderBuilder::default()
-            .build::<reth_primitives::Block, _, _>(
-                client.clone(),
-                Arc::new(TestConsensus::default()),
-                factory,
-            );
+        let mut downloader = BodiesDownloaderBuilder::default().build::<Block, _, _>(
+            client.clone(),
+            Arc::new(TestConsensus::default()),
+            factory,
+        );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
@@ -625,7 +622,7 @@ mod tests {
         let p0 = child_header(&p1);
 
         let file = tempfile::tempfile().unwrap();
-        let client: Arc<FileClient> = Arc::new(
+        let client: Arc<FileClient<Block>> = Arc::new(
             FileClient::from_file(file.into(), NoopConsensus::arc()).await.unwrap().with_headers(
                 HashMap::from([
                     (0u64, p0.clone_header()),
@@ -656,7 +653,7 @@ mod tests {
         // Generate some random blocks
         let (file, headers, _) = generate_bodies_file(0..=19).await;
         // now try to read them back
-        let client: Arc<FileClient> =
+        let client: Arc<FileClient<Block>> =
             Arc::new(FileClient::from_file(file, NoopConsensus::arc()).await.unwrap());
 
         // construct headers downloader and use first header
@@ -682,18 +679,17 @@ mod tests {
         let (file, headers, mut bodies) = generate_bodies_file(0..=19).await;
 
         // now try to read them back
-        let client: Arc<FileClient> =
+        let client: Arc<FileClient<Block>> =
             Arc::new(FileClient::from_file(file, NoopConsensus::arc()).await.unwrap());
 
         // insert headers in db for the bodies downloader
         insert_headers(factory.db_ref().db(), &headers);
 
-        let mut downloader = BodiesDownloaderBuilder::default()
-            .build::<reth_primitives::Block, _, _>(
-                client.clone(),
-                Arc::new(TestConsensus::default()),
-                factory,
-            );
+        let mut downloader = BodiesDownloaderBuilder::default().build::<Block, _, _>(
+            client.clone(),
+            Arc::new(TestConsensus::default()),
+            factory,
+        );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
