@@ -4,7 +4,7 @@ use eyre::eyre;
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer};
 use std::{
     ffi::OsStr,
     fs,
@@ -18,7 +18,8 @@ const EXTENSION: &str = "toml";
 pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
 
 /// Configuration for the reth node.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct Config {
     /// Configuration for each stage in the pipeline.
@@ -95,7 +96,8 @@ impl Config {
 }
 
 /// Configuration for each stage in the pipeline.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct StageConfig {
     /// Header stage configuration.
@@ -138,7 +140,8 @@ impl StageConfig {
 }
 
 /// Header stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct HeadersConfig {
     /// The maximum number of requests to send concurrently.
@@ -171,7 +174,8 @@ impl Default for HeadersConfig {
 }
 
 /// Body stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
@@ -210,7 +214,8 @@ impl Default for BodiesConfig {
 }
 
 /// Sender recovery stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct SenderRecoveryConfig {
     /// The maximum number of transactions to process before committing progress to the database.
@@ -224,7 +229,8 @@ impl Default for SenderRecoveryConfig {
 }
 
 /// Execution stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct ExecutionConfig {
     /// The maximum number of blocks to process before the execution stage commits.
@@ -266,7 +272,8 @@ impl From<ExecutionConfig> for ExecutionStageThresholds {
 }
 
 /// Prune stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct PruneStageConfig {
     /// The maximum number of entries to prune before committing progress to the database.
@@ -280,7 +287,8 @@ impl Default for PruneStageConfig {
 }
 
 /// Hashing stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct HashingConfig {
     /// The threshold (in number of blocks) for switching between
@@ -297,7 +305,8 @@ impl Default for HashingConfig {
 }
 
 /// Merkle stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct MerkleConfig {
     /// The threshold (in number of blocks) for switching from incremental trie building of changes
@@ -312,7 +321,8 @@ impl Default for MerkleConfig {
 }
 
 /// Transaction Lookup stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct TransactionLookupConfig {
     /// The maximum number of transactions to process before writing to disk.
@@ -326,7 +336,8 @@ impl Default for TransactionLookupConfig {
 }
 
 /// Common ETL related configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct EtlConfig {
     /// Data directory where temporary files are created.
@@ -360,7 +371,8 @@ impl EtlConfig {
 }
 
 /// History stage configuration.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct IndexHistoryConfig {
     /// The maximum number of blocks to process before committing progress to the database.
@@ -374,7 +386,8 @@ impl Default for IndexHistoryConfig {
 }
 
 /// Pruning configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[serde(default)]
 pub struct PruneConfig {
     /// Minimum pruning interval measured in blocks.
@@ -436,7 +449,7 @@ fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::
 where
     D: Deserializer<'de>,
 {
-    #[derive(Deserialize)]
+    #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
     #[serde(untagged)]
     enum AnyDuration {
         #[serde(deserialize_with = "humantime_serde::deserialize")]
