@@ -830,10 +830,11 @@ where
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
-    /// [`EngineTypes::ExecutionData`]. The Execution layer executes the transactions and validates
-    /// the state in the block header, then passes validation data back to Consensus layer, that
-    /// adds the block to the head of its own blockchain and attests to it. The block is then
-    /// broadcast over the consensus p2p network in the form of a "Beacon block".
+    /// [`PayloadTypes::ExecutionData`](reth_payload_primitives::PayloadTypes::ExecutionData). The
+    /// Execution layer executes the transactions and validates the state in the block header,
+    /// then passes validation data back to Consensus layer, that adds the block to the head of
+    /// its own blockchain and attests to it. The block is then broadcast over the consensus p2p
+    /// network in the form of a "Beacon block".
     ///
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).

@@ -39,9 +39,10 @@ impl<T: PayloadTypes> PayloadTypes for OpEngineTypes<T> {
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
+    type ExecutionData = T::ExecutionData;
 }
 
-impl<T: PayloadTypes> EngineTypes for OpEngineTypes<T>
+impl<T: PayloadTypes<ExecutionData = OpExecutionData>> EngineTypes for OpEngineTypes<T>
 where
     T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = OpBlock>>
         + TryInto<ExecutionPayloadV1>
@@ -53,13 +54,12 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
-    type ExecutionData = OpExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> OpExecutionData {
+    ) -> <T as PayloadTypes>::ExecutionData {
         OpExecutionData::from_block_unchecked(block.hash(), &block.into_block())
     }
 }
@@ -73,6 +73,7 @@ impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N> {
     type BuiltPayload = OpBuiltPayload<N>;
     type PayloadAttributes = OpPayloadAttributes;
     type PayloadBuilderAttributes = OpPayloadBuilderAttributes<N::SignedTx>;
+    type ExecutionData = OpExecutionData;
 }
 
 /// Validator for Optimism engine API.
