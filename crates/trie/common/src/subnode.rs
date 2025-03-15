@@ -68,6 +68,8 @@ impl reth_codecs::Compact for StoredSubNode {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::TrieMask;
     use alloy_primitives::B256;
@@ -82,7 +84,7 @@ mod tests {
                 state_mask: TrieMask::new(1),
                 tree_mask: TrieMask::new(0),
                 hash_mask: TrieMask::new(1),
-                hashes: vec![B256::ZERO],
+                hashes: Arc::new(vec![B256::ZERO]),
                 root_hash: None,
             }),
         };

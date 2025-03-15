@@ -723,6 +723,8 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use alloy_primitives::{
         b256,
@@ -737,7 +739,7 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNode, LeafNode, StorageMultiProof, TrieMask,
+        BranchNode, BranchNodeCompact, LeafNode, StorageMultiProof, TrieMask,
     };
 
     #[test]
@@ -1062,7 +1064,16 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse_updates,
             TrieUpdates {
-                account_nodes: HashMap::default(),
+                account_nodes: HashMap::from_iter([(
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact {
+                        state_mask: TrieMask::new(0b11),
+                        tree_mask: TrieMask::default(),
+                        hash_mask: TrieMask::default(),
+                        hashes: Arc::new(vec![]),
+                        root_hash: None
+                    }
+                )]),
                 storage_tries: HashMap::from_iter([(
                     b256!("0x1100000000000000000000000000000000000000000000000000000000000000"),
                     StorageTrieUpdates {

@@ -681,7 +681,8 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
-# [patch.crates-io]
+[patch.crates-io]
+alloy-trie = { git = "https://github.com/alloy-rs/trie", branch = "alexey/always-store-branch-nodes" }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
