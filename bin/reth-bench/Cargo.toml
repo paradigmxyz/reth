@@ -58,6 +58,7 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 clap = { workspace = true, features = ["derive", "env"] }
 eyre.workspace = true
 thiserror.workspace = true
+humantime.workspace = true
 
 # for writing data
 csv.workspace = true
