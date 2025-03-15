@@ -17,6 +17,7 @@ serde = [
     "reth-network-types/serde",
     "reth-prune-types/serde",
     "reth-stages-types/serde",
+    "alloy-primitives/serde",
 ]
 
 [dependencies]
