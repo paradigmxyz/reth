@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
@@ -24,7 +24,6 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_primitives::EthereumHardforks;
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
