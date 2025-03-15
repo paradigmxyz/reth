@@ -1893,6 +1893,75 @@ impl TransportRpcModules {
         Ok(())
     }
 
+    /// Merge the given [Methods] in the configured http methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    ///
+    /// Returns [Ok(false)] if no http transport is configured.
+    pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
+        if let Some(ref mut http) = self.http {
+            return http.merge(other.into()).map(|_| true)
+        }
+        Ok(false)
+    }
+
+    /// Merge the given [Methods] in the configured ws methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    ///
+    /// Returns [Ok(false)] if no ws transport is configured.
+    pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
+        if let Some(ref mut ws) = self.ws {
+            return ws.merge(other.into()).map(|_| true)
+        }
+        Ok(false)
+    }
+
+    /// Merge the given [Methods] in the configured ipc methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    ///
+    /// Returns [Ok(false)] if no ipc transport is configured.
+    pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
+        if let Some(ref mut ipc) = self.ipc {
+            return ipc.merge(other.into()).map(|_| true)
+        }
+        Ok(false)
+    }
+
+    /// Merge the given [`Methods`] in all configured methods.
+    ///
+    /// Fails if any of the methods in other is present already.
+    pub fn merge_configured(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<(), RegisterMethodError> {
+        let other = other.into();
+        self.merge_http(other.clone())?;
+        self.merge_ws(other.clone())?;
+        self.merge_ipc(other)?;
+        Ok(())
+    }
+
+    /// Filters methods for the specified transport type based on the given filter function.
+    ///
+    /// A `Methods` instance containing only the methods that pass the given filter function.
+    pub fn filter_methods<F>(&self, module: RethRpcModule, filter: F) -> Methods
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+        if self.module_config().contains_http(&module) {
+            methods = self.filter_http(filter)
+        } else if self.module_config().contains_ws(&module) {
+            methods = self.filter_ws(filter)
+        } else if self.module_config().contains_ipc(&module) {
+            methods = self.filter_ipc(filter)
+        }
+
+        methods
+    }
+
     /// Filters HTTP methods based on the given filter function.
     pub fn filter_http<F>(&self, filter: F) -> Methods
     where
@@ -1942,56 +2011,6 @@ impl TransportRpcModules {
         }
 
         methods
-    }
-
-    /// Merge the given [Methods] in the configured http methods.
-    ///
-    /// Fails if any of the methods in other is present already.
-    ///
-    /// Returns [Ok(false)] if no http transport is configured.
-    pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
-        if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
-        }
-        Ok(false)
-    }
-
-    /// Merge the given [Methods] in the configured ws methods.
-    ///
-    /// Fails if any of the methods in other is present already.
-    ///
-    /// Returns [Ok(false)] if no ws transport is configured.
-    pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
-        if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true)
-        }
-        Ok(false)
-    }
-
-    /// Merge the given [Methods] in the configured ipc methods.
-    ///
-    /// Fails if any of the methods in other is present already.
-    ///
-    /// Returns [Ok(false)] if no ipc transport is configured.
-    pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
-        if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true)
-        }
-        Ok(false)
-    }
-
-    /// Merge the given [`Methods`] in all configured methods.
-    ///
-    /// Fails if any of the methods in other is present already.
-    pub fn merge_configured(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<(), RegisterMethodError> {
-        let other = other.into();
-        self.merge_http(other.clone())?;
-        self.merge_ws(other.clone())?;
-        self.merge_ipc(other)?;
-        Ok(())
     }
 
     /// Removes the method with the given name from the configured http methods.
