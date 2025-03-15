@@ -202,7 +202,7 @@ where
     }
 }
 
-/// [`Receipt`] with block number.
+/// Receipt with block number.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ReceiptWithBlockNumber<R> {
     /// Receipt.
