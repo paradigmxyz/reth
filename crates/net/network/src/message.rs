@@ -3,7 +3,7 @@
 //! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
@@ -14,7 +14,6 @@ use reth_eth_wire::{
 };
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
-use reth_primitives::ReceiptWithBloom;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
@@ -23,7 +22,7 @@ use tokio::sync::oneshot;
 
 /// Internal form of a `NewBlock` message
 #[derive(Debug, Clone)]
-pub struct NewBlockMessage<B = reth_primitives::Block> {
+pub struct NewBlockMessage<B = reth_ethereum_primitives::Block> {
     /// Hash of the block
     pub hash: B256,
     /// Raw received message

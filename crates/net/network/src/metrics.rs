@@ -1,10 +1,10 @@
 use metrics::Histogram;
 use reth_eth_wire::DisconnectReason;
+use reth_ethereum_primitives::TxType;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives::TxType;
 
 /// Scope for monitoring transactions sent from the manager to the tx manager
 pub(crate) const NETWORK_POOL_TRANSACTIONS_SCOPE: &str = "network.pool.transactions";

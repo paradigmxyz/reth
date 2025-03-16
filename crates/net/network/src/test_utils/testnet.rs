@@ -8,19 +8,20 @@ use crate::{
     transactions::{TransactionsHandle, TransactionsManager, TransactionsManagerConfig},
     NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
+use alloy_consensus::transaction::PooledTransaction;
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks, Hardforks};
 use reth_eth_wire::{
     protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
 };
+use reth_ethereum_primitives::TransactionSigned;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
     NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{PooledTransaction, TransactionSigned};
 use reth_storage_api::{
     noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
 };
@@ -224,9 +225,9 @@ where
 impl<C, Pool> Testnet<C, Pool>
 where
     C: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = reth_ethereum_primitives::Block,
+            Receipt = reth_ethereum_primitives::Receipt,
+            Header = alloy_consensus::Header,
         > + HeaderProvider
         + Clone
         + Unpin
@@ -293,9 +294,9 @@ impl<C, Pool> fmt::Debug for Testnet<C, Pool> {
 impl<C, Pool> Future for Testnet<C, Pool>
 where
     C: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = reth_ethereum_primitives::Block,
+            Receipt = reth_ethereum_primitives::Receipt,
+            Header = alloy_consensus::Header,
         > + HeaderProvider
         + Unpin
         + 'static,
@@ -527,9 +528,9 @@ where
 impl<C, Pool> Future for Peer<C, Pool>
 where
     C: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
+            Block = reth_ethereum_primitives::Block,
+            Receipt = reth_ethereum_primitives::Receipt,
+            Header = alloy_consensus::Header,
         > + HeaderProvider
         + Unpin
         + 'static,

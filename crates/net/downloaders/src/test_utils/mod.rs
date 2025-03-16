@@ -5,7 +5,7 @@
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
 use alloy_primitives::B256;
 use futures::SinkExt;
-use reth_primitives::{BlockBody, SealedHeader};
+use reth_ethereum_primitives::BlockBody;
 use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
 use std::{collections::HashMap, io::SeekFrom, ops::RangeInclusive};
 use tokio::{fs::File, io::AsyncSeekExt};
@@ -13,6 +13,7 @@ use tokio_util::codec::FramedWrite;
 
 mod bodies_client;
 pub use bodies_client::TestBodiesClient;
+use reth_primitives_traits::SealedHeader;
 
 /// Metrics scope used for testing.
 pub(crate) const TEST_SCOPE: &str = "downloaders.test";

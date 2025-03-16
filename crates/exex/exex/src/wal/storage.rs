@@ -5,9 +5,9 @@ use std::{
 };
 
 use crate::wal::{WalError, WalResult};
+use reth_ethereum_primitives::EthPrimitives;
 use reth_exex_types::ExExNotification;
 use reth_node_api::NodePrimitives;
-use reth_primitives::EthPrimitives;
 use reth_tracing::tracing::debug;
 use tracing::instrument;
 
@@ -188,8 +188,10 @@ mod tests {
     #[test]
     fn decode_notification_wal() {
         let wal = include_bytes!("../../test-data/28.wal");
-        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<'_> =
-            rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
+        let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
+            '_,
+            reth_ethereum_primitives::EthPrimitives,
+        > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
         let notification: ExExNotification = notification.into();
         match notification {
             ExExNotification::ChainCommitted { new } => {

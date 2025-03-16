@@ -13,14 +13,14 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-provider.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-revm.workspace = true
+reth-storage-api.workspace = true
+reth-chain-state.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
