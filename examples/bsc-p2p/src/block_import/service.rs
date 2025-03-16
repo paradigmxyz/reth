@@ -234,6 +234,45 @@ mod tests {
         task::{Context, Poll},
     };
 
+    #[tokio::test]
+    async fn can_handle_valid_block() {
+        let mut fixture = TestFixture::new(EngineResponses::both_valid()).await;
+        fixture
+            .assert_block_import(|outcome| {
+                matches!(
+                    outcome,
+                    BlockImportOutcome { peer: _, result: Ok(BlockValidation::ValidBlock { .. }) }
+                )
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn can_handle_invalid_new_payload() {
+        let mut fixture = TestFixture::new(EngineResponses::invalid_new_payload()).await;
+        fixture
+            .assert_block_import(|outcome| {
+                matches!(
+                    outcome,
+                    BlockImportOutcome { peer: _, result: Err(BlockImportError::Other(_)) }
+                )
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn can_handle_invalid_fcu() {
+        let mut fixture = TestFixture::new(EngineResponses::invalid_fcu()).await;
+        fixture
+            .assert_block_import(|outcome| {
+                matches!(
+                    outcome,
+                    BlockImportOutcome { peer: _, result: Err(BlockImportError::Other(_)) }
+                )
+            })
+            .await;
+    }
+
     #[derive(Clone)]
     struct MockProvider;
 
@@ -269,30 +308,113 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn can_handle_valid_block() {
-        let consensus = Arc::new(ParliaConsensus::new(MockProvider));
+    /// Response configuration for engine messages
+    struct EngineResponses {
+        new_payload: PayloadStatusEnum,
+        fcu: PayloadStatusEnum,
+    }
 
-        // setup a mock engine
-        let (to_engine, mut from_engine) = mpsc::unbounded_channel();
-        let engine_handle: BeaconConsensusEngineHandle<EthEngineTypes> =
-            BeaconConsensusEngineHandle::new(to_engine);
+    impl EngineResponses {
+        fn both_valid() -> Self {
+            Self { new_payload: PayloadStatusEnum::Valid, fcu: PayloadStatusEnum::Valid }
+        }
 
-        // handle the EngineMessages
+        fn invalid_new_payload() -> Self {
+            Self {
+                new_payload: PayloadStatusEnum::Invalid { validation_error: "test error".into() },
+                fcu: PayloadStatusEnum::Valid,
+            }
+        }
+
+        fn invalid_fcu() -> Self {
+            Self {
+                new_payload: PayloadStatusEnum::Valid,
+                fcu: PayloadStatusEnum::Invalid { validation_error: "fcu error".into() },
+            }
+        }
+    }
+
+    /// Test fixture for block import tests
+    struct TestFixture {
+        handle: ImportHandle<EthEngineTypes>,
+    }
+
+    impl TestFixture {
+        /// Create a new test fixture with the given engine responses
+        async fn new(responses: EngineResponses) -> Self {
+            let consensus = Arc::new(ParliaConsensus::new(MockProvider));
+            let (to_engine, from_engine) = mpsc::unbounded_channel();
+            let engine_handle = BeaconConsensusEngineHandle::new(to_engine);
+
+            handle_engine_msg(from_engine, responses).await;
+
+            let (service, handle) = ImportService::new(consensus, engine_handle);
+            tokio::spawn(Box::pin(async move {
+                service.await.unwrap();
+            }));
+
+            Self { handle }
+        }
+
+        /// Run a block import test with the given outcome assertion
+        async fn assert_block_import<F>(&mut self, assert_fn: F)
+        where
+            F: Fn(&BlockImportOutcome<BscBlock<EthEngineTypes>>) -> bool,
+        {
+            let block_msg = create_test_block();
+            self.handle.send_block(block_msg, PeerId::random()).unwrap();
+
+            let waker = futures::task::noop_waker();
+            let mut cx = Context::from_waker(&waker);
+            let mut outcomes = Vec::new();
+
+            // Wait for both NewPayload and FCU outcomes
+            while outcomes.len() < 2 {
+                match self.handle.poll_outcome(&mut cx) {
+                    Poll::Ready(Some(outcome)) => {
+                        outcomes.push(outcome);
+                    }
+                    Poll::Ready(None) => break,
+                    Poll::Pending => tokio::task::yield_now().await,
+                }
+            }
+
+            // Assert that at least one outcome matches our criteria
+            assert!(
+                outcomes.iter().any(assert_fn),
+                "No outcome matched the expected criteria. Outcomes: {:?}",
+                outcomes
+            );
+        }
+    }
+
+    /// Creates a test block message
+    fn create_test_block() -> NewBlockMessage<Block> {
+        let block: reth_primitives::Block = Block::default();
+        let new_block = NewBlock { block: block.clone(), td: U128::ZERO };
+        NewBlockMessage { hash: block.header.hash_slow(), block: Arc::new(new_block) }
+    }
+
+    /// Helper function to handle engine messages with specified payload statuses
+    async fn handle_engine_msg(
+        mut from_engine: mpsc::UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
+        responses: EngineResponses,
+    ) {
         tokio::spawn(Box::pin(async move {
             while let Some(message) = from_engine.recv().await {
                 match message {
-                    BeaconEngineMessage::NewPayload { payload, tx } => {
-                        tx.send(Ok(PayloadStatus::new(PayloadStatusEnum::Valid, None))).unwrap();
+                    BeaconEngineMessage::NewPayload { payload: _, tx } => {
+                        tx.send(Ok(PayloadStatus::new(responses.new_payload.clone(), None)))
+                            .unwrap();
                     }
                     BeaconEngineMessage::ForkchoiceUpdated {
-                        state,
-                        payload_attrs,
-                        version,
+                        state: _,
+                        payload_attrs: _,
+                        version: _,
                         tx,
                     } => {
                         tx.send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::new(
-                            PayloadStatusEnum::Valid,
+                            responses.fcu.clone(),
                             None,
                         ))))
                         .unwrap();
@@ -301,42 +423,5 @@ mod tests {
                 }
             }
         }));
-
-        // setup the import service
-        let (service, mut handle) = ImportService::new(consensus.clone(), engine_handle);
-        tokio::spawn(Box::pin(async move {
-            service.await.unwrap();
-        }));
-
-        // create an empty block
-        let block: reth_primitives::Block = Block::default();
-        let new_block = NewBlock { block: block.clone(), td: U128::ZERO };
-        let block_msg =
-            NewBlockMessage { hash: block.header.hash_slow(), block: Arc::new(new_block) };
-
-        // send the block to the service
-        handle.send_block(block_msg.clone(), PeerId::random()).unwrap();
-
-        // poll the service until the block is processed
-        let waker = futures::task::noop_waker();
-        let mut cx = Context::from_waker(&waker);
-        loop {
-            match handle.poll_outcome(&mut cx) {
-                Poll::Ready(outcome) => {
-                    if let Some(outcome) = outcome {
-                        println!("Outcome: {:?}", outcome);
-                        assert!(matches!(
-                            outcome,
-                            BlockImportOutcome {
-                                peer: _,
-                                result: Ok(BlockValidation::ValidBlock { .. })
-                            }
-                        ));
-                        break;
-                    }
-                }
-                Poll::Pending => tokio::task::yield_now().await,
-            }
-        }
     }
 }

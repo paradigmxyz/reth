@@ -1,3 +1,4 @@
+#![allow(unused)]
 use handle::ImportHandle;
 use reth_engine_primitives::EngineTypes;
 use reth_network::import::BlockImport;
