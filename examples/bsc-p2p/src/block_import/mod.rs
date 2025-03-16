@@ -1,15 +1,18 @@
+use handle::ImportHandle;
 use reth_engine_primitives::EngineTypes;
 use reth_network::import::BlockImport;
 use reth_network_peers::PeerId;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives::NodePrimitives;
-use service::{BlockMsg, ImportHandle, Outcome};
+use service::{BlockMsg, Outcome};
 use std::{
     fmt,
     task::{ready, Context, Poll},
 };
 
-pub mod service;
+mod handle;
+mod parlia;
+mod service;
 
 pub struct BscBlockImport<EngineT: EngineTypes> {
     handle: ImportHandle<EngineT>,
