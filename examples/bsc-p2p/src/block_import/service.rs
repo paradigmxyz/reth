@@ -217,3 +217,126 @@ where
         Poll::Pending
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{B256, U128};
+    use alloy_rpc_types::engine::PayloadStatus;
+    use reth_chainspec::ChainInfo;
+    use reth_engine_primitives::{BeaconEngineMessage, OnForkChoiceUpdated};
+    use reth_eth_wire::NewBlock;
+    use reth_node_ethereum::EthEngineTypes;
+    use reth_primitives::Block;
+    use reth_provider::ProviderError;
+    use std::{
+        sync::Arc,
+        task::{Context, Poll},
+    };
+
+    #[derive(Clone)]
+    struct MockProvider;
+
+    impl BlockNumReader for MockProvider {
+        fn chain_info(&self) -> Result<ChainInfo, ProviderError> {
+            unimplemented!()
+        }
+
+        fn best_block_number(&self) -> Result<u64, ProviderError> {
+            Ok(0)
+        }
+
+        fn last_block_number(&self) -> Result<u64, ProviderError> {
+            Ok(0)
+        }
+
+        fn block_number(&self, _hash: B256) -> Result<Option<u64>, ProviderError> {
+            Ok(None)
+        }
+    }
+
+    impl BlockHashReader for MockProvider {
+        fn block_hash(&self, _number: u64) -> Result<Option<B256>, ProviderError> {
+            Ok(Some(B256::ZERO))
+        }
+
+        fn canonical_hashes_range(
+            &self,
+            _start: u64,
+            _end: u64,
+        ) -> Result<Vec<B256>, ProviderError> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn can_handle_valid_block() {
+        let consensus = Arc::new(ParliaConsensus::new(MockProvider));
+
+        // setup a mock engine
+        let (to_engine, mut from_engine) = mpsc::unbounded_channel();
+        let engine_handle: BeaconConsensusEngineHandle<EthEngineTypes> =
+            BeaconConsensusEngineHandle::new(to_engine);
+
+        // handle the EngineMessages
+        tokio::spawn(Box::pin(async move {
+            while let Some(message) = from_engine.recv().await {
+                match message {
+                    BeaconEngineMessage::NewPayload { payload, tx } => {
+                        tx.send(Ok(PayloadStatus::new(PayloadStatusEnum::Valid, None))).unwrap();
+                    }
+                    BeaconEngineMessage::ForkchoiceUpdated {
+                        state,
+                        payload_attrs,
+                        version,
+                        tx,
+                    } => {
+                        tx.send(Ok(OnForkChoiceUpdated::valid(PayloadStatus::new(
+                            PayloadStatusEnum::Valid,
+                            None,
+                        ))))
+                        .unwrap();
+                    }
+                    _ => {}
+                }
+            }
+        }));
+
+        // setup the import service
+        let (service, mut handle) = ImportService::new(consensus.clone(), engine_handle);
+        tokio::spawn(Box::pin(async move {
+            service.await.unwrap();
+        }));
+
+        // create an empty block
+        let block: reth_primitives::Block = Block::default();
+        let new_block = NewBlock { block: block.clone(), td: U128::ZERO };
+        let block_msg =
+            NewBlockMessage { hash: block.header.hash_slow(), block: Arc::new(new_block) };
+
+        // send the block to the service
+        handle.send_block(block_msg.clone(), PeerId::random()).unwrap();
+
+        // poll the service until the block is processed
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        loop {
+            match handle.poll_outcome(&mut cx) {
+                Poll::Ready(outcome) => {
+                    if let Some(outcome) = outcome {
+                        println!("Outcome: {:?}", outcome);
+                        assert!(matches!(
+                            outcome,
+                            BlockImportOutcome {
+                                peer: _,
+                                result: Ok(BlockValidation::ValidBlock { .. })
+                            }
+                        ));
+                        break;
+                    }
+                }
+                Poll::Pending => tokio::task::yield_now().await,
+            }
+        }
+    }
+}
