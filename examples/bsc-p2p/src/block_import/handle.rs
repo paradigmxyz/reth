@@ -9,7 +9,8 @@ use super::service::{BlockMsg, IncomingBlock, Outcome};
 
 /// A handle for interacting with the block import service.
 ///
-/// This handle provides a bidirectional communication channel with the [`ImportService`]:
+/// This handle provides a bidirectional communication channel with the
+/// [`super::service::ImportService`]:
 /// - Blocks can be sent to the service for import via [`send_block`](ImportHandle::send_block)
 /// - Import outcomes can be received via [`poll_outcome`](ImportHandle::poll_outcome)`
 pub struct ImportHandle<T: EngineTypes> {
