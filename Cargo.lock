@@ -3138,23 +3138,30 @@ version = "0.0.0"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types",
  "bytes",
  "derive_more 2.0.1",
+ "eyre",
  "futures",
  "reth-chainspec",
  "reth-discv4",
+ "reth-engine-primitives",
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
  "reth-network",
  "reth-network-api",
  "reth-network-peers",
+ "reth-node-ethereum",
+ "reth-payload-primitives",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-tracing",
  "secp256k1",
  "serde",
  "serde_json",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -5113,9 +5120,9 @@ dependencies = [
 
 [[package]]
 name = "libz-sys"
-version = "1.1.21"
+version = "1.1.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df9b68e50e6e0b26f672573834882eb57759f6db9b3be2ea3c35c91188bb4eaa"
+checksum = "8b70e7a7df205e92a1a4cd9aaae7898dac0aa555503cc0a649494d0d60e7651d"
 dependencies = [
  "cc",
  "libc",
@@ -6502,7 +6509,7 @@ checksum = "3779b94aeb87e8bd4e834cee3650289ee9e0d5677f976ecdb6d219e5f4f6cd94"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.3",
- "zerocopy 0.8.23",
+ "zerocopy 0.8.21",
 ]
 
 [[package]]
@@ -8199,6 +8206,7 @@ dependencies = [
  "reth-discv5",
  "reth-dns-discovery",
  "reth-ecies",
+ "reth-engine-primitives",
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
@@ -12936,11 +12944,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.23"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd97444d05a4328b90e75e503a34bad781f14e28a823ad3557f0750df1ebcbc6"
+checksum = "dcf01143b2dd5d134f11f545cf9f1431b13b749695cb33bcce051e7568f99478"
 dependencies = [
- "zerocopy-derive 0.8.23",
+ "zerocopy-derive 0.8.21",
 ]
 
 [[package]]
@@ -12956,9 +12964,9 @@ dependencies = [
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.23"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6352c01d0edd5db859a63e2605f4ea3183ddbd15e2c4a9e7d32184df75e4f154"
+checksum = "712c8386f4f4299382c9abee219bee7084f78fb939d88b6840fcc1320d5f6da2"
 dependencies = [
  "proc-macro2",
  "quote",
