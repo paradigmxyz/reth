@@ -19,7 +19,7 @@ use reth_trie_sparse::{
     SparseStateTrie,
 };
 use std::{
-    sync::mpsc::{self, Sender},
+    sync::mpsc,
     time::{Duration, Instant},
 };
 use tracing::{debug, trace, trace_span};
@@ -44,19 +44,15 @@ impl<F> SparseTrieTask<F>
 where
     F: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
 {
-    /// Runs the sparse trie task to completion and sends the outcome to the provided channel.
-    ///
-    /// We do not return the outcome directly to avoid waiting for the [`SparseStateTrie`] to drop.
-    pub(super) fn run(self, tx: Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>) {
-        tx.send(self.run_inner()).unwrap();
-    }
-
     /// Runs the sparse trie task to completion.
     ///
     /// This waits for new incoming [`SparseTrieUpdate`].
     ///
     /// This concludes once the last trie update has been received.
-    fn run_inner(self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    ///
+    /// NOTE: This function does not take `self` by value to prevent blocking on [`SparseStateTrie`]
+    /// drop.
+    pub(super) fn run(&self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
         let provider_ro = self.config.consistent_view.provider_ro()?;
         let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(

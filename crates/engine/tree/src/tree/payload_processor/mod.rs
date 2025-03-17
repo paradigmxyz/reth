@@ -153,7 +153,8 @@ where
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
         self.executor.spawn_blocking(move || {
-            sparse_trie_task.run(state_root_tx);
+            let res = sparse_trie_task.run();
+            let _ = state_root_tx.send(res);
         });
 
         PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }
