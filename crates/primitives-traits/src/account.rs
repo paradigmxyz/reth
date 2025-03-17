@@ -165,10 +165,9 @@ impl reth_codecs::Compact for Bytecode {
 
         use compact_ids::*;
 
-        let original_len = buf
-            .read_u32::<byteorder::BigEndian>()
-            .expect("could not read bytecode length") as usize;
-        let bytes = Bytes::from(buf.copy_to_bytes(original_len));
+        let len = buf.read_u32::<byteorder::BigEndian>().expect("could not read bytecode length")
+            as usize;
+        let bytes = Bytes::from(buf.copy_to_bytes(len));
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
             LEGACY_RAW_BYTECODE_ID => Self(RevmBytecode::new_raw(bytes)),
@@ -176,14 +175,15 @@ impl reth_codecs::Compact for Bytecode {
                 unreachable!("Junk data in database: checked Bytecode variant was removed")
             }
             LEGACY_ANALYZED_BYTECODE_ID => {
-                // As jumptable needs to be u8 aligned, the loaded length can be 
+                let original_len = buf.read_u64::<byteorder::BigEndian>().unwrap() as usize;
+                // As jumptable needs to be u8 aligned, the loaded length can be
                 // different from saved, so we are aligning them to bytes len or
                 // original len to preserve same number of used bits.
                 let jump_table_len =
                     if buf.len() * 8 >= bytes.len() { bytes.len() } else { original_len };
                 Self(RevmBytecode::new_analyzed(
                     bytes,
-                    buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
+                    original_len,
                     revm_bytecode::JumpTable::from_slice(buf, jump_table_len),
                 ))
             }
