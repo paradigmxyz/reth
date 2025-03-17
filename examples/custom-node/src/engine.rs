@@ -1,46 +1,31 @@
-use std::sync::Arc;
-
 use crate::{
     chainspec::CustomChainSpec,
-    evm::CustomEvmConfig,
-    primitives::{CustomHeader, CustomNodePrimitives},
-    txpool::CustomTxPool,
+    primitives::{Block, CustomNodePrimitives},
 };
-use alloy_consensus::{
-    proofs::calculate_transaction_root, Block, BlockBody, Header, EMPTY_OMMER_ROOT_HASH,
-};
-use alloy_eips::merge::BEACON_NONCE;
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
-use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
-use reth_basic_payload_builder::{
-    BuildArguments, BuildOutcome, BuildOutcomeKind, PayloadBuilder, PayloadConfig,
+use op_alloy_rpc_types_engine::{
+    OpExecutionData, OpExecutionPayload, OpExecutionPayloadEnvelopeV3,
+    OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
 };
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
-use reth_chainspec::ChainSpecProvider;
-use reth_execution_types::ExecutionOutcome;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_node_api::{
-    Block as _, BuiltPayload, EngineTypes, ExecutionData, NodePrimitives, PayloadAttributes,
-    PayloadBuilderAttributes, PayloadBuilderError, PayloadTypes,
+    validate_version_specific_fields, AddOnsContext, BuiltPayload, EngineApiMessageVersion,
+    EngineObjectValidationError, EngineTypes, EngineValidator, ExecutionPayload,
+    FullNodeComponents, InvalidPayloadAttributesError, NewPayloadError, NodePrimitives,
+    NodeTypesWithEngine, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+    PayloadTypes, PayloadValidator,
 };
-use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_optimism_node::{
-    BasicOpReceiptBuilder, OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilder,
-    OpPayloadBuilderAttributes,
-};
-use reth_optimism_payload_builder::builder::{
-    ExecutedPayload, OpBuilder, OpPayloadBuilderCtx, OpPayloadTransactions,
-};
+use reth_node_builder::rpc::EngineValidatorBuilder;
+use reth_optimism_node::{OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes};
+use reth_optimism_payload_builder::OpExecutionPayloadValidator;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-use reth_revm::database::StateProviderDatabase;
-use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
-use revm::db::State;
+use reth_primitives::RecoveredBlock;
+use reth_primitives_traits::SealedBlock;
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CustomEngineTypes;
@@ -50,11 +35,11 @@ pub struct CustomBuiltPayload(OpBuiltPayload<CustomNodePrimitives>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomExecutionData {
-    inner: ExecutionData,
+    inner: OpExecutionData,
     extension: u64,
 }
 
-impl reth_node_api::ExecutionPayload for CustomExecutionData {
+impl ExecutionPayload for CustomExecutionData {
     fn block_hash(&self) -> revm_primitives::B256 {
         self.inner.block_hash()
     }
@@ -65,6 +50,22 @@ impl reth_node_api::ExecutionPayload for CustomExecutionData {
 
     fn parent_hash(&self) -> revm_primitives::B256 {
         self.inner.parent_hash()
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.inner.gas_used()
+    }
+
+    fn timestamp(&self) -> u64 {
+        self.inner.timestamp()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<revm_primitives::B256> {
+        self.inner.parent_beacon_block_root()
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<alloy_eips::eip4895::Withdrawal>> {
+        None
     }
 }
 
@@ -221,7 +222,7 @@ impl From<CustomBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
             // No blobs for OP.
             blobs_bundle: BlobsBundleV1 { blobs: vec![], commitments: vec![], proofs: vec![] },
             parent_beacon_block_root: value.0.block().parent_beacon_block_root.unwrap_or_default(),
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+            execution_payload: OpExecutionPayloadV4::from_block_unchecked(
                 value.0.block().hash(),
                 &value.into(),
             ),
@@ -251,235 +252,105 @@ impl EngineTypes for CustomEngineTypes {
         let extension = block.header().extension;
         let block_hash = block.hash();
         let block = block.into_block().map_header(|header| header.inner);
-        let (payload, sidecar) = ExecutionPayload::from_block_unchecked(block_hash, &block);
-        CustomExecutionData { inner: ExecutionData { payload, sidecar }, extension }
+        let (payload, sidecar) = OpExecutionPayload::from_block_unchecked(block_hash, &block);
+        CustomExecutionData { inner: OpExecutionData { payload, sidecar }, extension }
     }
 }
 
+/// Custom engine validator
 #[derive(Debug, Clone)]
-pub struct CustomPayloadBuilder<Provider> {
-    inner:
-        OpPayloadBuilder<CustomTxPool<Provider>, Provider, CustomEvmConfig, CustomNodePrimitives>,
+pub struct CustomEngineValidator {
+    inner: OpExecutionPayloadValidator<CustomChainSpec>,
 }
 
-impl<Provider> CustomPayloadBuilder<Provider> {
-    pub fn new(
-        pool: CustomTxPool<Provider>,
-        provider: Provider,
-        chain_spec: Arc<CustomChainSpec>,
-    ) -> Self {
-        Self {
-            inner: OpPayloadBuilder::new(
-                pool,
-                provider,
-                CustomEvmConfig::new(chain_spec),
-                BasicOpReceiptBuilder::default(),
+impl CustomEngineValidator {
+    /// Instantiates a new validator.
+    pub const fn new(chain_spec: Arc<CustomChainSpec>) -> Self {
+        Self { inner: OpExecutionPayloadValidator::new(chain_spec) }
+    }
+
+    /// Returns the chain spec used by the validator.
+    #[inline]
+    fn chain_spec(&self) -> &CustomChainSpec {
+        self.inner.chain_spec()
+    }
+}
+
+impl PayloadValidator for CustomEngineValidator {
+    type Block = Block;
+    type ExecutionData = CustomExecutionData;
+
+    fn ensure_well_formed_payload(
+        &self,
+        payload: CustomExecutionData,
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self
+            .inner
+            .ensure_well_formed_payload(payload.inner)
+            .map_err(|e| NewPayloadError::Other(e.into()))?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+    }
+}
+
+impl<T> EngineValidator<T> for CustomEngineValidator
+where
+    T: EngineTypes<
+        PayloadAttributes = CustomPayloadAttributes,
+        ExecutionData = CustomExecutionData,
+    >,
+{
+    fn validate_version_specific_fields(
+        &self,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, T::PayloadAttributes>,
+    ) -> Result<(), EngineObjectValidationError> {
+        validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
+    }
+
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &T::PayloadAttributes,
+    ) -> Result<(), EngineObjectValidationError> {
+        validate_version_specific_fields(
+            self.chain_spec(),
+            version,
+            PayloadOrAttributes::<Self::ExecutionData, T::PayloadAttributes>::PayloadAttributes(
+                attributes,
             ),
-        }
+        )?;
+
+        Ok(())
+    }
+
+    fn validate_payload_attributes_against_header(
+        &self,
+        _attr: &<T as PayloadTypes>::PayloadAttributes,
+        _header: &<Self::Block as reth::api::Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
+        // skip default timestamp validation
+        Ok(())
     }
 }
 
-impl<Provider> CustomPayloadBuilder<Provider>
+/// Custom engine validator builder
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct CustomEngineValidatorBuilder;
+
+impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    Provider: Clone
-        + StateProviderFactory
-        + BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec = CustomChainSpec>
-        + 'static,
-{
-    fn build_payload<Txs>(
-        &self,
-        args: BuildArguments<CustomPayloadBuilderAttributes, CustomBuiltPayload>,
-        txs: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync,
-    ) -> Result<BuildOutcome<CustomBuiltPayload>, PayloadBuilderError>
-    where
-        Txs: PayloadTransactions<
-            Transaction = <CustomTxPool<Provider> as TransactionPool>::Transaction,
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            Engine = CustomEngineTypes,
+            ChainSpec = CustomChainSpec,
+            Primitives = CustomNodePrimitives,
         >,
-    {
-        let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
-        let builder = OpBuilder::new(txs);
-
-        let ctx = OpPayloadBuilderCtx {
-            evm_config: self.inner.evm_config.clone(),
-            da_config: self.inner.config.da_config.clone(),
-            chain_spec: self.inner.client.chain_spec(),
-            config: PayloadConfig {
-                parent_header: config.parent_header.clone(),
-                attributes: config.attributes.inner.clone(),
-            },
-            evm_env: self
-                .inner
-                .evm_env(&config.attributes.inner, &config.parent_header)
-                .map_err(PayloadBuilderError::other)?,
-            cancel: cancel.clone(),
-            best_payload: best_payload.map(|payload| payload.0),
-            receipt_builder: self.inner.receipt_builder.clone(),
-        };
-
-        let state_provider = self.inner.client.state_by_block_hash(ctx.parent().hash())?;
-        let state = StateProviderDatabase::new(state_provider);
-
-        let (executed, bundle_state, state) = if ctx.attributes().no_tx_pool {
-            let mut db = State::builder().with_database(state).with_bundle_update().build();
-            (builder.execute(&mut db, &ctx)?, db.take_bundle(), db.database)
-        } else {
-            // sequencer mode we can reuse cachedreads from previous runs
-            let mut db = State::builder()
-                .with_database(cached_reads.as_db_mut(state))
-                .with_bundle_update()
-                .build();
-            (builder.execute(&mut db, &ctx)?, db.take_bundle(), db.database.db)
-        };
-
-        let ExecutedPayload { info, withdrawals_root } = match executed {
-            BuildOutcomeKind::Better { payload } | BuildOutcomeKind::Freeze(payload) => payload,
-            BuildOutcomeKind::Cancelled => {
-                return Ok(BuildOutcomeKind::Cancelled.with_cached_reads(cached_reads))
-            }
-            BuildOutcomeKind::Aborted { fees } => {
-                return Ok(BuildOutcomeKind::Aborted { fees }.with_cached_reads(cached_reads))
-            }
-        };
-
-        let block_number = ctx.block_number();
-        let execution_outcome =
-            ExecutionOutcome::new(bundle_state, vec![info.receipts], block_number, Vec::new());
-        let receipts_root = execution_outcome
-            .generic_receipts_root_slow(block_number, |receipts| {
-                calculate_receipt_root_no_memo_optimism(
-                    receipts,
-                    &ctx.chain_spec,
-                    ctx.attributes().timestamp(),
-                )
-            })
-            .expect("Number is in range");
-        let logs_bloom =
-            execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
-
-        // // calculate the state root
-        let hashed_state = state.hashed_post_state(execution_outcome.state());
-        let (state_root, trie_output) = state.state_root_with_updates(hashed_state.clone())?;
-
-        // create the block header
-        let transactions_root = calculate_transaction_root(&info.executed_transactions);
-
-        // OP doesn't support blobs/EIP-4844.
-        // https://specs.optimism.io/protocol/exec-engine.html#ecotone-disable-blob-transactions
-        // Need [Some] or [None] based on hardfork to match block hash.
-        let (excess_blob_gas, blob_gas_used) = ctx.blob_fields();
-        let extra_data = ctx.extra_data()?;
-
-        let header = CustomHeader {
-            inner: Header {
-                parent_hash: ctx.parent().hash(),
-                ommers_hash: EMPTY_OMMER_ROOT_HASH,
-                beneficiary: ctx.evm_env.block_env.coinbase,
-                state_root,
-                transactions_root,
-                receipts_root,
-                withdrawals_root,
-                logs_bloom,
-                timestamp: ctx.attributes().payload_attributes.timestamp,
-                mix_hash: ctx.attributes().payload_attributes.prev_randao,
-                nonce: BEACON_NONCE.into(),
-                base_fee_per_gas: Some(ctx.base_fee()),
-                number: ctx.parent().number + 1,
-                gas_limit: ctx.block_gas_limit(),
-                difficulty: U256::ZERO,
-                gas_used: info.cumulative_gas_used,
-                extra_data,
-                parent_beacon_block_root: ctx
-                    .attributes()
-                    .payload_attributes
-                    .parent_beacon_block_root,
-                blob_gas_used,
-                excess_blob_gas,
-                requests_hash: None,
-            },
-            extension: config.attributes.extension,
-        };
-
-        // seal the block
-        let block = Block::new(
-            header,
-            BlockBody {
-                transactions: info.executed_transactions,
-                ommers: vec![],
-                withdrawals: ctx.withdrawals().cloned(),
-            },
-        );
-
-        let sealed_block = Arc::new(block.seal_slow());
-
-        // create the executed block data
-        let executed: ExecutedBlockWithTrieUpdates<CustomNodePrimitives> =
-            ExecutedBlockWithTrieUpdates {
-                block: ExecutedBlock {
-                    recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                        sealed_block.as_ref().clone(),
-                        info.executed_senders,
-                    )),
-                    execution_output: Arc::new(execution_outcome),
-                    hashed_state: Arc::new(hashed_state),
-                },
-                trie: Arc::new(trie_output),
-            };
-
-        let no_tx_pool = ctx.attributes().no_tx_pool;
-
-        let payload = CustomBuiltPayload(OpBuiltPayload::new(
-            ctx.payload_id(),
-            sealed_block,
-            info.total_fees,
-            Some(executed),
-        ));
-
-        let outcome = if no_tx_pool {
-            // if `no_tx_pool` is set only transactions from the payload attributes will be included
-            // in the payload. In other words, the payload is deterministic and we can
-            // freeze it once we've successfully built it.
-            BuildOutcomeKind::Freeze(payload)
-        } else {
-            BuildOutcomeKind::Better { payload }
-        };
-
-        Ok(outcome.with_cached_reads(cached_reads))
-    }
-}
-
-impl<Provider> PayloadBuilder for CustomPayloadBuilder<Provider>
-where
-    Provider: Clone
-        + StateProviderFactory
-        + BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec = CustomChainSpec>
-        + 'static,
+    >,
 {
-    type Attributes = CustomPayloadBuilderAttributes;
-    type BuiltPayload = CustomBuiltPayload;
+    type Validator = CustomEngineValidator;
 
-    fn try_build(
-        &self,
-        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
-    ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        self.build_payload(args, |attrs| {
-            self.inner.best_transactions.best_transactions(self.inner.pool.clone(), attrs)
-        })
-    }
-
-    fn build_empty_payload(
-        &self,
-        config: PayloadConfig<Self::Attributes, CustomHeader>,
-    ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments {
-            cached_reads: Default::default(),
-            config,
-            cancel: Default::default(),
-            best_payload: None,
-        };
-        self.build_payload(args, |_| NoopPayloadTransactions::default())?
-            .into_payload()
-            .ok_or_else(|| PayloadBuilderError::MissingPayload)
+    async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        Ok(CustomEngineValidator::new(ctx.config.chain.clone()))
     }
 }

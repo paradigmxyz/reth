@@ -7,72 +7,55 @@ license.workspace = true
 
 [dependencies]
 # reth
-reth-codecs.workspace = true
+reth.workspace = true
+reth-chain-state.workspace = true
 reth-chainspec.workspace = true
-reth-primitives-traits.workspace = true
-reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
-reth-optimism-chainspec.workspace = true
-reth-node-api.workspace = true
-reth-node-builder.workspace = true
-reth-trie-db.workspace = true
-reth-storage-api.workspace = true
-reth-network-peers.workspace = true
-reth-optimism-node.workspace = true
-reth-optimism-payload-builder.workspace = true
-reth-transaction-pool.workspace = true
-reth-basic-payload-builder.workspace = true
-reth-optimism-forks.workspace = true
-reth-revm.workspace = true
+reth-codecs.workspace = true
 reth-evm.workspace = true
 reth-execution-types.workspace = true
+reth-network-peers.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
-reth-payload-util.workspace = true
-reth-eth-wire-types.workspace = true
+reth-optimism-forks.workspace = true
+reth-optimism-node.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-revm.workspace = true
 
-revm.workspace = true
-
-# ethereum
-alloy-genesis.workspace = true
-alloy-eips.workspace = true
-alloy-primitives.workspace = true
-alloy-network = { workspace = true, optional = true }
-alloy-consensus = { workspace = true, features = ["serde"] }
-alloy-serde = { workspace = true, optional = true }
-alloy-rlp.workspace = true
-alloy-evm.workspace = true
-alloy-op-evm.workspace = true
-alloy-rpc-types = { workspace = true, optional = true }
-revm-primitives.workspace = true
-reth-chain-state.workspace = true
-
-op-alloy-consensus.workspace = true
-op-alloy-rpc-types-engine.workspace = true
+# revm
 op-revm.workspace = true
+revm-primitives.workspace = true
+
+# alloy
+alloy-consensus = { workspace = true, features = ["serde"] }
+alloy-eips.workspace = true
+alloy-evm.workspace = true
+alloy-genesis.workspace = true
+alloy-op-evm.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 
 # misc
-arbitrary = { workspace = true, optional = true, features = ["derive"] }
 derive_more.workspace = true
 eyre.workspace = true
-rand = { workspace = true, optional = true }
-secp256k1 = { workspace = true, optional = true, features = ["rand"] }
 serde.workspace = true
 
 [features]
 default = []
 arbitrary = [
-	"dep:arbitrary",
 	"alloy-consensus/arbitrary",
 	"alloy-eips/arbitrary",
 	"alloy-primitives/arbitrary",
-	"alloy-rpc-types?/arbitrary",
-	"alloy-serde?/arbitrary",
 	"reth-codecs/arbitrary",
 	"reth-optimism-primitives/arbitrary",
 	"reth-primitives-traits/arbitrary",
 	"revm-primitives/arbitrary",
-	"revm/arbitrary",
 	"reth-chainspec/arbitrary"
 ]
 
