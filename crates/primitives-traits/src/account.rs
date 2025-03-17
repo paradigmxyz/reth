@@ -176,11 +176,16 @@ impl reth_codecs::Compact for Bytecode {
             }
             LEGACY_ANALYZED_BYTECODE_ID => {
                 let original_len = buf.read_u64::<byteorder::BigEndian>().unwrap() as usize;
-                // As jumptable needs to be u8 aligned, the loaded length can be
-                // different from saved, so we are aligning them to bytes len or
-                // original len to preserve same number of used bits.
-                let jump_table_len =
-                    if buf.len() * 8 >= bytes.len() { bytes.len() } else { original_len };
+                // When saving jumptable, its length is getting aligned to u8 boundary. Thus, we
+                // need to re-calculate the internal length of bitvec and truncate it when loading
+                // jumptables to avoid inconsistencies during `Compact` roundtrip.
+                let jump_table_len = if buf.len() * 8 >= bytes.len() {
+                    // Use length of padded bytecode if we can fit it
+                    bytes.len()
+                } else {
+                    // Otherwise, use original_len
+                    original_len
+                };
                 Self(RevmBytecode::new_analyzed(
                     bytes,
                     original_len,
