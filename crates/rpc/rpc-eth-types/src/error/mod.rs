@@ -811,7 +811,7 @@ pub fn ensure_success<Halt, Error: FromEvmHalt<Halt> + FromEthApiError>(
 mod tests {
     use super::*;
     use alloy_sol_types::{Revert, SolError};
-    use revm_primitives::b256;
+    use revm::primitives::b256;
 
     #[test]
     fn timed_out_error() {

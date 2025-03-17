@@ -145,10 +145,10 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_execution_types::BlockExecutionResult;
     use revm::{
+        database::State,
         database_interface::EmptyDB,
         state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
     };
-    use revm_database::State;
     use std::sync::mpsc;
 
     /// A mock executor that simulates state changes
@@ -190,7 +190,7 @@ mod tests {
             })
         }
 
-        fn into_state(self) -> revm_database::State<DB> {
+        fn into_state(self) -> revm::database::State<DB> {
             State::builder().with_database(Default::default()).build()
         }
 
@@ -253,9 +253,9 @@ mod tests {
 
         for metric in snapshot {
             let metric_name = metric.0.key().name();
-            if metric_name == "sync.execution.accounts_loaded_histogram" ||
-                metric_name == "sync.execution.storage_slots_loaded_histogram" ||
-                metric_name == "sync.execution.bytecodes_loaded_histogram"
+            if metric_name == "sync.execution.accounts_loaded_histogram"
+                || metric_name == "sync.execution.storage_slots_loaded_histogram"
+                || metric_name == "sync.execution.bytecodes_loaded_histogram"
             {
                 if let DebugValue::Histogram(vs) = metric.3 {
                     assert!(
