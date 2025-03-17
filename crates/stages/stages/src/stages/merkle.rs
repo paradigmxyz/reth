@@ -21,7 +21,7 @@ use tracing::*;
 use {
     alloy_primitives::{BlockNumber, Sealable, B256},
     reth_consensus::ConsensusError,
-    reth_primitives::{GotExpected, SealedHeader},
+    reth_primitives_traits::{GotExpected, SealedHeader},
     reth_stages_api::BlockErrorKind,
 };
 
