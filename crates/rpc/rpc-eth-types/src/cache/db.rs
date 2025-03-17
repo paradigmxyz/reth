@@ -7,9 +7,8 @@ use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, DatabaseRef};
 use reth_storage_api::{HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
-use revm::database::CacheDB;
 use revm::{
-    database::BundleState,
+    database::{BundleState, CacheDB},
     state::{AccountInfo, Bytecode},
     Database,
 };

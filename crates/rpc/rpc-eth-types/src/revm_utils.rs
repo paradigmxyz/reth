@@ -111,8 +111,8 @@ impl CallFees {
                     let max_priority_fee_per_gas = max_priority_fee_per_gas.unwrap_or(U256::ZERO);
 
                     // only enforce the fee cap if provided input is not zero
-                    if !(max_fee.is_zero() && max_priority_fee_per_gas.is_zero())
-                        && max_fee < block_base_fee
+                    if !(max_fee.is_zero() && max_priority_fee_per_gas.is_zero()) &&
+                        max_fee < block_base_fee
                     {
                         // `base_fee_per_gas` is greater than the `max_fee_per_gas`
                         return Err(RpcInvalidTransactionError::FeeCapTooLow.into());

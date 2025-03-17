@@ -253,9 +253,9 @@ mod tests {
 
         for metric in snapshot {
             let metric_name = metric.0.key().name();
-            if metric_name == "sync.execution.accounts_loaded_histogram"
-                || metric_name == "sync.execution.storage_slots_loaded_histogram"
-                || metric_name == "sync.execution.bytecodes_loaded_histogram"
+            if metric_name == "sync.execution.accounts_loaded_histogram" ||
+                metric_name == "sync.execution.storage_slots_loaded_histogram" ||
+                metric_name == "sync.execution.bytecodes_loaded_histogram"
             {
                 if let DebugValue::Histogram(vs) = metric.3 {
                     assert!(
