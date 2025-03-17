@@ -73,6 +73,7 @@ mod tests {
     use super::*;
     use crate::TrieMask;
     use alloy_primitives::B256;
+    use alloy_trie::nodes::RlpNode;
     use reth_codecs::Compact;
 
     #[test]
@@ -84,7 +85,7 @@ mod tests {
                 state_mask: TrieMask::new(1),
                 tree_mask: TrieMask::new(0),
                 hash_mask: TrieMask::new(1),
-                hashes: Arc::new(vec![B256::ZERO]),
+                hashes: Arc::new(vec![RlpNode::word_rlp(&B256::ZERO)]),
                 root_hash: None,
             }),
         };
