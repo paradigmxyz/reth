@@ -582,11 +582,11 @@ discv5 = "0.9"
 if-addrs = "0.13"
 
 # rpc
-jsonrpsee = "0.24"
-jsonrpsee-core = "0.24"
-jsonrpsee-server = "0.24"
-jsonrpsee-http-client = "0.24"
-jsonrpsee-types = "0.24"
+jsonrpsee = "0.24.9"
+jsonrpsee-core = "0.24.9"
+jsonrpsee-server = "0.24.9"
+jsonrpsee-http-client = "0.24.9"
+jsonrpsee-types = "0.24.9"
 
 # http
 http = "1.0"
