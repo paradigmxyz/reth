@@ -2438,7 +2438,7 @@ where
             handle.cache_metrics(),
         );
 
-        trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
+        debug!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
         let execution_start = Instant::now();
@@ -2449,7 +2449,7 @@ where
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
-        trace!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
+        debug!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
 
         // after executing the block we can stop executing transactions
         handle.stop_prewarming_execution();
@@ -2471,7 +2471,7 @@ where
             return Err(err.into())
         }
 
-        trace!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
+        debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
         let root_time = Instant::now();
 
