@@ -27,7 +27,8 @@ use reth_ethereum_forks::{
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::{
-    holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes, NodeRecord,
+    holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes,
+    NodeRecord,
 };
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
@@ -631,6 +632,7 @@ impl ChainSpec {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
+            C::Hoodi => Some(hoodi_nodes()),
             // opstack uses the same bootnodes for all chains: <https://github.com/paradigmxyz/reth/issues/14603>
             C::Base | C::Optimism | C::Unichain | C::World => Some(op_nodes()),
             C::OptimismSepolia | C::BaseSepolia | C::UnichainSepolia | C::WorldSepolia => {
