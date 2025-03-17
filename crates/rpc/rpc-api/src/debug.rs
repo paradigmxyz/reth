@@ -48,9 +48,9 @@ pub trait DebugApi {
     ) -> RpcResult<Vec<BlockTraceResult>>;
 
     /// The `debug_traceBlock` method will return a full stack trace of all invoked opcodes of all
-    /// transaction that were included in this block.
+    /// transactions that were included in this block.
     ///
-    /// This expects an rlp encoded block
+    /// This expects an RLP-encoded block
     ///
     /// Note, the parent of this block must be present, or it will fail. For the second parameter
     /// see [GethDebugTracingOptions] reference.
@@ -115,13 +115,13 @@ pub trait DebugApi {
     ///
     /// The first argument is a list of bundles. Each bundle can overwrite the block headers. This
     /// will affect all transaction in that bundle.
-    /// BlockNumber and transaction_index are optional. Transaction_index
+    /// BlockNumber and transaction index are optional. Transaction_index
     /// specifies the number of tx in the block to replay and -1 means all transactions should be
     /// replayed.
     /// The trace can be configured similar to `debug_traceTransaction`.
-    /// State override apply to all bundles.
+    /// State overrides apply to all bundles.
     ///
-    /// This methods is similar to many `eth_callMany`, hence this returns nested lists of traces.
+    /// This method is similar to many `eth_callMany`, hence this returns nested lists of traces.
     /// Where the length of the outer list is the number of bundles and the length of the inner list
     /// (`Vec<GethTrace>`) is the number of transactions in the bundle.
     #[method(name = "traceCallMany")]
@@ -382,7 +382,7 @@ pub trait DebugApi {
 
     /// Returns the structured logs created during the execution of EVM against a block pulled
     /// from the pool of bad ones and returns them as a JSON object. For the second parameter see
-    /// TraceConfig reference.
+    /// [TraceConfig] reference.
     #[method(name = "traceBadBlock")]
     async fn debug_trace_bad_block(
         &self,
