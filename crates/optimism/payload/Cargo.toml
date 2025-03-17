@@ -34,6 +34,10 @@ reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["reth-codec"] }
 reth-optimism-txpool.workspace = true
 
+# kona
+kona-rpc = { workspace = true, features = ["client", "interop", "jsonrpsee"]}
+kona-interop.workspace = true
+
 # ethereum
 revm.workspace = true
 alloy-eips.workspace = true
@@ -50,3 +54,5 @@ derive_more.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

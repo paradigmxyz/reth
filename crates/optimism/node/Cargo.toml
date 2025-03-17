@@ -61,6 +61,10 @@ alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
 
+# kona
+kona-rpc = { workspace = true, features = ["client", "interop", "jsonrpsee"]}
+kona-interop.workspace = true
+
 # misc
 clap.workspace = true
 serde.workspace = true

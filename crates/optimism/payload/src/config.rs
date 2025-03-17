@@ -7,12 +7,16 @@ use std::sync::{atomic::AtomicU64, Arc};
 pub struct OpBuilderConfig {
     /// Data availability configuration for the OP builder.
     pub da_config: OpDAConfig,
+    /// Supervisor configuration for the OP builder.
+    pub supervisor_url: Option<String>,
+    /// Safety level for the supervisor
+    pub supervisor_safety_level: Option<String>,
 }
 
 impl OpBuilderConfig {
     /// Creates a new OP builder configuration with the given data availability configuration.
     pub const fn new(da_config: OpDAConfig) -> Self {
-        Self { da_config }
+        Self { da_config, supervisor_url: None, supervisor_safety_level: None }
     }
 
     /// Returns the Data Availability configuration for the OP builder, if it has configured
@@ -23,6 +27,18 @@ impl OpBuilderConfig {
         } else {
             Some(&self.da_config)
         }
+    }
+
+    /// Sets supervisor_url
+    pub fn with_supervisor_url(mut self, supervisor_url: Option<String>) -> Self {
+        self.supervisor_url = supervisor_url;
+        self
+    }
+
+    /// Sets supervisor_safety_level
+    pub fn with_supervisor_safety_level(mut self, supervisor_safety_level: Option<String>) -> Self {
+        self.supervisor_safety_level = supervisor_safety_level;
+        self
     }
 }
 

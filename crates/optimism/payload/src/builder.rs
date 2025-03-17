@@ -4,6 +4,7 @@ use crate::{
     config::{OpBuilderConfig, OpDAConfig},
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
+    supervisor::SupervisorValidator,
     OpPayloadPrimitives,
 };
 use alloy_consensus::{Transaction, Typed2718};
@@ -11,6 +12,9 @@ use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
+use jsonrpsee::{client_transport::ws::Url, http_client::HttpClientBuilder};
+use kona_interop::{ExecutingDescriptor, SafetyLevel};
+use kona_rpc::{InteropTxValidator, InteropTxValidatorError};
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_basic_payload_builder::*;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
@@ -145,6 +149,44 @@ where
     {
         let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
 
+        let supervisor = if self
+            .client
+            .chain_spec()
+            .is_interop_active_at_timestamp(config.attributes.timestamp())
+        {
+            let url = Url::parse(
+                self.config
+                    .supervisor_url
+                    .as_ref()
+                    .expect("interop active, getting supervisor url"),
+            )
+            .map_err(|e| PayloadBuilderError::Other(Box::new(e)))?;
+            Some(SupervisorValidator(
+                HttpClientBuilder::default().build(url).expect("building supervisor http client"),
+            ))
+        } else {
+            None
+        };
+
+        let supervisor_safety_level = if self
+            .client
+            .chain_spec()
+            .is_interop_active_at_timestamp(config.attributes.timestamp())
+        {
+            Some(
+                self.config
+                    .supervisor_safety_level
+                    .as_ref()
+                    .map(|level| {
+                        serde_json::from_str(level.as_str())
+                            .expect("parsing supervisor_safety_level")
+                    })
+                    .unwrap_or(SafetyLevel::CrossUnsafe),
+            )
+        } else {
+            None
+        };
+
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             da_config: self.config.da_config.clone(),
@@ -152,6 +194,8 @@ where
             config,
             cancel,
             best_payload,
+            supervisor,
+            supervisor_safety_level,
         };
 
         let builder = OpBuilder::new(best);
@@ -185,6 +229,8 @@ where
             config,
             cancel: Default::default(),
             best_payload: Default::default(),
+            supervisor: Default::default(),
+            supervisor_safety_level: Default::default(),
         };
 
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
@@ -473,6 +519,10 @@ pub struct OpPayloadBuilderCtx<Evm: ConfigureEvm, ChainSpec> {
     pub cancel: CancelOnDrop,
     /// The currently best payload.
     pub best_payload: Option<OpBuiltPayload<Evm::Primitives>>,
+    /// Op-supervisor client to perfrom cross chain tx validation.
+    pub supervisor: Option<SupervisorValidator>,
+    /// Safety level for the supervisor
+    pub supervisor_safety_level: Option<SafetyLevel>,
 }
 
 impl<Evm, ChainSpec> OpPayloadBuilderCtx<Evm, ChainSpec>
@@ -580,6 +630,20 @@ where
                 PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
             })?;
 
+            // Check that interop transaction is valid
+            if self.chain_spec.is_interop_active_at_timestamp(self.attributes().timestamp()) {
+                let (is_valid, _is_recoverable) = is_cross_tx_valid::<Evm::Primitives>(
+                    sequencer_tx.inner(),
+                    self.supervisor.as_ref().unwrap(),
+                    self.supervisor_safety_level.unwrap(),
+                    self.attributes().timestamp(),
+                );
+                if !is_valid {
+                    // TODO: we should retry validation is _is_recoverable == true
+                    continue
+                }
+            }
+
             let gas_used = match builder.execute_transaction(sequencer_tx.clone()) {
                 Ok(gas_used) => gas_used,
                 Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
@@ -634,6 +698,22 @@ where
                 continue
             }
 
+            // TODO: if interop is active, validate the transaction with the supervisor
+
+            if self.chain_spec.is_interop_active_at_timestamp(self.attributes().timestamp()) {
+                let (is_valid, _is_recoverable) = is_cross_tx_valid::<Evm::Primitives>(
+                    tx.inner(),
+                    self.supervisor.as_ref().unwrap(),
+                    self.supervisor_safety_level.unwrap(),
+                    self.attributes().timestamp(),
+                );
+                if !is_valid {
+                    // TODO: we should retry validation is _is_recoverable == true
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    continue
+                }
+            }
+
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
                 return Ok(Some(()))
@@ -675,5 +755,69 @@ where
         }
 
         Ok(None)
+    }
+}
+
+/// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
+/// against supervisor.
+///
+/// If commitment present pre-interop tx rejected.
+///
+/// returns (is_valid, is_recoverable)
+/// is_recoverable to set to false if we can't recover from error, in case supervisor is down,
+/// connection is broken or transaction is invalid deterministically.
+pub fn is_cross_tx_valid<Primitives: OpPayloadPrimitives>(
+    tx: &Primitives::SignedTx,
+    client: &SupervisorValidator,
+    safety_level: SafetyLevel,
+    timestamp: u64,
+) -> (bool, bool) {
+    if tx.access_list().is_none() {
+        return (true, true);
+    }
+    let access_list = tx.access_list().unwrap();
+    let inbox_entries =
+        SupervisorValidator::parse_access_list(access_list).cloned().collect::<Vec<_>>();
+    if !inbox_entries.is_empty() {
+        match tokio::task::block_in_place(move || {
+            tokio::runtime::Handle::current().block_on(async {
+                client
+                    .validate_messages(
+                        inbox_entries.as_slice(),
+                        safety_level,
+                        ExecutingDescriptor::new(timestamp, None),
+                        Some(core::time::Duration::from_millis(100)),
+                    )
+                    .await
+            })
+        }) {
+            Ok(()) => (true, true),
+            Err(err) => {
+                match err {
+                    InteropTxValidatorError::SupervisorServerError(err) => {
+                        warn!(target: "payload_builder", %err, ?tx, "Supervisor error, skipping.");
+                        (false, true)
+                    }
+                    InteropTxValidatorError::ValidationTimeout(_) => {
+                        warn!(target: "payload_builder", %err, ?tx, "Cross tx validation timed out, skipping.");
+                        (false, true)
+                    }
+                    InteropTxValidatorError::RpcClientError(err) => {
+                        // TODO: we should add reconnecting to supervisor in case of disconnect
+                        warn!(target: "payload_builder", %err, ?tx, "Supervisor client error, skipping.");
+                        (false, false)
+                    }
+                    err => {
+                        trace!(target: "payload_builder", %err, ?tx, "Cross tx rejected.");
+                        // It's possible that transaction invalid now, but would be valid later.
+                        // We should keep limited queue for transactions that could become valid.
+                        // We should have the limit to ensure that builder won't get overwhelmed.
+                        (false, false)
+                    }
+                }
+            }
+        }
+    } else {
+        (true, true)
     }
 }
