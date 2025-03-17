@@ -434,17 +434,17 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "20.0.0-alpha.5", default-features = false }
-revm-bytecode = { version = "1.0.0-alpha.3", default-features = false }
-revm-database = { version = "1.0.0-alpha.3", default-features = false }
-revm-state = { version = "1.0.0-alpha.3", default-features = false }
-revm-primitives = { version = "16.0.0-alpha.3", default-features = false }
-revm-interpreter = { version = "16.0.0-alpha.5", default-features = false }
-revm-inspector = { version = "1.0.0-alpha.5", default-features = false }
-revm-context = { version = "1.0.0-alpha.4", default-features = false }
-revm-context-interface = { version = "1.0.0-alpha.4", default-features = false }
-revm-database-interface = { version = "1.0.0-alpha.3", default-features = false }
-op-revm = { version = "1.0.0-alpha.4", default-features = false }
+revm = { version = "20.0.0-alpha.6", default-features = false }
+revm-bytecode = { version = "1.0.0-alpha.4", default-features = false }
+revm-database = { version = "1.0.0-alpha.4", default-features = false }
+revm-state = { version = "1.0.0-alpha.4", default-features = false }
+revm-primitives = { version = "16.0.0-alpha.4", default-features = false }
+revm-interpreter = { version = "16.0.0-alpha.6", default-features = false }
+revm-inspector = { version = "1.0.0-alpha.6", default-features = false }
+revm-context = { version = "1.0.0-alpha.5", default-features = false }
+revm-context-interface = { version = "1.0.0-alpha.5", default-features = false }
+revm-database-interface = { version = "1.0.0-alpha.4", default-features = false }
+op-revm = { version = "1.0.0-alpha.5", default-features = false }
 revm-inspectors = "0.17.0-alpha.1"
 
 # eth
