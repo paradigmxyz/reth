@@ -68,7 +68,7 @@ pub(crate) struct BlockValidationMetrics {
     /// Latest state root duration
     pub(crate) state_root_duration: Gauge,
     /// Trie input computation duration
-    pub(crate) trie_input_duration: Gauge,
+    pub(crate) trie_input_duration: Histogram,
 }
 
 impl BlockValidationMetrics {

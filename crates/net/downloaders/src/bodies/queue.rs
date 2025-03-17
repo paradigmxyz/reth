@@ -9,8 +9,7 @@ use reth_network_p2p::{
     bodies::{client::BodiesClient, response::BlockResponse},
     error::DownloadResult,
 };
-use reth_primitives::SealedHeader;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, SealedHeader};
 use std::{
     pin::Pin,
     sync::Arc,

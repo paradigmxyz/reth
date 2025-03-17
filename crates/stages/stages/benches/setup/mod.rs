@@ -7,7 +7,7 @@ use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account, SealedBlock, SealedHeader};
+use reth_primitives_traits::{Account, SealedBlock, SealedHeader};
 use reth_provider::{
     test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory, TrieWriter,
 };

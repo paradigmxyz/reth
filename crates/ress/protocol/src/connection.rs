@@ -1,6 +1,4 @@
-use crate::{
-    GetHeaders, NodeType, RessMessage, RessProtocolMessage, RessProtocolProvider, StateWitnessNet,
-};
+use crate::{GetHeaders, NodeType, RessMessage, RessProtocolMessage, RessProtocolProvider};
 use alloy_consensus::Header;
 use alloy_primitives::{bytes::BytesMut, BlockHash, Bytes, B256};
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
@@ -12,6 +10,10 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -33,8 +35,12 @@ pub struct RessProtocolConnection<P> {
     conn: ProtocolConnection,
     /// Stream of incoming commands.
     commands: UnboundedReceiverStream<RessPeerRequest>,
+    /// The total number of active connections.
+    active_connections: Arc<AtomicU64>,
     /// Flag indicating whether the node type was sent to the peer.
     node_type_sent: bool,
+    /// Flag indicating whether this stream has previously been terminated.
+    terminated: bool,
     /// Incremental counter for request ids.
     next_id: u64,
     /// Collection of inflight requests.
@@ -52,6 +58,7 @@ impl<P> RessProtocolConnection<P> {
         peer_id: PeerId,
         conn: ProtocolConnection,
         commands: UnboundedReceiverStream<RessPeerRequest>,
+        active_connections: Arc<AtomicU64>,
     ) -> Self {
         Self {
             provider,
@@ -60,7 +67,9 @@ impl<P> RessProtocolConnection<P> {
             peer_id,
             conn,
             commands,
+            active_connections,
             node_type_sent: false,
+            terminated: false,
             next_id: 0,
             inflight_requests: HashMap::default(),
             pending_witnesses: FuturesUnordered::new(),
@@ -141,18 +150,14 @@ where
     fn on_witness_response(
         &self,
         request: RequestPair<B256>,
-        witness_result: ProviderResult<Option<StateWitnessNet>>,
+        witness_result: ProviderResult<Vec<Bytes>>,
     ) -> RessProtocolMessage {
         let peer_id = self.peer_id;
         let block_hash = request.message;
         let witness = match witness_result {
-            Ok(Some(witness)) => {
-                trace!(target: "ress::net::connection", %peer_id, %block_hash, "witness found");
+            Ok(witness) => {
+                trace!(target: "ress::net::connection", %peer_id, %block_hash, len = witness.len(), "witness found");
                 witness
-            }
-            Ok(None) => {
-                trace!(target: "ress::net::connection", %peer_id, %block_hash, "witness not found");
-                Default::default()
             }
             Err(error) => {
                 trace!(target: "ress::net::connection", %peer_id, %block_hash, %error, "error retrieving witness");
@@ -241,6 +246,14 @@ where
     }
 }
 
+impl<P> Drop for RessProtocolConnection<P> {
+    fn drop(&mut self) {
+        let _ = self
+            .active_connections
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |c| Some(c.saturating_sub(1)));
+    }
+}
+
 impl<P> Stream for RessProtocolConnection<P>
 where
     P: RessProtocolProvider + Clone + Unpin + 'static,
@@ -250,14 +263,17 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        if this.terminated {
+            return Poll::Ready(None)
+        }
+
         if !this.node_type_sent {
             this.node_type_sent = true;
             return Poll::Ready(Some(RessProtocolMessage::node_type(this.node_type).encoded()))
         }
 
-        loop {
-            if let Poll::Ready(maybe_cmd) = this.commands.poll_next_unpin(cx) {
-                let Some(cmd) = maybe_cmd else { return Poll::Ready(None) };
+        'conn: loop {
+            if let Poll::Ready(Some(cmd)) = this.commands.poll_next_unpin(cx) {
                 let message = this.on_command(cmd);
                 let encoded = message.encoded();
                 trace!(target: "ress::net::connection", peer_id = %this.peer_id, ?message, encoded = alloy_primitives::hex::encode(&encoded), "Sending peer command");
@@ -272,7 +288,7 @@ where
             }
 
             if let Poll::Ready(maybe_msg) = this.conn.poll_next_unpin(cx) {
-                let Some(next) = maybe_msg else { return Poll::Ready(None) };
+                let Some(next) = maybe_msg else { break 'conn };
                 let msg = match RessProtocolMessage::decode_message(&mut &next[..]) {
                     Ok(msg) => {
                         trace!(target: "ress::net::connection", peer_id = %this.peer_id, message = ?msg.message_type, "Processing message");
@@ -287,7 +303,7 @@ where
 
                 match this.on_ress_message(msg) {
                     OnRessMessageOutcome::Response(bytes) => return Poll::Ready(Some(bytes)),
-                    OnRessMessageOutcome::Terminate => return Poll::Ready(None),
+                    OnRessMessageOutcome::Terminate => break 'conn,
                     OnRessMessageOutcome::None => {}
                 };
 
@@ -296,12 +312,15 @@ where
 
             return Poll::Pending;
         }
+
+        // Terminating the connection.
+        this.terminated = true;
+        Poll::Ready(None)
     }
 }
 
-type WitnessFut = Pin<
-    Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<Option<StateWitnessNet>>)> + Send>,
->;
+type WitnessFut =
+    Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<Vec<Bytes>>)> + Send>>;
 
 /// Ress peer request.
 #[derive(Debug)]
@@ -332,7 +351,7 @@ pub enum RessPeerRequest {
         /// Target block hash that we want to get witness for.
         block_hash: BlockHash,
         /// The sender for the response.
-        tx: oneshot::Sender<StateWitnessNet>,
+        tx: oneshot::Sender<Vec<Bytes>>,
     },
 }
 

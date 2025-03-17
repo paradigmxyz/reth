@@ -10,7 +10,7 @@ use crate::tree::{
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnvFor, Evm};
+use reth_evm::{ConfigureEvm, Evm};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, SignedTransaction};
 use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
@@ -52,10 +52,7 @@ impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
-    Evm: ConfigureEvmEnvFor<N>
-        + 'static
-        + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
-        + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Initializes the task with the given transactions pending execution
     pub(super) fn new(
@@ -89,6 +86,9 @@ where
     fn spawn_next(&mut self) {
         while self.in_progress < self.max_concurrency {
             if let Some(tx) = self.pending.pop_front() {
+                // increment the in progress counter
+                self.in_progress += 1;
+
                 self.spawn_transaction(tx);
             } else {
                 break
@@ -102,6 +102,7 @@ where
         let metrics = self.ctx.metrics.clone();
         let actions_tx = self.actions_tx.clone();
         let prepare_proof_targets = self.should_prepare_multi_proof_targets();
+
         self.executor.spawn_blocking(move || {
             let start = Instant::now();
             // depending on whether this task needs he proof targets we either just transact or
@@ -204,10 +205,7 @@ impl<N, P, Evm> PrewarmContext<N, P, Evm>
 where
     N: NodePrimitives,
     P: BlockReader + StateProviderFactory + StateReader + StateCommitmentProvider + Clone + 'static,
-    Evm: ConfigureEvmEnvFor<N>
-        + 'static
-        + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
-        + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Transacts the transactions and transform the state into [`MultiProofTargets`].
     fn prepare_multiproof_targets(self, tx: Recovered<N::SignedTx>) -> Option<MultiProofTargets> {

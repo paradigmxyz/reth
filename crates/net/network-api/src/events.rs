@@ -9,7 +9,7 @@ use reth_eth_wire_types::{
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
-use reth_network_types::PeerAddr;
+use reth_network_types::{PeerAddr, PeerKind};
 use reth_tokio_util::EventStream;
 use std::{
     fmt,
@@ -66,6 +66,8 @@ pub struct SessionInfo {
     pub status: Arc<Status>,
     /// Negotiated eth version of the session.
     pub version: EthVersion,
+    /// The kind of peer this session represents
+    pub peer_kind: PeerKind,
 }
 
 /// (Non-exhaustive) List of the different events emitted by the network that are of interest for

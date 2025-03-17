@@ -9,9 +9,12 @@ use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{
+    execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor,
+    NextBlockEnvAttributes,
+};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, BlockTy, FullNodeComponents, NodeAddOns, ReceiptTy, TxTy};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
@@ -19,8 +22,8 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{
-        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns, RpcAddOns,
-        RpcHandle,
+        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, EthApiCtx, RethRpcAddOns,
+        RpcAddOns, RpcHandle,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
     PayloadTypes,
@@ -29,7 +32,7 @@ use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, 
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
 use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
 use reth_rpc_builder::config::RethRpcServerConfig;
-use reth_rpc_eth_types::{error::FromEvmError, EthApiError, EthConfig, EthStateCache};
+use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -130,25 +133,20 @@ where
 {
     type EthApi = EthApiFor<N>;
 
-    fn build_eth_api(
-        self,
-        core_components: &N,
-        config: EthConfig,
-        cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
-    ) -> Self::EthApi {
+    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
         reth_rpc::EthApiBuilder::new(
-            core_components.provider().clone(),
-            core_components.pool().clone(),
-            core_components.network().clone(),
-            core_components.evm_config().clone(),
+            ctx.components.provider().clone(),
+            ctx.components.pool().clone(),
+            ctx.components.network().clone(),
+            ctx.components.evm_config().clone(),
         )
-        .eth_cache(cache)
-        .task_spawner(core_components.task_executor().clone())
-        .gas_cap(config.rpc_gas_cap.into())
-        .max_simulate_blocks(config.rpc_max_simulate_blocks)
-        .eth_proof_window(config.eth_proof_window)
-        .fee_history_cache_config(config.fee_history_cache)
-        .proof_permits(config.proof_permits)
+        .eth_cache(ctx.cache)
+        .task_spawner(ctx.components.task_executor().clone())
+        .gas_cap(ctx.config.rpc_gas_cap.into())
+        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+        .eth_proof_window(ctx.config.eth_proof_window)
+        .fee_history_cache_config(ctx.config.fee_history_cache)
+        .proof_permits(ctx.config.proof_permits)
         .build()
     }
 }
@@ -179,9 +177,10 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type Handle = RpcHandle<N, EthApiFor<N>>;
 
@@ -199,7 +198,7 @@ where
         );
 
         self.inner
-            .launch_add_ons_with(ctx, move |modules, _| {
+            .launch_add_ons_with(ctx, move |modules, _, _| {
                 modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
@@ -219,9 +218,10 @@ where
             Primitives = EthPrimitives,
             Engine = EthEngineTypes,
         >,
-        Evm: ConfigureEvm<TxEnv = TxEnv, NextBlockEnvCtx = NextBlockEnvAttributes>,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
     type EthApi = EthApiFor<N>;
 

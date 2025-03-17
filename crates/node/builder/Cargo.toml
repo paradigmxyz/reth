@@ -39,7 +39,6 @@ reth-node-core.workspace = true
 reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-payload-builder.workspace = true
-reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-rpc.workspace = true
@@ -98,7 +97,6 @@ test-utils = [
     "reth-network/test-utils",
     "reth-network-p2p/test-utils",
     "reth-payload-builder/test-utils",
-    "reth-primitives/test-utils",
     "reth-stages/test-utils",
     "reth-db-api/test-utils",
     "reth-provider/test-utils",

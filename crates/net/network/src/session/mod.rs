@@ -353,8 +353,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     /// Sends a message to the peer's session
-    pub fn send_message(&mut self, peer_id: &PeerId, msg: PeerMessage<N>) {
-        if let Some(session) = self.active_sessions.get_mut(peer_id) {
+    pub fn send_message(&self, peer_id: &PeerId, msg: PeerMessage<N>) {
+        if let Some(session) = self.active_sessions.get(peer_id) {
             let _ = session.commands_to_session.try_send(SessionCommand::Message(msg)).inspect_err(
                 |e| {
                     if let TrySendError::Full(_) = e {

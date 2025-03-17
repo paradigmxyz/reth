@@ -18,7 +18,7 @@ use reth::{
         inspector::{Inspector, NoOpInspector},
         interpreter::{interpreter::EthInterpreter, InterpreterResult},
         precompile::PrecompileError,
-        specification::hardfork::SpecId,
+        primitives::hardfork::SpecId,
         MainBuilder, MainContext,
     },
     tasks::TaskManager,
@@ -38,7 +38,7 @@ use std::{collections::HashMap, sync::Arc};
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
 type PrecompileLRUCache = LruMap<(SpecId, Bytes, u64), Result<InterpreterResult, PrecompileError>>;
 
-type WrappedEthEvm<DB, I> = EthEvm<DB, I, WrappedPrecompile<EthPrecompiles<EthEvmContext<DB>>>>;
+type WrappedEthEvm<DB, I> = EthEvm<DB, I, WrappedPrecompile<EthPrecompiles>>;
 
 /// A cache for precompile inputs / outputs.
 ///
@@ -93,7 +93,7 @@ impl EvmFactory for MyEvmFactory {
 
 /// A custom precompile that contains the cache and precompile it wraps.
 #[derive(Clone)]
-pub struct WrappedPrecompile<P: PrecompileProvider> {
+pub struct WrappedPrecompile<P> {
     /// The precompile to wrap.
     precompile: P,
     /// The cache to use.
@@ -102,7 +102,7 @@ pub struct WrappedPrecompile<P: PrecompileProvider> {
     spec: SpecId,
 }
 
-impl<P: PrecompileProvider> WrappedPrecompile<P> {
+impl<P> WrappedPrecompile<P> {
     /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn new(precompile: P, cache: Arc<RwLock<PrecompileCache>>) -> Self {
@@ -110,20 +110,19 @@ impl<P: PrecompileProvider> WrappedPrecompile<P> {
     }
 }
 
-impl<P: PrecompileProvider<Output = InterpreterResult>> PrecompileProvider
+impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> PrecompileProvider<CTX>
     for WrappedPrecompile<P>
 {
-    type Context = P::Context;
     type Output = P::Output;
 
-    fn set_spec(&mut self, spec: <<Self::Context as ContextTr>::Cfg as Cfg>::Spec) {
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) {
         self.precompile.set_spec(spec.clone());
         self.spec = spec.into();
     }
 
     fn run(
         &mut self,
-        context: &mut Self::Context,
+        context: &mut CTX,
         address: &Address,
         bytes: &Bytes,
         gas_limit: u64,
@@ -157,7 +156,7 @@ impl<P: PrecompileProvider<Output = InterpreterResult>> PrecompileProvider
         self.precompile.contains(address)
     }
 
-    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address> + '_> {
+    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
         self.precompile.warm_addresses()
     }
 }

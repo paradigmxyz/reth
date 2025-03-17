@@ -11,19 +11,3 @@ reth-exex = { path = "../../crates/exex/exex" }
 reth-node-ethereum = { path = "../../crates/ethereum/node" }
 reth-tracing = { path = "../../crates/tracing" }
 reth-node-api = { path = "../../crates/node/api" }
-
-[patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-database = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-context = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-revm-specification = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-op-revm = { git = "https://github.com/bluealloy/revm", rev = "19a5f3b" }
-
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "9219073" }

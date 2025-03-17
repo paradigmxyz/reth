@@ -13,13 +13,13 @@ workspace = true
 
 [dependencies]
 # reth
+reth-primitives-traits.workspace = true
 reth-ipc.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-network-api.workspace = true
 reth-node-core.workspace = true
 reth-provider.workspace = true
-reth-primitives.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
@@ -52,6 +52,7 @@ alloy-network.workspace = true
 
 [dev-dependencies]
 reth-primitives-traits.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
@@ -64,7 +65,6 @@ reth-rpc-engine-api.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-rpc-types-compat.workspace = true
-reth-primitives.workspace = true
 reth-engine-primitives.workspace = true
 reth-node-ethereum.workspace = true
 

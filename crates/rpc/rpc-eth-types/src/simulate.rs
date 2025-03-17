@@ -11,8 +11,9 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
     Evm,
 };
-use reth_primitives::{Recovered, RecoveredBlock, TxTy};
-use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
+use reth_primitives_traits::{
+    block::BlockTx, BlockBody as _, Recovered, RecoveredBlock, SignedTransaction, TxTy,
+};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::noop::NoopProvider;

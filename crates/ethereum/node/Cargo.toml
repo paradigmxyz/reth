@@ -16,6 +16,7 @@ reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-node-builder.workspace = true
 reth-tracing.workspace = true
 reth-provider.workspace = true
@@ -34,7 +35,6 @@ reth-revm = { workspace = true, features = ["std"] }
 reth-trie-db.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-engine-primitives.workspace = true
-reth-primitives.workspace = true
 reth-payload-primitives.workspace = true
 
 # ethereum
@@ -57,7 +57,6 @@ reth-rpc-eth-api.workspace = true
 reth-tasks.workspace = true
 
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
 alloy-provider.workspace = true
 alloy-genesis.workspace = true
 alloy-signer.workspace = true
@@ -89,7 +88,6 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
     "reth-trie-db/test-utils",
-    "revm/test-utils",
     "reth-evm/test-utils",
-    "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
 ]

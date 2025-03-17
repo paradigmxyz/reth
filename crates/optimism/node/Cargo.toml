@@ -15,7 +15,6 @@ workspace = true
 reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["op"] }
 reth-engine-local = { workspace = true, features = ["op"] }
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-util.workspace = true
@@ -37,6 +36,7 @@ reth-tasks = { workspace = true, optional = true }
 reth-trie-common.workspace = true
 reth-node-core.workspace = true
 reth-rpc-engine-api.workspace = true
+reth-rpc-api.workspace = true
 
 # op-reth
 reth-optimism-payload-builder.workspace = true
@@ -92,7 +92,6 @@ futures.workspace = true
 [features]
 default = ["reth-codec"]
 asm-keccak = [
-    "reth-primitives/asm-keccak",
     "alloy-primitives/asm-keccak",
     "revm/asm-keccak",
     "reth-optimism-node/asm-keccak",
@@ -112,19 +111,16 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-network/test-utils",
     "reth-payload-builder/test-utils",
-    "reth-primitives/test-utils",
     "reth-revm/test-utils",
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
     "reth-trie-db/test-utils",
-    "revm/test-utils",
     "reth-optimism-node/test-utils",
     "reth-optimism-primitives/arbitrary",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
 ]
 reth-codec = [
-    "reth-primitives/reth-codec",
     "reth-optimism-primitives/reth-codec",
 ]

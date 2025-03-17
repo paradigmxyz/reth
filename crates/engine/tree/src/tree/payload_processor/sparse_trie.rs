@@ -34,7 +34,7 @@ pub(super) struct SparseTrieTask<F> {
     #[allow(unused)] // TODO use this for spawning trie tasks
     pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
-    pub(super) updates: mpsc::Receiver<SparseTrieEvent>,
+    pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,
     // TODO: ideally we need a way to create multiple readers on demand.
     pub(super) config: MultiProofConfig<F>,
     pub(super) metrics: MultiProofTaskMetrics,
@@ -115,18 +115,6 @@ pub struct StateRootComputeOutcome {
     pub trie_updates: TrieUpdates,
 }
 
-/// Aliased for now to not introduce too many changes at once.
-pub(super) type SparseTrieEvent = SparseTrieUpdate;
-
-// /// The event type the sparse trie task operates on.
-// pub(crate) enum SparseTrieEvent {
-//     /// Updates received from the multiproof task.
-//     ///
-//     /// This represents a stream of [`SparseTrieUpdate`] where a `None` indicates that all
-// updates     /// have been received.
-//     Update(Option<SparseTrieUpdate>),
-// }
-
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 pub(crate) fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
@@ -142,6 +130,12 @@ where
 
     // Reveal new accounts and storage slots.
     trie.reveal_multiproof(multiproof)?;
+    let reveal_multiproof_elapsed = started_at.elapsed();
+    trace!(
+        target: "engine::root::sparse",
+        ?reveal_multiproof_elapsed,
+        "Done revealing multiproof"
+    );
 
     // Update storage slots with new values and calculate storage roots.
     let (tx, rx) = mpsc::channel();
@@ -202,8 +196,22 @@ where
         trie.update_account(address, account.unwrap_or_default())?;
     }
 
+    let elapsed_before = started_at.elapsed();
+    trace!(
+        target: "engine::root:sparse",
+        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
+        "Calculating intermediate nodes below trie level"
+    );
     trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+
     let elapsed = started_at.elapsed();
+    let below_level_elapsed = elapsed - elapsed_before;
+    trace!(
+        target: "engine::root:sparse",
+        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
+        ?below_level_elapsed,
+        "Intermediate nodes calculated"
+    );
 
     Ok(elapsed)
 }

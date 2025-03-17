@@ -13,7 +13,8 @@ use alloy_consensus::{
         LEGACY_TX_TYPE_ID,
     },
     transaction::PooledTransaction,
-    TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, TxType, Typed2718,
+    EthereumTxEnvelope, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702, TxEnvelope,
+    TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
@@ -1050,6 +1051,111 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
             }),
             tx => Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(tx.ty())),
+        }
+    }
+}
+
+impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
+    type Error = TryFromRecoveredTransactionError;
+
+    fn try_from(tx: Recovered<TxEnvelope>) -> Result<Self, Self::Error> {
+        let sender = tx.signer();
+        let transaction = tx.into_inner();
+        let hash = *transaction.tx_hash();
+        let size = transaction.size();
+
+        match transaction {
+            EthereumTxEnvelope::Legacy(signed_tx) => {
+                let tx = signed_tx.strip_signature();
+                Ok(Self::Legacy {
+                    chain_id: tx.chain_id,
+                    hash,
+                    sender,
+                    nonce: tx.nonce,
+                    gas_price: tx.gas_price,
+                    gas_limit: tx.gas_limit,
+                    to: tx.to,
+                    value: tx.value,
+                    input: tx.input,
+                    size,
+                    cost: U256::from(tx.gas_limit) * U256::from(tx.gas_price) + tx.value,
+                })
+            }
+            EthereumTxEnvelope::Eip2930(signed_tx) => {
+                let tx = signed_tx.strip_signature();
+                Ok(Self::Eip2930 {
+                    chain_id: tx.chain_id,
+                    hash,
+                    sender,
+                    nonce: tx.nonce,
+                    gas_price: tx.gas_price,
+                    gas_limit: tx.gas_limit,
+                    to: tx.to,
+                    value: tx.value,
+                    input: tx.input,
+                    access_list: tx.access_list,
+                    size,
+                    cost: U256::from(tx.gas_limit) * U256::from(tx.gas_price) + tx.value,
+                })
+            }
+            EthereumTxEnvelope::Eip1559(signed_tx) => {
+                let tx = signed_tx.strip_signature();
+                Ok(Self::Eip1559 {
+                    chain_id: tx.chain_id,
+                    hash,
+                    sender,
+                    nonce: tx.nonce,
+                    max_fee_per_gas: tx.max_fee_per_gas,
+                    max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
+                    gas_limit: tx.gas_limit,
+                    to: tx.to,
+                    value: tx.value,
+                    input: tx.input,
+                    access_list: tx.access_list,
+                    size,
+                    cost: U256::from(tx.gas_limit) * U256::from(tx.max_fee_per_gas) + tx.value,
+                })
+            }
+            EthereumTxEnvelope::Eip4844(signed_tx) => match signed_tx.tx() {
+                TxEip4844Variant::TxEip4844(tx) => Ok(Self::Eip4844 {
+                    chain_id: tx.chain_id,
+                    hash,
+                    sender,
+                    nonce: tx.nonce,
+                    max_fee_per_gas: tx.max_fee_per_gas,
+                    max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
+                    max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+                    gas_limit: tx.gas_limit,
+                    to: tx.to,
+                    value: tx.value,
+                    input: tx.input.clone(),
+                    access_list: tx.access_list.clone(),
+                    sidecar: BlobTransactionSidecar::default(),
+                    blob_versioned_hashes: tx.blob_versioned_hashes.clone(),
+                    size,
+                    cost: U256::from(tx.gas_limit) * U256::from(tx.max_fee_per_gas) + tx.value,
+                }),
+                tx => Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(tx.ty())),
+            },
+            EthereumTxEnvelope::Eip7702(signed_tx) => {
+                let tx = signed_tx.strip_signature();
+                Ok(Self::Eip7702 {
+                    chain_id: tx.chain_id,
+                    hash,
+                    sender,
+                    nonce: tx.nonce,
+                    max_fee_per_gas: tx.max_fee_per_gas,
+                    max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
+                    gas_limit: tx.gas_limit,
+                    to: tx.to,
+                    value: tx.value,
+                    access_list: tx.access_list,
+                    authorization_list: tx.authorization_list,
+                    input: tx.input,
+                    size,
+                    cost: U256::from(tx.gas_limit) * U256::from(tx.max_fee_per_gas) + tx.value,
+                })
+            }
         }
     }
 }

@@ -2,6 +2,7 @@
 
 use std::{fmt::Debug, sync::Arc};
 
+use alloy_consensus::Block;
 use alloy_eips::{
     eip1559::BaseFeeParams, eip2718::Decodable2718, eip4895::Withdrawals, eip7685::Requests,
 };
@@ -12,15 +13,17 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV3, PayloadId,
 };
 use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
-/// Re-export for use in downstream arguments.
-pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
-use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
+use op_alloy_rpc_types_engine::{
+    OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
+};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{transaction::WithEncoded, Block, NodePrimitives, SealedBlock};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction, WithEncoded};
+
+/// Re-export for use in downstream arguments.
+pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +142,14 @@ impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
+    }
+}
+
+impl<OpTransactionSigned> From<EthPayloadBuilderAttributes>
+    for OpPayloadBuilderAttributes<OpTransactionSigned>
+{
+    fn from(value: EthPayloadBuilderAttributes) -> Self {
+        Self { payload_attributes: value, ..Default::default() }
     }
 }
 
@@ -279,10 +290,16 @@ where
 
         let parent_beacon_block_root = block.parent_beacon_block_root.unwrap_or_default();
 
+        let l2_withdrawals_root = block.withdrawals_root.unwrap_or_default();
+        let payload_v3 = ExecutionPayloadV3::from_block_unchecked(
+            block.hash(),
+            &Arc::unwrap_or_clone(block).into_block(),
+        );
+
         Self {
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
+            execution_payload: OpExecutionPayloadV4::from_v3_with_withdrawals_root(
+                payload_v3,
+                l2_withdrawals_root,
             ),
             block_value: fees,
             // From the engine API spec:

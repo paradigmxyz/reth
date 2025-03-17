@@ -6,9 +6,9 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use reth_db::DatabaseEnv;
 use reth_db_api::{database::Database, tables, transaction::DbTxMut};
+use reth_ethereum_primitives::BlockBody;
 use reth_network_p2p::bodies::response::BlockResponse;
-use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
 use std::collections::HashMap;
 
 pub(crate) fn zip_blocks<'a, B: Block>(
@@ -31,7 +31,7 @@ pub(crate) fn zip_blocks<'a, B: Block>(
 pub(crate) fn create_raw_bodies(
     headers: impl IntoIterator<Item = SealedHeader>,
     bodies: &mut HashMap<B256, BlockBody>,
-) -> Vec<reth_primitives::Block> {
+) -> Vec<reth_ethereum_primitives::Block> {
     headers
         .into_iter()
         .map(|header| {

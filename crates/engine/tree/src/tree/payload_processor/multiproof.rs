@@ -1,6 +1,6 @@
 //! Multiproof task related functionality.
 
-use crate::tree::payload_processor::{executor::WorkloadExecutor, sparse_trie::SparseTrieEvent};
+use crate::tree::payload_processor::executor::WorkloadExecutor;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use derive_more::derive::Deref;
@@ -429,6 +429,10 @@ pub(crate) struct MultiProofTaskMetrics {
     pub state_updates_received_histogram: Histogram,
     /// Histogram of proofs processed.
     pub proofs_processed_histogram: Histogram,
+    /// Histogram of total time spent in the multiproof task.
+    pub multiproof_task_total_duration_histogram: Histogram,
+    /// Total time spent waiting for the first state update or prefetch request.
+    pub first_update_wait_time_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -449,7 +453,7 @@ pub(super) struct MultiProofTask<Factory> {
     /// Sender for state root related messages.
     tx: Sender<MultiProofMessage>,
     /// Sender for state updates emitted by this type.
-    to_sparse_trie: Sender<SparseTrieEvent>,
+    to_sparse_trie: Sender<SparseTrieUpdate>,
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
     /// Proof sequencing handler.
@@ -469,7 +473,7 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
-        to_sparse_trie: Sender<SparseTrieEvent>,
+        to_sparse_trie: Sender<SparseTrieUpdate>,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
@@ -706,7 +710,10 @@ where
 
         let mut updates_finished = false;
 
-        // Timestamp when the first state update was received
+        // Timestamp before the first state update or prefetch was received
+        let start = Instant::now();
+
+        // Timestamp when the first state update or prefetch was received
         let mut first_update_time = None;
         // Timestamp when the last state update was received
         let mut last_update_time = None;
@@ -717,6 +724,14 @@ where
                 Ok(message) => match message {
                     MultiProofMessage::PrefetchProofs(targets) => {
                         trace!(target: "engine::root", "processing MultiProofMessage::PrefetchProofs");
+                        if first_update_time.is_none() {
+                            // record the wait time
+                            self.metrics
+                                .first_update_wait_time_histogram
+                                .record(start.elapsed().as_secs_f64());
+                            first_update_time = Some(Instant::now());
+                            debug!(target: "engine::root", "Started state root calculation");
+                        }
 
                         let account_targets = targets.len();
                         let storage_targets =
@@ -731,9 +746,12 @@ where
                         );
                     }
                     MultiProofMessage::StateUpdate(source, update) => {
-                        trace!(target: "engine::root", "processing
-        MultiProofMessage::StateUpdate");
-                        if state_update_proofs_requested == 0 {
+                        trace!(target: "engine::root", "processing MultiProofMessage::StateUpdate");
+                        if first_update_time.is_none() {
+                            // record the wait time
+                            self.metrics
+                                .first_update_wait_time_histogram
+                                .record(start.elapsed().as_secs_f64());
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
@@ -853,14 +871,17 @@ where
             target: "engine::root",
             total_updates = state_update_proofs_requested,
             total_proofs = proofs_processed,
-            total_time =? first_update_time.map(|t|t.elapsed()),
-            time_from_last_update =?last_update_time.map(|t|t.elapsed()),
+            total_time = ?first_update_time.map(|t|t.elapsed()),
+            time_from_last_update = ?last_update_time.map(|t|t.elapsed()),
             "All proofs processed, ending calculation"
         );
 
         // update total metrics on finish
         self.metrics.state_updates_received_histogram.record(state_update_proofs_requested as f64);
         self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
+        if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
+            self.metrics.multiproof_task_total_duration_histogram.record(total_time);
+        }
     }
 }
 
