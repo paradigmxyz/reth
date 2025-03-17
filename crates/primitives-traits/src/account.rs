@@ -176,6 +176,9 @@ impl reth_codecs::Compact for Bytecode {
                 unreachable!("Junk data in database: checked Bytecode variant was removed")
             }
             LEGACY_ANALYZED_BYTECODE_ID => {
+                // As jumptable needs to be u8 aligned, the loaded length can be 
+                // different from saved, so we are aligning them to bytes len or
+                // original len to preserve same number of used bits.
                 let jump_table_len =
                     if buf.len() * 8 >= bytes.len() { bytes.len() } else { original_len };
                 Self(RevmBytecode::new_analyzed(
