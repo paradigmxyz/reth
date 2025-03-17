@@ -423,7 +423,16 @@ where
         if transaction.is_eip7702() {
             let authorization_list = transaction.authorization_list().unwrap();
             for authorization in authorization_list {
-                let state_nonce = match state.account_nonce(authorization.address()) {
+                let addr = match authorization.recover_authority() {
+                    Ok(addr) => addr,
+                    Err(err) => {
+                        return TransactionValidationOutcome::Error(
+                            *transaction.hash(),
+                            Box::new(err),
+                        )
+                    }
+                };
+                let state_nonce = match state.account_nonce(&addr) {
                     Ok(nonce) => nonce.unwrap_or_default(),
                     Err(err) => {
                         return TransactionValidationOutcome::Error(
