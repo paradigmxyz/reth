@@ -9,27 +9,34 @@ license.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
+reth-engine-primitives.workspace = true
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
+reth-node-ethereum.workspace = true
 reth-network-peers.workspace = true
+reth-payload-primitives.workspace = true
 reth-primitives.workspace = true
-reth-provider.workspace = true
+reth-primitives-traits.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 # misc
 bytes.workspace = true
 derive_more.workspace = true
+eyre.workspace = true
 futures.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
@@ -43,6 +50,7 @@ serde = [
     "reth-eth-wire-types/serde",
     "reth-ethereum-forks/serde",
     "reth-provider/serde",
+    "reth-primitives-traits/serde",
     "secp256k1/serde",
     "bytes/serde",
 ]
