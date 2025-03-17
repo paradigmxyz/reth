@@ -126,7 +126,7 @@ pub trait AnvilApi {
 
     /// Jump forward in time by the given amount of time, in seconds.
     #[method(name = "increaseTime")]
-    async fn anvil_increase_time(&self, seconds: U256) -> RpcResult<i64>;
+    async fn anvil_increase_time(&self, seconds: i64) -> RpcResult<i64>;
 
     /// Similar to `evm_increaseTime` but takes the exact timestamp that you want in the next block.
     #[method(name = "setNextBlockTimestamp")]
@@ -140,7 +140,7 @@ pub trait AnvilApi {
     #[method(name = "setBlockTimestampInterval")]
     async fn anvil_set_block_timestamp_interval(&self, seconds: u64) -> RpcResult<()>;
 
-    /// Sets an interval for the block timestamp.
+    /// Removes the interval for the block timestamp.
     #[method(name = "removeBlockTimestampInterval")]
     async fn anvil_remove_block_timestamp_interval(&self) -> RpcResult<bool>;
 
