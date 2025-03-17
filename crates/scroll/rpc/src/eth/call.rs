@@ -3,8 +3,9 @@ use crate::{ScrollEthApi, ScrollEthApiError};
 
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
-use reth_evm::{ConfigureEvm, EvmEnv, SpecFor};
-use reth_provider::ProviderHeader;
+use reth_evm::{block::BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
+use reth_primitives_traits::NodePrimitives;
+use reth_provider::{ProviderHeader, ProviderTx};
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, IntoEthApiError,
@@ -37,8 +38,13 @@ impl<N> Call for ScrollEthApi<N>
 where
     Self: LoadState<
             Evm: ConfigureEvm<
-                Header = ProviderHeader<Self::Provider>,
-                TxEnv = ScrollTransactionIntoTxEnv<TxEnv>,
+                Primitives: NodePrimitives<
+                    BlockHeader = ProviderHeader<Self::Provider>,
+                    SignedTx = ProviderTx<Self::Provider>,
+                >,
+                BlockExecutorFactory: BlockExecutorFactory<
+                    EvmFactory: EvmFactory<Tx = ScrollTransactionIntoTxEnv<TxEnv>>,
+                >,
             >,
             Error: FromEvmError<Self::Evm>,
         > + SpawnBlocking,

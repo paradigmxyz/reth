@@ -1,5 +1,5 @@
 use crate::{ScrollEngineValidator, ScrollEngineValidatorBuilder, ScrollStorage};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
 use reth_node_api::{AddOnsContext, NodeAddOns};
 use reth_node_builder::{
     rpc::{
@@ -64,12 +64,10 @@ where
             Storage = ScrollStorage,
             Engine = ScrollEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<
-            TxEnv = ScrollTransactionIntoTxEnv<TxEnv>,
-            NextBlockEnvCtx = NextBlockEnvAttributes,
-        >,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     ScrollEthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = ScrollTransactionIntoTxEnv<TxEnv>>,
 {
     type Handle = RpcHandle<N, ScrollEthApi<N>>;
 
@@ -78,7 +76,7 @@ where
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
         let Self { rpc_add_ons } = self;
-        rpc_add_ons.launch_add_ons_with(ctx, |_, _| Ok(())).await
+        rpc_add_ons.launch_add_ons_with(ctx, |_, _, _| Ok(())).await
     }
 }
 
@@ -91,12 +89,10 @@ where
             Storage = ScrollStorage,
             Engine = ScrollEngineTypes,
         >,
-        Evm: ConfigureEvm<
-            TxEnv = ScrollTransactionIntoTxEnv<TxEnv>,
-            NextBlockEnvCtx = NextBlockEnvAttributes,
-        >,
+        Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     ScrollEthApiError: FromEvmError<N::Evm>,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = ScrollTransactionIntoTxEnv<TxEnv>>,
 {
     type EthApi = ScrollEthApi<N>;
 

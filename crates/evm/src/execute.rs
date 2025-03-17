@@ -478,7 +478,6 @@ where
 mod tests {
     use super::*;
     use crate::Address;
-    use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_evm::block::state_changes::balance_increment_state;
     use alloy_primitives::{address, map::HashMap, U256};
     use core::marker::PhantomData;

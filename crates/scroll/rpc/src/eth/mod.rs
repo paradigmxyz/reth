@@ -6,7 +6,7 @@ use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BlockTy, FullNodeComponents, ReceiptTy};
+use reth_node_api::FullNodeComponents;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx, StageCheckpointReader,
@@ -20,7 +20,7 @@ use reth_rpc_eth_api::{
     },
     EthApiTypes, FullEthApiServer, RpcNodeCore, RpcNodeCoreExt,
 };
-use reth_rpc_eth_types::{EthConfig, EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -28,7 +28,8 @@ use reth_tasks::{
 use reth_transaction_pool::TransactionPool;
 
 pub use receipt::ScrollReceiptBuilder;
-use reth_node_builder::rpc::EthApiBuilder;
+use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_scroll_primitives::ScrollPrimitives;
 use scroll_alloy_network::Scroll;
@@ -246,8 +247,10 @@ where
     Self: RpcNodeCore<Provider: BlockReader>
         + LoadState<
             Evm: ConfigureEvm<
-                Header = ProviderHeader<Self::Provider>,
-                Transaction = ProviderTx<Self::Provider>,
+                Primitives: NodePrimitives<
+                    BlockHeader = ProviderHeader<Self::Provider>,
+                    SignedTx = ProviderTx<Self::Provider>,
+                >,
             >,
             Error: FromEvmError<Self::Evm>,
         >,
@@ -302,25 +305,20 @@ where
 {
     type EthApi = ScrollEthApi<N>;
 
-    fn build_eth_api(
-        self,
-        core_components: &N,
-        config: EthConfig,
-        cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
-    ) -> Self::EthApi {
+    fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> Self::EthApi {
         let eth_api = reth_rpc::EthApiBuilder::new(
-            core_components.provider().clone(),
-            core_components.pool().clone(),
-            core_components.network().clone(),
-            core_components.evm_config().clone(),
+            ctx.components.provider().clone(),
+            ctx.components.pool().clone(),
+            ctx.components.network().clone(),
+            ctx.components.evm_config().clone(),
         )
-        .eth_cache(cache)
-        .task_spawner(core_components.task_executor().clone())
-        .gas_cap(config.rpc_gas_cap.into())
-        .max_simulate_blocks(config.rpc_max_simulate_blocks)
-        .eth_proof_window(config.eth_proof_window)
-        .fee_history_cache_config(config.fee_history_cache)
-        .proof_permits(config.proof_permits)
+        .eth_cache(ctx.cache)
+        .task_spawner(ctx.components.task_executor().clone())
+        .gas_cap(ctx.config.rpc_gas_cap.into())
+        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+        .eth_proof_window(ctx.config.eth_proof_window)
+        .fee_history_cache_config(ctx.config.fee_history_cache)
+        .proof_permits(ctx.config.proof_permits)
         .build_inner();
 
         ScrollEthApi { inner: Arc::new(ScrollEthApiInner { eth_api }) }

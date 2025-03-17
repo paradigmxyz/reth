@@ -50,4 +50,4 @@ op = [
     "dep:op-alloy-rpc-types-engine",
     "reth-primitives-traits/op",
 ]
-scroll-alloy-traits = ["dep:scroll-alloy-rpc-types-engine"]
+scroll-alloy-traits = ["dep:scroll-alloy-rpc-types-engine", "reth-primitives-traits/scroll-alloy-traits"]
