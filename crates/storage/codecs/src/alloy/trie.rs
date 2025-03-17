@@ -135,15 +135,12 @@ mod tests {
 
     #[test]
     fn node_encoding() {
-        let n = BranchNodeCompact::new(
-            0xf607,
-            0x0005,
-            0x4004,
+        let node = BranchNodeCompact::new(
+            TrieMask::new(0b1111011000000111),
+            TrieMask::new(0b0000000000000101),
+            TrieMask::new(0b0100000000000100),
             vec![
-                RlpNode::word_rlp(
-                    &hex!("90d53cd810cc5d4243766cd4451e7b9d14b736a1148b26b3baac7617f617d321")
-                        .into(),
-                ),
+                RlpNode::from_raw_rlp(&[1; 33]).unwrap(),
                 RlpNode::word_rlp(
                     &hex!("cc35c964dda53ba6c0b87798073a9628dbc9cd26b5cce88eb69655a9c609caf1")
                         .into(),
@@ -153,7 +150,7 @@ mod tests {
         );
 
         let mut out = Vec::new();
-        let compact_len = n.to_compact(&mut out);
-        assert_eq!(BranchNodeCompact::from_compact(&out, compact_len).0, n);
+        let compact_len = node.to_compact(&mut out);
+        assert_eq!(BranchNodeCompact::from_compact(&out, compact_len).0, node);
     }
 }
