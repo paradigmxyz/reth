@@ -1,4 +1,4 @@
-//! Implementation of the [`BlockExecutionStrategyFactory`] for Scroll.
+//! Execution primitives for EVM.
 
 use crate::{receipt::ScrollRethReceiptBuilder, ScrollEvmConfig};
 use std::{fmt::Debug, sync::Arc};
