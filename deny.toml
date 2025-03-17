@@ -62,6 +62,7 @@ exceptions = [
     # These dependencies are grandfathered in https://github.com/paradigmxyz/reth/pull/6980
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-roots" },
+    { allow = ["MPL-2.0"], name = "webpki-root-certs" },
 ]
 
 [[licenses.clarify]]
