@@ -69,10 +69,8 @@ async fn main() -> eyre::Result<()> {
     loop {
         // receive incoming eth requests and transaction messages from the second peer
         tokio::select! {
-              eth_request = requests_rx.recv() => {
-                    let Some(eth_request) = eth_request else {break};
-                    match eth_request {
-                        IncomingEthRequest::GetBlockHeaders { peer_id, request, response } => {
+              eth_request = requests_rx.recv() => match eth_request {
+                    Some(IncomingEthRequest::GetBlockHeaders { peer_id, request, response }) => {
                             println!("Received block headers request: {peer_id:?}, {request:?}");
                             response.send(Ok(vec![DEV.genesis_header().clone()].into())).unwrap();
                         }
