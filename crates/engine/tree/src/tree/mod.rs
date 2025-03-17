@@ -1175,7 +1175,18 @@ where
             return Ok(valid_outcome(state.head_block_hash))
         }
 
-        // 2. ensure we can apply a new chain update for the head block
+        // 2. Check if forkchoice state points to a valid ancestor of the canonical head.
+        if self.is_valid_canonical_ancestor(state.head_block_hash)? {
+            trace!(
+                target: "engine::tree",
+                head=?state.head_block_hash,
+                "fcu head block is a valid ancestor of the canonical head, skipping update"
+            );
+
+            return Ok(valid_outcome(state.head_block_hash));
+        }
+
+        // 3. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
             let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
@@ -1194,7 +1205,7 @@ where
             return Ok(valid_outcome(state.head_block_hash))
         }
 
-        // 3. check if the head is already part of the canonical chain
+        // 4. check if the head is already part of the canonical chain
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number(), "fcu head block is already canonical");
 
@@ -1221,7 +1232,7 @@ where
             return Ok(valid_outcome(state.head_block_hash))
         }
 
-        // 4. we don't have the block to perform the update
+        // 5. we don't have the block to perform the update
         // we assume the FCU is valid and at least the head is missing,
         // so we need to start syncing to it
         //
@@ -2987,6 +2998,19 @@ where
 
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
         Ok(None)
+    }
+
+    /// Checks if the given block hash is a valid ancestor of the current canonical head
+    ///
+    /// Returns true if the block is a valid ancestor of the canonical head.
+    fn is_valid_canonical_ancestor(&self, hash: B256) -> ProviderResult<bool> {
+        let canonical_head_num = self.state.tree_state.canonical_block_number();
+        let Some(header) = self.find_canonical_header(hash)? else {
+            return Ok(false);
+        };
+
+        // It's a valid ancestor if it's in canonical chain and has a lower block number
+        Ok(header.number() < canonical_head_num)
     }
 }
 
