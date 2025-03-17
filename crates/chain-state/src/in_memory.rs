@@ -1115,7 +1115,7 @@ mod tests {
     #[test]
     fn test_in_memory_state_impl_state_by_hash() {
         let mut state_by_hash = HashMap::default();
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::thread_rng().r#gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
         state_by_hash.insert(state.hash(), state.clone());
@@ -1131,7 +1131,7 @@ mod tests {
         let mut state_by_hash = HashMap::default();
         let mut hash_by_number = BTreeMap::new();
 
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::thread_rng().r#gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let state = Arc::new(create_mock_state(&mut test_block_builder, number, B256::random()));
         let hash = state.hash();
@@ -1168,7 +1168,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_impl_pending_state() {
-        let pending_number = rand::thread_rng().gen::<u64>();
+        let pending_number = rand::thread_rng().r#gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let pending_state =
             create_mock_state(&mut test_block_builder, pending_number, B256::random());
@@ -1194,7 +1194,7 @@ mod tests {
 
     #[test]
     fn test_state_new() {
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::thread_rng().r#gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block = test_block_builder.get_executed_block_with_number(number, B256::random());
 
@@ -1205,7 +1205,7 @@ mod tests {
 
     #[test]
     fn test_state_block() {
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::thread_rng().r#gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block = test_block_builder.get_executed_block_with_number(number, B256::random());
 
@@ -1216,7 +1216,7 @@ mod tests {
 
     #[test]
     fn test_state_hash() {
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::thread_rng().r#gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block = test_block_builder.get_executed_block_with_number(number, B256::random());
 
@@ -1227,7 +1227,7 @@ mod tests {
 
     #[test]
     fn test_state_number() {
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::thread_rng().r#gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block = test_block_builder.get_executed_block_with_number(number, B256::random());
 
@@ -1238,7 +1238,7 @@ mod tests {
 
     #[test]
     fn test_state_state_root() {
-        let number = rand::thread_rng().gen::<u64>();
+        let number = rand::thread_rng().r#gen::<u64>();
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block = test_block_builder.get_executed_block_with_number(number, B256::random());
 
