@@ -10,8 +10,8 @@ use core::{
     time::Duration,
 };
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_primitives::{EthPrimitives, SealedBlock};
-use reth_primitives_traits::{NodePrimitives, SealedHeader};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
 /// Events emitted by the consensus engine.
 #[derive(Clone, Debug)]

@@ -26,6 +26,10 @@ alloy-rlp.workspace = true
 smallvec = { workspace = true, features = ["const_new"] }
 thiserror.workspace = true
 
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
+
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-provider = { workspace = true, features = ["test-utils"] }

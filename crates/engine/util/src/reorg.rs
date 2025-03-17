@@ -15,8 +15,9 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
-use reth_primitives::{BlockTy, HeaderTy, SealedBlock};
-use reth_primitives_traits::{block::Block as _, BlockBody as _, SignedTransaction};
+use reth_primitives_traits::{
+    block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
+};
 use reth_provider::{BlockReader, ChainSpecProvider, ProviderError, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use std::{

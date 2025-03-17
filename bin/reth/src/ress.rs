@@ -1,9 +1,9 @@
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkProtocols};
 use reth_network_api::FullNetwork;
 use reth_node_api::BeaconConsensusEngineEvent;
 use reth_node_core::args::RessArgs;
-use reth_primitives::EthPrimitives;
 use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use reth_ress_protocol::{NodeType, ProtocolState, RessProtocolHandler};
 use reth_ress_provider::{maintain_pending_state, PendingState, RethRessProtocolProvider};
@@ -41,9 +41,10 @@ where
         provider,
         block_executor,
         Box::new(task_executor.clone()),
-        pending_state,
+        args.max_witness_window,
         args.witness_max_parallel,
         args.witness_cache_size,
+        pending_state,
     )?;
     network.add_rlpx_sub_protocol(
         RessProtocolHandler {

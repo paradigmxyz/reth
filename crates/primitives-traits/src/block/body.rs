@@ -102,7 +102,7 @@ pub trait BlockBody:
 
     /// Calculate the withdrawals root for the block body.
     ///
-    /// Returns `None` if there are no withdrawals in the block.
+    /// Returns `RecoveryError` if there are no withdrawals in the block.
     fn calculate_withdrawals_root(&self) -> Option<B256> {
         self.withdrawals().map(|withdrawals| {
             alloy_consensus::proofs::calculate_withdrawals_root(withdrawals.as_slice())
@@ -114,7 +114,7 @@ pub trait BlockBody:
 
     /// Calculate the ommers root for the block body.
     ///
-    /// Returns `None` if there are no ommers in the block.
+    /// Returns `RecoveryError` if there are no ommers in the block.
     fn calculate_ommers_root(&self) -> Option<B256> {
         self.ommers().map(alloy_consensus::proofs::calculate_ommers_root)
     }
@@ -154,7 +154,7 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        crate::transaction::recover::recover_signers(self.transactions()).map_err(|_| RecoveryError)
+        crate::transaction::recover::recover_signers(self.transactions())
     }
 
     /// Recover signer addresses for all transactions in the block body.
@@ -170,7 +170,7 @@ pub trait BlockBody:
     /// Recover signer addresses for all transactions in the block body _without ensuring that the
     /// signature has a low `s` value_.
     ///
-    /// Returns `None`, if some transaction's signature is invalid.
+    /// Returns `RecoveryError`, if some transaction's signature is invalid.
     fn recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError>
     where
         Self::Transaction: SignedTransaction,

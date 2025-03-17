@@ -6,8 +6,9 @@ use alloy_primitives::{
 use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_node_api::{BeaconConsensusEngineEvent, NodePrimitives};
-use reth_primitives::{Bytecode, EthPrimitives, RecoveredBlock};
+use reth_primitives_traits::{Bytecode, RecoveredBlock};
 use reth_provider::BlockNumReader;
 use reth_tokio_util::EventStream;
 use std::{collections::BTreeMap, sync::Arc};

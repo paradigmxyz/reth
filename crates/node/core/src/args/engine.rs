@@ -1,6 +1,7 @@
 //! clap [Args](clap::Args) for engine purposes
 
 use clap::Args;
+use reth_engine_primitives::TreeConfig;
 
 use crate::node_config::{
     DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
@@ -47,6 +48,19 @@ impl Default for EngineArgs {
             caching_and_prewarming_enabled: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
         }
+    }
+}
+
+impl EngineArgs {
+    /// Creates a [`TreeConfig`] from the engine arguments.
+    pub fn tree_config(&self) -> TreeConfig {
+        TreeConfig::default()
+            .with_persistence_threshold(self.persistence_threshold)
+            .with_memory_block_buffer_target(self.memory_block_buffer_target)
+            .with_legacy_state_root(self.legacy_state_root_task_enabled)
+            .with_caching_and_prewarming(self.caching_and_prewarming_enabled)
+            .with_always_compare_trie_updates(self.state_root_task_compare_updates)
+            .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
     }
 }
 

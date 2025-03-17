@@ -54,7 +54,7 @@ pub trait SignedTransaction:
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also `reth_primitives::transaction::recover_signer`.
+    /// Returns `RecoveryError` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also `reth_primitives::transaction::recover_signer`.
     ///
     /// Note:
     ///
@@ -67,16 +67,16 @@ pub trait SignedTransaction:
     ///
     /// Returns an error if the transaction's signature is invalid.
     fn try_recover(&self) -> Result<Address, RecoveryError> {
-        self.recover_signer().map_err(|_| RecoveryError)
+        self.recover_signer()
     }
 
     /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
     /// value_.
     ///
-    /// Returns `None` if the transaction's signature is invalid, see also
+    /// Returns `RecoveryError` if the transaction's signature is invalid, see also
     /// `reth_primitives::transaction::recover_signer_unchecked`.
     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-        self.recover_signer_unchecked_with_buf(&mut Vec::new()).map_err(|_| RecoveryError)
+        self.recover_signer_unchecked_with_buf(&mut Vec::new())
     }
 
     /// Recover signer from signature and hash _without ensuring that the signature has a low `s`
@@ -121,7 +121,7 @@ pub trait SignedTransaction:
     /// Consumes the type, recover signer and return [`Recovered`] _without
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
-    /// Returns `None` if the transaction's signature is invalid.
+    /// Returns `RecoveryError` if the transaction's signature is invalid.
     #[auto_impl(keep_default_for(&, Arc))]
     fn into_recovered_unchecked(self) -> Result<Recovered<Self>, RecoveryError> {
         self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self, signer))

@@ -100,9 +100,9 @@ pub enum Transaction {
     Eip4844(TxEip4844),
     /// EOA Set Code Transactions ([EIP-7702](https://eips.ethereum.org/EIPS/eip-7702)), type `0x4`.
     ///
-    /// EOA Set Code Transactions give the ability to temporarily set contract code for an
-    /// EOA for a single transaction. This allows for temporarily adding smart contract
-    /// functionality to the EOA.
+    /// EOA Set Code Transactions give the ability to set contract code for an EOA in perpetuity
+    /// until re-assigned by the same EOA. This allows for adding smart contract functionality to
+    /// the EOA.
     Eip7702(TxEip7702),
 }
 
@@ -941,7 +941,7 @@ impl From<PooledTransaction> for TransactionSigned {
 
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
-pub mod serde_bincode_compat {
+pub(super) mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_consensus::{
         transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},

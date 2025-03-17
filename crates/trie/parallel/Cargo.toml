@@ -13,11 +13,11 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 reth-trie.workspace = true
 reth-trie-common.workspace = true
 reth-trie-db.workspace = true
+reth-db-api.workspace = true
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
 
@@ -41,7 +41,7 @@ metrics = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
-reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 
@@ -59,9 +59,10 @@ metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
 test-utils = [
     "reth-trie/test-utils",
     "reth-trie-common/test-utils",
-    "reth-primitives/test-utils",
     "reth-provider/test-utils",
     "reth-trie-db/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-db-api/test-utils",
 ]
 
 [[bench]]

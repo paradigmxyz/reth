@@ -337,6 +337,11 @@ RPC:
 
           [default: <NUM CPU CORES-2>]
 
+      --rpc.max-trace-filter-blocks <COUNT>
+          Maximum number of blocks for `trace_filter` requests
+
+          [default: 100]
+
       --rpc.max-blocks-per-filter <COUNT>
           Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
 
@@ -729,6 +734,11 @@ Ress:
           The maximum number of active connections for `ress` subprotocol
 
           [default: 5]
+
+      --ress.max-witness-window <MAX_WITNESS_WINDOW>
+          The maximum witness lookback window
+
+          [default: 1024]
 
       --ress.witness-max-parallel <WITNESS_MAX_PARALLEL>
           The maximum number of witnesses to generate in parallel

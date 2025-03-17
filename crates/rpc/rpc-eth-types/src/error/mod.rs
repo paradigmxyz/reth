@@ -9,7 +9,7 @@ use alloy_sol_types::{ContractError, RevertReason};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, RethError};
-use reth_primitives_traits::transaction::signed::RecoveryError;
+use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
@@ -584,9 +584,9 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
     }
 }
 
-impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionError {
-    fn from(err: reth_primitives::InvalidTransactionError) -> Self {
-        use reth_primitives::InvalidTransactionError;
+impl From<InvalidTransactionError> for RpcInvalidTransactionError {
+    fn from(err: InvalidTransactionError) -> Self {
+        use InvalidTransactionError;
         // This conversion is used to convert any transaction errors that could occur inside the
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {

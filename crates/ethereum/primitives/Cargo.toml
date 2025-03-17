@@ -35,6 +35,7 @@ modular-bitfield = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, features = ["rand"] }
 serde.workspace = true
+serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
 arbitrary.workspace = true
@@ -70,6 +71,7 @@ std = [
     "alloy-rpc-types-eth?/std",
     "revm-context/std",
     "alloy-evm/std",
+    "serde_with?/std",
 ]
 reth-codec = [
     "std",
@@ -90,6 +92,7 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
 ]
 serde-bincode-compat = [
+    "dep:serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",

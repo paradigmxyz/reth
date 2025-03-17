@@ -5,11 +5,11 @@ use crate::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadJob, PayloadJobGenerator,
 };
 
+use alloy_consensus::Block;
 use alloy_primitives::U256;
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{PayloadKind, PayloadTypes};
-use reth_primitives::Block;
 use reth_primitives_traits::Block as _;
 use std::{
     future::Future,

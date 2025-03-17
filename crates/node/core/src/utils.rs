@@ -9,8 +9,7 @@ use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
     bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
 };
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::{Block, SealedHeader};
+use reth_primitives_traits::{Block, SealedBlock, SealedHeader};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
