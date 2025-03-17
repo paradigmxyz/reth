@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+auto_impl.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
@@ -21,6 +22,7 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
+revm.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -29,9 +31,12 @@ alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 # misc
 bytes.workspace = true
+cfg-if = { version = "1.0", default-features = false }
 derive_more.workspace = true
 futures.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
+once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
+parity-bytes = { version = "0.1.2", default-features = false }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"], optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
 thiserror.workspace = true
@@ -39,10 +44,42 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
 
+# precompiles deps
+bls_on_arkworks = "0.3.0"
+
+cometbft = { git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
+cometbft-light-client-verifier = {  git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
+cometbft-proto = {  git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
+cometbft-light-client = {  git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
+
+prost = { version = "0.12.6" }
+
+tendermint = { git = "https://github.com/bnb-chain/tendermint-rs-parlia", rev = "8c21ccbd58a174e07eed2c9343e63ccd00f0fbd5", features = ["secp256k1"] }
+
+# KZG point evaluation precompile
+c-kzg = { version = "1.0.3", default-features = false, optional = true, features = [
+    "ethereum_kzg_settings",
+] }
+
+# Optionally use `kzg-rs` for a pure Rust implementation of KZG point evaluation.
+kzg-rs = { version = "0.2.3", default-features = false, optional = true }
+
+# BLS12-381 precompiles
+blst = { version = "0.3.13", optional = true }
+
+# p256verify precompile
+p256 = { version = "0.13.2", optional = true, default-features = false, features = [
+    "ecdsa",
+] }
+
+
 [dev-dependencies]
 reth-node-ethereum.workspace = true
 
 [features]
+default = ["c-kzg", "secp256k1", "blst"]
+c-kzg = ["dep:c-kzg"]
+secp256r1 = ["dep:p256"]
 serde = [
     "dep:serde",
     "alloy-primitives/serde",
@@ -50,6 +87,7 @@ serde = [
     "reth-eth-wire-types/serde",
     "reth-ethereum-forks/serde",
     "reth-primitives-traits/serde",
+    "revm/serde",
     "secp256k1/serde",
     "bytes/serde",
     "reth-network/serde",
