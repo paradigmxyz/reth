@@ -153,6 +153,7 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 pub struct CustomEngineTypes;
 
 impl PayloadTypes for CustomEngineTypes {
+    type ExecutionData = ExecutionData;
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
@@ -163,7 +164,6 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
-    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
