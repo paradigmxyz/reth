@@ -47,6 +47,7 @@ impl reth_primitives_traits::NodePrimitives for OpPrimitives {
 /// Bincode-compatible serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
-    pub use super::receipt::serde_bincode_compat::*;
-    pub use super::transaction::signed::serde_bincode_compat::*;
+    pub use super::{
+        receipt::serde_bincode_compat::*, transaction::signed::serde_bincode_compat::*,
+    };
 }
