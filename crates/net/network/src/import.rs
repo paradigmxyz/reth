@@ -8,7 +8,7 @@ use std::{
 };
 
 /// Abstraction over block import.
-pub trait BlockImport<B = reth_primitives::Block>: std::fmt::Debug + Send + Sync {
+pub trait BlockImport<B = reth_ethereum_primitives::Block>: std::fmt::Debug + Send + Sync {
     /// Invoked for a received `NewBlock` broadcast message from the peer.
     ///
     /// > When a `NewBlock` announcement message is received from a peer, the client first verifies
@@ -24,7 +24,7 @@ pub trait BlockImport<B = reth_primitives::Block>: std::fmt::Debug + Send + Sync
 
 /// Outcome of the [`BlockImport`]'s block handling.
 #[derive(Debug)]
-pub struct BlockImportOutcome<B = reth_primitives::Block> {
+pub struct BlockImportOutcome<B = reth_ethereum_primitives::Block> {
     /// Sender of the `NewBlock` message.
     pub peer: PeerId,
     /// The result after validating the block
@@ -56,7 +56,7 @@ pub enum BlockImportError {
     Consensus(#[from] reth_consensus::ConsensusError),
     /// Other error
     #[error(transparent)]
-    Other(#[from] Box<dyn Error>),
+    Other(#[from] Box<dyn Error + Send + Sync>),
 }
 
 /// An implementation of `BlockImport` used in Proof-of-Stake consensus that does nothing.

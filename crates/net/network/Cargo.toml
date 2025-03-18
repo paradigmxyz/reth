@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-fs-util.workspace = true
-reth-primitives = { workspace = true, features = ["secp256k1"] }
 reth-primitives-traits.workspace = true
 reth-net-banlist.workspace = true
 reth-network-api.workspace = true
@@ -23,6 +22,7 @@ reth-network-p2p.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
+reth-engine-primitives.workspace = true
 reth-ethereum-forks.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
@@ -78,7 +78,6 @@ smallvec.workspace = true
 [dev-dependencies]
 # reth
 reth-discv4 = { workspace = true, features = ["test-utils"] }
-reth-primitives = { workspace = true, features = ["test-utils"] }
 
 # we need to enable the test-utils feature in our own crate to use utils in
 # integration tests
@@ -137,7 +136,6 @@ test-utils = [
     "reth-discv4/test-utils",
     "reth-network/test-utils",
     "reth-network-p2p/test-utils",
-    "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-ethereum-primitives/test-utils",
