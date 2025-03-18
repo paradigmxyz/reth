@@ -7,6 +7,7 @@ use alloy_rpc_types_eth::{
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
+use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
 use reth_primitives_traits::RecoveredBlock;
@@ -15,8 +16,8 @@ use reth_provider::{
     ProviderError, ProviderReceipt,
 };
 use reth_rpc_eth_api::{
-    EthApiTypes, EthFilterApiServer, FullEthApiTypes, RpcNodeCoreExt, RpcTransaction,
-    TransactionCompat,
+    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
+    RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
@@ -28,6 +29,7 @@ use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, Transa
 use std::{
     collections::HashMap,
     fmt,
+    future::Future,
     iter::StepBy,
     ops::RangeInclusive,
     sync::Arc,
@@ -39,31 +41,18 @@ use tokio::{
 };
 use tracing::{error, trace};
 
-/// Limits for logs queries
-#[derive(Default, Debug, Clone, Copy)]
-pub struct QueryLimits {
-    /// Maximum number of blocks that could be scanned per filter
-    max_blocks_per_filter: Option<u64>,
-    /// Maximum number of logs that can be returned in a response
-    max_logs_per_response: Option<usize>,
-}
-
-/// RPC interface for ETH filter API, implementing only the `eth_getLogs` method
-#[async_trait::async_trait]
-pub trait EngineEthFilter {
-    /// Returns logs matching given filter object.
-    async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
-}
-
-#[async_trait::async_trait]
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt<Provider: BlockIdReader>,
+    Eth: FullEthApiTypes + RpcNodeCoreExt<Provider: BlockIdReader> + 'static,
 {
     /// Returns logs matching given filter object, no query limits
-    async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
+    fn logs(
+        &self,
+        filter: Filter,
+        limits: QueryLimits,
+    ) -> impl Future<Output = RpcResult<Vec<Log>>> + Send {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        Ok(self.inner.logs_for_filter(filter, Default::default()).await?)
+        self.inner.logs_for_filter(filter, limits).map_err(|e| e.into())
     }
 }
 
