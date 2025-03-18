@@ -9,8 +9,8 @@ use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::V
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
-        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH,
-        SEPOLIA_GENESIS_HASH,
+        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH,
+        MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
     },
     Header,
 };
@@ -184,8 +184,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         chain: Chain::hoodi(),
         genesis_header: SealedHeader::new(
             make_genesis_header(&genesis, &hardforks),
-            // TODO: replace with alloy_consensus::HOODI_GENESIS_HASH when released
-            b256!("bbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b"),
+            HOODI_GENESIS_HASH,
         ),
         genesis,
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
