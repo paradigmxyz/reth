@@ -200,7 +200,7 @@ where
                     .await?;
 
                 if let Some(block) = latest_block {
-                    let block_number = u64::from(block.header.number);
+                    let block_number = block.header.number;
                     let block_hash = block.header.hash;
 
                     // Check if the block hash and number match the latest block info
