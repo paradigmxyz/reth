@@ -140,13 +140,13 @@ impl<N: NodePrimitives> Chain<N> {
         block_number: BlockNumber,
     ) -> Option<ExecutionOutcome<N::Receipt>> {
         if self.tip().number() == block_number {
-            return Some(self.execution_outcome.clone());
+            return Some(self.execution_outcome.clone())
         }
 
         if self.blocks.contains_key(&block_number) {
             let mut execution_outcome = self.execution_outcome.clone();
             execution_outcome.revert_to(block_number);
-            return Some(execution_outcome);
+            return Some(execution_outcome)
         }
         None
     }
@@ -278,7 +278,7 @@ impl<N: NodePrimitives> Chain<N> {
         let chain_tip = self.tip();
         let other_fork_block = other.fork_block();
         if chain_tip.hash() != other_fork_block.hash {
-            return Err(other);
+            return Err(other)
         }
 
         // Insert blocks from other chain
@@ -315,7 +315,7 @@ impl<N: NodePrimitives> Chain<N> {
         let block_number = match split_at {
             ChainSplitTarget::Hash(block_hash) => {
                 let Some(block_number) = self.block_number(block_hash) else {
-                    return ChainSplit::NoSplitPending(self);
+                    return ChainSplit::NoSplitPending(self)
                 };
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
@@ -325,13 +325,13 @@ impl<N: NodePrimitives> Chain<N> {
             }
             ChainSplitTarget::Number(block_number) => {
                 if block_number > chain_tip {
-                    return ChainSplit::NoSplitPending(self);
+                    return ChainSplit::NoSplitPending(self)
                 }
                 if block_number == chain_tip {
                     return ChainSplit::NoSplitCanonical(self);
                 }
                 if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
-                    return ChainSplit::NoSplitPending(self);
+                    return ChainSplit::NoSplitPending(self)
                 }
                 block_number
             }

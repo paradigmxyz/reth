@@ -203,11 +203,11 @@ impl<T> ExecutionOutcome<T> {
     /// Transform block number to the index of block.
     pub fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
-            return None;
+            return None
         }
         let index = block_number - self.first_block;
         if index >= self.receipts.len() as u64 {
-            return None;
+            return None
         }
         Some(index as usize)
     }
