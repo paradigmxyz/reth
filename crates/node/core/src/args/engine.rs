@@ -37,7 +37,7 @@ pub struct EngineArgs {
     #[arg(long = "engine.state-root-task-compare-updates")]
     pub state_root_task_compare_updates: bool,
 
-    /// Enables accepting requests hash instead of an array of requests.
+    /// Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`.
     #[arg(long = "engine.accept-execution-requests-hash")]
     pub accept_execution_requests_hash: bool,
 }

@@ -726,6 +726,9 @@ Engine:
       --engine.state-root-task-compare-updates
           Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
 
+      --engine.accept-execution-requests-hash
+          Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
+
 Ress:
       --ress.enable
           Enable support for `ress` subprotocol
