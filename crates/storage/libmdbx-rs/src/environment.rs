@@ -429,7 +429,7 @@ impl Info {
     /// Return the mode of the database
     #[inline]
     pub const fn mode(&self) -> Mode {
-        let mode = self.0.mi_mode;
+        let mode = self.0.mi_mode as ffi::MDBX_env_flags_t;
         if (mode & ffi::MDBX_RDONLY) != 0 {
             Mode::ReadOnly
         } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
