@@ -419,6 +419,42 @@ where
             )
         }
 
+        // Check for 7702 authorization list item's nonce is greater than or equal with state nonce
+        if transaction.is_eip7702() {
+            let authorization_list = transaction.authorization_list().unwrap();
+            for authorization in authorization_list {
+                let addr = match authorization.recover_authority() {
+                    Ok(addr) => addr,
+                    Err(err) => {
+                        return TransactionValidationOutcome::Error(
+                            *transaction.hash(),
+                            Box::new(err),
+                        )
+                    }
+                };
+                let state_nonce = match state.account_nonce(&addr) {
+                    Ok(nonce) => nonce.unwrap_or_default(),
+                    Err(err) => {
+                        return TransactionValidationOutcome::Error(
+                            *transaction.hash(),
+                            Box::new(err),
+                        )
+                    }
+                };
+                let auth_nonce = authorization.nonce;
+                if auth_nonce < state_nonce {
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidTransactionError::NonceNotConsistent {
+                            tx: auth_nonce,
+                            state: state_nonce,
+                        }
+                        .into(),
+                    );
+                }
+            }
+        }
+
         let cost = transaction.cost();
 
         // Checks for max cost
