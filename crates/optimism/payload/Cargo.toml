@@ -31,7 +31,7 @@ reth-payload-validator.workspace = true
 # op-reth
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives.workspace = true
+reth-optimism-primitives = { workspace = true, default-features = true, features = ["supervisor"] }
 reth-optimism-txpool.workspace = true
 
 # ethereum

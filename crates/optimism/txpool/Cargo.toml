@@ -33,7 +33,7 @@ op-alloy-consensus.workspace = true
 op-alloy-flz.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives.workspace = true
+reth-optimism-primitives = { workspace = true, default-features = true, features = ["supervisor"] }
 
 # metrics
 reth-metrics.workspace = true
@@ -44,7 +44,10 @@ c-kzg.workspace = true
 derive_more.workspace = true
 futures-util.workspace = true
 parking_lot.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+tokio.workspace = true
