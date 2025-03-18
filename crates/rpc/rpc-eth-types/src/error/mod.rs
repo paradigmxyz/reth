@@ -8,8 +8,8 @@ use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError
 use alloy_sol_types::{ContractError, RevertReason};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
-use reth_errors::RethError;
-use reth_primitives_traits::transaction::signed::RecoveryError;
+use reth_errors::{BlockExecutionError, RethError};
+use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
@@ -252,6 +252,12 @@ impl From<RethError> for EthApiError {
             RethError::Provider(err) => err.into(),
             err => Self::Internal(err),
         }
+    }
+}
+
+impl From<BlockExecutionError> for EthApiError {
+    fn from(error: BlockExecutionError) -> Self {
+        Self::Internal(error.into())
     }
 }
 
@@ -564,7 +570,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
             InvalidTransaction::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
-            InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
+            InvalidTransaction::EofCreateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
             InvalidTransaction::AuthorizationListNotSupported => {
                 Self::AuthorizationListNotSupported
             }
@@ -578,9 +584,9 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
     }
 }
 
-impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionError {
-    fn from(err: reth_primitives::InvalidTransactionError) -> Self {
-        use reth_primitives::InvalidTransactionError;
+impl From<InvalidTransactionError> for RpcInvalidTransactionError {
+    fn from(err: InvalidTransactionError) -> Self {
+        use InvalidTransactionError;
         // This conversion is used to convert any transaction errors that could occur inside the
         // txpool (e.g. `eth_sendRawTransaction`) to their corresponding RPC
         match err {
@@ -817,13 +823,13 @@ mod tests {
     fn header_not_found_message() {
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::hash(b256!(
-                "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
         assert_eq!(err.message(), "block not found: hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::hash_canonical(b256!(
-                "1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
+                "0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9"
             )))
             .into();
         assert_eq!(err.message(), "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");

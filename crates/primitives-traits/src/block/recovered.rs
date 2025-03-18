@@ -2,7 +2,7 @@
 
 use crate::{
     block::{error::SealedBlockRecoveryError, SealedBlock},
-    transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt},
+    transaction::signed::{RecoveryError, SignedTransaction},
     Block, BlockBody, InMemorySize, SealedHeader,
 };
 use alloc::vec::Vec;
@@ -291,6 +291,15 @@ impl<B: Block> RecoveredBlock<B> {
         self.senders.iter().zip(self.block.body().transactions())
     }
 
+    /// Returns an iterator over cloned `Recovered<Transaction>`
+    #[inline]
+    pub fn clone_transactions_recovered(
+        &self,
+    ) -> impl Iterator<Item = Recovered<<B::Body as BlockBody>::Transaction>> + '_ {
+        self.transactions_with_sender()
+            .map(|(sender, tx)| Recovered::new_unchecked(tx.clone(), *sender))
+    }
+
     /// Returns an iterator over `Recovered<&Transaction>`
     #[inline]
     pub fn transactions_recovered(
@@ -554,6 +563,7 @@ pub(super) mod serde_bincode_compat {
             bound = "serde_bincode_compat::SealedBlock<'a, T>: Serialize + serde::de::DeserializeOwned"
         )]
         block: serde_bincode_compat::SealedBlock<'a, T>,
+        #[allow(clippy::owned_cow)]
         senders: Cow<'a, Vec<Address>>,
     }
 

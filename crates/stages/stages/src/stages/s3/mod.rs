@@ -6,13 +6,13 @@ mod filelist;
 use filelist::DOWNLOAD_FILE_LIST;
 
 use reth_db_api::transaction::DbTxMut;
-use reth_primitives::StaticFileSegment;
 use reth_provider::{
     DBProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use std::{
     path::PathBuf,
     task::{ready, Context, Poll},
@@ -215,7 +215,7 @@ mod tests {
         ExecuteStageTestRunner, StageTestRunner, TestRunnerError, TestStageDB,
         UnwindStageTestRunner,
     };
-    use reth_primitives::SealedHeader;
+    use reth_primitives_traits::SealedHeader;
     use reth_testing_utils::{
         generators,
         generators::{random_header, random_header_range},

@@ -57,7 +57,6 @@ pub mod fuzz_rlp {
         NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData, P2PMessage,
         PooledTransactions, Receipts, Status, Transactions,
     };
-    use reth_primitives::TransactionSigned;
     use serde::{Deserialize, Serialize};
     use test_fuzz::test_fuzz;
 
@@ -161,5 +160,4 @@ pub mod fuzz_rlp {
     fuzz_type_and_name!(NodeData, fuzz_NodeData);
     fuzz_type_and_name!(GetReceipts, fuzz_GetReceipts);
     fuzz_type_and_name!(Receipts, fuzz_Receipts);
-    fuzz_type_and_name!(TransactionSigned, fuzz_TransactionSigned);
 }

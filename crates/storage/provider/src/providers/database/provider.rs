@@ -373,9 +373,9 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         self,
         mut block_number: BlockNumber,
     ) -> ProviderResult<StateProviderBox> {
-        if block_number == self.best_block_number().unwrap_or_default() &&
-            block_number == self.last_block_number().unwrap_or_default()
-        {
+        // if the block number is the same as the currently best block number on disk we can use the
+        // latest state provider here
+        if block_number == self.best_block_number().unwrap_or_default() {
             return Ok(Box::new(LatestStateProvider::new(self)))
         }
 
@@ -550,7 +550,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         )
     }
 
-    fn block_with_senders<H, HF, B, BF>(
+    fn recovered_block<H, HF, B, BF>(
         &self,
         id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
@@ -1011,10 +1011,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     }
 
     fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
-            // if this block is higher than the final paris(merge) block, return the final paris
-            // difficulty
-            return Ok(Some(td))
+        if self.chain_spec.is_paris_active_at_block(number) {
+            if let Some(td) = self.chain_spec.final_paris_total_difficulty() {
+                // if this block is higher than the final paris(merge) block, return the final paris
+                // difficulty
+                return Ok(Some(td))
+            }
         }
 
         self.static_file_provider.get_with_static_file_or_database(
@@ -1123,6 +1125,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+        // The best block number is tracked via the finished stage which gets updated in the same tx
+        // when new blocks committed
         Ok(self
             .get_stage_checkpoint(StageId::Finish)?
             .map(|checkpoint| checkpoint.block_number)
@@ -1213,12 +1217,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// If the header for this block is not found, this returns `None`.
     /// If the header is found, but the transactions either do not exist, or are not indexed, this
     /// will return None.
-    fn block_with_senders(
+    fn recovered_block(
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.block_with_senders(
+        self.recovered_block(
             id,
             transaction_kind,
             |block_number| self.header_by_number(block_number),
@@ -1239,7 +1243,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.block_with_senders(
+        self.recovered_block(
             id,
             transaction_kind,
             |block_number| self.sealed_header(block_number),
@@ -1278,7 +1282,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         )
     }
 
-    fn sealed_block_with_senders_range(
+    fn recovered_block_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
@@ -1602,7 +1606,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabasePro
         if let Some(number) = self.convert_hash_or_number(id)? {
             // If the Paris (Merge) hardfork block is known and block is after it, return empty
             // ommers.
-            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
+            if self.chain_spec.is_paris_active_at_block(number) {
                 return Ok(Some(Vec::new()))
             }
 
@@ -2755,7 +2759,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
         // get execution res
         let execution_state = self.take_state_above(block, remove_from)?;
 
-        let blocks = self.sealed_block_with_senders_range(range)?;
+        let blocks = self.recovered_block_range(range)?;
 
         // remove block bodies it is needed for both get block range and get block execution results
         // that is why it is deleted afterwards.
@@ -2975,16 +2979,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         block: BlockNumber,
         remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        let mut canonical_headers_cursor = self.tx.cursor_write::<tables::CanonicalHeaders>()?;
-        let mut rev_headers = canonical_headers_cursor.walk_back(None)?;
-
-        while let Some(Ok((number, hash))) = rev_headers.next() {
-            if number <= block {
-                break
-            }
+        for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
-            rev_headers.delete_current()?;
         }
+
+        // Only prune canonical headers after we've removed the block hashes as we rely on data from
+        // this table in `canonical_hashes_range`.
+        self.remove::<tables::CanonicalHeaders>(block + 1..)?;
         self.remove::<tables::Headers<HeaderTy<N>>>(block + 1..)?;
         self.remove::<tables::HeaderTerminalDifficulties>(block + 1..)?;
 

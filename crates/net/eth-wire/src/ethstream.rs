@@ -1,6 +1,7 @@
 use crate::{
     capability::RawCapabilityMessage,
     errors::{EthHandshakeError, EthStreamError},
+    handshake::EthereumEthHandshake,
     message::{EthBroadcastMessage, ProtocolBroadcastMessage},
     p2pstream::HANDSHAKE_TIMEOUT,
     CanDisconnect, DisconnectReason, EthMessage, EthNetworkPrimitives, EthVersion, ProtocolMessage,
@@ -8,12 +9,12 @@ use crate::{
 };
 use alloy_primitives::bytes::{Bytes, BytesMut};
 use alloy_rlp::Encodable;
-use futures::{ready, Sink, SinkExt, StreamExt};
+use futures::{ready, Sink, SinkExt};
 use pin_project::pin_project;
 use reth_eth_wire_types::NetworkPrimitives;
 use reth_ethereum_forks::ForkFilter;
-use reth_primitives_traits::GotExpected;
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -52,7 +53,7 @@ impl<S> UnauthedEthStream<S> {
 
 impl<S, E> UnauthedEthStream<S>
 where
-    S: Stream<Item = Result<BytesMut, E>> + CanDisconnect<Bytes> + Unpin,
+    S: Stream<Item = Result<BytesMut, E>> + CanDisconnect<Bytes> + Send + Unpin,
     EthStreamError: From<E> + From<<S as Sink<Bytes>>::Error>,
 {
     /// Consumes the [`UnauthedEthStream`] and returns an [`EthStream`] after the `Status`
@@ -88,106 +89,13 @@ where
             %status,
             "sending eth status to peer"
         );
+        EthereumEthHandshake(&mut self.inner).eth_handshake(status, fork_filter).await?;
 
-        // we need to encode and decode here on our own because we don't have an `EthStream` yet
-        // The max length for a status with TTD is: <msg id = 1 byte> + <rlp(status) = 88 byte>
-        self.inner
-            .send(
-                alloy_rlp::encode(ProtocolMessage::<N>::from(EthMessage::<N>::Status(status)))
-                    .into(),
-            )
-            .await?;
+        // now we can create the `EthStream` because the peer has successfully completed
+        // the handshake
+        let stream = EthStream::new(status.version, self.inner);
 
-        let their_msg_res = self.inner.next().await;
-
-        let their_msg = match their_msg_res {
-            Some(msg) => msg,
-            None => {
-                self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
-                return Err(EthStreamError::EthHandshakeError(EthHandshakeError::NoResponse))
-            }
-        }?;
-
-        if their_msg.len() > MAX_STATUS_SIZE {
-            self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-            return Err(EthStreamError::MessageTooBig(their_msg.len()))
-        }
-
-        let version = status.version;
-        let msg = match ProtocolMessage::<N>::decode_message(version, &mut their_msg.as_ref()) {
-            Ok(m) => m,
-            Err(err) => {
-                debug!("decode error in eth handshake: msg={their_msg:x}");
-                self.inner.disconnect(DisconnectReason::DisconnectRequested).await?;
-                return Err(EthStreamError::InvalidMessage(err))
-            }
-        };
-
-        // The following checks should match the checks in go-ethereum:
-        // https://github.com/ethereum/go-ethereum/blob/9244d5cd61f3ea5a7645fdf2a1a96d53421e412f/eth/protocols/eth/handshake.go#L87-L89
-        match msg.message {
-            EthMessage::Status(resp) => {
-                trace!(
-                    status=%resp,
-                    "validating incoming eth status from peer"
-                );
-                if status.genesis != resp.genesis {
-                    self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-                    return Err(EthHandshakeError::MismatchedGenesis(
-                        GotExpected { expected: status.genesis, got: resp.genesis }.into(),
-                    )
-                    .into())
-                }
-
-                if status.version != resp.version {
-                    self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-                    return Err(EthHandshakeError::MismatchedProtocolVersion(GotExpected {
-                        got: resp.version,
-                        expected: status.version,
-                    })
-                    .into())
-                }
-
-                if status.chain != resp.chain {
-                    self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-                    return Err(EthHandshakeError::MismatchedChain(GotExpected {
-                        got: resp.chain,
-                        expected: status.chain,
-                    })
-                    .into())
-                }
-
-                // TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
-                // larger, it will still fit within 160 bits
-                if status.total_difficulty.bit_len() > 160 {
-                    self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-                    return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
-                        got: status.total_difficulty.bit_len(),
-                        maximum: 160,
-                    }
-                    .into())
-                }
-
-                if let Err(err) =
-                    fork_filter.validate(resp.forkid).map_err(EthHandshakeError::InvalidFork)
-                {
-                    self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-                    return Err(err.into())
-                }
-
-                // now we can create the `EthStream` because the peer has successfully completed
-                // the handshake
-                let stream = EthStream::new(version, self.inner);
-
-                Ok((stream, resp))
-            }
-            _ => {
-                self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
-                Err(EthStreamError::EthHandshakeError(
-                    EthHandshakeError::NonStatusMessageInHandshake,
-                ))
-            }
-        }
+        Ok((stream, status))
     }
 }
 
@@ -362,8 +270,11 @@ where
     EthStreamError: From<<S as Sink<Bytes>>::Error>,
     N: NetworkPrimitives,
 {
-    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
-        self.inner.disconnect(reason).await.map_err(Into::into)
+    fn disconnect(
+        &mut self,
+        reason: DisconnectReason,
+    ) -> Pin<Box<dyn Future<Output = Result<(), EthStreamError>> + Send + '_>> {
+        Box::pin(async move { self.inner.disconnect(reason).await.map_err(Into::into) })
     }
 }
 

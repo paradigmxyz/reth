@@ -18,10 +18,11 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
-    ConfigureEvmEnv, EvmEnv,
+    ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
-use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
-use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
+use reth_primitives_traits::{
+    Block as _, BlockBody, NodePrimitives, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
+};
 use reth_provider::{
     BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
     ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderFactory,
@@ -97,7 +98,7 @@ where
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
+        evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         // replay all transactions of the block
@@ -199,7 +200,7 @@ where
 
         let ((evm_env, _), block) = futures::try_join!(
             self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().block_with_senders(block_hash.into()),
+            self.eth_api().recovered_block(block_hash.into()),
         )?;
 
         let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -496,7 +497,7 @@ where
         let target_block = block_number.unwrap_or_default();
         let ((mut evm_env, _), block) = futures::try_join!(
             self.eth_api().evm_env_at(target_block),
-            self.eth_api().block_with_senders(target_block),
+            self.eth_api().recovered_block(target_block),
         )?;
 
         let opts = opts.unwrap_or_default();
@@ -600,7 +601,7 @@ where
         let this = self.clone();
         let block = this
             .eth_api()
-            .block_with_senders(hash.into())
+            .recovered_block(hash.into())
             .await?
             .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
 
@@ -618,7 +619,7 @@ where
         let this = self.clone();
         let block = this
             .eth_api()
-            .block_with_senders(block_id.into())
+            .recovered_block(block_id.into())
             .await?
             .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
@@ -649,7 +650,7 @@ where
                 let state = state_provider
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
-                Ok(ExecutionWitness { state: state.into_iter().collect(), codes, keys })
+                Ok(ExecutionWitness { state, codes, keys })
             })
             .await
     }
@@ -687,8 +688,8 @@ where
     fn trace_transaction(
         &self,
         opts: &GethDebugTracingOptions,
-        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
-        tx_env: <Eth::Evm as ConfigureEvmEnv>::TxEnv,
+        evm_env: EvmEnvFor<Eth::Evm>,
+        tx_env: TxEnvFor<Eth::Evm>,
         db: &mut StateCacheDb<'_>,
         transaction_context: Option<TransactionContext>,
         fused_inspector: &mut Option<TracingInspector>,

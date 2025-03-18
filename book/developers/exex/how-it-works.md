@@ -11,7 +11,7 @@ Reth manages the lifecycle of all ExExes, including:
 - Sending [notifications](https://reth.rs/docs/reth_exex/enum.ExExNotification.html) about new chain, reverts,
   and reorgs from historical and live sync
 - Processing [events](https://reth.rs/docs/reth_exex/enum.ExExEvent.html) emitted by ExExes
-- Pruning (in case of a full or pruned node) only the data that have been processed by all ExExes
+- Pruning (in case of a full or pruned node) only the data that has been processed by all ExExes
 - Shutting ExExes down when the node is shut down
 
 ## Pruning

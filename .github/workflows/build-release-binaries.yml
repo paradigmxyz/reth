@@ -1,0 +1,57 @@
+name: build release binaries
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build release
+    runs-on: ${{ matrix.configs.os }}
+    strategy:
+      matrix:
+        configs:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            profile: maxperf
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04
+            profile: maxperf
+          - target: x86_64-apple-darwin
+            os: macos-13
+            profile: maxperf
+          - target: aarch64-apple-darwin
+            os: macos-14
+            profile: maxperf
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-24.04
+            profile: maxperf
+        build:
+          - command: build
+            binary: reth
+          - command: op-build
+            binary: op-reth
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.configs.target }}
+      - name: Install cross main
+        id: cross_main
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Apple M1 setup
+        if: matrix.configs.target == 'aarch64-apple-darwin'
+        run: |
+          echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
+
+      - name: Build Reth
+        run: make PROFILE=${{ matrix.configs.profile }} ${{ matrix.build.command }}-${{ matrix.configs.target }}

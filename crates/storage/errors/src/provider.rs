@@ -140,7 +140,7 @@ pub enum ProviderError {
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,
-    /// Any other error type wrapped into a clonable [`AnyError`].
+    /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),
 }

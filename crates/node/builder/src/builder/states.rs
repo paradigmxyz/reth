@@ -93,7 +93,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
     type Executor = C::Executor;
     type Consensus = C::Consensus;
     type Network = C::Network;
-    type PayloadBuilder = C::PayloadBuilder;
 
     fn pool(&self) -> &Self::Pool {
         self.components.pool()
@@ -113,10 +112,6 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
 
     fn network(&self) -> &Self::Network {
         self.components.network()
-    }
-
-    fn payload_builder(&self) -> &Self::PayloadBuilder {
-        self.components.payload_builder()
     }
 
     fn payload_builder_handle(

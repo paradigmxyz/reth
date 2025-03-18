@@ -88,14 +88,12 @@ pub enum BlobStoreUpdates {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::PrimitiveSignature as Signature;
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_execution_types::Chain;
-    use reth_primitives::{
-        BlockBody, RecoveredBlock, SealedBlock, SealedHeader, Transaction, TransactionSigned,
-    };
-
-    use super::*;
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
 
     #[test]
     fn test_finalized_tracker() {
@@ -129,7 +127,7 @@ mod tests {
         let block1 = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
-                BlockBody {
+                alloy_consensus::BlockBody {
                     transactions: vec![
                         TransactionSigned::new(
                             Transaction::Eip4844(Default::default()),
@@ -159,7 +157,7 @@ mod tests {
         let block2 = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
-                BlockBody {
+                alloy_consensus::BlockBody {
                     transactions: vec![
                         TransactionSigned::new(
                             Transaction::Eip1559(Default::default()),

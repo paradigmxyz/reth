@@ -14,8 +14,7 @@ use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, RecoveredBlock};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
@@ -88,7 +87,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             self.cache()
-                .get_sealed_block_with_senders(block)
+                .get_recovered_block(block)
                 .await
                 .map(|b| b.map(|b| b.body().transactions().to_vec()))
                 .map_err(Self::Error::from_eth_err)
@@ -207,7 +206,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.block_with_senders(block_id).await? {
+            if let Some(block) = self.recovered_block(block_id).await? {
                 let block_hash = block.hash();
                 let block_number = block.number();
                 let base_fee_per_gas = block.base_fee_per_gas();
@@ -279,7 +278,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             .await?;
 
             let block_id = num.into();
-            self.block_with_senders(block_id)
+            self.recovered_block(block_id)
                 .await?
                 .and_then(|block| {
                     let block_hash = block.hash();
@@ -318,7 +317,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.block_with_senders(block_id).await? {
+            if let Some(block) = self.recovered_block(block_id).await? {
                 if let Some(tx) = block.body().transactions().get(index) {
                     return Ok(Some(tx.encoded_2718().into()))
                 }
@@ -563,7 +562,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
             };
             let block = self
                 .cache()
-                .get_sealed_block_with_senders(block_hash)
+                .get_recovered_block(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?;
             Ok(block.map(|block| (transaction, block)))

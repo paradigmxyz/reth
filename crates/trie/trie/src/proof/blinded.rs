@@ -1,11 +1,8 @@
 use super::{Proof, StorageProof};
 use crate::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
-use alloy_primitives::{
-    map::{HashMap, HashSet},
-    B256,
-};
+use alloy_primitives::{map::HashSet, B256};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
-use reth_trie_common::{prefix_set::TriePrefixSetsMut, Nibbles};
+use reth_trie_common::{prefix_set::TriePrefixSetsMut, MultiProofTargets, Nibbles};
 use reth_trie_sparse::blinded::{
     pad_path_to_key, BlindedProvider, BlindedProviderFactory, RevealedNode,
 };
@@ -90,7 +87,7 @@ where
     fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
 
-        let targets = HashMap::from_iter([(pad_path_to_key(path), HashSet::default())]);
+        let targets = MultiProofTargets::from_iter([(pad_path_to_key(path), HashSet::default())]);
         let mut proof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())

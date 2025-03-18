@@ -2,14 +2,13 @@
 
 use crate::{
     execute::{BlockExecutorProvider, Executor},
-    system_calls::OnStateHook,
-    Database,
+    Database, OnStateHook,
 };
 
 // re-export Either
 pub use futures_util::future::Either;
 use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
-use reth_primitives::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 impl<A, B> BlockExecutorProvider for Either<A, B>
 where

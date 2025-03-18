@@ -10,9 +10,9 @@ repository.workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-primitives.workspace = true
 reth-db-api.workspace = true
 reth-provider.workspace = true
+reth-primitives-traits.workspace = true
 reth-config.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
@@ -21,6 +21,7 @@ reth-codecs.workspace = true
 reth-stages-types.workspace = true
 reth-fs-util.workspace = true
 reth-node-types.workspace = true
+reth-static-file-types.workspace = true
 
 # eth
 alloy-consensus.workspace = true
@@ -41,7 +42,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["mdbx"] }
-reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 alloy-consensus.workspace = true
 

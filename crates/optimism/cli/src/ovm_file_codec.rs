@@ -1,5 +1,5 @@
 use alloy_consensus::{
-    transaction::{from_eip155_value, RlpEcdsaTx},
+    transaction::{from_eip155_value, RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
     Header, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
 };
 use alloy_eips::{
@@ -293,7 +293,7 @@ impl Decodable2718 for OvmTransactionSigned {
 mod tests {
     use crate::ovm_file_codec::OvmTransactionSigned;
     use alloy_consensus::Typed2718;
-    use alloy_primitives::{address, hex, TxKind, B256, U256};
+    use alloy_primitives::{address, b256, hex, TxKind, U256};
     use op_alloy_consensus::OpTypedTransaction;
     const DEPOSIT_FUNCTION_SELECTOR: [u8; 4] = [0xb6, 0xb5, 0x5f, 0x25];
     use alloy_rlp::Decodable;
@@ -313,7 +313,7 @@ mod tests {
 
         assert_eq!(
             deposit_tx.to,
-            TxKind::Call(address!("a75127121d28a9bf848f3b70e7eea26570aa7700"))
+            TxKind::Call(address!("0xa75127121d28a9bf848f3b70e7eea26570aa7700"))
         );
         assert_eq!(deposit_tx.nonce, 240);
         assert_eq!(deposit_tx.gas_price, 1001500);
@@ -356,7 +356,7 @@ mod tests {
         assert_eq!(system_tx.gas_limit, 173950);
         assert_eq!(
             system_tx.to,
-            TxKind::Call(address!("a0cc33dd6f4819d473226257792afe230ec3c67f"))
+            TxKind::Call(address!("0xa0cc33dd6f4819d473226257792afe230ec3c67f"))
         );
         assert_eq!(system_tx.value, U256::ZERO);
         assert_eq!(system_tx.chain_id, Some(10));
@@ -379,7 +379,7 @@ mod tests {
         );
         assert_eq!(
             system_decoded.hash,
-            B256::from(hex!("e20b11349681dd049f8df32f5cdbb4c68d46b537685defcd86c7fa42cfe75b9e"))
+            b256!("0xe20b11349681dd049f8df32f5cdbb4c68d46b537685defcd86c7fa42cfe75b9e")
         );
     }
 }

@@ -1,8 +1,11 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use alloy_eips::BlockNumHash;
 use reth_exex_types::ExExHead;
-use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
+use reth_node_api::{
+    FullNodeComponents, NodePrimitives, NodeTypes, NodeTypesWithEngine, PrimitivesTy,
+};
 use reth_node_core::node_config::NodeConfig;
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::BlockReader;
 use reth_tasks::TaskExecutor;
 use std::fmt::Debug;
@@ -100,8 +103,10 @@ where
     }
 
     /// Returns the handle to the payload builder service.
-    pub fn payload_builder(&self) -> &Node::PayloadBuilder {
-        self.components.payload_builder()
+    pub fn payload_builder_handle(
+        &self,
+    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+        self.components.payload_builder_handle()
     }
 
     /// Returns the task executor.
@@ -159,7 +164,7 @@ mod tests {
                 self.ctx.block_executor();
                 self.ctx.provider();
                 self.ctx.network();
-                self.ctx.payload_builder();
+                self.ctx.payload_builder_handle();
                 self.ctx.task_executor();
                 self.ctx.set_notifications_without_head();
                 self.ctx.set_notifications_with_head(ExExHead { block: Default::default() });

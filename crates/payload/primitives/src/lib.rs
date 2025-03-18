@@ -29,10 +29,12 @@ pub use traits::{
 };
 
 mod payload;
-pub use payload::PayloadOrAttributes;
+pub use payload::{ExecutionPayload, PayloadOrAttributes};
 
 /// The types that are used by the engine API.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
+    /// The execution payload type provided as input
+    type ExecutionData: ExecutionPayload;
     /// The built payload type.
     type BuiltPayload: BuiltPayload + Clone + Unpin;
 
@@ -302,12 +304,13 @@ impl MessageValidationKind {
 /// either an execution payload, or payload attributes.
 ///
 /// The version is provided by the [`EngineApiMessageVersion`] argument.
-pub fn validate_version_specific_fields<Type, T>(
+pub fn validate_version_specific_fields<Payload, Type, T>(
     chain_spec: &T,
     version: EngineApiMessageVersion,
-    payload_or_attrs: PayloadOrAttributes<'_, Type>,
+    payload_or_attrs: PayloadOrAttributes<'_, Payload, Type>,
 ) -> Result<(), EngineObjectValidationError>
 where
+    Payload: ExecutionPayload,
     Type: PayloadAttributes,
     T: EthereumHardforks,
 {

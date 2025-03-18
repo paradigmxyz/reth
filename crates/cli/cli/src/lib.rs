@@ -52,12 +52,10 @@ pub trait RethCli: Sized {
     }
 
     /// Executes a command.
-    fn with_runner<F, R>(self, f: F) -> R
+    fn with_runner<F, R>(self, f: F, runner: CliRunner) -> R
     where
         F: FnOnce(Self, CliRunner) -> R,
     {
-        let runner = CliRunner::default();
-
         f(self, runner)
     }
 
@@ -68,8 +66,8 @@ pub trait RethCli: Sized {
         F: FnOnce(Self, CliRunner) -> R,
     {
         let cli = Self::parse_args()?;
-
-        Ok(cli.with_runner(f))
+        let runner = CliRunner::try_default_runtime()?;
+        Ok(cli.with_runner(f, runner))
     }
 
     /// The client version of the node.

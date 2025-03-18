@@ -367,12 +367,12 @@ impl Sink<Bytes> for ProtocolProxy {
 }
 
 impl CanDisconnect<Bytes> for ProtocolProxy {
-    async fn disconnect(
+    fn disconnect(
         &mut self,
         _reason: DisconnectReason,
-    ) -> Result<(), <Self as Sink<Bytes>>::Error> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), <Self as Sink<Bytes>>::Error>> + Send + '_>> {
         // TODO handle disconnects
-        Ok(())
+        Box::pin(async move { Ok(()) })
     }
 }
 

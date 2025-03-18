@@ -50,7 +50,6 @@ test-utils = [
     "dep:reth-trie",
     "reth-primitives-traits/test-utils",
     "reth-trie?/test-utils",
-    "revm/test-utils",
 ]
 serde = [
     "revm/serde",
@@ -62,3 +61,4 @@ serde = [
     "reth-primitives-traits/serde",
     "revm-inspector/serde",
 ]
+portable = ["revm/portable"]

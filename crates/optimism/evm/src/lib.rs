@@ -12,71 +12,122 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
-use alloy_op_evm::OpEvmFactory;
+use alloy_evm::FromRecoveredTx;
+use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use alloy_primitives::U256;
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
+use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader, SignedTransaction};
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
-    specification::hardfork::SpecId,
+    primitives::hardfork::SpecId,
 };
-use revm_optimism::{OpSpecId, OpTransaction};
 
 mod config;
-pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
+pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock, OpNextBlockEnvAttributes};
 mod execute;
 pub use execute::*;
 pub mod l1;
 pub use l1::*;
 mod receipts;
 pub use receipts::*;
+mod build;
+pub use build::OpBlockAssembler;
 
 mod error;
 pub use error::OpBlockExecutionError;
 
+pub use alloy_op_evm::{OpBlockExecutorFactory, OpEvm, OpEvmFactory};
+
 /// Optimism-related EVM configuration.
 #[derive(Debug)]
-pub struct OpEvmConfig<ChainSpec = OpChainSpec> {
-    chain_spec: Arc<ChainSpec>,
-    evm_factory: OpEvmFactory,
+pub struct OpEvmConfig<
+    ChainSpec = OpChainSpec,
+    N: NodePrimitives = OpPrimitives,
+    R = OpRethReceiptBuilder,
+> {
+    executor_factory: OpBlockExecutorFactory<R, Arc<ChainSpec>>,
+    block_assembler: OpBlockAssembler<ChainSpec>,
+    _pd: core::marker::PhantomData<N>,
 }
 
-impl<ChainSpec> Clone for OpEvmConfig<ChainSpec> {
+impl<ChainSpec, N: NodePrimitives, R: Clone> Clone for OpEvmConfig<ChainSpec, N, R> {
     fn clone(&self) -> Self {
-        Self { chain_spec: self.chain_spec.clone(), evm_factory: OpEvmFactory::default() }
+        Self {
+            executor_factory: self.executor_factory.clone(),
+            block_assembler: self.block_assembler.clone(),
+            _pd: self._pd,
+        }
     }
 }
 
 impl<ChainSpec> OpEvmConfig<ChainSpec> {
+    /// Creates a new [`OpEvmConfig`] with the given chain spec for OP chains.
+    pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
+        Self::new(chain_spec, OpRethReceiptBuilder::default())
+    }
+}
+
+impl<ChainSpec, N: NodePrimitives, R> OpEvmConfig<ChainSpec, N, R> {
     /// Creates a new [`OpEvmConfig`] with the given chain spec.
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, evm_factory: OpEvmFactory::default() }
+    pub fn new(chain_spec: Arc<ChainSpec>, receipt_builder: R) -> Self {
+        Self {
+            block_assembler: OpBlockAssembler::new(chain_spec.clone()),
+            executor_factory: OpBlockExecutorFactory::new(
+                receipt_builder,
+                chain_spec,
+                OpEvmFactory::default(),
+            ),
+            _pd: core::marker::PhantomData,
+        }
     }
 
     /// Returns the chain spec associated with this configuration.
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
-        &self.chain_spec
+        self.executor_factory.spec()
     }
 }
 
-impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvmEnv for OpEvmConfig<ChainSpec> {
-    type Header = Header;
-    type Transaction = OpTransactionSigned;
+impl<ChainSpec, N, R> ConfigureEvm for OpEvmConfig<ChainSpec, N, R>
+where
+    ChainSpec: EthChainSpec + OpHardforks,
+    N: NodePrimitives<
+        Receipt = R::Receipt,
+        SignedTx = R::Transaction,
+        BlockHeader = Header,
+        BlockBody = alloy_consensus::BlockBody<R::Transaction>,
+        Block = alloy_consensus::Block<R::Transaction>,
+    >,
+    OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx>,
+    R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
+    Self: Send + Sync + Unpin + Clone + 'static,
+{
+    type Primitives = N;
     type Error = EIP1559ParamError;
-    type TxEnv = OpTransaction<TxEnv>;
-    type Spec = OpSpecId;
+    type NextBlockEnvCtx = OpNextBlockEnvAttributes;
+    type BlockExecutorFactory = OpBlockExecutorFactory<R, Arc<ChainSpec>>;
+    type BlockAssembler = OpBlockAssembler<ChainSpec>;
 
-    fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        &self.executor_factory
+    }
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assembler
+    }
+
+    fn evm_env(&self, header: &Header) -> EvmEnv<OpSpecId> {
         let spec = config::revm_spec(self.chain_spec(), header);
 
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec.chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
 
         let block_env = BlockEnv {
             number: header.number(),
@@ -105,14 +156,15 @@ impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvmEnv for OpEvmC
 
     fn next_evm_env(
         &self,
-        parent: &Self::Header,
-        attributes: NextBlockEnvAttributes,
-    ) -> Result<EvmEnv<Self::Spec>, Self::Error> {
+        parent: &Header,
+        attributes: &Self::NextBlockEnvCtx,
+    ) -> Result<EvmEnv<OpSpecId>, Self::Error> {
         // ensure we're not missing any timestamp based hardforks
-        let spec_id = revm_spec_by_timestamp_after_bedrock(&self.chain_spec, attributes.timestamp);
+        let spec_id = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), attributes.timestamp);
 
         // configure evm env based on parent block
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec.chain().id()).with_spec(spec_id);
+        let cfg_env =
+            CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
@@ -124,30 +176,41 @@ impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvmEnv for OpEvmC
             .map(|gas| BlobExcessGasAndPrice::new(gas, false));
 
         let block_env = BlockEnv {
-            number: parent.number + 1,
+            number: parent.number() + 1,
             beneficiary: attributes.suggested_fee_recipient,
             timestamp: attributes.timestamp,
             difficulty: U256::ZERO,
             prevrandao: Some(attributes.prev_randao),
             gas_limit: attributes.gas_limit,
             // calculate basefee based on parent block's gas usage
-            basefee: next_block_base_fee(&self.chain_spec, parent, attributes.timestamp)?,
+            basefee: next_block_base_fee(self.chain_spec(), parent, attributes.timestamp)?,
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };
 
         Ok(EvmEnv { cfg_env, block_env })
     }
-}
 
-impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvm for OpEvmConfig<ChainSpec> {
-    type EvmFactory = OpEvmFactory;
+    fn context_for_block(&self, block: &'_ SealedBlock<N::Block>) -> OpBlockExecutionCtx {
+        OpBlockExecutionCtx {
+            parent_hash: block.header().parent_hash(),
+            parent_beacon_block_root: block.header().parent_beacon_block_root(),
+            extra_data: block.header().extra_data().clone(),
+        }
+    }
 
-    fn evm_factory(&self) -> &Self::EvmFactory {
-        &self.evm_factory
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader<N::BlockHeader>,
+        attributes: Self::NextBlockEnvCtx,
+    ) -> OpBlockExecutionCtx {
+        OpBlockExecutionCtx {
+            parent_hash: parent.hash(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            extra_data: attributes.extra_data,
+        }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +218,7 @@ mod tests {
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
     use alloy_primitives::{bytes, map::HashMap, Address, LogData, B256};
+    use op_revm::OpSpecId;
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
     use reth_execution_types::{
@@ -165,12 +229,11 @@ mod tests {
     use reth_primitives_traits::{Account, RecoveredBlock};
     use revm::{database_interface::EmptyDBTyped, inspector::NoOpInspector, state::AccountInfo};
     use revm_database::{BundleState, CacheDB};
-    use revm_optimism::OpSpecId;
     use revm_primitives::Log;
     use std::sync::Arc;
 
     fn test_evm_config() -> OpEvmConfig {
-        OpEvmConfig::new(BASE_MAINNET.clone())
+        OpEvmConfig::optimism(BASE_MAINNET.clone())
     }
 
     #[test]
@@ -191,7 +254,8 @@ mod tests {
         // Use the `OpEvmConfig` to create the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
         let EvmEnv { cfg_env, .. } =
-            OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() })).evm_env(&header);
+            OpEvmConfig::optimism(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
+                .evm_env(&header);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec

@@ -2,6 +2,7 @@
 
 use std::{fmt::Debug, sync::Arc};
 
+use alloy_consensus::Block;
 use alloy_eips::{
     eip1559::BaseFeeParams, eip2718::Decodable2718, eip4895::Withdrawals, eip7685::Requests,
 };
@@ -12,15 +13,17 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV3, PayloadId,
 };
 use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
-/// Re-export for use in downstream arguments.
-pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
-use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
+use op_alloy_rpc_types_engine::{
+    OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
+};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{transaction::WithEncoded, Block, NodePrimitives, SealedBlock};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction, WithEncoded};
+
+/// Re-export for use in downstream arguments.
+pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +142,14 @@ impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
+    }
+}
+
+impl<OpTransactionSigned> From<EthPayloadBuilderAttributes>
+    for OpPayloadBuilderAttributes<OpTransactionSigned>
+{
+    fn from(value: EthPayloadBuilderAttributes) -> Self {
+        Self { payload_attributes: value, ..Default::default() }
     }
 }
 
@@ -279,10 +290,16 @@ where
 
         let parent_beacon_block_root = block.parent_beacon_block_root.unwrap_or_default();
 
+        let l2_withdrawals_root = block.withdrawals_root.unwrap_or_default();
+        let payload_v3 = ExecutionPayloadV3::from_block_unchecked(
+            block.hash(),
+            &Arc::unwrap_or_clone(block).into_block(),
+        );
+
         Self {
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
+            execution_payload: OpExecutionPayloadV4::from_v3_with_withdrawals_root(
+                payload_v3,
+                l2_withdrawals_root,
             ),
             block_value: fees,
             // From the engine API spec:
@@ -374,10 +391,10 @@ mod tests {
         let attrs = OpPayloadAttributes {
             payload_attributes: PayloadAttributes {
                 timestamp: 1728933301,
-                prev_randao: b256!("9158595abbdab2c90635087619aa7042bbebe47642dfab3c9bfb934f6b082765"),
-                suggested_fee_recipient: address!("4200000000000000000000000000000000000011"),
+                prev_randao: b256!("0x9158595abbdab2c90635087619aa7042bbebe47642dfab3c9bfb934f6b082765"),
+                suggested_fee_recipient: address!("0x4200000000000000000000000000000000000011"),
                 withdrawals: Some([].into()),
-                parent_beacon_block_root: b256!("8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into(),
+                parent_beacon_block_root: b256!("0x8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into(),
             },
             transactions: Some([bytes!("7ef8f8a0dc19cfa777d90980e4875d0a548a881baaa3f83f14d1bc0d3038bc329350e54194deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f424000000000000000000000000300000000670d6d890000000000000125000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000014bf9181db6e381d4384bbf69c48b0ee0eed23c6ca26143c6d2544f9d39997a590000000000000000000000007f83d659683caf2767fd3c720981d51f5bc365bc")].into()),
             no_tx_pool: None,
@@ -389,7 +406,7 @@ mod tests {
         assert_eq!(
             expected,
             payload_id_optimism(
-                &b256!("3533bf30edaf9505d0810bf475cbe4e5f4b9889904b9845e83efdeab4e92eb1e"),
+                &b256!("0x3533bf30edaf9505d0810bf475cbe4e5f4b9889904b9845e83efdeab4e92eb1e"),
                 &attrs,
                 EngineApiMessageVersion::V3 as u8
             )

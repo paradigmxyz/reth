@@ -15,5 +15,5 @@
 mod client;
 mod providers;
 
-pub use client::{block_to_execution_payload_v3, BlockProvider, DebugConsensusClient};
+pub use client::{BlockProvider, DebugConsensusClient};
 pub use providers::{EtherscanBlockProvider, RpcBlockProvider};

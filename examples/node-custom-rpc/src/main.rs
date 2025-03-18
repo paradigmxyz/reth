@@ -2,7 +2,7 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p node-custom-rpc -- node --http --ws --enable-ext
 //! ```
 //!
@@ -11,6 +11,8 @@
 //! ```sh
 //! cast rpc txpoolExt_transactionCount
 //! ```
+
+#![warn(unused_crate_dependencies)]
 
 use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};

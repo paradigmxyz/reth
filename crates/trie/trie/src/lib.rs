@@ -29,10 +29,6 @@ pub mod walker;
 /// The iterators for traversing existing intermediate hashes and updated trie leaves.
 pub mod node_iter;
 
-/// Input for trie computation.
-mod input;
-pub use input::TrieInput;
-
 /// Merkle proof generation.
 pub mod proof;
 

@@ -23,8 +23,9 @@ use alloy_eips::{
     eip7840::BlobParams,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_primitives::{InvalidTransactionError, SealedBlock};
-use reth_primitives_traits::{Block, GotExpected};
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
+};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -37,6 +38,7 @@ use std::{
 use tokio::sync::Mutex;
 
 /// Validator for Ethereum transactions.
+/// It is a [`TransactionValidator`] implementation that validates ethereum transaction.
 #[derive(Debug, Clone)]
 pub struct EthTransactionValidator<Client, T> {
     /// The type that performs the actual validation.
@@ -279,7 +281,7 @@ where
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
         if !self.local_transactions_config.is_local(origin, transaction.sender_ref()) &&
-            transaction.is_eip1559() &&
+            transaction.is_dynamic_fee() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return TransactionValidationOutcome::Invalid(
@@ -299,7 +301,7 @@ where
         }
 
         if transaction.is_eip7702() {
-            // Cancun fork is required for 7702 txs
+            // Prague fork is required for 7702 txs
             if !self.fork_tracker.is_prague_activated() {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
@@ -544,7 +546,7 @@ where
     }
 }
 
-/// A builder for [`TransactionValidationTaskExecutor`]
+/// A builder for [`EthTransactionValidator`] and [`TransactionValidationTaskExecutor`]
 #[derive(Debug)]
 pub struct EthTransactionValidatorBuilder<Client> {
     client: Client,
@@ -885,7 +887,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
     fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
-    use revm_specification::hardfork::SpecId;
+    use revm_primitives::hardfork::SpecId;
     let spec_id = if fork_tracker.is_prague_activated() {
         SpecId::PRAGUE
     } else if fork_tracker.is_shanghai_activated() {
@@ -924,7 +926,8 @@ mod tests {
     use alloy_consensus::Transaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, PooledTransaction};
+    use reth_ethereum_primitives::PooledTransaction;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

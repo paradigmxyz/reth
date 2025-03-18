@@ -1,7 +1,7 @@
 use alloy_consensus::Header;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_revm::specification::hardfork::SpecId;
+use revm::primitives::hardfork::SpecId;
 
 /// Map the latest active hardfork at the given header to a revm [`SpecId`].
 pub fn revm_spec(chain_spec: &ChainSpec, header: &Header) -> SpecId {
@@ -34,7 +34,7 @@ pub fn revm_spec_by_timestamp_and_block_number(
         .active_at_timestamp_or_number(timestamp, block_number)
     {
         SpecId::SHANGHAI
-    } else if chain_spec.is_paris_active_at_block(block_number).is_some_and(|active| active) {
+    } else if chain_spec.is_paris_active_at_block(block_number) {
         SpecId::MERGE
     } else if chain_spec
         .fork(EthereumHardfork::London)

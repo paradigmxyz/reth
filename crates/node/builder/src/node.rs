@@ -117,8 +117,6 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     pub network: Node::Network,
     /// Provider to interact with the node's database
     pub provider: Node::Provider,
-    /// Node's configured payload builder.
-    pub payload_builder: Node::PayloadBuilder,
     /// Handle to the node's payload builder service.
     pub payload_builder_handle: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
     /// Task executor for the node.
@@ -139,7 +137,6 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node
             pool: self.pool.clone(),
             network: self.network.clone(),
             provider: self.provider.clone(),
-            payload_builder: self.payload_builder.clone(),
             payload_builder_handle: self.payload_builder_handle.clone(),
             task_executor: self.task_executor.clone(),
             config: self.config.clone(),

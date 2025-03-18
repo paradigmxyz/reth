@@ -12,6 +12,3 @@ optimism_package:
       - el_type: op-reth
         el_image: "ghcr.io/paradigmxyz/op-reth:kurtosis-ci"
         cl_type: op-node
-      batcher_params:
-        extra_params:
-          - "--throttle-interval=0"

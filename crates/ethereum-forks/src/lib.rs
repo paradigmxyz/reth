@@ -21,14 +21,11 @@ extern crate alloc;
 pub use alloy_eip2124::*;
 
 mod display;
-mod forkcondition;
-mod hardfork;
 mod hardforks;
 
-pub use hardfork::{EthereumHardfork, Hardfork, DEV_HARDFORKS};
+pub use alloy_hardforks::*;
 
 pub use display::DisplayHardforks;
-pub use forkcondition::ForkCondition;
 pub use hardforks::*;
 
 #[cfg(any(test, feature = "arbitrary"))]

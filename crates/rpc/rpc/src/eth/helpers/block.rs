@@ -20,8 +20,8 @@ where
         Error = EthApiError,
         NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
         Provider: BlockReader<
-            Transaction = reth_primitives::TransactionSigned,
-            Receipt = reth_primitives::Receipt,
+            Transaction = reth_ethereum_primitives::TransactionSigned,
+            Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
     Provider: BlockReader + ChainSpecProvider,

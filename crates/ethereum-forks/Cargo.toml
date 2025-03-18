@@ -13,13 +13,11 @@ workspace = true
 
 [dependencies]
 # ethereum
-alloy-chains.workspace = true
+alloy-hardforks.workspace = true
 alloy-eip2124.workspace = true
 alloy-primitives = { workspace = true, features = ["serde", "rlp"] }
 
 # misc
-serde = { workspace = true, features = ["derive"], optional = true }
-dyn-clone.workspace = true
 once_cell.workspace = true
 rustc-hash = { workspace = true, optional = true }
 
@@ -34,21 +32,17 @@ arbitrary = { workspace = true, features = ["derive"] }
 default = ["std", "serde", "rustc-hash"]
 arbitrary = [
     "dep:arbitrary",
-    "alloy-chains/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-eip2124/arbitrary",
 ]
 serde = [
-    "dep:serde",
-    "alloy-chains/serde",
     "alloy-primitives/serde",
     "alloy-eip2124/serde",
+    "alloy-hardforks/serde",
 ]
 std = [
-    "alloy-chains/std",
     "alloy-primitives/std",
     "rustc-hash/std",
-    "serde?/std",
     "alloy-eip2124/std",
     "once_cell/std",
 ]

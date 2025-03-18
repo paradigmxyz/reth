@@ -2,8 +2,9 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, Sealed, SignableTransaction, Signed, Transaction, TxEip1559,
-    TxEip2930, TxEip7702, TxLegacy, Typed2718,
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    Sealed, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
+    Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -24,6 +25,7 @@ use derive_more::{AsRef, Deref};
 use op_alloy_consensus::{
     DepositTransaction, OpPooledTransaction, OpTxEnvelope, OpTypedTransaction, TxDeposit,
 };
+use op_revm::transaction::deposit::DepositTransactionParts;
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
@@ -33,7 +35,6 @@ use reth_primitives_traits::{
     InMemorySize, SignedTransaction,
 };
 use revm_context::TxEnv;
-use revm_optimism::transaction::deposit::DepositTransactionParts;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -214,7 +215,7 @@ impl OpTransaction for OpTransactionSigned {
     }
 }
 
-impl FromRecoveredTx<OpTransactionSigned> for revm_optimism::OpTransaction<TxEnv> {
+impl FromRecoveredTx<OpTransactionSigned> for op_revm::OpTransaction<TxEnv> {
     fn from_recovered_tx(tx: &OpTransactionSigned, sender: Address) -> Self {
         let envelope = tx.encoded_2718();
 
@@ -308,7 +309,11 @@ impl FromRecoveredTx<OpTransactionSigned> for revm_optimism::OpTransaction<TxEnv
                 DepositTransactionParts {
                     is_system_transaction: tx.is_system_transaction,
                     source_hash: tx.source_hash,
-                    mint: tx.mint,
+                    // For consistency with op-geth, we always return `0x0` for mint if it is
+                    // missing This is because op-geth does not distinguish
+                    // between null and 0, because this value is decoded from RLP where null is
+                    // represented as 0
+                    mint: Some(tx.mint.unwrap_or_default()),
                 }
             } else {
                 Default::default()

@@ -8,7 +8,7 @@ use alloy_rpc_types_engine::{
 };
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_primitives::{Block, TransactionSigned};
+use reth_ethereum_primitives::{Block, TransactionSigned};
 use reth_primitives_traits::block::Block as _;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_layer::JwtSecret;
@@ -18,7 +18,7 @@ async fn test_basic_engine_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync + EngineApiClient<EthEngineTypes>,
 {
-    let block = Block::<_>::default().seal_slow();
+    let block = Block::default().seal_slow();
     EngineApiClient::new_payload_v1(
         client,
         ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.clone().into_block()),

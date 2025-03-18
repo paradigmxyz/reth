@@ -60,6 +60,13 @@ pub trait EthFees: LoadFee {
                 return Ok(FeeHistory::default())
             }
 
+            // ensure the given reward percentiles aren't excessive
+            if reward_percentiles.as_ref().map(|perc| perc.len() as u64) >
+                Some(self.gas_oracle().config().max_reward_percentile_count)
+            {
+                return Err(EthApiError::InvalidRewardPercentiles.into())
+            }
+
             // See https://github.com/ethereum/go-ethereum/blob/2754b197c935ee63101cbbca2752338246384fec/eth/gasprice/feehistory.go#L218C8-L225
             let max_fee_history = if reward_percentiles.is_none() {
                 self.gas_oracle().config().max_header_history
@@ -292,7 +299,7 @@ pub trait LoadFee: LoadBlock {
                 None => {
                     // fetch pending base fee
                     let base_fee = self
-                        .block_with_senders(BlockNumberOrTag::Pending.into())
+                        .recovered_block(BlockNumberOrTag::Pending.into())
                         .await?
                         .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Pending.into()))?
                         .base_fee_per_gas()
@@ -328,7 +335,7 @@ pub trait LoadFee: LoadBlock {
     ///
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
     fn gas_price(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        let header = self.block_with_senders(BlockNumberOrTag::Latest.into());
+        let header = self.recovered_block(BlockNumberOrTag::Latest.into());
         let suggested_tip = self.suggested_priority_fee();
         async move {
             let (header, suggested_tip) = futures::try_join!(header, suggested_tip)?;
@@ -340,7 +347,7 @@ pub trait LoadFee: LoadBlock {
     /// Returns a suggestion for a base fee for blob transactions.
     fn blob_base_fee(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         async move {
-            self.block_with_senders(BlockNumberOrTag::Latest.into())
+            self.recovered_block(BlockNumberOrTag::Latest.into())
                 .await?
                 .and_then(|h| {
                     h.maybe_next_block_blob_fee(
