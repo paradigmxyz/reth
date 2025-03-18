@@ -34,7 +34,7 @@ alloy-network = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
 
 # kona
-kona-rpc = { workspace = true, features = ["client", "interop", "jsonrpsee"]}
+kona-rpc = { workspace = true, features = ["client", "interop", "jsonrpsee"] }
 kona-interop.workspace = true
 
 # codec
@@ -48,6 +48,7 @@ derive_more = { workspace = true, features = ["deref", "from", "into", "construc
 rand = { workspace = true, optional = true }
 jsonrpsee.workspace = true
 url.workspace = true
+serde_json.workspace = true
 
 # test
 arbitrary = { workspace = true, features = ["derive"], optional = true }

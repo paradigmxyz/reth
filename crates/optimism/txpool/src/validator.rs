@@ -6,7 +6,7 @@ use reth_chainspec::ChainSpecProvider;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::supervisor::{
-    ExecutingDescriptor, InteropTxValidator, SafetyLevel, SupervisorClient,
+    ExecutingDescriptor, InteropTxValidator, SupervisorClient,
 };
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
@@ -46,8 +46,6 @@ pub struct OpTransactionValidator<Client, Tx> {
     require_l1_data_gas_fee: bool,
     /// Client used to check transaction validity with op-supervisor
     supervisor_client: Option<SupervisorClient>,
-    /// Supervisor safety level
-    supervisor_safety_level: SafetyLevel,
 }
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx> {
@@ -121,18 +119,12 @@ where
             block_info: Arc::new(block_info),
             require_l1_data_gas_fee: true,
             supervisor_client: None,
-            supervisor_safety_level: SafetyLevel::CrossUnsafe,
         }
     }
 
     /// Set the supervisor client and safety level
-    pub fn with_supervisor(
-        mut self,
-        supervisor_client: Option<SupervisorClient>,
-        safety_level: SafetyLevel,
-    ) -> Self {
+    pub fn with_supervisor(mut self, supervisor_client: Option<SupervisorClient>) -> Self {
         self.supervisor_client = supervisor_client;
-        self.supervisor_safety_level = safety_level;
         self
     }
 
@@ -158,7 +150,7 @@ where
     ///
     /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
     /// that the account has enough balance to cover the L1 gas cost.
-    pub fn validate_one(
+    pub async fn validate_one(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -171,7 +163,7 @@ where
         }
 
         // Interop cross tx validation
-        if self.is_valid_cross_tx(&transaction) == Some(false) {
+        if self.is_valid_cross_tx(&transaction).await == Some(false) {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::CrossTxInvalid,
@@ -240,18 +232,21 @@ where
     /// Returns all outcomes for the given transactions in the same order.
     ///
     /// See also [`Self::validate_one`]
-    pub fn validate_all(
+    pub async fn validate_all(
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        futures_util::future::join_all(
+            transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)),
+        )
+        .await
     }
 
     /// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
     /// against supervisor.
     ///
     /// If commitment present pre-interop tx rejected.
-    pub fn is_valid_cross_tx(&self, tx: &Tx) -> Option<bool> {
+    pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<bool> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
         let access_list = tx.access_list()?;
@@ -270,19 +265,16 @@ where
             .supervisor_client
             .as_ref()
             .expect("supervisor client should be always set after interop is active");
-        let safety_level = self.supervisor_safety_level;
-        match tokio::task::block_in_place(move || {
-            tokio::runtime::Handle::current().block_on(async {
-                client
-                    .validate_messages(
-                        inbox_entries.as_slice(),
-                        safety_level,
-                        ExecutingDescriptor::new(timestamp, Some(86400)),
-                        Some(core::time::Duration::from_millis(100)),
-                    )
-                    .await
-            })
-        }) {
+        let safety_level = client.safety();
+        match client
+            .validate_messages(
+                inbox_entries.as_slice(),
+                safety_level,
+                ExecutingDescriptor::new(timestamp, Some(86400)),
+                Some(core::time::Duration::from_millis(100)),
+            )
+            .await
+        {
             Ok(()) => Some(true),
             Err(_) => {
                 trace!(target: "txpool", hash=%tx.hash(), "Cross chain transaction invalid");
@@ -304,14 +296,14 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
+        self.validate_one(origin, transaction).await
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions)
+        self.validate_all(transactions).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
