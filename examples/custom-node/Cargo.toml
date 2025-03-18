@@ -53,4 +53,3 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
 ]
-
