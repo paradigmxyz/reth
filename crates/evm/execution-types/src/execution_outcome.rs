@@ -296,7 +296,7 @@ impl<T> ExecutionOutcome<T> {
         T: Clone,
     {
         if at == self.first_block {
-            return (None, self);
+            return (None, self)
         }
 
         let (mut lower_state, mut higher_state) = (self.clone(), self);

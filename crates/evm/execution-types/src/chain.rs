@@ -319,7 +319,7 @@ impl<N: NodePrimitives> Chain<N> {
                 };
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self);
+                    return ChainSplit::NoSplitCanonical(self)
                 }
                 block_number
             }
@@ -328,7 +328,7 @@ impl<N: NodePrimitives> Chain<N> {
                     return ChainSplit::NoSplitPending(self)
                 }
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self);
+                    return ChainSplit::NoSplitCanonical(self)
                 }
                 if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
                     return ChainSplit::NoSplitPending(self)
