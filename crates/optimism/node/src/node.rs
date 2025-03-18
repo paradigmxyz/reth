@@ -115,16 +115,13 @@ impl OpNode {
             .pool(
                 OpPoolBuilder::default()
                     .with_enable_tx_conditional(self.args.enable_tx_conditional)
-                    // TODO: we must ensure that if interop enabled we check presence of
-                    // supervisor_http
                     .with_supervisor_client(
-                        self.args.supervisor_http.clone().map(SupervisorClient::new),
+                        self.args.supervisor_http.clone(),
                     )
                     .with_supervisor_safety_level(
                         self.args
                             .supervisor_safety_level
-                            .clone()
-                            .map(|level| serde_json::from_str(level.as_str()).unwrap()),
+                            .clone(),
                     ),
             )
             .payload(BasicPayloadServiceBuilder::new(
@@ -491,10 +488,10 @@ pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     pub pool_config_overrides: PoolBuilderConfigOverrides,
     /// Enable transaction conditionals.
     pub enable_tx_conditional: bool,
-    /// Supervisor client
-    pub supervisor_client: Option<SupervisorClient>,
+    /// Supervisor client url
+    pub supervisor_http: Option<String>,
     /// Supervisor safety level
-    pub supervisor_safety_level: SafetyLevel,
+    pub supervisor_safety_level: Option<String>,
     /// Marker for the pooled transaction type.
     _pd: core::marker::PhantomData<T>,
 }
@@ -504,8 +501,8 @@ impl<T> Default for OpPoolBuilder<T> {
         Self {
             pool_config_overrides: Default::default(),
             enable_tx_conditional: false,
-            supervisor_client: None,
-            supervisor_safety_level: SafetyLevel::CrossUnsafe,
+            supervisor_http: None,
+            supervisor_safety_level: None,
             _pd: Default::default(),
         }
     }
@@ -528,17 +525,17 @@ impl<T> OpPoolBuilder<T> {
     }
 
     /// Sets the supervisor client
-    pub fn with_supervisor_client(mut self, supervisor_client: Option<SupervisorClient>) -> Self {
-        self.supervisor_client = supervisor_client;
+    pub fn with_supervisor_client(mut self, supervisor_client: Option<String>) -> Self {
+        self.supervisor_http = supervisor_client;
         self
     }
 
     /// Sets the supervisor safety level
     pub fn with_supervisor_safety_level(
         mut self,
-        supervisor_safety_level: Option<SafetyLevel>,
+        supervisor_safety_level: Option<String>,
     ) -> Self {
-        self.supervisor_safety_level = supervisor_safety_level.unwrap_or(SafetyLevel::CrossUnsafe);
+        self.supervisor_safety_level = supervisor_safety_level;
         self
     }
 }
@@ -554,7 +551,6 @@ where
         let Self { pool_config_overrides, .. } = self;
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .no_eip4844()
             .with_head_timestamp(ctx.head().timestamp)
@@ -566,11 +562,20 @@ where
             )
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
             .map(|validator| {
-                OpTransactionValidator::new(validator)
+                let mut validator = OpTransactionValidator::new(validator)
                     // In --dev mode we can't require gas fees because we're unable to decode
                     // the L1 block info
-                    .require_l1_data_gas_fee(!ctx.config().dev.dev)
-                    .with_supervisor(self.supervisor_client.clone(), self.supervisor_safety_level)
+                    .require_l1_data_gas_fee(!ctx.config().dev.dev);
+                if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) {
+                    // If interop is enabled it's mandatory to set supervisor_client
+                    if self.supervisor_http.is_none() {
+                        return Err(eyre::eyre!("interop is activated. `--rollup.supervisor-http` must be provided"));
+                    }
+                    let supervisor_client = self.supervisor_http.clone().map(SupervisorClient::new);
+                    let safety = self.supervisor_safety_level.clone().map(|level| serde_json::from_str(level.as_str()).expect("invalid safety level provided")).unwrap_or(SafetyLevel::CrossUnsafe);
+                    validator = validator.with_supervisor(supervisor_client, safety);
+                }
+                Ok(validator)
             });
 
         let transaction_pool = reth_transaction_pool::Pool::new(

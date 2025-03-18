@@ -174,7 +174,7 @@ where
         if self.is_valid_cross_tx(&transaction) == Some(false) {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::InvalidCrossTx,
+                InvalidPoolTransactionError::CrossTxInvalid,
             )
         }
 

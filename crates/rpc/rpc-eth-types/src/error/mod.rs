@@ -669,6 +669,9 @@ pub enum RpcPoolError {
     /// When the transaction is already known
     #[error("already known")]
     AlreadyKnown,
+    /// When cross chain transaction invalid
+    #[error("cross chain transaction invalid")]
+    CrossTxInvalid,
     /// When the sender is invalid
     #[error("invalid sender")]
     InvalidSender,
@@ -763,8 +766,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Overdraft { cost, balance } => {
                 Self::Invalid(RpcInvalidTransactionError::InsufficientFunds { cost, balance })
             }
-            // TODO: change to correct error
-            InvalidPoolTransactionError::InvalidCrossTx => Self::TxPoolOverflow,
+            InvalidPoolTransactionError::CrossTxInvalid => Self::CrossTxInvalid,
         }
     }
 }
