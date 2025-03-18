@@ -45,7 +45,7 @@ To set up a new metric in Reth and its Grafana dashboard (this assumes running R
 1. Save and arrange:
 
     - Click `Apply` to save the panel
-    - Drag the panel to desired position on the dashboard
+    - Drag the panel to the desired position on the dashboard
 
 1. Export the dashboard:
 
