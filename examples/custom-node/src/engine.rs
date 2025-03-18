@@ -1,6 +1,6 @@
 use crate::{
     chainspec::CustomChainSpec,
-    primitives::{Block, CustomNodePrimitives},
+    primitives::{Block, CustomHeader, CustomNodePrimitives},
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
@@ -31,7 +31,7 @@ use std::sync::Arc;
 pub struct CustomEngineTypes;
 
 #[derive(Debug, Clone)]
-pub struct CustomBuiltPayload(OpBuiltPayload<CustomNodePrimitives>);
+pub struct CustomBuiltPayload(pub OpBuiltPayload<CustomNodePrimitives>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomExecutionData {
@@ -208,8 +208,23 @@ impl From<CustomBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
 
 impl From<CustomBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
     fn from(value: CustomBuiltPayload) -> Self {
+        let fees = value.0.fees();
+        let block = value.0.into_sealed_block();
+
+        let parent_beacon_block_root = block.parent_beacon_block_root.unwrap_or_default();
+
+        let l2_withdrawals_root = block.withdrawals_root.unwrap_or_default();
+        let payload_v3 = ExecutionPayloadV3::from_block_unchecked(
+            block.hash(),
+            &Arc::unwrap_or_clone(block.into()).into_block(),
+        );
+
         Self {
-            block_value: value.fees(),
+            execution_payload: OpExecutionPayloadV4::from_v3_with_withdrawals_root(
+                payload_v3,
+                l2_withdrawals_root,
+            ),
+            block_value: fees,
             // From the engine API spec:
             //
             // > Client software **MAY** use any heuristics to decide whether to set
@@ -221,11 +236,7 @@ impl From<CustomBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
             should_override_builder: false,
             // No blobs for OP.
             blobs_bundle: BlobsBundleV1 { blobs: vec![], commitments: vec![], proofs: vec![] },
-            parent_beacon_block_root: value.0.block().parent_beacon_block_root.unwrap_or_default(),
-            execution_payload: OpExecutionPayloadV4::from_block_unchecked(
-                value.0.block().hash(),
-                &value.into(),
-            ),
+            parent_beacon_block_root,
             execution_requests: vec![],
         }
     }
@@ -288,7 +299,21 @@ impl PayloadValidator for CustomEngineValidator {
             .inner
             .ensure_well_formed_payload(payload.inner)
             .map_err(|e| NewPayloadError::Other(e.into()))?;
-        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+
+        // First recover the block with the original header
+        let recovered = sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))?;
+
+        let senders = recovered.senders().to_vec();
+        let block_hash = recovered.hash();
+
+        // Create a new block with CustomHeader
+        let block = recovered.into_block().map_header(|header| {
+            // Create CustomHeader using the original header and the extension
+            CustomHeader { inner: header, extension: payload.extension }
+        });
+
+        // Create a new RecoveredBlock with our custom block type
+        Ok(RecoveredBlock::new(block, senders, block_hash))
     }
 }
 
