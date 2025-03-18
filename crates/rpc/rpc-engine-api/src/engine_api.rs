@@ -1142,7 +1142,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    EngineT: EngineTypes + serde::Serialize + for<'de> serde::Deserialize<'de>,
+    EngineT: EngineTypes,
     Self: EngineApiServer<EngineT>,
 {
     fn into_rpc_module(self) -> RpcModule<()> {
