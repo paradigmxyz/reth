@@ -1,6 +1,7 @@
 //! Contains RPC handler implementations specific to tracing.
 
 use reth_evm::ConfigureEvm;
+use reth_node_api::NodePrimitives;
 use reth_provider::{BlockReader, ProviderHeader, ProviderTx};
 use reth_rpc_eth_api::{
     helpers::{LoadState, Trace},
@@ -14,8 +15,10 @@ where
     Self: LoadState<
         Provider: BlockReader,
         Evm: ConfigureEvm<
-            Header = ProviderHeader<Self::Provider>,
-            Transaction = ProviderTx<Self::Provider>,
+            Primitives: NodePrimitives<
+                BlockHeader = ProviderHeader<Self::Provider>,
+                SignedTx = ProviderTx<Self::Provider>,
+            >,
         >,
         Error: FromEvmError<Self::Evm>,
     >,

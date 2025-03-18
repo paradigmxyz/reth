@@ -244,6 +244,11 @@ where
     }
 }
 
+/// Helper trait to provide payload builder with access to conditionals and encoded bytes of
+/// transaction.
+pub trait OpPooledTx: MaybeConditionalTransaction + PoolTransaction {}
+impl<T> OpPooledTx for T where T: MaybeConditionalTransaction + PoolTransaction {}
+
 #[cfg(test)]
 mod tests {
     use crate::{OpPooledTransaction, OpTransactionValidator};

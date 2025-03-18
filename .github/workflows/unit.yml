@@ -46,11 +46,10 @@ jobs:
             args: -p "reth-scroll-*" -p "scroll-alloy-*" --locked
             partition: 1
             total_partitions: 1
-    # Commented until the next rebase, the lints on the docs break CI and require an upstream rebase in order to pass.
-    #          - type: book
-    #            args: --manifest-path book/sources/Cargo.toml
-    #            partition: 1
-    #            total_partitions: 1
+          - type: book
+            args: --manifest-path book/sources/Cargo.toml
+            partition: 1
+            total_partitions: 1
     timeout-minutes: 30
     steps:
       - name: Free up disk space

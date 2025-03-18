@@ -1,10 +1,5 @@
-use alloy_primitives::{
-    bytes::{Buf, BufMut},
-    Bytes, B256,
-};
-use alloy_rlp::{
-    Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
-};
+use alloy_primitives::bytes::{Buf, BufMut};
+use alloy_rlp::{Decodable, Encodable};
 
 /// Node type variant.
 #[repr(u8)]
@@ -55,29 +50,5 @@ impl NodeType {
     /// stateful  |     +     |     -    |
     pub fn is_valid_connection(&self, other: &Self) -> bool {
         !self.is_stateful() || !other.is_stateful()
-    }
-}
-
-/// State witness entry in the format used for networking.
-#[derive(PartialEq, Eq, Clone, Debug, RlpEncodable, RlpDecodable)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct StateWitnessEntry {
-    /// Trie node hash.
-    pub hash: B256,
-    /// RLP-encoded trie node.
-    pub bytes: Bytes,
-}
-
-/// State witness in the format used for networking.
-#[derive(PartialEq, Eq, Clone, Default, Debug, RlpEncodableWrapper, RlpDecodableWrapper)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct StateWitnessNet(
-    /// State witness entries.
-    pub Vec<StateWitnessEntry>,
-);
-
-impl FromIterator<(B256, Bytes)> for StateWitnessNet {
-    fn from_iter<T: IntoIterator<Item = (B256, Bytes)>>(iter: T) -> Self {
-        Self(iter.into_iter().map(|(hash, bytes)| StateWitnessEntry { hash, bytes }).collect())
     }
 }

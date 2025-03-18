@@ -107,13 +107,12 @@ impl<T: Decodable2718> EthSigner<T> for DevSigner {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_consensus::Transaction;
     use alloy_primitives::{Bytes, U256};
     use alloy_rpc_types_eth::TransactionInput;
-    use reth_primitives::TransactionSigned;
+    use reth_ethereum_primitives::TransactionSigned;
     use revm_primitives::TxKind;
-
-    use super::*;
 
     fn build_signer() -> DevSigner {
         let signer: PrivateKeySigner =
@@ -193,9 +192,10 @@ mod tests {
         let data: TypedData = serde_json::from_str(eip_712_example).unwrap();
         let signer = build_signer();
         let from = *signer.addresses.first().unwrap();
-        let sig =
-            EthSigner::<reth_primitives::TransactionSigned>::sign_typed_data(&signer, from, &data)
-                .unwrap();
+        let sig = EthSigner::<reth_ethereum_primitives::TransactionSigned>::sign_typed_data(
+            &signer, from, &data,
+        )
+        .unwrap();
         let expected = Signature::new(
             U256::from_str_radix(
                 "5318aee9942b84885761bb20e768372b76e7ee454fc4d39b59ce07338d15a06c",
@@ -217,9 +217,10 @@ mod tests {
         let message = b"Test message";
         let signer = build_signer();
         let from = *signer.addresses.first().unwrap();
-        let sig = EthSigner::<reth_primitives::TransactionSigned>::sign(&signer, from, message)
-            .await
-            .unwrap();
+        let sig =
+            EthSigner::<reth_ethereum_primitives::TransactionSigned>::sign(&signer, from, message)
+                .await
+                .unwrap();
         let expected = Signature::new(
             U256::from_str_radix(
                 "54313da7432e4058b8d22491b2e7dbb19c7186c35c24155bec0820a8a2bfe0c1",

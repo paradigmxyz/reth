@@ -1,5 +1,5 @@
 [package]
-name = "reth-network-ress"
+name = "reth-ress-protocol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -39,7 +39,7 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 
 # enable `test-utils` feature on this crate
-reth-network-ress = { path = ".", features = ["test-utils"] }
+reth-ress-protocol = { path = ".", features = ["test-utils"] }
 
 tokio.workspace = true
 strum.workspace = true
@@ -51,7 +51,7 @@ proptest-arbitrary-interop.workspace = true
 [features]
 test-utils = [
     "reth-network/test-utils",
-    "reth-network-ress/test-utils",
+    "reth-ress-protocol/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-provider/test-utils",
 ]
@@ -59,7 +59,7 @@ arbitrary = [
     "dep:arbitrary",
     "reth-eth-wire/arbitrary",
     "alloy-primitives/arbitrary",
-    "reth-network-ress/arbitrary",
+    "reth-ress-protocol/arbitrary",
     "reth-ethereum-primitives/arbitrary",
     "alloy-consensus/arbitrary",
 ]

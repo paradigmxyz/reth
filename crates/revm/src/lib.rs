@@ -29,7 +29,7 @@ pub use revm_inspector as inspector;
 pub mod test_utils;
 
 // Convenience re-exports.
-pub use revm::{self, *};
+pub use revm::{self, database::State, *};
 
 /// Either type for flexible usage of different database types in the same context.
 pub mod either;

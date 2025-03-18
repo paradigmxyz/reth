@@ -8,9 +8,9 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::B256;
 use derive_more::Constructor;
+use reth_ethereum_primitives::Receipt;
 use reth_evm::EvmEnv;
-use reth_primitives::{Receipt, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, RecoveredBlock, SealedHeader};
 
 /// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
@@ -23,7 +23,7 @@ pub struct PendingBlockEnv<B: Block, R, Spec> {
 
 /// The origin for a configured [`PendingBlockEnv`]
 #[derive(Clone, Debug)]
-pub enum PendingBlockEnvOrigin<B: Block = reth_primitives::Block, R = Receipt> {
+pub enum PendingBlockEnvOrigin<B: Block = reth_ethereum_primitives::Block, R = Receipt> {
     /// The pending block as received from the CL.
     ActualPending(RecoveredBlock<B>, Vec<R>),
     /// The _modified_ header of the latest block.

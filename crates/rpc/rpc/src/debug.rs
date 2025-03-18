@@ -18,10 +18,11 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
-    ConfigureEvmEnv, EvmEnv,
+    ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
-use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
-use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
+use reth_primitives_traits::{
+    Block as _, BlockBody, NodePrimitives, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
+};
 use reth_provider::{
     BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
     ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderFactory,
@@ -98,7 +99,7 @@ where
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
+        evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         // replay all transactions of the block
@@ -688,8 +689,8 @@ where
     fn trace_transaction(
         &self,
         opts: &GethDebugTracingOptions,
-        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
-        tx_env: <Eth::Evm as ConfigureEvmEnv>::TxEnv,
+        evm_env: EvmEnvFor<Eth::Evm>,
+        tx_env: TxEnvFor<Eth::Evm>,
         db: &mut StateCacheDb<'_>,
         transaction_context: Option<TransactionContext>,
         fused_inspector: &mut Option<TracingInspector>,

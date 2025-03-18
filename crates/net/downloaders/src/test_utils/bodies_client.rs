@@ -1,11 +1,11 @@
 use alloy_primitives::B256;
+use reth_ethereum_primitives::BlockBody;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::BlockBody;
 use std::{
     collections::HashMap,
     fmt::Debug,

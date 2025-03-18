@@ -463,15 +463,15 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{EthApi, EthApiBuilder};
-    use alloy_consensus::Header;
+    use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::{BaseFeeParams, ChainSpec};
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
@@ -483,13 +483,13 @@ mod tests {
 
     fn build_test_eth_api<
         P: BlockReaderIdExt<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                Header = reth_primitives::Header,
+                Block = reth_ethereum_primitives::Block,
+                Receipt = reth_ethereum_primitives::Receipt,
+                Header = alloy_consensus::Header,
             > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + StateProviderFactory
-            + CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives>
+            + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
             + Unpin
             + Clone
             + 'static,
@@ -545,18 +545,20 @@ mod tests {
 
                 if let Some(base_fee_per_gas) = header.base_fee_per_gas {
                     let transaction = TransactionSigned::new_unhashed(
-                        reth_primitives::Transaction::Eip1559(alloy_consensus::TxEip1559 {
-                            max_priority_fee_per_gas: random_fee,
-                            max_fee_per_gas: random_fee + base_fee_per_gas as u128,
-                            ..Default::default()
-                        }),
+                        reth_ethereum_primitives::Transaction::Eip1559(
+                            alloy_consensus::TxEip1559 {
+                                max_priority_fee_per_gas: random_fee,
+                                max_fee_per_gas: random_fee + base_fee_per_gas as u128,
+                                ..Default::default()
+                            },
+                        ),
                         Signature::test_signature(),
                     );
 
                     transactions.push(transaction);
                 } else {
                     let transaction = TransactionSigned::new_unhashed(
-                        reth_primitives::Transaction::Legacy(Default::default()),
+                        reth_ethereum_primitives::Transaction::Legacy(Default::default()),
                         Signature::test_signature(),
                     );
 

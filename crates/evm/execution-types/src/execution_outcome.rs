@@ -401,7 +401,7 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use alloc::borrow::Cow;
+    use alloc::{borrow::Cow, vec::Vec};
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::BlockNumber;
     use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;

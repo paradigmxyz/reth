@@ -1,49 +1,54 @@
-use crate::ScrollEvmConfig;
-use std::convert::Infallible;
-
-use alloy_consensus::BlockHeader;
+use crate::{build::ScrollBlockAssembler, ScrollEvmConfig};
+use alloy_consensus::{BlockHeader, Header};
 use alloy_evm::FromRecoveredTx;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
-use reth_primitives_traits::NodePrimitives;
+use reth_evm::{ConfigureEvm, EvmEnv, ExecutionCtxFor, NextBlockEnvAttributes};
+use reth_primitives_traits::{
+    BlockTy, NodePrimitives, SealedBlock, SealedHeader, SignedTransaction,
+};
 use reth_scroll_chainspec::{ChainConfig, ScrollChainConfig};
+use reth_scroll_primitives::ScrollReceipt;
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     primitives::U256,
 };
 use revm_scroll::ScrollSpecId;
-use scroll_alloy_evm::{ScrollEvmFactory, ScrollTransactionIntoTxEnv};
+use scroll_alloy_evm::{
+    ScrollBlockExecutionCtx, ScrollBlockExecutorFactory, ScrollReceiptBuilder,
+    ScrollTransactionIntoTxEnv,
+};
 use scroll_alloy_hardforks::ScrollHardforks;
+use std::{convert::Infallible, sync::Arc};
 
 impl<ChainSpec, N, R> ConfigureEvm for ScrollEvmConfig<ChainSpec, N, R>
 where
     ChainSpec: EthChainSpec + ChainConfig<Config = ScrollChainConfig> + ScrollHardforks,
-    N: NodePrimitives,
+    N: NodePrimitives<
+        Receipt = R::Receipt,
+        SignedTx = R::Transaction,
+        BlockHeader = Header,
+        BlockBody = alloy_consensus::BlockBody<R::Transaction>,
+        Block = alloy_consensus::Block<R::Transaction>,
+    >,
     ScrollTransactionIntoTxEnv<TxEnv>: FromRecoveredTx<N::SignedTx>,
-    Self: Send + Sync + Unpin + Clone,
+    R: ScrollReceiptBuilder<Receipt = ScrollReceipt, Transaction: SignedTransaction>,
+    Self: Send + Sync + Unpin + Clone + 'static,
 {
-    type EvmFactory = ScrollEvmFactory;
-
-    fn evm_factory(&self) -> &Self::EvmFactory {
-        self.executor_factory.evm_factory()
-    }
-}
-
-impl<ChainSpec, N, R> ConfigureEvmEnv for ScrollEvmConfig<ChainSpec, N, R>
-where
-    ChainSpec: EthChainSpec + ChainConfig<Config = ScrollChainConfig> + ScrollHardforks,
-    N: NodePrimitives,
-    ScrollTransactionIntoTxEnv<TxEnv>: FromRecoveredTx<N::SignedTx>,
-    Self: Send + Sync + Unpin + Clone,
-{
-    type Header = N::BlockHeader;
-    type Transaction = N::SignedTx;
-    type TxEnv = ScrollTransactionIntoTxEnv<TxEnv>;
+    type Primitives = N;
     type Error = Infallible;
-    type Spec = ScrollSpecId;
     type NextBlockEnvCtx = NextBlockEnvAttributes;
+    type BlockExecutorFactory = ScrollBlockExecutorFactory<R, Arc<ChainSpec>>;
+    type BlockAssembler = ScrollBlockAssembler<ChainSpec>;
 
-    fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec> {
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        &self.executor_factory
+    }
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assembler
+    }
+
+    fn evm_env(&self, header: &N::BlockHeader) -> EvmEnv<ScrollSpecId> {
         let chain_spec = self.chain_spec();
         let spec_id = self.spec_id_at_timestamp_and_number(header.timestamp(), header.number());
 
@@ -75,9 +80,9 @@ where
 
     fn next_evm_env(
         &self,
-        parent: &Self::Header,
+        parent: &N::BlockHeader,
         attributes: &Self::NextBlockEnvCtx,
-    ) -> Result<EvmEnv<Self::Spec>, Self::Error> {
+    ) -> Result<EvmEnv<ScrollSpecId>, Self::Error> {
         // ensure we're not missing any timestamp based hardforks
         let spec_id =
             self.spec_id_at_timestamp_and_number(attributes.timestamp, parent.number() + 1);
@@ -110,6 +115,21 @@ where
         };
 
         Ok(EvmEnv { cfg_env, block_env })
+    }
+
+    fn context_for_block<'a>(
+        &self,
+        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> ExecutionCtxFor<'a, Self> {
+        ScrollBlockExecutionCtx { parent_hash: block.header().parent_hash() }
+    }
+
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader<N::BlockHeader>,
+        _attributes: Self::NextBlockEnvCtx,
+    ) -> ExecutionCtxFor<'_, Self> {
+        ScrollBlockExecutionCtx { parent_hash: parent.header().parent_hash() }
     }
 }
 

@@ -32,7 +32,6 @@ exclude_crates=(
   reth-exex-test-utils
   reth-ipc
   reth-net-nat
-  reth-network-ress
   reth-network
   reth-node-api
   reth-node-builder
@@ -56,6 +55,8 @@ exclude_crates=(
   reth-rpc-layer
   reth-stages
   reth-engine-local
+  reth-ress-protocol
+  reth-ress-provider
   # The following are not supposed to be working
   reth # all of the crates below
   reth-invalid-block-hooks # reth-provider

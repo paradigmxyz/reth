@@ -28,10 +28,10 @@
 //! use std::pin::Pin;
 //! use std::sync::Arc;
 //! use std::task::{Context, Poll};
-//! use alloy_consensus::Header;
+//! use alloy_consensus::{Header, Block};
 //! use alloy_primitives::U256;
 //! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator, PayloadKind};
-//! use reth_primitives::{Block, SealedBlock};
+//! use reth_primitives_traits::SealedBlock;
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
 //! pub struct EmptyBlockPayloadJobGenerator;

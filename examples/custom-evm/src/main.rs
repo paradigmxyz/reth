@@ -23,7 +23,7 @@ use reth::{
         precompile::{
             PrecompileError, PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles,
         },
-        specification::hardfork::SpecId,
+        primitives::hardfork::SpecId,
         MainBuilder, MainContext,
     },
     rpc::types::engine::PayloadAttributes,
@@ -50,7 +50,7 @@ pub struct MyEvmFactory;
 
 impl EvmFactory for MyEvmFactory {
     type Evm<DB: Database, I: Inspector<EthEvmContext<DB>, EthInterpreter>> =
-        EthEvm<DB, I, CustomPrecompiles<EthEvmContext<DB>>>;
+        EthEvm<DB, I, CustomPrecompiles>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
@@ -139,11 +139,11 @@ where
 
 /// A custom precompile that contains static precompiles.
 #[derive(Clone)]
-pub struct CustomPrecompiles<CTX> {
-    pub precompiles: EthPrecompiles<CTX>,
+pub struct CustomPrecompiles {
+    pub precompiles: EthPrecompiles,
 }
 
-impl<CTX: ContextTr> CustomPrecompiles<CTX> {
+impl CustomPrecompiles {
     /// Given a [`PrecompileProvider`] and cache for a specific precompiles, create a
     /// wrapper that can be used inside Evm.
     fn new() -> Self {
@@ -168,22 +168,21 @@ pub fn prague_custom() -> &'static Precompiles {
     })
 }
 
-impl<CTX: ContextTr> PrecompileProvider for CustomPrecompiles<CTX> {
-    type Context = CTX;
+impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
     type Output = InterpreterResult;
 
-    fn set_spec(&mut self, spec: <<Self::Context as ContextTr>::Cfg as Cfg>::Spec) {
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) {
         let spec_id = spec.clone().into();
         if spec_id == SpecId::PRAGUE {
-            self.precompiles = EthPrecompiles { precompiles: prague_custom(), ..Default::default() }
+            self.precompiles = EthPrecompiles { precompiles: prague_custom() }
         } else {
-            self.precompiles.set_spec(spec);
+            PrecompileProvider::<CTX>::set_spec(&mut self.precompiles, spec);
         }
     }
 
     fn run(
         &mut self,
-        context: &mut Self::Context,
+        context: &mut CTX,
         address: &Address,
         bytes: &Bytes,
         gas_limit: u64,
@@ -195,7 +194,7 @@ impl<CTX: ContextTr> PrecompileProvider for CustomPrecompiles<CTX> {
         self.precompiles.contains(address)
     }
 
-    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address> + '_> {
+    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
         self.precompiles.warm_addresses()
     }
 }

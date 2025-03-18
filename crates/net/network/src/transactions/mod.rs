@@ -38,6 +38,7 @@ use reth_eth_wire::{
     NewPooledTransactionHashes66, NewPooledTransactionHashes68, PooledTransactions,
     RequestTxHashes, Transactions,
 };
+use reth_ethereum_primitives::TransactionSigned;
 use reth_metrics::common::mpsc::UnboundedMeteredReceiver;
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
@@ -49,7 +50,6 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
@@ -1917,7 +1917,7 @@ mod tests {
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
-    use reth_network_api::NetworkInfo;
+    use reth_network_api::{NetworkInfo, PeerKind};
     use reth_network_p2p::{
         error::{RequestError, RequestResult},
         sync::{NetworkSyncUpdater, SyncState},
@@ -2123,6 +2123,104 @@ mod tests {
         assert!(NetworkInfo::is_syncing(&network_handle));
         assert!(!pool.is_empty());
         handle.terminate().await;
+    }
+
+    // Ensure that the transaction manager correctly handles the `IncomingPooledTransactionHashes`
+    // event and is able to retrieve the corresponding transactions.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_handle_incoming_transactions_hashes() {
+        reth_tracing::init_test_tracing();
+
+        let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let client = NoopProvider::default();
+
+        let config = NetworkConfigBuilder::new(secret_key)
+            // let OS choose port
+            .listener_port(0)
+            .disable_discovery()
+            .build(client);
+
+        let pool = testing_pool();
+
+        let transactions_manager_config = config.transactions_manager_config.clone();
+        let (_network_handle, _network, mut tx_manager, _) = NetworkManager::new(config)
+            .await
+            .unwrap()
+            .into_builder()
+            .transactions(pool.clone(), transactions_manager_config)
+            .split_with_handle();
+
+        let peer_id_1 = PeerId::new([1; 64]);
+        let eth_version = EthVersion::Eth66;
+
+        let txs = vec![TransactionSigned::new_unhashed(
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(4),
+                nonce: 15u64,
+                gas_price: 2200000000,
+                gas_limit: 34811,
+                to: TxKind::Call(hex!("cf7f9e66af820a19257a2108375b180b0ec49167").into()),
+                value: U256::from(1234u64),
+                input: Default::default(),
+            }),
+            Signature::new(
+                U256::from_str(
+                    "0x35b7bfeb9ad9ece2cbafaaf8e202e706b4cfaeb233f46198f00b44d4a566a981",
+                )
+                .unwrap(),
+                U256::from_str(
+                    "0x612638fb29427ca33b9a3be2a0a561beecfe0269655be160d35e72d366a6a860",
+                )
+                .unwrap(),
+                true,
+            ),
+        )];
+
+        let txs_hashes: Vec<B256> = txs.iter().map(|tx| *tx.hash()).collect();
+
+        let (peer_1, mut to_mock_session_rx) = new_mock_session(peer_id_1, eth_version);
+        tx_manager.peers.insert(peer_id_1, peer_1);
+
+        assert!(pool.is_empty());
+
+        tx_manager.on_network_tx_event(NetworkTransactionEvent::IncomingPooledTransactionHashes {
+            peer_id: peer_id_1,
+            msg: NewPooledTransactionHashes::from(NewPooledTransactionHashes66::from(
+                txs_hashes.clone(),
+            )),
+        });
+
+        // mock session of peer_1 receives request
+        let req = to_mock_session_rx
+            .recv()
+            .await
+            .expect("peer_1 session should receive request with buffered hashes");
+        let PeerRequest::GetPooledTransactions { request, response } = req else { unreachable!() };
+        assert_eq!(request, GetPooledTransactions::from(txs_hashes.clone()));
+
+        let message: Vec<PooledTransaction> = txs
+            .into_iter()
+            .map(|tx| {
+                PooledTransaction::try_from(tx)
+                    .expect("Failed to convert MockTransaction to PooledTransaction")
+            })
+            .collect();
+
+        // return the transactions corresponding to the transaction hashes.
+        response
+            .send(Ok(reth_eth_wire::PooledTransactions(message)))
+            .expect("should send peer_1 response to tx manager");
+
+        // adance the transaction manager future
+        poll_fn(|cx| {
+            let _ = tx_manager.poll_unpin(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        // ensure that the transactions corresponding to the transaction hashes have been
+        // successfully retrieved and stored in the Pool.
+        assert_eq!(pool.get_all(txs_hashes.clone()).len(), txs_hashes.len());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2604,6 +2702,7 @@ mod tests {
 
         // mock a peer
         let (tx, _rx) = mpsc::channel::<PeerRequest>(1);
+
         let session_info = SessionInfo {
             peer_id,
             remote_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
@@ -2611,6 +2710,7 @@ mod tests {
             capabilities: Arc::new(vec![].into()),
             status: Arc::new(Default::default()),
             version: EthVersion::Eth68,
+            peer_kind: PeerKind::Basic,
         };
         let messages: PeerRequestSender<PeerRequest> = PeerRequestSender::new(peer_id, tx);
         tx_manager

@@ -1,64 +1,14 @@
-//! Implementation of the [`BlockExecutionStrategyFactory`] for Scroll.
+//! Execution primitives for EVM.
 
-use crate::{build::ScrollBlockAssembler, receipt::ScrollRethReceiptBuilder, ScrollEvmConfig};
+use crate::{receipt::ScrollRethReceiptBuilder, ScrollEvmConfig};
 use std::{fmt::Debug, sync::Arc};
 
-use alloy_consensus::{BlockHeader, Header};
-use alloy_evm::{block::BlockExecutorFactory, FromRecoveredTx};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256};
-use reth_chainspec::EthChainSpec;
-use reth_evm::execute::{BasicBlockExecutorProvider, BlockExecutionStrategyFactory};
+use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_primitives::SealedBlock;
-use reth_primitives_traits::{Block, NodePrimitives, SealedHeader, SignedTransaction};
-use reth_scroll_chainspec::{ChainConfig, ScrollChainConfig, ScrollChainSpec};
-use reth_scroll_primitives::ScrollReceipt;
-use revm::context::TxEnv;
-use scroll_alloy_evm::{
-    ScrollBlockExecutionCtx, ScrollBlockExecutorFactory, ScrollReceiptBuilder,
-    ScrollTransactionIntoTxEnv,
-};
-use scroll_alloy_hardforks::ScrollHardforks;
-
-impl<ChainSpec, N, R> BlockExecutionStrategyFactory for ScrollEvmConfig<ChainSpec, N, R>
-where
-    ChainSpec: EthChainSpec + ScrollHardforks + ChainConfig<Config = ScrollChainConfig>,
-    N: NodePrimitives<
-        Receipt = R::Receipt,
-        SignedTx = R::Transaction,
-        BlockHeader = Header,
-        BlockBody = alloy_consensus::BlockBody<R::Transaction>,
-    >,
-    ScrollTransactionIntoTxEnv<TxEnv>: FromRecoveredTx<N::SignedTx>,
-    R: ScrollReceiptBuilder<Receipt = ScrollReceipt, Transaction: SignedTransaction>,
-    Self: Send + Sync + Unpin + Clone + 'static,
-{
-    type Primitives = N;
-    type BlockExecutorFactory = ScrollBlockExecutorFactory<R, Arc<ChainSpec>>;
-    type BlockAssembler = ScrollBlockAssembler<ChainSpec>;
-
-    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
-        &self.executor_factory
-    }
-
-    fn block_assembler(&self) -> &Self::BlockAssembler {
-        &self.block_assembler
-    }
-
-    fn context_for_block<'a>(
-        &self,
-        block: &'a reth_primitives_traits::SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
-    ) -> <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a> {
-        ScrollBlockExecutionCtx { parent_hash: block.header().parent_hash() }
-    }
-
-    fn context_for_next_block(
-        &self,
-        parent: &SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
-        _attributes: Self::NextBlockEnvCtx,
-    ) -> <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'_> {
-        ScrollBlockExecutionCtx { parent_hash: parent.hash() }
-    }
-}
+use reth_primitives_traits::Block;
+use reth_scroll_chainspec::ScrollChainSpec;
 
 /// Input for block execution.
 #[derive(Debug, Clone, Copy)]

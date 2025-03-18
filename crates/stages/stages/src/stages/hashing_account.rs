@@ -8,7 +8,7 @@ use reth_db_api::{
     RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
 use reth_stages_api::{
     AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
@@ -62,11 +62,11 @@ impl AccountHashingStage {
     pub fn seed<Tx: DbTx + DbTxMut + 'static, N: reth_provider::providers::ProviderNodeTypes>(
         provider: &reth_provider::DatabaseProvider<Tx, N>,
         opts: SeedOpts,
-    ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError>
+    ) -> Result<Vec<(alloy_primitives::Address, Account)>, StageError>
     where
         N::Primitives: reth_primitives_traits::FullNodePrimitives<
-            Block = reth_primitives::Block,
-            BlockHeader = reth_primitives::Header,
+            Block = reth_ethereum_primitives::Block,
+            BlockHeader = reth_primitives_traits::Header,
         >,
     {
         use alloy_primitives::U256;
@@ -90,7 +90,7 @@ impl AccountHashingStage {
         }
         provider
             .static_file_provider()
-            .latest_writer(reth_primitives::StaticFileSegment::Headers)
+            .latest_writer(reth_static_file_types::StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();
@@ -304,7 +304,7 @@ mod tests {
     };
     use alloy_primitives::U256;
     use assert_matches::assert_matches;
-    use reth_primitives::Account;
+    use reth_primitives_traits::Account;
     use reth_provider::providers::StaticFileWriter;
     use reth_stages_api::StageUnitCheckpoint;
     use test_utils::*;

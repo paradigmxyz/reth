@@ -23,10 +23,9 @@ jobs:
           - type: scroll
             args: --bin scroll-reth --workspace --lib --examples --tests --benches --locked
             features: "skip-state-root-validation asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
-    # Commented until the next rebase, the lints on the docs break CI and require an upstream rebase in order to pass.
-    #          - type: book
-    #            args: --manifest-path book/sources/Cargo.toml --workspace --bins
-    #            features: ""
+          - type: book
+            args: --manifest-path book/sources/Cargo.toml --workspace --bins
+            features: ""
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1

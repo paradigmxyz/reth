@@ -23,7 +23,7 @@ reth-fs-util.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
 revm-interpreter.workspace = true
-revm-specification.workspace = true
+revm-primitives.workspace = true
 
 # ethereum
 alloy-eips = { workspace = true, features = ["kzg"] }
@@ -59,6 +59,7 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-consensus = { workspace = true, features = ["k256"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 paste.workspace = true
@@ -86,7 +87,7 @@ serde = [
     "rand?/serde",
     "smallvec/serde",
     "revm-interpreter/serde",
-    "revm-specification/serde",
+    "revm-primitives/serde",
     "reth-primitives-traits/serde",
 ]
 test-utils = [
@@ -112,6 +113,7 @@ arbitrary = [
     "smallvec/arbitrary",
     "revm-interpreter/arbitrary",
     "reth-ethereum-primitives/arbitrary",
+    "revm-primitives/arbitrary",
 ]
 
 [[bench]]

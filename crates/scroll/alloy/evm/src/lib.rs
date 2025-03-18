@@ -23,7 +23,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 use revm::{
-    context::{result::HaltReason, setters::ContextSetters, BlockEnv, TxEnv},
+    context::{result::HaltReason, BlockEnv, TxEnv},
     context_interface::result::{EVMError, ResultAndState},
     inspector::NoOpInspector,
     interpreter::interpreter::EthInterpreter,
@@ -95,7 +95,7 @@ where
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
         if self.inspect {
             self.inner.set_tx(tx.into());
-            self.inner.inspect_previous()
+            self.inner.inspect_replay()
         } else {
             self.inner.transact(tx.into())
         }

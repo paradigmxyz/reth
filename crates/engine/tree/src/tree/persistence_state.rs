@@ -1,8 +1,8 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
-use std::{collections::VecDeque, time::Instant};
+use std::time::Instant;
 use tokio::sync::oneshot;
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// The state of the persistence task.
 #[derive(Default, Debug)]
@@ -15,9 +15,6 @@ pub struct PersistenceState {
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
         Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction)>,
-    /// The block above which blocks should be removed from disk, because there has been an on disk
-    /// reorg.
-    pub(crate) remove_above_state: VecDeque<u64>,
 }
 
 impl PersistenceState {
@@ -50,13 +47,6 @@ impl PersistenceState {
     /// this returns `None`.
     pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction> {
         self.rx.as_ref().map(|rx| &rx.2)
-    }
-
-    /// Sets the `remove_above_state`, to the new tip number specified, only if it is less than the
-    /// current `last_persisted_block_number`.
-    pub(crate) fn schedule_removal(&mut self, new_tip_num: u64) {
-        debug!(target: "engine::tree", ?new_tip_num, prev_remove_state=?self.remove_above_state, last_persisted_block=?self.last_persisted_block, "Scheduling removal");
-        self.remove_above_state.push_back(new_tip_num);
     }
 
     /// Sets state for a finished persistence task.

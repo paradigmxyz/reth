@@ -3,9 +3,9 @@ use alloy_consensus::{proofs, BlockBody, Header, TxReceipt, EMPTY_OMMER_ROOT_HAS
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_evm::block::{BlockExecutionError, BlockExecutorFactory};
 use alloy_primitives::logs_bloom;
-use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionStrategyFactory};
+use reth_evm::execute::{BlockAssembler, BlockAssemblerInput};
 use reth_execution_types::BlockExecutionResult;
-use reth_primitives_traits::{Block, BlockTy, NodePrimitives, SignedTransaction};
+use reth_primitives_traits::SignedTransaction;
 use reth_scroll_primitives::ScrollReceipt;
 use scroll_alloy_evm::ScrollBlockExecutionCtx;
 use scroll_alloy_hardforks::ScrollHardforks;
@@ -29,24 +29,21 @@ impl<ChainSpec> Clone for ScrollBlockAssembler<ChainSpec> {
     }
 }
 
-impl<Evm, ChainSpec, T> BlockAssembler<Evm> for ScrollBlockAssembler<ChainSpec>
+impl<F, ChainSpec> BlockAssembler<F> for ScrollBlockAssembler<ChainSpec>
 where
     ChainSpec: ScrollHardforks,
-    T: SignedTransaction,
-    Evm: for<'a> BlockExecutionStrategyFactory<
-        Primitives: NodePrimitives<
-            Receipt = ScrollReceipt,
-            BlockHeader = Header,
-            BlockBody = BlockBody<T>,
-            SignedTx = T,
-        >,
-        BlockExecutorFactory: BlockExecutorFactory<ExecutionCtx<'a> = ScrollBlockExecutionCtx>,
+    F: for<'a> BlockExecutorFactory<
+        ExecutionCtx<'a> = ScrollBlockExecutionCtx,
+        Transaction: SignedTransaction,
+        Receipt = ScrollReceipt,
     >,
 {
+    type Block = alloy_consensus::Block<F::Transaction>;
+
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, Evm>,
-    ) -> Result<BlockTy<Evm::Primitives>, BlockExecutionError> {
+        input: BlockAssemblerInput<'_, '_, F>,
+    ) -> Result<Self::Block, BlockExecutionError> {
         let BlockAssemblerInput {
             evm_env,
             execution_ctx: ctx,
@@ -86,7 +83,7 @@ where
             requests_hash: None,
         };
 
-        Ok(BlockTy::<Evm::Primitives>::new(
+        Ok(alloy_consensus::Block::new(
             header,
             BlockBody { transactions, ommers: Default::default(), withdrawals: None },
         ))

@@ -20,7 +20,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{GotExpected, SealedHeader};
+use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},

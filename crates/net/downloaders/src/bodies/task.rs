@@ -195,11 +195,12 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
-        let downloader = BodiesDownloaderBuilder::default().build::<reth_primitives::Block, _, _>(
-            client.clone(),
-            Arc::new(TestConsensus::default()),
-            factory,
-        );
+        let downloader = BodiesDownloaderBuilder::default()
+            .build::<reth_ethereum_primitives::Block, _, _>(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                factory,
+            );
         let mut downloader = TaskDownloader::spawn(downloader);
 
         downloader.set_download_range(0..=19).expect("failed to set download range");
@@ -217,11 +218,12 @@ mod tests {
         reth_tracing::init_test_tracing();
         let factory = create_test_provider_factory();
 
-        let downloader = BodiesDownloaderBuilder::default().build::<reth_primitives::Block, _, _>(
-            Arc::new(TestBodiesClient::default()),
-            Arc::new(TestConsensus::default()),
-            factory,
-        );
+        let downloader = BodiesDownloaderBuilder::default()
+            .build::<reth_ethereum_primitives::Block, _, _>(
+                Arc::new(TestBodiesClient::default()),
+                Arc::new(TestConsensus::default()),
+                factory,
+            );
         let mut downloader = TaskDownloader::spawn(downloader);
 
         downloader.set_download_range(1..=0).expect("failed to set download range");

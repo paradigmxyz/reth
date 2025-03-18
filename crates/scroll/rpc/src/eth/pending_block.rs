@@ -5,7 +5,7 @@ use crate::ScrollEthApi;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::B256;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{execute::BlockExecutionStrategyFactory, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
@@ -39,7 +39,7 @@ where
         > + ChainSpecProvider<ChainSpec: EthChainSpec + ScrollHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
-        Evm: BlockExecutionStrategyFactory<
+        Evm: ConfigureEvm<
             Primitives: NodePrimitives<
                 SignedTx = ProviderTx<Self::Provider>,
                 BlockHeader = ProviderHeader<Self::Provider>,
@@ -62,7 +62,7 @@ where
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as ConfigureEvmEnv>::NextBlockEnvCtx, Self::Error> {
+    ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
         Ok(NextBlockEnvAttributes {
             timestamp: parent.timestamp().saturating_add(12),
             suggested_fee_recipient: parent.beneficiary(),

@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockNumHash;
+use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256, U256,
@@ -46,7 +46,6 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
-    cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     fmt::Debug,
     ops::Bound,
@@ -64,7 +63,6 @@ use tracing::*;
 
 mod block_buffer;
 mod cached_state;
-pub mod config;
 pub mod error;
 mod invalid_block_hook;
 mod invalid_headers;
@@ -75,13 +73,21 @@ mod persistence_state;
 #[allow(unused)]
 mod trie_updates;
 
-use crate::tree::{config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError};
+use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
-pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use persistence_state::PersistenceState;
+pub use reth_engine_primitives::TreeConfig;
+use reth_evm::execute::BlockExecutionOutput;
+
+/// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
+/// for more information.
+///
+/// This is the default threshold, the distance to the head that the tree will be used for sync.
+/// If the distance exceeds this threshold, the pipeline will be used for sync.
+pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Keeps track of the state of the tree.
 ///
@@ -121,6 +127,11 @@ impl<N: NodePrimitives> TreeState<N> {
             parent_to_child: HashMap::default(),
             persisted_trie_updates: HashMap::default(),
         }
+    }
+
+    /// Resets the state and points to the given canonical head.
+    fn reset(&mut self, current_canonical_head: BlockNumHash) {
+        *self = Self::new(current_canonical_head);
     }
 
     /// Returns the number of executed blocks stored.
@@ -636,7 +647,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
-    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx> + 'static,
+    C: ConfigureEvm<Primitives = N> + 'static,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
@@ -716,7 +727,6 @@ where
         let persistence_state = PersistenceState {
             last_persisted_block: BlockNumHash::new(best_block_number, header.hash()),
             rx: None,
-            remove_above_state: VecDeque::new(),
         };
 
         let (tx, outgoing) = unbounded_channel();
@@ -1264,7 +1274,7 @@ where
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're removing blocks.
     fn remove_blocks(&mut self, new_tip_num: u64) {
-        debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
+        debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
             let (tx, rx) = oneshot::channel();
@@ -1334,7 +1344,7 @@ where
         }
 
         if !self.persistence_state.in_progress() {
-            if let Some(new_tip_num) = self.persistence_state.remove_above_state.pop_front() {
+            if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
             } else if self.should_persist() {
                 let blocks_to_persist = self.get_canonical_blocks_to_persist();
@@ -1470,6 +1480,9 @@ where
     /// This will also do the necessary housekeeping of the tree state, this includes:
     ///  - removing all blocks below the backfill height
     ///  - resetting the canonical in-memory state
+    ///
+    /// In case backfill resulted in an unwind, this will clear the tree state above the unwind
+    /// target block.
     fn on_backfill_sync_finished(
         &mut self,
         ctrl: ControlFlow,
@@ -1477,33 +1490,48 @@ where
         debug!(target: "engine::tree", "received backfill sync finished event");
         self.backfill_sync_state = BackfillSyncState::Idle;
 
+        // backfill height is the block number that the backfill finished at
+        let mut backfill_height = ctrl.block_number();
+
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
-        if let ControlFlow::Unwind { bad_block, .. } = ctrl {
+        if let ControlFlow::Unwind { bad_block, target } = &ctrl {
             warn!(target: "engine::tree", invalid_block=?bad_block, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
-            self.state.invalid_headers.insert(*bad_block);
-            return Ok(())
+            self.state.invalid_headers.insert(**bad_block);
+
+            // if this was an unwind then the target is the new height
+            backfill_height = Some(*target);
         }
 
         // backfill height is the block number that the backfill finished at
-        let Some(backfill_height) = ctrl.block_number() else { return Ok(()) };
+        let Some(backfill_height) = backfill_height else { return Ok(()) };
 
         // state house keeping after backfill sync
         // remove all executed blocks below the backfill height
         //
         // We set the `finalized_num` to `Some(backfill_height)` to ensure we remove all state
         // before that
-        let backfill_num_hash = self
+        let Some(backfill_num_hash) = self
             .provider
             .block_hash(backfill_height)?
-            .map(|hash| BlockNumHash { hash, number: backfill_height });
+            .map(|hash| BlockNumHash { hash, number: backfill_height })
+        else {
+            debug!(target: "engine::tree", ?ctrl, "Backfill block not found");
+            return Ok(())
+        };
 
-        self.state.tree_state.remove_until(
-            backfill_num_hash
-                .expect("after backfill the block target hash should be present in the db"),
-            self.persistence_state.last_persisted_block.hash,
-            backfill_num_hash,
-        );
+        if ctrl.is_unwind() {
+            // the node reset so we need to clear everything above that height so that backfill
+            // height is the new canonical block.
+            self.state.tree_state.reset(backfill_num_hash)
+        } else {
+            self.state.tree_state.remove_until(
+                backfill_num_hash,
+                self.persistence_state.last_persisted_block.hash,
+                Some(backfill_num_hash),
+            );
+        }
+
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
         self.metrics.tree.canonical_chain_height.set(backfill_height as f64);
 
@@ -1686,6 +1714,13 @@ where
     ///
     /// Assumes that `finish` has been called on the `persistence_state` at least once
     fn on_new_persisted_block(&mut self) -> ProviderResult<()> {
+        // If we have an on-disk reorg, we need to handle it firsrt before touching the in-memory
+        // state.
+        if let Some(remove_above) = self.find_disk_reorg()? {
+            self.remove_blocks(remove_above);
+            return Ok(())
+        }
+
         let finalized = self.state.forkchoice_state_tracker.last_valid_finalized();
         self.remove_before(self.persistence_state.last_persisted_block, finalized)?;
         self.canonical_in_memory_state.remove_persisted_blocks(BlockNumHash {
@@ -2054,39 +2089,50 @@ where
         None
     }
 
-    /// This determines whether or not we should remove blocks from the chain, based on a canonical
-    /// chain update.
-    ///
-    /// If the chain update is a reorg:
-    /// * is the new chain behind the last persisted block, or
-    /// * if the root of the new chain is at the same height as the last persisted block, is it a
-    ///   different block
-    ///
-    /// If either of these are true, then this returns the height of the first block. Otherwise,
-    /// this returns [`None`]. This should be used to check whether or not we should be sending a
-    /// remove command to the persistence task.
-    fn find_disk_reorg(&self, chain_update: &NewCanonicalChain<N>) -> Option<u64> {
-        let NewCanonicalChain::Reorg { new, old: _ } = chain_update else { return None };
+    /// This method tries to detect whether on-disk and in-memory states have diverged. It might
+    /// happen if a reorg is happening while we are persisting a block.
+    fn find_disk_reorg(&self) -> ProviderResult<Option<u64>> {
+        let mut canonical = self.state.tree_state.current_canonical_head;
+        let mut persisted = self.persistence_state.last_persisted_block;
 
-        let BlockNumHash { number: new_num, hash: new_hash } =
-            new.first().map(|block| block.recovered_block().num_hash())?;
+        let parent_num_hash = |num_hash: NumHash| -> ProviderResult<NumHash> {
+            Ok(self
+                .sealed_header_by_hash(num_hash.hash)?
+                .ok_or(ProviderError::BlockHashNotFound(num_hash.hash))?
+                .parent_num_hash())
+        };
 
-        match new_num.cmp(&self.persistence_state.last_persisted_block.number) {
-            Ordering::Greater => {
-                // new number is above the last persisted block so the reorg can be performed
-                // entirely in memory
-                None
-            }
-            Ordering::Equal => {
-                // new number is the same, if the hash is the same then we should not need to remove
-                // any blocks
-                (self.persistence_state.last_persisted_block.hash != new_hash).then_some(new_num)
-            }
-            Ordering::Less => {
-                // this means we are below the last persisted block and must remove on disk blocks
-                Some(new_num)
-            }
+        // Happy path, canonical chain is ahead or equal to persisted chain.
+        // Walk canonical chain back to make sure that it connects to persisted chain.
+        while canonical.number > persisted.number {
+            canonical = parent_num_hash(canonical)?;
         }
+
+        // If we've reached persisted tip by walking the canonical chain back, everything is fine.
+        if canonical == persisted {
+            return Ok(None);
+        }
+
+        // At this point, we know that `persisted` block can't be reached by walking the canonical
+        // chain back. In this case we need to truncate it to the first canonical block it connects
+        // to.
+
+        // Firstly, walk back until we reach the same height as `canonical`.
+        while persisted.number > canonical.number {
+            persisted = parent_num_hash(persisted)?;
+        }
+
+        debug_assert_eq!(persisted.number, canonical.number);
+
+        // Now walk both chains back until we find a common ancestor.
+        while persisted.hash != canonical.hash {
+            canonical = parent_num_hash(canonical)?;
+            persisted = parent_num_hash(persisted)?;
+        }
+
+        debug!(target: "engine::tree", remove_above=persisted.number, "on-disk reorg detected");
+
+        Ok(Some(persisted.number))
     }
 
     /// Invoked when we the canonical chain has been updated.
@@ -2095,13 +2141,6 @@ where
     fn on_canonical_chain_update(&mut self, chain_update: NewCanonicalChain<N>) {
         trace!(target: "engine::tree", new_blocks = %chain_update.new_block_count(), reorged_blocks =  %chain_update.reorged_block_count(), "applying new chain update");
         let start = Instant::now();
-
-        // schedule a remove_above call if we have an on-disk reorg
-        if let Some(height) = self.find_disk_reorg(&chain_update) {
-            // calculate the new tip by subtracting one from the lowest part of the chain
-            let new_tip_num = height.saturating_sub(1);
-            self.persistence_state.schedule_removal(new_tip_num);
-        }
 
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
@@ -2170,6 +2209,21 @@ where
                 self.state.tree_state.insert_executed(block);
             }
         }
+    }
+
+    /// Invoke the invalid block hook if this is a new invalid block.
+    fn on_invalid_block(
+        &mut self,
+        parent_header: &SealedHeader<N::BlockHeader>,
+        block: &RecoveredBlock<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
+        trie_updates: Option<(&TrieUpdates, B256)>,
+    ) {
+        if self.state.invalid_headers.get(&block.hash()).is_some() {
+            // we already marked this block as invalid
+            return;
+        }
+        self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
@@ -2283,7 +2337,6 @@ where
             .map_err(|kind| InsertBlockError::new(block.into_sealed_block(), kind))
     }
 
-    #[allow(unused)]
     fn insert_block_inner(
         &mut self,
         block: RecoveredBlock<N::Block>,
@@ -2368,7 +2421,7 @@ where
             self.metrics
                 .block_validation
                 .trie_input_duration
-                .set(trie_input_start.elapsed().as_secs_f64());
+                .record(trie_input_start.elapsed().as_secs_f64());
 
             self.payload_processor.spawn(header, txs, provider_builder, consistent_view, trie_input)
         } else {
@@ -2401,7 +2454,7 @@ where
 
         if let Err(err) = self.consensus.validate_block_post_execution(&block, &output) {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            self.on_invalid_block(&parent_block, &block, &output, None);
             return Err(err.into())
         }
 
@@ -2412,7 +2465,7 @@ where
             .validate_block_post_execution_with_hashed_state(&hashed_state, &block)
         {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            self.on_invalid_block(&parent_block, &block, &output, None);
             return Err(err.into())
         }
 
@@ -2489,12 +2542,7 @@ where
         #[cfg(not(feature = "skip-state-root-validation"))]
         if state_root != block.header().state_root() {
             // call post-block hook
-            self.invalid_block_hook.on_invalid_block(
-                &parent_block,
-                &block,
-                &output,
-                Some((&trie_output, state_root)),
-            );
+            self.on_invalid_block(&parent_block, &block, &output, Some((&trie_output, state_root)));
             return Err(ConsensusError::BodyStateRootDiff(
                 reth_primitives_traits::GotExpected {
                     got: state_root,
@@ -4100,8 +4148,8 @@ mod tests {
         test_harness = test_harness.with_blocks(blocks.clone());
 
         let last_persisted_block_number = 3;
-        test_harness.tree.persistence_state.last_persisted_block.number =
-            last_persisted_block_number;
+        test_harness.tree.persistence_state.last_persisted_block =
+            blocks[last_persisted_block_number as usize].recovered_block.num_hash();
 
         let persistence_threshold = 4;
         let memory_block_buffer_target = 3;

@@ -8,9 +8,7 @@ use crate::{
 };
 use op_alloy_consensus::OpPooledTransaction;
 use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_evm::{
-    execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
-};
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
@@ -42,8 +40,9 @@ use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
 };
-use reth_optimism_txpool::conditional::MaybeConditionalTransaction;
+use reth_optimism_txpool::{conditional::MaybeConditionalTransaction, OpPooledTx};
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
@@ -279,13 +278,11 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<
-            TxEnv = op_revm::OpTransaction<TxEnv>,
-            NextBlockEnvCtx = OpNextBlockEnvAttributes,
-        >,
+        Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
-    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
+    <N::Pool as TransactionPool>::Transaction: OpPooledTx,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -313,8 +310,9 @@ where
             ctx.node.pool().clone(),
             ctx.node.provider().clone(),
         );
+
         rpc_add_ons
-            .launch_add_ons_with(ctx, move |modules, auth_modules| {
+            .launch_add_ons_with(ctx, move |modules, auth_modules, registry| {
                 debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
                 modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
 
@@ -326,8 +324,14 @@ where
 
                 // install the miner extension in the authenticated if configured
                 if modules.module_config().contains_any(&RethRpcModule::Miner) {
-                    debug!(target: "reth::cli", "Installing miner DA rpc enddpoint");
+                    debug!(target: "reth::cli", "Installing miner DA rpc endpoint");
                     auth_modules.merge_auth_methods(miner_ext.into_rpc())?;
+                }
+
+                // install the debug namespace in the authenticated if configured
+                if modules.module_config().contains_any(&RethRpcModule::Debug) {
+                    debug!(target: "reth::cli", "Installing debug rpc endpoint");
+                    auth_modules.merge_auth_methods(registry.debug_api().into_rpc())?;
                 }
 
                 if enable_tx_conditional {
@@ -353,13 +357,11 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvm<
-            TxEnv = op_revm::OpTransaction<TxEnv>,
-            NextBlockEnvCtx = OpNextBlockEnvAttributes,
-        >,
+        Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
-    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: MaybeConditionalTransaction,
+    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: OpPooledTx,
+    EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
 {
     type EthApi = OpEthApi<N>;
 
@@ -658,7 +660,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
             + Unpin
             + 'static,
-        Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
+        Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
         Txs: OpPayloadTransactions<Pool::Transaction>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
@@ -686,6 +688,7 @@ where
         + Unpin
         + 'static,
     Txs: OpPayloadTransactions<Pool::Transaction>,
+    <Pool as TransactionPool>::Transaction: OpPooledTx,
 {
     type PayloadBuilder =
         reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, OpEvmConfig, Txs>;
@@ -835,8 +838,8 @@ pub struct OpNetworkPrimitives;
 
 impl NetworkPrimitives for OpNetworkPrimitives {
     type BlockHeader = alloy_consensus::Header;
-    type BlockBody = reth_primitives::BlockBody<OpTransactionSigned>;
-    type Block = reth_primitives::Block<OpTransactionSigned>;
+    type BlockBody = alloy_consensus::BlockBody<OpTransactionSigned>;
+    type Block = alloy_consensus::Block<OpTransactionSigned>;
     type BroadcastedTransaction = OpTransactionSigned;
     type PooledTransaction = OpPooledTransaction;
     type Receipt = OpReceipt;

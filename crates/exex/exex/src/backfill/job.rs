@@ -6,12 +6,12 @@ use std::{
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
+use reth_ethereum_primitives::Receipt;
 use reth_evm::execute::{
     BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
-use reth_primitives::{Receipt, RecoveredBlock};
-use reth_primitives_traits::{format_gas_throughput, SignedTransaction};
+use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
     BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProviderFactory,
     TransactionVariant,
@@ -194,7 +194,7 @@ where
     ) -> StreamBackfillJob<
         E,
         P,
-        (RecoveredBlock<reth_primitives::Block>, BlockExecutionOutput<Receipt>),
+        (RecoveredBlock<reth_ethereum_primitives::Block>, BlockExecutionOutput<Receipt>),
     > {
         self.into()
     }

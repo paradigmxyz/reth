@@ -34,4 +34,5 @@ scroll-alloy-hardforks.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
-[dev-dependencies]
+[package.metadata.cargo-udeps.ignore]
+normal = ["reth-primitives"]

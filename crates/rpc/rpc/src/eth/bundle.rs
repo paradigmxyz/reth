@@ -5,7 +5,7 @@ use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::SignedTransaction;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_api::{

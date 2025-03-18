@@ -20,9 +20,9 @@ use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_metrics::{metrics, metrics::Gauge, Metrics};
 use reth_node_api::NewPayloadError;
-use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{
-    constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock, SealedHeaderFor,
+    constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
+    SealedBlock, SealedHeaderFor,
 };
 use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};

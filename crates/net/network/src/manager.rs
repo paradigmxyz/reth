@@ -758,6 +758,13 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
                 self.update_active_connection_metrics();
 
+                let peer_kind = self
+                    .swarm
+                    .state()
+                    .peers()
+                    .peer_by_id(peer_id)
+                    .map(|(_, kind)| kind)
+                    .unwrap_or_default();
                 let session_info = SessionInfo {
                     peer_id,
                     remote_addr,
@@ -765,6 +772,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     capabilities,
                     status,
                     version,
+                    peer_kind,
                 };
 
                 self.event_sender

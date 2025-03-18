@@ -128,6 +128,7 @@ async fn test_node_record_address_with_nat_disable_discovery() {
     let config = NetworkConfigBuilder::eth(secret_key)
         .add_nat(Some(NatResolver::ExternalIp("10.1.1.1".parse().unwrap())))
         .disable_discovery()
+        .disable_nat()
         .listener_port(0)
         .build_with_noop_provider(MAINNET.clone());
 
