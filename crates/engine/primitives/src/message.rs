@@ -12,7 +12,6 @@ use core::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use alloy_consensus::BlockHeader;
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
