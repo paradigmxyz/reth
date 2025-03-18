@@ -36,6 +36,10 @@ pub struct EngineArgs {
     /// state root calculation.
     #[arg(long = "engine.state-root-task-compare-updates")]
     pub state_root_task_compare_updates: bool,
+
+    /// Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`.
+    #[arg(long = "engine.accept-execution-requests-hash")]
+    pub accept_execution_requests_hash: bool,
 }
 
 impl Default for EngineArgs {
@@ -47,6 +51,7 @@ impl Default for EngineArgs {
             state_root_task_compare_updates: false,
             caching_and_prewarming_enabled: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
+            accept_execution_requests_hash: false,
         }
     }
 }
