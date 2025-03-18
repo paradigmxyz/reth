@@ -122,7 +122,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -145,7 +145,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -158,7 +158,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -240,7 +240,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -281,7 +281,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -319,7 +319,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -332,7 +332,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -357,7 +357,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -369,7 +369,7 @@ dependencies = [
 [[package]]
 name = "alloy-node-bindings"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-genesis",
  "alloy-hardforks",
@@ -448,7 +448,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -489,7 +489,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -529,7 +529,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -556,7 +556,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -568,7 +568,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -579,7 +579,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -590,7 +590,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -600,7 +600,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -617,7 +617,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -626,7 +626,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -646,7 +646,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -667,7 +667,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -680,7 +680,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -693,7 +693,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -704,7 +704,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -715,7 +715,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -729,7 +729,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -816,7 +816,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-json-rpc",
  "base64 0.22.1",
@@ -837,7 +837,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -851,7 +851,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -870,7 +870,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "0.12.5"
-source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#26d14e07a4e56d67ca5e0fc6fb8f1ed20784a5dc"
+source = "git+https://github.com/alloy-rs/alloy?branch=alexey%2Frequests-or-hash-untagged#e75c2ca8b07ede899c6e2b35f96d7f6e8aeb8bce"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -2060,7 +2060,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4996,7 +4996,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -11932,7 +11932,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69fff37da548239c3bf9e64a12193d261e8b22b660991c6fd2df057c168f435f"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -12446,7 +12446,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

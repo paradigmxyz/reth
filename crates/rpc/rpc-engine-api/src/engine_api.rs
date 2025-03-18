@@ -946,8 +946,8 @@ where
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
 
-        if !self.inner.accept_execution_requests_hash && matches!(requests, RequestsOrHash::Hash(_))
-        {
+        // Accept requests as a hash only if it is explicitly allowed
+        if requests.is_hash() && !self.inner.accept_execution_requests_hash {
             return Err(EngineApiError::UnexpectedRequestsHash.into());
         }
 
