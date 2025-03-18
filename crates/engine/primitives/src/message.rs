@@ -204,12 +204,12 @@ where
     to_engine: UnboundedSender<BeaconEngineMessage<Payload>>,
 }
 
-impl<Engine> BeaconConsensusEngineHandle<Engine>
+impl<Payload> BeaconConsensusEngineHandle<Payload>
 where
-    Engine: EngineTypes,
+    Payload: PayloadTypes,
 {
     /// Creates a new beacon consensus engine handle.
-    pub const fn new(to_engine: UnboundedSender<BeaconEngineMessage<Engine>>) -> Self {
+    pub const fn new(to_engine: UnboundedSender<BeaconEngineMessage<Payload>>) -> Self {
         Self { to_engine }
     }
 
@@ -218,7 +218,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload(
         &self,
-        payload: Engine::ExecutionData,
+        payload: Payload::ExecutionData,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
@@ -231,7 +231,7 @@ where
     pub async fn fork_choice_updated(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<Engine::PayloadAttributes>,
+        payload_attrs: Option<Payload::PayloadAttributes>,
         version: EngineApiMessageVersion,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
         Ok(self
@@ -247,7 +247,7 @@ where
     fn send_fork_choice_updated(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<Engine::PayloadAttributes>,
+        payload_attrs: Option<Payload::PayloadAttributes>,
         version: EngineApiMessageVersion,
     ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
