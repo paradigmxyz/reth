@@ -297,9 +297,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac52fcdca02c101b5e651af856702dd35b1af31cb00a87350f562ada636b5033"
+checksum = "1692158e9d100486fa6c2429edb42680298678ee74644b058c44f8484a278fea"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -10585,7 +10585,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
