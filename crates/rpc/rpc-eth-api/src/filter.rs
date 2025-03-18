@@ -58,7 +58,7 @@ impl QueryLimits {
 }
 
 /// Rpc Interface for poll-based ethereum filter API, implementing only the `eth_getLogs` method.
-/// Used for the EngineAPI, with possibility to specify [QueryLimits].
+/// Used for the engine API, with possibility to specify [`QueryLimits`].
 pub trait EngineEthFilter: Send + Sync + 'static {
     /// Returns logs matching given filter object.
     fn logs(
