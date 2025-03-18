@@ -33,7 +33,10 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
 };
-use reth_optimism_primitives::{supervisor::SafetyLevel, DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned, SupervisorClient};
+use reth_optimism_primitives::{
+    supervisor::SafetyLevel, DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned,
+    SupervisorClient,
+};
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -112,9 +115,17 @@ impl OpNode {
             .pool(
                 OpPoolBuilder::default()
                     .with_enable_tx_conditional(self.args.enable_tx_conditional)
-                    // TODO: we must ensure that if interop enabled we check presense of supervisor_http
-                    .with_supervisor_client(self.args.supervisor_http.clone().map(|url| SupervisorClient::new(url)))
-                    .with_supervisor_safety_level(self.args.supervisor_safety_level.clone().map(|level| serde_json::from_str(level.as_str()).unwrap())),
+                    // TODO: we must ensure that if interop enabled we check presence of
+                    // supervisor_http
+                    .with_supervisor_client(
+                        self.args.supervisor_http.clone().map(SupervisorClient::new),
+                    )
+                    .with_supervisor_safety_level(
+                        self.args
+                            .supervisor_safety_level
+                            .clone()
+                            .map(|level| serde_json::from_str(level.as_str()).unwrap()),
+                    ),
             )
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
@@ -523,7 +534,10 @@ impl<T> OpPoolBuilder<T> {
     }
 
     /// Sets the supervisor safety level
-    pub fn with_supervisor_safety_level(mut self, supervisor_safety_level: Option<SafetyLevel>) -> Self {
+    pub fn with_supervisor_safety_level(
+        mut self,
+        supervisor_safety_level: Option<SafetyLevel>,
+    ) -> Self {
         self.supervisor_safety_level = supervisor_safety_level.unwrap_or(SafetyLevel::CrossUnsafe);
         self
     }

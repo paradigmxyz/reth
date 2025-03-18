@@ -4,8 +4,8 @@ use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
 use std::time::Duration;
 use url::Url;
 
-pub use kona_rpc::{InteropTxValidator, InteropTxValidatorError};
 pub use kona_interop::{ExecutingDescriptor, SafetyLevel};
+pub use kona_rpc::{InteropTxValidator, InteropTxValidatorError};
 
 /// Implementation of the supervisor trait for the interop.
 #[derive(Debug, Clone)]
@@ -20,7 +20,6 @@ impl SupervisorClient {
         Self(client)
     }
 }
-
 
 impl InteropTxValidator for SupervisorClient {
     type SupervisorClient = HttpClient;

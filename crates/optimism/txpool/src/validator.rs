@@ -1,24 +1,26 @@
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::{Encodable2718, Typed2718};
+use alloy_eips::Encodable2718;
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::supervisor::{
+    ExecutingDescriptor, InteropTxValidator, SafetyLevel, SupervisorClient,
+};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator, TransactionOrigin, TransactionValidationOutcome, TransactionValidator
+    error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
 };
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
 use tracing::trace;
-use op_alloy_consensus::TxDeposit;
-use reth_optimism_primitives::supervisor::{SupervisorClient, InteropTxValidator, SafetyLevel, ExecutingDescriptor, InteropTxValidatorError};
 
 /// Tracks additional infos for the current block.
 #[derive(Debug, Default)]
@@ -114,11 +116,21 @@ where
         inner: EthTransactionValidator<Client, Tx>,
         block_info: OpL1BlockInfo,
     ) -> Self {
-        Self { inner, block_info: Arc::new(block_info), require_l1_data_gas_fee: true , supervisor_client: None, supervisor_safety_level: SafetyLevel::CrossUnsafe}
+        Self {
+            inner,
+            block_info: Arc::new(block_info),
+            require_l1_data_gas_fee: true,
+            supervisor_client: None,
+            supervisor_safety_level: SafetyLevel::CrossUnsafe,
+        }
     }
 
     /// Set the supervisor client and safety level
-    pub fn with_supervisor(mut self, supervisor_client: Option<SupervisorClient>, safety_level: SafetyLevel) -> Self {
+    pub fn with_supervisor(
+        mut self,
+        supervisor_client: Option<SupervisorClient>,
+        safety_level: SafetyLevel,
+    ) -> Self {
         self.supervisor_client = supervisor_client;
         self.supervisor_safety_level = safety_level;
         self
@@ -158,17 +170,15 @@ where
             )
         }
 
-        let outcome = self.inner.validate_one(origin, transaction.clone());
-
-        // TODO: Validate transaction with op-supervisor
-        if let Some(supervisor_client) = self.supervisor_client.as_ref() {
-            if let Some(false) = self.is_valid_cross_tx(&transaction) {
-                return TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidPoolTransactionError::InvalidCrossTx.into(),
-                )
-            }
+        // Interop cross tx validation
+        if self.is_valid_cross_tx(&transaction) == Some(false) {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::InvalidCrossTx,
+            )
         }
+
+        let outcome = self.inner.validate_one(origin, transaction);
 
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
@@ -237,33 +247,29 @@ where
         transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
     }
 
-
     /// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
     /// against supervisor.
     ///
     /// If commitment present pre-interop tx rejected.
-    ///
-    /// returns (is_valid, is_recoverable)
-    /// is_recoverable to set to false if we can't recover from error, in case supervisor is down,
-    /// connection is broken or transaction is invalid deterministically.
-    pub fn is_valid_cross_tx(
-        &self,
-        tx: &Tx,
-    ) -> Option<bool> {
-        // We don't need to check for deposit transaction in here, because they won't come from txpool
+    pub fn is_valid_cross_tx(&self, tx: &Tx) -> Option<bool> {
+        // We don't need to check for deposit transaction in here, because they won't come from
+        // txpool
         let access_list = tx.access_list()?;
         let inbox_entries =
-            SupervisorClient::parse_access_list(access_list).cloned().collect::<Vec<_>>();
+            SupervisorClient::parse_access_list(access_list).copied().collect::<Vec<_>>();
         if inbox_entries.is_empty() {
             return None;
         }
         let timestamp = self.block_info.timestamp.load(Ordering::Relaxed);
         // Interop check
         if !self.chain_spec().is_interop_active_at_timestamp(timestamp) {
-            // transaction is invalid, no cross transactions before interop
+            // No cross chain tx allowed before interop
             return Some(false)
         }
-        let client = self.supervisor_client.as_ref().expect("supervisor client should be always set after interop is active");
+        let client = self
+            .supervisor_client
+            .as_ref()
+            .expect("supervisor client should be always set after interop is active");
         let safety_level = self.supervisor_safety_level;
         match tokio::task::block_in_place(move || {
             tokio::runtime::Handle::current().block_on(async {
@@ -271,19 +277,18 @@ where
                     .validate_messages(
                         inbox_entries.as_slice(),
                         safety_level,
-                        ExecutingDescriptor::new(timestamp, None),
+                        ExecutingDescriptor::new(timestamp, Some(86400)),
                         Some(core::time::Duration::from_millis(100)),
                     )
                     .await
             })
         }) {
-                Ok(()) => Some(true),
-                Err(_) => {
-                    trace!(target: "txpool", hash=%tx.hash(), "Cross chain transaction invalid");
-                    Some(false)
-                },
+            Ok(()) => Some(true),
+            Err(_) => {
+                trace!(target: "txpool", hash=%tx.hash(), "Cross chain transaction invalid");
+                Some(false)
             }
-
+        }
     }
 }
 
