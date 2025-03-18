@@ -1,6 +1,6 @@
 use crate::{
     error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, EngineApiMessageVersion,
-    EngineTypes, ExecutionPayload, ForkchoiceStatus,
+    ExecutionPayload, ForkchoiceStatus,
 };
 use alloy_rpc_types_engine::{
     ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
@@ -15,6 +15,7 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::PayloadTypes;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Represents the outcome of forkchoice update.
@@ -141,11 +142,11 @@ impl Future for PendingPayloadId {
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the
 /// consensus layer).
 #[derive(Debug)]
-pub enum BeaconEngineMessage<Engine: EngineTypes> {
+pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     /// Message with new payload.
     NewPayload {
         /// The execution payload received by Engine API.
-        payload: Engine::ExecutionData,
+        payload: Payload::ExecutionData,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
@@ -154,7 +155,7 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
         /// The updated forkchoice state.
         state: ForkchoiceState,
         /// The payload attributes for block building.
-        payload_attrs: Option<Engine::PayloadAttributes>,
+        payload_attrs: Option<Payload::PayloadAttributes>,
         /// The Engine API Version.
         version: EngineApiMessageVersion,
         /// The sender for returning forkchoice updated result.
@@ -164,7 +165,7 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
     TransitionConfigurationExchanged,
 }
 
-impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
+impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NewPayload { payload, .. } => {
@@ -196,19 +197,19 @@ impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
 ///
 /// This type mirrors consensus related functions of the engine API.
 #[derive(Debug, Clone)]
-pub struct BeaconConsensusEngineHandle<Engine>
+pub struct BeaconConsensusEngineHandle<Payload>
 where
-    Engine: EngineTypes,
+    Payload: PayloadTypes,
 {
-    to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+    to_engine: UnboundedSender<BeaconEngineMessage<Payload>>,
 }
 
-impl<Engine> BeaconConsensusEngineHandle<Engine>
+impl<Payload> BeaconConsensusEngineHandle<Payload>
 where
-    Engine: EngineTypes,
+    Payload: PayloadTypes,
 {
     /// Creates a new beacon consensus engine handle.
-    pub const fn new(to_engine: UnboundedSender<BeaconEngineMessage<Engine>>) -> Self {
+    pub const fn new(to_engine: UnboundedSender<BeaconEngineMessage<Payload>>) -> Self {
         Self { to_engine }
     }
 
@@ -217,7 +218,7 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload(
         &self,
-        payload: Engine::ExecutionData,
+        payload: Payload::ExecutionData,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
         let (tx, rx) = oneshot::channel();
         let _ = self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx });
@@ -230,7 +231,7 @@ where
     pub async fn fork_choice_updated(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<Engine::PayloadAttributes>,
+        payload_attrs: Option<Payload::PayloadAttributes>,
         version: EngineApiMessageVersion,
     ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
         Ok(self
@@ -246,7 +247,7 @@ where
     fn send_fork_choice_updated(
         &self,
         state: ForkchoiceState,
-        payload_attrs: Option<Engine::PayloadAttributes>,
+        payload_attrs: Option<Payload::PayloadAttributes>,
         version: EngineApiMessageVersion,
     ) -> oneshot::Receiver<RethResult<OnForkChoiceUpdated>> {
         let (tx, rx) = oneshot::channel();
