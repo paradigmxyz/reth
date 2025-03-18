@@ -4,6 +4,7 @@ use crate::{
     testsuite::actions::{Action, ActionBox},
     NodeBuilderHelper, PayloadAttributesBuilder,
 };
+use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_engine_local::LocalPayloadAttributesBuilder;
@@ -11,7 +12,6 @@ use reth_node_api::{NodeTypesWithEngine, PayloadTypes};
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
 use std::marker::PhantomData;
-
 pub mod actions;
 pub mod setup;
 
@@ -27,6 +27,14 @@ pub struct NodeClient {
     pub engine: HttpClient<AuthClientService<HttpBackend>>,
 }
 
+/// Represents the latest block information.
+#[derive(Debug, Clone)]
+pub struct LatestBlockInfo {
+    /// Hash of the latest block
+    pub hash: B256,
+    /// Number of the latest block
+    pub number: u64,
+}
 /// Represents a test environment.
 #[derive(Debug)]
 pub struct Environment<I> {
@@ -34,11 +42,20 @@ pub struct Environment<I> {
     pub node_clients: Vec<NodeClient>,
     /// Tracks instance generic.
     _phantom: PhantomData<I>,
+    /// Latest block information
+    pub latest_block_info: Option<LatestBlockInfo>,
+    /// Last producer index
+    pub last_producer_idx: Option<usize>,
 }
 
 impl<I> Default for Environment<I> {
     fn default() -> Self {
-        Self { node_clients: vec![], _phantom: Default::default() }
+        Self {
+            node_clients: vec![],
+            _phantom: Default::default(),
+            latest_block_info: None,
+            last_producer_idx: None,
+        }
     }
 }
 
