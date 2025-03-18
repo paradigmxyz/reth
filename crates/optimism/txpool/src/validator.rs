@@ -16,7 +16,9 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
-use reth_optimism_primitives::supervisor::{SupervisorClient, InteropTxValidator, SafetyLevel, ExecutingDescriptor};
+use tracing::trace;
+use op_alloy_consensus::TxDeposit;
+use reth_optimism_primitives::supervisor::{SupervisorClient, InteropTxValidator, SafetyLevel, ExecutingDescriptor, InteropTxValidatorError};
 
 /// Tracks additional infos for the current block.
 #[derive(Debug, Default)]
@@ -160,7 +162,6 @@ where
 
         // TODO: Validate transaction with op-supervisor
         if let Some(supervisor_client) = self.supervisor_client.as_ref() {
-            // self.is_valid_cross_tx(&transaction);
             if let Some(false) = self.is_valid_cross_tx(&transaction) {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
@@ -249,18 +250,21 @@ where
         &self,
         tx: &Tx,
     ) -> Option<bool> {
-        // TODO: check if tx is deposit return None
+        // We don't need to check for deposit transaction in here, because they won't come from txpool
         let access_list = tx.access_list()?;
         let inbox_entries =
             SupervisorClient::parse_access_list(access_list).cloned().collect::<Vec<_>>();
         if inbox_entries.is_empty() {
             return None;
         }
-        // TODO: check that we are in interop and reject if not
-        let client = self.supervisor_client.as_ref()?;
-        // TODO: make this configurable
-        let safety_level = SafetyLevel::CrossUnsafe;
         let timestamp = self.block_info.timestamp.load(Ordering::Relaxed);
+        // Interop check
+        if !self.chain_spec().is_interop_active_at_timestamp(timestamp) {
+            // transaction is invalid, no cross transactions before interop
+            return Some(false)
+        }
+        let client = self.supervisor_client.as_ref().expect("supervisor client should be always set after interop is active");
+        let safety_level = self.supervisor_safety_level;
         match tokio::task::block_in_place(move || {
             tokio::runtime::Handle::current().block_on(async {
                 client
@@ -274,7 +278,10 @@ where
             })
         }) {
                 Ok(()) => Some(true),
-                Err(_) => Some(false),
+                Err(_) => {
+                    trace!(target: "txpool", hash=%tx.hash(), "Cross chain transaction invalid");
+                    Some(false)
+                },
             }
 
     }

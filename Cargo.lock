@@ -9127,6 +9127,7 @@ dependencies = [
  "reth-storage-api",
  "reth-transaction-pool",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
