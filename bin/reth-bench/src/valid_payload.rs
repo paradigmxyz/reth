@@ -2,11 +2,12 @@
 //! response. This is useful for benchmarking, as it allows us to wait for a payload to be valid
 //! before sending additional calls.
 
+use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::B256;
 use alloy_provider::{ext::EngineApi, Network};
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
 use alloy_transport::TransportResult;
 use reth_node_api::EngineApiMessageVersion;
@@ -36,6 +37,16 @@ pub trait EngineApiValidWaitExt<N>: Send + Sync {
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
+    ) -> TransportResult<PayloadStatus>;
+
+    /// Calls `engine_newPayloadV4` with the given [ExecutionPayloadV3], parent beacon block root,
+    /// versioned hashes, and requests hash, and waits until the response is VALID.
+    async fn new_payload_v4_wait(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests_hash: B256,
     ) -> TransportResult<PayloadStatus>;
 
     /// Calls `engine_forkChoiceUpdatedV1` with the given [ForkchoiceState] and optional
@@ -126,6 +137,49 @@ where
             }
             status = self
                 .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
+                .await?;
+        }
+        Ok(status)
+    }
+
+    async fn new_payload_v4_wait(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests_hash: B256,
+    ) -> TransportResult<PayloadStatus> {
+        let mut status = self
+            .new_payload_v4(
+                payload.clone(),
+                versioned_hashes.clone(),
+                parent_beacon_block_root,
+                RequestsOrHash::Hash(requests_hash),
+            )
+            .await?;
+        while !status.is_valid() {
+            if status.is_invalid() {
+                error!(
+                    ?status,
+                    ?payload,
+                    ?versioned_hashes,
+                    ?parent_beacon_block_root,
+                    "Invalid newPayloadV4",
+                );
+                panic!("Invalid newPayloadV4: {status:?}");
+            }
+            if status.is_syncing() {
+                return Err(alloy_json_rpc::RpcError::UnsupportedFeature(
+                    "invalid range: no canonical state found for parent of requested block",
+                ))
+            }
+            status = self
+                .new_payload_v4(
+                    payload.clone(),
+                    versioned_hashes.clone(),
+                    parent_beacon_block_root,
+                    RequestsOrHash::Hash(requests_hash),
+                )
                 .await?;
         }
         Ok(status)
@@ -225,6 +279,7 @@ where
 pub(crate) async fn call_new_payload<N, P: EngineApiValidWaitExt<N>>(
     provider: P,
     payload: ExecutionPayload,
+    sidecar: ExecutionPayloadSidecar,
     parent_beacon_block_root: Option<B256>,
     versioned_hashes: Vec<B256>,
 ) -> TransportResult<EngineApiMessageVersion> {
@@ -232,12 +287,24 @@ pub(crate) async fn call_new_payload<N, P: EngineApiValidWaitExt<N>>(
         ExecutionPayload::V3(payload) => {
             // We expect the caller
             let parent_beacon_block_root = parent_beacon_block_root
-                .expect("parent_beacon_block_root is required for V3 payloads");
-            provider
-                .new_payload_v3_wait(payload, versioned_hashes, parent_beacon_block_root)
-                .await?;
+                .expect("parent_beacon_block_root is required for V3 payloads and higher");
 
-            Ok(EngineApiMessageVersion::V3)
+            if let Some(requests_hash) = sidecar.requests_hash() {
+                provider
+                    .new_payload_v4_wait(
+                        payload,
+                        versioned_hashes,
+                        parent_beacon_block_root,
+                        requests_hash,
+                    )
+                    .await?;
+                Ok(EngineApiMessageVersion::V4)
+            } else {
+                provider
+                    .new_payload_v3_wait(payload, versioned_hashes, parent_beacon_block_root)
+                    .await?;
+                Ok(EngineApiMessageVersion::V3)
+            }
         }
         ExecutionPayload::V2(payload) => {
             let input = ExecutionPayloadInputV2 {
