@@ -29,7 +29,7 @@ Options:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, holesky, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
           [default: mainnet]
 

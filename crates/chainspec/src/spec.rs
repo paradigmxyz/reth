@@ -184,7 +184,8 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         chain: Chain::hoodi(),
         genesis_header: SealedHeader::new(
             make_genesis_header(&genesis, &hardforks),
-            HOODI_GENESIS_HASH,
+            // TODO: replace with alloy_consensus::HOODI_GENESIS_HASH when released
+            b256!("bbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b"),
         ),
         genesis,
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
@@ -1511,6 +1512,24 @@ Post-merge hard forks (timestamp based):
                 ),
             ],
         );
+    }
+
+    #[test]
+    fn hoodi_fork_ids() {
+        test_fork_ids(
+            &HOODI,
+            &[
+                (
+                    Head { number: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbe, 0xf7, 0x1d, 0x30]), next: 1742999832 },
+                ),
+                // First Prague block
+                (
+                    Head { number: 0, timestamp: 1742999833, ..Default::default() },
+                    ForkId { hash: ForkHash([0x09, 0x29, 0xe2, 0x4e]), next: 0 },
+                ),
+            ],
+        )
     }
 
     #[test]
