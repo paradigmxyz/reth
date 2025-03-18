@@ -712,8 +712,6 @@ where
         >,
     >,
     EV: EngineValidatorBuilder<N>,
-    for<'de> <<N as FullNodeTypes>::Types as NodeTypesWithEngine>::Engine:
-        serde::Serialize + serde::Deserialize<'de>,
 {
     type EngineApi = EngineApi<
         N::Provider,

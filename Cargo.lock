@@ -8452,7 +8452,6 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
- "serde",
  "tempfile",
  "tokio",
  "tokio-stream",

@@ -27,7 +27,7 @@ use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct CustomEngineTypes;
 
 #[derive(Debug, Clone)]
