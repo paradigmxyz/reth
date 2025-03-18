@@ -3826,8 +3826,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a49c392881ce6d5c3b8cb70f98717b7c07aabbdff06687b9030dbfbe2725f8"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.13.3+wasi-0.2.2",
+ "wasm-bindgen",
  "windows-targets 0.52.6",
 ]
 
@@ -4989,6 +4991,112 @@ checksum = "505d1856a39b200489082f90d897c3f07c455563880bc5952e38eabf731c83b6"
 dependencies = [
  "digest 0.10.7",
  "sha3-asm",
+]
+
+[[package]]
+name = "kona-genesis"
+version = "0.2.4"
+source = "git+https://github.com/op-rs/kona?rev=0493d8479e2ca9f0eb6d5c6154e2bedc61de7217#0493d8479e2ca9f0eb6d5c6154e2bedc61de7217"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "derive_more 2.0.1",
+ "kona-serde",
+ "serde",
+ "serde_repr",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "kona-interop"
+version = "0.2.4"
+source = "git+https://github.com/op-rs/kona?rev=0493d8479e2ca9f0eb6d5c6154e2bedc61de7217#0493d8479e2ca9f0eb6d5c6154e2bedc61de7217"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-sol-types",
+ "async-trait",
+ "derive_more 2.0.1",
+ "kona-genesis",
+ "kona-registry",
+ "op-alloy-consensus",
+ "serde",
+ "thiserror 2.0.12",
+ "tracing",
+]
+
+[[package]]
+name = "kona-protocol"
+version = "0.2.4"
+source = "git+https://github.com/op-rs/kona?rev=0493d8479e2ca9f0eb6d5c6154e2bedc61de7217#0493d8479e2ca9f0eb6d5c6154e2bedc61de7217"
+dependencies = [
+ "alloc-no-stdlib",
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde",
+ "async-trait",
+ "brotli",
+ "kona-genesis",
+ "miniz_oxide",
+ "op-alloy-consensus",
+ "op-alloy-flz",
+ "rand 0.9.0",
+ "serde",
+ "thiserror 2.0.12",
+ "tracing",
+ "tracing-subscriber",
+ "unsigned-varint",
+]
+
+[[package]]
+name = "kona-registry"
+version = "0.2.4"
+source = "git+https://github.com/op-rs/kona?rev=0493d8479e2ca9f0eb6d5c6154e2bedc61de7217#0493d8479e2ca9f0eb6d5c6154e2bedc61de7217"
+dependencies = [
+ "alloy-chains",
+ "alloy-primitives",
+ "kona-genesis",
+ "lazy_static",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "kona-rpc"
+version = "0.1.1"
+source = "git+https://github.com/op-rs/kona?rev=0493d8479e2ca9f0eb6d5c6154e2bedc61de7217#0493d8479e2ca9f0eb6d5c6154e2bedc61de7217"
+dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
+ "async-trait",
+ "derive_more 2.0.1",
+ "getrandom 0.3.1",
+ "jsonrpsee",
+ "kona-genesis",
+ "kona-interop",
+ "kona-protocol",
+ "op-alloy-rpc-jsonrpsee",
+ "op-alloy-rpc-types-engine",
+ "serde",
+ "thiserror 2.0.12",
+ "tokio",
+]
+
+[[package]]
+name = "kona-serde"
+version = "0.1.1"
+source = "git+https://github.com/op-rs/kona?rev=0493d8479e2ca9f0eb6d5c6154e2bedc61de7217#0493d8479e2ca9f0eb6d5c6154e2bedc61de7217"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -8899,6 +9007,9 @@ dependencies = [
  "bincode",
  "bytes",
  "derive_more 2.0.1",
+ "jsonrpsee",
+ "kona-interop",
+ "kona-rpc",
  "modular-bitfield",
  "op-alloy-consensus",
  "op-revm",
@@ -8914,6 +9025,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "url",
 ]
 
 [[package]]
@@ -9014,6 +9126,7 @@ dependencies = [
  "reth-provider",
  "reth-storage-api",
  "reth-transaction-pool",
+ "tokio",
 ]
 
 [[package]]
@@ -10856,6 +10969,17 @@ dependencies = [
  "percent-encoding",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "serde_repr"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175ee3e80ae9982737ca543e96133087cbd9a485eecc3bc4de9c1a37b47ea59c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.99",
 ]
 
 [[package]]

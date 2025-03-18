@@ -232,6 +232,10 @@ pub enum InvalidPoolTransactionError {
     /// invocation.
     #[error("intrinsic gas too low")]
     IntrinsicGasTooLow,
+    /// Op-supervisor deemed transaction invalid
+    // TODO: we should add proper error and incluse all option in here
+    #[error("invalid cross tx")]
+    InvalidCrossTx,
 }
 
 // === impl InvalidPoolTransactionError ===

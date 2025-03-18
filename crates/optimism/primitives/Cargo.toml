@@ -33,6 +33,10 @@ alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-network = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
 
+# kona
+kona-rpc = { workspace = true, features = ["client", "interop", "jsonrpsee"]}
+kona-interop.workspace = true
+
 # codec
 bytes = { workspace = true, optional = true }
 modular-bitfield = { workspace = true, optional = true }
@@ -42,6 +46,8 @@ serde_with = { workspace = true, optional = true }
 # misc
 derive_more = { workspace = true, features = ["deref", "from", "into", "constructor"] }
 rand = { workspace = true, optional = true }
+jsonrpsee.workspace = true
+url.workspace = true
 
 # test
 arbitrary = { workspace = true, features = ["derive"], optional = true }

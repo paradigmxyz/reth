@@ -1,5 +1,5 @@
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::Encodable2718;
+use alloy_eips::{Encodable2718, Typed2718};
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
@@ -10,13 +10,13 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    EthPoolTransaction, EthTransactionValidator, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
+    error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator, TransactionOrigin, TransactionValidationOutcome, TransactionValidator
 };
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
+use reth_optimism_primitives::supervisor::{SupervisorClient, InteropTxValidator, SafetyLevel, ExecutingDescriptor};
 
 /// Tracks additional infos for the current block.
 #[derive(Debug, Default)]
@@ -40,6 +40,8 @@ pub struct OpTransactionValidator<Client, Tx> {
     /// derived from the tracked L1 block info that is extracted from the first transaction in the
     /// L2 block.
     require_l1_data_gas_fee: bool,
+    /// Client used to check transaction validity with op-supervisor
+    supervisor_client: Option<SupervisorClient>,
 }
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx> {
@@ -108,7 +110,13 @@ where
         inner: EthTransactionValidator<Client, Tx>,
         block_info: OpL1BlockInfo,
     ) -> Self {
-        Self { inner, block_info: Arc::new(block_info), require_l1_data_gas_fee: true }
+        Self { inner, block_info: Arc::new(block_info), require_l1_data_gas_fee: true , supervisor_client: None}
+    }
+
+    /// Set the supervisor client
+    pub fn with_supervisor_client(mut self, supervisor_client: SupervisorClient) -> Self {
+        self.supervisor_client = Some(supervisor_client);
+        self
     }
 
     /// Update the L1 block info for the given header and system transaction, if any.
@@ -145,7 +153,18 @@ where
             )
         }
 
-        let outcome = self.inner.validate_one(origin, transaction);
+        let outcome = self.inner.validate_one(origin, transaction.clone());
+
+        // TODO: Validate transaction with op-supervisor
+        if let Some(supervisor_client) = self.supervisor_client.as_ref() {
+            // self.is_valid_cross_tx(&transaction);
+            if let Some(false) = self.is_valid_cross_tx(&transaction) {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::InvalidCrossTx.into(),
+                )
+            }
+        }
 
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
@@ -212,6 +231,48 @@ where
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+    }
+
+
+    /// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
+    /// against supervisor.
+    ///
+    /// If commitment present pre-interop tx rejected.
+    ///
+    /// returns (is_valid, is_recoverable)
+    /// is_recoverable to set to false if we can't recover from error, in case supervisor is down,
+    /// connection is broken or transaction is invalid deterministically.
+    pub fn is_valid_cross_tx(
+        &self,
+        tx: &Tx,
+    ) -> Option<bool> {
+        // TODO: check if tx is deposit return None
+        let access_list = tx.access_list()?;
+        let inbox_entries =
+            SupervisorClient::parse_access_list(access_list).cloned().collect::<Vec<_>>();
+        if inbox_entries.is_empty() {
+            return None;
+        }
+        let client = self.supervisor_client.as_ref()?;
+        // TODO: make this configurable
+        let safety_level = SafetyLevel::CrossUnsafe;
+        let timestamp = self.block_info.timestamp.load(Ordering::Relaxed);
+        match tokio::task::block_in_place(move || {
+            tokio::runtime::Handle::current().block_on(async {
+                client
+                    .validate_messages(
+                        inbox_entries.as_slice(),
+                        safety_level,
+                        ExecutingDescriptor::new(timestamp, None),
+                        Some(core::time::Duration::from_millis(100)),
+                    )
+                    .await
+            })
+        }) {
+                Ok(()) => Some(true),
+                Err(_) => Some(false),
+            }
+
     }
 }
 
