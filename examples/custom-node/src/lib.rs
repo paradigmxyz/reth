@@ -20,11 +20,12 @@ use reth_node_builder::{
 };
 use reth_optimism_node::{
     node::{
-        OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder,
-        OpStorage,
+        OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
+        OpPayloadBuilder, OpPoolBuilder, OpStorage,
     },
     OpEngineTypes, OpNode,
 };
+use reth_optimism_rpc::eth::OpEthApiBuilder;
 
 pub mod chainspec;
 pub mod engine;
@@ -55,6 +56,14 @@ where
             Storage = OpStorage,
         >,
     >,
+    ComponentsBuilder<
+        N,
+        OpPoolBuilder,
+        BasicPayloadServiceBuilder<OpPayloadBuilder>,
+        OpNetworkBuilder,
+        OpExecutorBuilder,
+        OpConsensusBuilder,
+    >: NodeComponentsBuilder<N>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -67,6 +76,8 @@ where
 
     type AddOns = RpcAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+        OpEthApiBuilder,
+        OpEngineValidatorBuilder,
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
