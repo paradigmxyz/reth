@@ -117,7 +117,7 @@ where
             ),
             tx,
         );
-        let mut sparse_trie = SparseStateTrie::new(blinded_provider_factory.clone());
+        let mut sparse_trie = SparseStateTrie::default();
         sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
@@ -159,7 +159,7 @@ where
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
                 .unwrap_or_default();
-            sparse_trie.update_account(hashed_address, account)?;
+            sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)?;
 
             while let Ok(node) = rx.try_recv() {
                 self.witness.insert(keccak256(&node), node);
