@@ -245,7 +245,7 @@ impl<P> WitnessBlindedProvider<P> {
 }
 
 impl<P: BlindedProvider> BlindedProvider for WitnessBlindedProvider<P> {
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let maybe_node = self.provider.blinded_node(path)?;
         if let Some(node) = &maybe_node {
             self.tx
