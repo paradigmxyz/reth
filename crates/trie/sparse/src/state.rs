@@ -164,7 +164,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
         // Reveal root node if it wasn't already.
         let trie = self.state.reveal_root_with_provider(
-            self.provider_factory.account_node_provider(),
             root_node,
             TrieMasks::none(),
             self.retain_updates,
@@ -208,7 +207,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
         // Reveal root node if it wasn't already.
         let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
-            self.provider_factory.storage_node_provider(account),
             root_node,
             TrieMasks::none(),
             self.retain_updates,
@@ -241,7 +239,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         if let Some(root_node) = self.validate_root_node(&mut account_nodes)? {
             // Reveal root node if it wasn't already.
             let trie = self.state.reveal_root_with_provider(
-                self.provider_factory.account_node_provider(),
                 root_node,
                 TrieMasks {
                     hash_mask: multiproof.branch_node_hash_masks.get(&Nibbles::default()).copied(),
@@ -283,7 +280,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             if let Some(root_node) = self.validate_root_node(&mut nodes)? {
                 // Reveal root node if it wasn't already.
                 let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
-                    self.provider_factory.storage_node_provider(account),
                     root_node,
                     TrieMasks {
                         hash_mask: storage_subtree
@@ -394,7 +390,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     if path.is_empty() {
                         // Handle special storage state root node case.
                         storage_trie_entry.reveal_root_with_provider(
-                            self.provider_factory.storage_node_provider(account),
                             trie_node,
                             TrieMasks::none(),
                             self.retain_updates,
@@ -416,7 +411,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 if path.is_empty() {
                     // Handle special state root node case.
                     self.state.reveal_root_with_provider(
-                        self.provider_factory.account_node_provider(),
                         trie_node,
                         TrieMasks::none(),
                         self.retain_updates,
@@ -500,7 +494,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     .unwrap_or((TrieNode::EmptyRoot, None, None));
                 self.state
                     .reveal_root_with_provider(
-                        self.provider_factory.account_node_provider(),
                         root_node,
                         TrieMasks { hash_mask, tree_mask },
                         self.retain_updates,

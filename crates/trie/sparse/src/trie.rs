@@ -1,4 +1,4 @@
-use crate::blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode};
+use crate::blinded::{BlindedProvider, RevealedNode};
 use alloy_primitives::{
     hex, keccak256,
     map::{Entry, HashMap, HashSet},
@@ -78,7 +78,7 @@ impl SparseTrie {
         masks: TrieMasks,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie> {
-        self.reveal_root_with_provider(DefaultBlindedProvider, root, masks, retain_updates)
+        self.reveal_root_with_provider(root, masks, retain_updates)
     }
 }
 
@@ -111,9 +111,8 @@ impl SparseTrie {
     /// # Returns
     ///
     /// Mutable reference to [`RevealedSparseTrie`].
-    pub fn reveal_root_with_provider<P: BlindedProvider>(
+    pub fn reveal_root_with_provider(
         &mut self,
-        _provider: P,
         root: TrieNode,
         masks: TrieMasks,
         retain_updates: bool,
@@ -1577,6 +1576,8 @@ impl SparseTrieUpdates {
 
 #[cfg(test)]
 mod tests {
+    use crate::blinded::DefaultBlindedProvider;
+
     use super::*;
     use alloy_primitives::{map::B256Set, U256};
     use alloy_rlp::Encodable;
