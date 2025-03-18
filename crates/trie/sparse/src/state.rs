@@ -577,7 +577,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             self.revealed_account_paths.insert(path.clone());
         }
 
-        self.state.update_leaf(path, value, &mut self.provider_factory.account_node_provider())?;
+        self.state.update_leaf(path, value, &self.provider_factory.account_node_provider())?;
         Ok(())
     }
 
@@ -596,7 +596,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         storage_trie.update_leaf(
             slot,
             value,
-            &mut self.provider_factory.storage_node_provider(address),
+            &self.provider_factory.storage_node_provider(address),
         )?;
         Ok(())
     }
@@ -687,7 +687,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
     /// Remove the account leaf node.
     pub fn remove_account_leaf(&mut self, path: &Nibbles) -> SparseStateTrieResult<()> {
-        self.state.remove_leaf(path, &mut self.provider_factory.account_node_provider())?;
+        self.state.remove_leaf(path, &self.provider_factory.account_node_provider())?;
         Ok(())
     }
 
@@ -698,8 +698,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         slot: &Nibbles,
     ) -> SparseStateTrieResult<()> {
         let storage_trie = self.storages.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
-        storage_trie
-            .remove_leaf(slot, &mut self.provider_factory.storage_node_provider(address))?;
+        storage_trie.remove_leaf(slot, &self.provider_factory.storage_node_provider(address))?;
         Ok(())
     }
 }

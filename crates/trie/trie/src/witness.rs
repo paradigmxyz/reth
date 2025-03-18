@@ -132,7 +132,7 @@ where
                     SparseTrieErrorKind::Blind,
                 ),
             )?;
-            let mut provider = blinded_provider_factory.storage_node_provider(hashed_address);
+            let provider = blinded_provider_factory.storage_node_provider(hashed_address);
             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
                 let storage_nibbles = Nibbles::unpack(hashed_slot);
                 let maybe_leaf_value = storage
@@ -141,16 +141,11 @@ where
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
 
                 if let Some(value) = maybe_leaf_value {
-                    storage_trie.update_leaf(storage_nibbles, value, &mut provider).map_err(
-                        |err| {
-                            SparseStateTrieErrorKind::SparseStorageTrie(
-                                hashed_address,
-                                err.into_kind(),
-                            )
-                        },
-                    )?;
+                    storage_trie.update_leaf(storage_nibbles, value, &provider).map_err(|err| {
+                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+                    })?;
                 } else {
-                    storage_trie.remove_leaf(&storage_nibbles, &mut provider).map_err(|err| {
+                    storage_trie.remove_leaf(&storage_nibbles, &provider).map_err(|err| {
                         SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
                     })?;
                 }

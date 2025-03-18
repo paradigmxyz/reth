@@ -47,7 +47,7 @@ fn calculate_root_from_leaves(c: &mut Criterion) {
                         .update_leaf(
                             Nibbles::unpack(key),
                             alloy_rlp::encode_fixed_size(value).to_vec(),
-                            &mut DefaultBlindedProvider,
+                            &DefaultBlindedProvider,
                         )
                         .unwrap();
                 }
@@ -189,7 +189,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                     .update_leaf(
                                         Nibbles::unpack(key),
                                         alloy_rlp::encode_fixed_size(value).to_vec(),
-                                        &mut DefaultBlindedProvider,
+                                        &DefaultBlindedProvider,
                                     )
                                     .unwrap();
                             }
@@ -203,7 +203,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                         .update_leaf(
                                             Nibbles::unpack(key),
                                             alloy_rlp::encode_fixed_size(value).to_vec(),
-                                            &mut DefaultBlindedProvider,
+                                            &DefaultBlindedProvider,
                                         )
                                         .unwrap();
                                 }

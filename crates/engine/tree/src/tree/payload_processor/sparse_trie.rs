@@ -154,7 +154,7 @@ where
             let _enter = span.enter();
             trace!(target: "engine::root::sparse", "Updating storage");
             let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
-            let mut provider = blinded_provider_factory.storage_node_provider(address);
+            let provider = blinded_provider_factory.storage_node_provider(address);
 
             if storage.wiped {
                 trace!(target: "engine::root::sparse", "Wiping storage");
@@ -164,13 +164,13 @@ where
                 let slot_nibbles = Nibbles::unpack(slot);
                 if value.is_zero() {
                     trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
-                    storage_trie.remove_leaf(&slot_nibbles, &mut provider)?;
+                    storage_trie.remove_leaf(&slot_nibbles, &provider)?;
                 } else {
                     trace!(target: "engine::root::sparse", ?slot, "Updating storage slot");
                     storage_trie.update_leaf(
                         slot_nibbles,
                         alloy_rlp::encode_fixed_size(&value).to_vec(),
-                        &mut provider,
+                        &provider,
                     )?;
                 }
             }
