@@ -23,6 +23,11 @@ pub mod transaction;
 pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
 
 mod receipt;
+#[cfg(feature = "supervisor")]
+pub mod supervisor;
+#[cfg(feature = "supervisor")]
+pub use supervisor::SupervisorClient;
+
 pub use receipt::{DepositReceipt, OpReceipt};
 
 /// Optimism-specific block type.
