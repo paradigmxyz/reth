@@ -7,7 +7,7 @@ use proptest::{prelude::*, test_runner::TestRunner};
 use rand::seq::IteratorRandom;
 use reth_testing_utils::generators;
 use reth_trie::Nibbles;
-use reth_trie_sparse::RevealedSparseTrie;
+use reth_trie_sparse::{blinded::DefaultBlindedProvider, RevealedSparseTrie};
 
 fn update_rlp_node_level(c: &mut Criterion) {
     let mut rng = generators::rng();
@@ -25,7 +25,11 @@ fn update_rlp_node_level(c: &mut Criterion) {
         let mut sparse = RevealedSparseTrie::default();
         for (key, value) in &state {
             sparse
-                .update_leaf(Nibbles::unpack(key), alloy_rlp::encode_fixed_size(value).to_vec())
+                .update_leaf(
+                    Nibbles::unpack(key),
+                    alloy_rlp::encode_fixed_size(value).to_vec(),
+                    &DefaultBlindedProvider,
+                )
                 .unwrap();
         }
         sparse.root();
@@ -39,6 +43,7 @@ fn update_rlp_node_level(c: &mut Criterion) {
                     .update_leaf(
                         Nibbles::unpack(key),
                         alloy_rlp::encode_fixed_size(&rng.gen::<U256>()).to_vec(),
+                        &DefaultBlindedProvider,
                     )
                     .unwrap();
             }
