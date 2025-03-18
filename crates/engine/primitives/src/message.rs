@@ -1,6 +1,6 @@
 use crate::{
     error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, EngineApiMessageVersion,
-    EngineTypes, ExecutionPayload, ForkchoiceStatus,
+    ExecutionPayload, ForkchoiceStatus,
 };
 use alloy_rpc_types_engine::{
     ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
@@ -165,7 +165,7 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     TransitionConfigurationExchanged,
 }
 
-impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
+impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NewPayload { payload, .. } => {
