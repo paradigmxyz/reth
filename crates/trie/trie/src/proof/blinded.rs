@@ -84,7 +84,7 @@ where
     T: TrieCursorFactory + Clone + Send + Sync,
     H: HashedCursorFactory + Clone + Send + Sync,
 {
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
 
         let targets = MultiProofTargets::from_iter([(pad_path_to_key(path), HashSet::default())]);
@@ -141,7 +141,7 @@ where
     T: TrieCursorFactory + Clone + Send + Sync,
     H: HashedCursorFactory + Clone + Send + Sync,
 {
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
 
         let targets = HashSet::from_iter([pad_path_to_key(path)]);
