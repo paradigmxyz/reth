@@ -74,7 +74,7 @@ impl<P: NodePrimitives> From<CanonStateNotification<P>> for ExExNotification<P> 
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
     use reth_execution_types::serde_bincode_compat::Chain;
-    use reth_primitives::{EthPrimitives, NodePrimitives};
+    use reth_primitives_traits::NodePrimitives;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
     use std::sync::Arc;
@@ -84,21 +84,22 @@ pub(super) mod serde_bincode_compat {
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
     /// use reth_exex_types::{serde_bincode_compat, ExExNotification};
+    /// use reth_primitives_traits::NodePrimitives;
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
     /// #[derive(Serialize, Deserialize)]
-    /// struct Data {
-    ///     #[serde_as(as = "serde_bincode_compat::ExExNotification")]
-    ///     notification: ExExNotification,
+    /// struct Data<N: NodePrimitives> {
+    ///     #[serde_as(as = "serde_bincode_compat::ExExNotification<'_, N>")]
+    ///     notification: ExExNotification<N>,
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     #[allow(missing_docs)]
     #[serde(bound = "")]
     #[allow(clippy::large_enum_variant)]
-    pub enum ExExNotification<'a, N = EthPrimitives>
+    pub enum ExExNotification<'a, N>
     where
         N: NodePrimitives,
     {
@@ -148,9 +149,12 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl SerializeAs<super::ExExNotification> for ExExNotification<'_> {
+    impl<N> SerializeAs<super::ExExNotification<N>> for ExExNotification<'_, N>
+    where
+        N: NodePrimitives,
+    {
         fn serialize_as<S>(
-            source: &super::ExExNotification,
+            source: &super::ExExNotification<N>,
             serializer: S,
         ) -> Result<S::Ok, S::Error>
         where
@@ -160,8 +164,11 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de> DeserializeAs<'de, super::ExExNotification> for ExExNotification<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::ExExNotification, D::Error>
+    impl<'de, N> DeserializeAs<'de, super::ExExNotification<N>> for ExExNotification<'de, N>
+    where
+        N: NodePrimitives,
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::ExExNotification<N>, D::Error>
         where
             D: Deserializer<'de>,
         {
@@ -175,7 +182,7 @@ pub(super) mod serde_bincode_compat {
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_execution_types::Chain;
-        use reth_primitives::RecoveredBlock;
+        use reth_primitives_traits::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
         use std::sync::Arc;
@@ -185,7 +192,9 @@ pub(super) mod serde_bincode_compat {
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
-                #[serde_as(as = "serde_bincode_compat::ExExNotification")]
+                #[serde_as(
+                    as = "serde_bincode_compat::ExExNotification<'_, reth_ethereum_primitives::EthPrimitives>"
+                )]
                 notification: ExExNotification,
             }
 
