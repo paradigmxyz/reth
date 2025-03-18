@@ -33,6 +33,8 @@ pub use payload::{ExecutionPayload, PayloadOrAttributes};
 
 /// The types that are used by the engine API.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
+    /// The execution payload type provided as input
+    type ExecutionData: ExecutionPayload;
     /// The built payload type.
     type BuiltPayload: BuiltPayload + Clone + Unpin;
 

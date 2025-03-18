@@ -89,10 +89,9 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
-    /// Execution data.
-    type ExecutionData: ExecutionPayload;
 
-    /// Converts a [`BuiltPayload`] into an [`Self::ExecutionData`].
+    /// Converts a [`BuiltPayload`] into an
+    /// [`PayloadTypes:ExecutionData`](reth_payload_primitives::PayloadTypes::ExecutionData).
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,

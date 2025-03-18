@@ -49,7 +49,10 @@ where
     /// This waits for new incoming [`SparseTrieUpdate`].
     ///
     /// This concludes once the last trie update has been received.
-    pub(super) fn run(self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    ///
+    /// NOTE: This function does not take `self` by value to prevent blocking on [`SparseStateTrie`]
+    /// drop.
+    pub(super) fn run(&self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
         let provider_ro = self.config.consistent_view.provider_ro()?;
         let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
