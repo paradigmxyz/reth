@@ -7,7 +7,7 @@ use alloy_rpc_types_engine::ClientVersionV1;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{
-    AddOnsContext, EngineTypes, FullNodeComponents, NodeTypes, NodeTypesWithEngine,
+    AddOnsContext, EngineTypes, FullNodeComponents, FullNodeTypes, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_builder::rpc::{EngineApiBuilder, EngineValidatorBuilder};
 use reth_node_core::version::{CARGO_PKG_VERSION, CLIENT_CODE, VERGEN_GIT_SHA};
@@ -30,6 +30,8 @@ where
         >,
     >,
     EV: EngineValidatorBuilder<N>,
+    for<'de> <<N as FullNodeTypes>::Types as NodeTypesWithEngine>::Engine:
+        serde::Serialize + serde::Deserialize<'de>,
 {
     type EngineApi = OpEngineApi<
         N::Provider,
