@@ -238,7 +238,15 @@ where
         );
 
         // send the result back
-        let _ = result_sender.send(result);
+        if let Err(e) = result_sender.send(result) {
+            debug!(
+                target: "trie::parallel_proof",
+                hashed_address=?input.hashed_address,
+                error = ?e,
+                task_time = ?proof_start.elapsed(),
+                "Failed to send proof result"
+            );
+        }
 
         // send the tx back
         let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
