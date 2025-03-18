@@ -249,6 +249,7 @@ impl PayloadTypes for CustomEngineTypes {
     type BuiltPayload = CustomBuiltPayload;
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
+    type ExecutionData = CustomExecutionData;
 }
 
 impl EngineTypes for CustomEngineTypes {
@@ -256,7 +257,6 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
-    type ExecutionData = CustomExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
