@@ -54,8 +54,8 @@ pub struct PendingPool<T: TransactionOrdering> {
 
 impl<T: TransactionOrdering> PendingPool<T> {
     /// Create a new pool instance.
-    pub fn new(ordering: T) -> Self {
-        let (new_transaction_notifier, _) = broadcast::channel(200);
+    pub fn new(ordering: T, max_new_pending_txs_notifications: usize) -> Self {
+        let (new_transaction_notifier, _) = broadcast::channel(max_new_pending_txs_notifications);
         Self {
             ordering,
             submission_id: 0,
@@ -183,7 +183,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this
+                        break 'this;
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
@@ -225,7 +225,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this
+                        break 'this;
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
@@ -413,8 +413,8 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // loop through the highest nonces set, removing transactions until we reach the limit
             for tx in worst_transactions {
                 // return early if the pool is under limits
-                if !limit.is_exceeded(original_length - total_removed, original_size - total_size) ||
-                    non_local_senders == 0
+                if !limit.is_exceeded(original_length - total_removed, original_size - total_size)
+                    || non_local_senders == 0
                 {
                     // need to remove remaining transactions before exiting
                     for id in &removed {
@@ -423,7 +423,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                         }
                     }
 
-                    return
+                    return;
                 }
 
                 if !remove_locals && tx.transaction.is_local() {
@@ -431,7 +431,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     if local_senders.insert(sender_id) {
                         non_local_senders -= 1;
                     }
-                    continue
+                    continue;
                 }
 
                 total_size += tx.transaction.size();
@@ -449,7 +449,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // return if either the pool is under limits or there are no more _eligible_
             // transactions to remove
             if !self.exceeds(limit) || non_local_senders == 0 {
-                return
+                return;
             }
         }
     }
@@ -471,13 +471,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut removed = Vec::new();
         // return early if the pool is already under the limits
         if !self.exceeds(&limit) {
-            return removed
+            return removed;
         }
 
         // first truncate only non-local transactions, returning if the pool end up under the limit
         self.remove_to_limit(&limit, false, &mut removed);
         if !self.exceeds(&limit) {
-            return removed
+            return removed;
         }
 
         // now repeat for local transactions, since local transactions must be removed now for the
@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn test_enforce_basefee() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
         let tx = f.validated_arc(MockTransaction::eip1559().inc_price());
         pool.add_transaction(tx.clone(), 0);
 
@@ -638,7 +638,7 @@ mod tests {
     #[test]
     fn test_enforce_basefee_descendant() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
         let t = MockTransaction::eip1559().inc_price_by(10);
         let root_tx = f.validated_arc(t.clone());
         pool.add_transaction(root_tx.clone(), 0);
@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn evict_worst() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
 
         let t = MockTransaction::eip1559();
         pool.add_transaction(f.validated_arc(t.clone()), 0);
@@ -702,7 +702,7 @@ mod tests {
     fn correct_independent_descendants() {
         // this test ensures that we set the right highest nonces set for each sender
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
 
         let a_sender = address!("0x000000000000000000000000000000000000000a");
         let b_sender = address!("0x000000000000000000000000000000000000000b");
@@ -750,7 +750,7 @@ mod tests {
     fn truncate_by_sender() {
         // This test ensures that transactions are removed from the pending pool by sender.
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
 
         // Addresses for simulated senders A, B, C, and D.
         let a = address!("0x000000000000000000000000000000000000000a");
@@ -835,7 +835,7 @@ mod tests {
     // <https://github.com/paradigmxyz/reth/issues/12340>
     #[test]
     fn test_eligible_updates_promoted() {
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
         let mut f = MockTransactionFactory::default();
 
         let num_senders = 10;
@@ -877,7 +877,7 @@ mod tests {
 
     #[test]
     fn test_empty_pool_behavior() {
-        let mut pool = PendingPool::<MockOrdering>::new(MockOrdering::default());
+        let mut pool = PendingPool::<MockOrdering>::new(MockOrdering::default(),200);
 
         // Ensure the pool is empty
         assert!(pool.is_empty());
@@ -896,7 +896,7 @@ mod tests {
     #[test]
     fn test_add_remove_transaction() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
 
         // Add a transaction and check if it's in the pool
         let tx = f.validated_arc(MockTransaction::eip1559());
@@ -914,7 +914,7 @@ mod tests {
     #[test]
     fn test_reorder_on_basefee_update() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
 
         // Add two transactions with different fees
         let tx1 = f.validated_arc(MockTransaction::eip1559().inc_price());
@@ -942,7 +942,7 @@ mod tests {
     #[should_panic(expected = "transaction already included")]
     fn test_handle_duplicates() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
 
         // Add the same transaction twice and ensure it only appears once
         let tx = f.validated_arc(MockTransaction::eip1559());
@@ -957,7 +957,7 @@ mod tests {
     #[test]
     fn test_update_blob_fee() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
 
         // Add transactions with varying blob fees
         let tx1 = f.validated_arc(MockTransaction::eip4844().set_blob_fee(50).clone());
@@ -978,7 +978,7 @@ mod tests {
     #[test]
     fn local_senders_tracking() {
         let mut f = MockTransactionFactory::default();
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
 
         // Addresses for simulated senders A, B, C
         let a = address!("0x000000000000000000000000000000000000000a");

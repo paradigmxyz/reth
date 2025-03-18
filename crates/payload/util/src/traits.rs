@@ -106,8 +106,8 @@ mod tests {
 
     #[test]
     fn test_best_transactions_chained_iterators() {
-        let mut priority_pool = PendingPool::new(MockOrdering::default());
-        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut priority_pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(),200);
         let mut f = MockTransactionFactory::default();
 
         // Block composition
