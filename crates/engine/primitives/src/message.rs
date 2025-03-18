@@ -15,8 +15,8 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use reth_payload_primitives::PayloadTypes;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -197,11 +197,11 @@ impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
 ///
 /// This type mirrors consensus related functions of the engine API.
 #[derive(Debug, Clone)]
-pub struct BeaconConsensusEngineHandle<Engine>
+pub struct BeaconConsensusEngineHandle<Payload>
 where
-    Engine: EngineTypes,
+    Payload: PayloadTypes,
 {
-    to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
+    to_engine: UnboundedSender<BeaconEngineMessage<Payload>>,
 }
 
 impl<Engine> BeaconConsensusEngineHandle<Engine>
