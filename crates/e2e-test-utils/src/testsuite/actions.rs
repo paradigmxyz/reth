@@ -160,6 +160,12 @@ pub struct PickNextBlockProducer<Engine> {
     _phantom: PhantomData<Engine>,
 }
 
+impl<Engine> Default for PickNextBlockProducer<Engine> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Engine> PickNextBlockProducer<Engine> {
     /// Create a new `PickNextBlockProducer` action
     pub fn new() -> Self {
