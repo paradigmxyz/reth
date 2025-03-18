@@ -87,10 +87,10 @@ where
                 "Updating sparse trie"
             );
 
-            let elapsed = update_sparse_trie(&mut trie, update, blinded_provider_factory.clone())
+            let elapsed = update_sparse_trie(&mut trie, update, &blinded_provider_factory)
                 .map_err(|e| {
-                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-            })?;
+                    ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+                })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
@@ -123,7 +123,7 @@ pub struct StateRootComputeOutcome {
 pub(crate) fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
     SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
-    blinded_provider_factory: BPF,
+    blinded_provider_factory: &BPF,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,
