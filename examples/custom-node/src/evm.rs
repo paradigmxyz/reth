@@ -1,3 +1,4 @@
+/*
 use crate::{
     chainspec::CustomChainSpec,
     primitives::{Block, CustomHeader, CustomNodePrimitives},
@@ -26,6 +27,7 @@ use reth_primitives::{logs_bloom, BlockBody, SealedBlock};
 use reth_primitives_traits::SealedHeader;
 use reth_revm::State;
 use std::sync::Arc;
+
 
 #[derive(Debug, Clone)]
 pub struct CustomBlockAssembler<CS> {
@@ -209,3 +211,4 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.context_for_next_block(parent, attributes)
     }
 }
+*/

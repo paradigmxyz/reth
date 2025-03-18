@@ -13,19 +13,11 @@ use chainspec::CustomChainSpec;
 use engine::CustomEngineTypes;
 use primitives::CustomNodePrimitives;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
-use reth_node_builder::{
-    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
-    rpc::RpcAddOns,
-    Node, NodeAdapter, NodeComponentsBuilder,
-};
+use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
 use reth_optimism_node::{
-    node::{
-        OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-        OpPayloadBuilder, OpPoolBuilder, OpStorage,
-    },
+    node::{OpConsensusBuilder, OpPoolBuilder, OpStorage},
     OpEngineTypes, OpNode,
 };
-use reth_optimism_rpc::eth::OpEthApiBuilder;
 
 pub mod chainspec;
 pub mod engine;
@@ -33,7 +25,7 @@ pub mod evm;
 pub mod primitives;
 
 #[derive(Debug, Clone)]
-pub struct CustomNode(OpNode);
+pub struct CustomNode {}
 
 impl NodeTypes for CustomNode {
     type Primitives = CustomNodePrimitives;
@@ -56,35 +48,18 @@ where
             Storage = OpStorage,
         >,
     >,
-    ComponentsBuilder<
-        N,
-        OpPoolBuilder,
-        BasicPayloadServiceBuilder<OpPayloadBuilder>,
-        OpNetworkBuilder,
-        OpExecutorBuilder,
-        OpConsensusBuilder,
-    >: NodeComponentsBuilder<N>,
+    ComponentsBuilder<N, OpPoolBuilder, (), (), (), OpConsensusBuilder>: NodeComponentsBuilder<N>,
 {
-    type ComponentsBuilder = ComponentsBuilder<
-        N,
-        OpPoolBuilder,
-        BasicPayloadServiceBuilder<OpPayloadBuilder>,
-        OpNetworkBuilder,
-        OpExecutorBuilder,
-        OpConsensusBuilder,
-    >;
+    type ComponentsBuilder = ComponentsBuilder<N, OpPoolBuilder, (), (), (), OpConsensusBuilder>;
 
-    type AddOns = RpcAddOns<
-        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-    >;
+    type AddOns = ();
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        todo!()
+        ComponentsBuilder::default()
+            .node_types::<N>()
+            .pool(OpPoolBuilder::default())
+            .consensus(OpConsensusBuilder::default())
     }
 
-    fn add_ons(&self) -> Self::AddOns {
-        todo!()
-    }
+    fn add_ons(&self) -> Self::AddOns {}
 }

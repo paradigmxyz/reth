@@ -93,7 +93,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
 #[derive(Debug, Clone)]
 pub struct CustomPayloadBuilderAttributes {
     inner: OpPayloadBuilderAttributes<OpTransactionSigned>,
-    extension: u64,
+    _extension: u64,
 }
 
 impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
@@ -110,7 +110,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
     {
         let CustomPayloadAttributes { inner, extension } = rpc_payload_attributes;
 
-        Ok(Self { inner: OpPayloadBuilderAttributes::try_new(parent, inner, version)?, extension })
+        Ok(Self {
+            inner: OpPayloadBuilderAttributes::try_new(parent, inner, version)?,
+            _extension: extension,
+        })
     }
 
     fn parent(&self) -> revm_primitives::B256 {
