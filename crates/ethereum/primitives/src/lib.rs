@@ -23,6 +23,7 @@ mod alloy_compat;
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     pub use super::receipt::serde_bincode_compat::*;
+    pub use super::transaction::serde_bincode_compat::*;
 }
 
 /// Type alias for the ethereum block
