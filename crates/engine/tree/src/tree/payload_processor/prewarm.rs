@@ -8,9 +8,10 @@ use crate::tree::{
     StateProviderBuilder,
 };
 use alloy_consensus::transaction::Recovered;
+use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use metrics::{Gauge, Histogram};
-use reth_evm::{ConfigureEvm, Evm};
+use reth_evm::{ConfigureEvm, Evm, EvmFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{header::SealedHeaderFor, NodePrimitives, SignedTransaction};
 use reth_provider::{BlockReader, StateCommitmentProvider, StateProviderFactory, StateReader};
@@ -247,16 +248,10 @@ where
         Some(targets)
     }
 
-    /// Transacts the transaction and returns the state outcome.
-    ///
-    /// Returns `None` if executing the transaction failed to a non Revert error.
-    /// Returns the touched+modified state of the transaction.
-    ///
-    /// Note: Since here are no ordering guarantees this won't the state the tx produces when
-    /// executed sequentially.
-    fn transact(self, tx: Recovered<N::SignedTx>) -> Option<EvmState> {
+    /// Splits this context into an evm, an evm config, and metrics.
+    fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, Evm, PrewarmMetrics)> {
         let Self { header, evm_config, cache: caches, cache_metrics, provider, metrics } = self;
-        // Create the state provider inside the thread
+
         let state_provider = match provider.build() {
             Ok(provider) => provider,
             Err(err) => {
@@ -273,7 +268,7 @@ where
         let state_provider =
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
-        let state_provider = StateProviderDatabase::new(&state_provider);
+        let state_provider = StateProviderDatabase::new(state_provider);
 
         let mut evm_env = evm_config.evm_env(&header);
 
@@ -282,7 +277,20 @@ where
         evm_env.cfg_env.disable_nonce_check = true;
 
         // create a new executor and disable nonce checks in the env
-        let mut evm = evm_config.evm_with_env(state_provider, evm_env);
+        let evm = evm_config.evm_with_env(state_provider, evm_env);
+
+        Some((evm, evm_config, metrics))
+    }
+
+    /// Transacts the transaction and returns the state outcome.
+    ///
+    /// Returns `None` if executing the transaction failed to a non Revert error.
+    /// Returns the touched+modified state of the transaction.
+    ///
+    /// Note: Since here are no ordering guarantees this won't the state the tx produces when
+    /// executed sequentially.
+    fn transact(self, tx: Recovered<N::SignedTx>) -> Option<EvmState> {
+        let (mut evm, evm_config, metrics) = self.evm_for_ctx()?;
 
         // create the tx env and reset nonce
         let tx_env = evm_config.tx_env(&tx);
