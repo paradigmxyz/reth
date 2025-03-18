@@ -149,6 +149,9 @@ where
         parent_beacon_block_root: B256,
         requests_hash: B256,
     ) -> TransportResult<PayloadStatus> {
+        // We cannot use `self.new_payload_v4` because it does not support sending
+        // `RequestsOrHash::Hash`
+
         let mut status: PayloadStatus = self
             .client()
             .request(
@@ -342,8 +345,7 @@ pub(crate) async fn call_forkchoice_updated<N, P: EngineApiValidWaitExt<N>>(
     payload_attributes: Option<PayloadAttributes>,
 ) -> TransportResult<ForkchoiceUpdated> {
     match message_version {
-        EngineApiMessageVersion::V4 => todo!("V4 payloads not supported yet"),
-        EngineApiMessageVersion::V3 => {
+        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
             provider.fork_choice_updated_v3_wait(forkchoice_state, payload_attributes).await
         }
         EngineApiMessageVersion::V2 => {
