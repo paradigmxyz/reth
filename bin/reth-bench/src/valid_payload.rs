@@ -4,7 +4,7 @@
 
 use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::B256;
-use alloy_provider::{ext::EngineApi, Network};
+use alloy_provider::{ext::EngineApi, Network, Provider};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
     ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
@@ -78,7 +78,7 @@ pub trait EngineApiValidWaitExt<N>: Send + Sync {
 impl<N, P> EngineApiValidWaitExt<N> for P
 where
     N: Network,
-    P: EngineApi<N>,
+    P: Provider<N> + EngineApi<N>,
 {
     async fn new_payload_v1_wait(
         &self,
@@ -149,12 +149,16 @@ where
         parent_beacon_block_root: B256,
         requests_hash: B256,
     ) -> TransportResult<PayloadStatus> {
-        let mut status = self
-            .new_payload_v4(
-                payload.clone(),
-                versioned_hashes.clone(),
-                parent_beacon_block_root,
-                RequestsOrHash::Hash(requests_hash),
+        let mut status: PayloadStatus = self
+            .client()
+            .request(
+                "engine_newPayloadV4",
+                (
+                    payload.clone(),
+                    versioned_hashes.clone(),
+                    parent_beacon_block_root,
+                    RequestsOrHash::Hash(requests_hash),
+                ),
             )
             .await?;
         while !status.is_valid() {
@@ -174,11 +178,15 @@ where
                 ))
             }
             status = self
-                .new_payload_v4(
-                    payload.clone(),
-                    versioned_hashes.clone(),
-                    parent_beacon_block_root,
-                    RequestsOrHash::Hash(requests_hash),
+                .client()
+                .request(
+                    "engine_newPayloadV4",
+                    (
+                        payload.clone(),
+                        versioned_hashes.clone(),
+                        parent_beacon_block_root,
+                        RequestsOrHash::Hash(requests_hash),
+                    ),
                 )
                 .await?;
         }
