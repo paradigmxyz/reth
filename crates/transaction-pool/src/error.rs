@@ -323,6 +323,7 @@ impl InvalidPoolTransactionError {
             Self::Eip7702(eip7702_err) => match eip7702_err {
                 Eip7702PoolTransactionError::MissingEip7702AuthorizationList => false,
             },
+            Self::InvalidCrossTx => true,
         }
     }
 

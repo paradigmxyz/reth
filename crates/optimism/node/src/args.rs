@@ -37,6 +37,14 @@ pub struct RollupArgs {
     /// Enable transaction conditional support on sequencer
     #[arg(long = "rollup.enable-tx-conditional", default_value = "false")]
     pub enable_tx_conditional: bool,
+
+    /// HTTP endpoint for the supervisor
+    #[arg(long = "rollup.supervisor-http", value_name = "SUPERVISOR_HTTP_URL")]
+    pub supervisor_http: Option<String>,
+
+    /// Safety level for the supervisor
+    #[arg(long = "rollup.supervisor-safety-level")]
+    pub supervisor_safety_level: Option<String>,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -49,6 +57,8 @@ impl Default for RollupArgs {
             compute_pending_block: false,
             discovery_v4: false,
             enable_tx_conditional: false,
+            supervisor_http: None,
+            supervisor_safety_level: None,
         }
     }
 }

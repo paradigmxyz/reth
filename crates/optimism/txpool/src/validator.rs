@@ -42,6 +42,8 @@ pub struct OpTransactionValidator<Client, Tx> {
     require_l1_data_gas_fee: bool,
     /// Client used to check transaction validity with op-supervisor
     supervisor_client: Option<SupervisorClient>,
+    /// Supervisor safety level
+    supervisor_safety_level: SafetyLevel,
 }
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx> {
@@ -110,12 +112,13 @@ where
         inner: EthTransactionValidator<Client, Tx>,
         block_info: OpL1BlockInfo,
     ) -> Self {
-        Self { inner, block_info: Arc::new(block_info), require_l1_data_gas_fee: true , supervisor_client: None}
+        Self { inner, block_info: Arc::new(block_info), require_l1_data_gas_fee: true , supervisor_client: None, supervisor_safety_level: SafetyLevel::CrossUnsafe}
     }
 
-    /// Set the supervisor client
-    pub fn with_supervisor_client(mut self, supervisor_client: SupervisorClient) -> Self {
-        self.supervisor_client = Some(supervisor_client);
+    /// Set the supervisor client and safety level
+    pub fn with_supervisor(mut self, supervisor_client: Option<SupervisorClient>, safety_level: SafetyLevel) -> Self {
+        self.supervisor_client = supervisor_client;
+        self.supervisor_safety_level = safety_level;
         self
     }
 
@@ -253,6 +256,7 @@ where
         if inbox_entries.is_empty() {
             return None;
         }
+        // TODO: check that we are in interop and reject if not
         let client = self.supervisor_client.as_ref()?;
         // TODO: make this configurable
         let safety_level = SafetyLevel::CrossUnsafe;

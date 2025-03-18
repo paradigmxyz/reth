@@ -33,7 +33,7 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
 };
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{supervisor::SafetyLevel, DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned, SupervisorClient};
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -111,7 +111,10 @@ impl OpNode {
             .node_types::<Node>()
             .pool(
                 OpPoolBuilder::default()
-                    .with_enable_tx_conditional(self.args.enable_tx_conditional),
+                    .with_enable_tx_conditional(self.args.enable_tx_conditional)
+                    // TODO: we must ensure that if interop enabled we check presense of supervisor_http
+                    .with_supervisor_client(self.args.supervisor_http.clone().map(|url| SupervisorClient::new(url)))
+                    .with_supervisor_safety_level(self.args.supervisor_safety_level.clone().map(|level| serde_json::from_str(level.as_str()).unwrap())),
             )
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
@@ -477,6 +480,10 @@ pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     pub pool_config_overrides: PoolBuilderConfigOverrides,
     /// Enable transaction conditionals.
     pub enable_tx_conditional: bool,
+    /// Supervisor client
+    pub supervisor_client: Option<SupervisorClient>,
+    /// Supervisor safety level
+    pub supervisor_safety_level: SafetyLevel,
     /// Marker for the pooled transaction type.
     _pd: core::marker::PhantomData<T>,
 }
@@ -486,6 +493,8 @@ impl<T> Default for OpPoolBuilder<T> {
         Self {
             pool_config_overrides: Default::default(),
             enable_tx_conditional: false,
+            supervisor_client: None,
+            supervisor_safety_level: SafetyLevel::CrossUnsafe,
             _pd: Default::default(),
         }
     }
@@ -504,6 +513,18 @@ impl<T> OpPoolBuilder<T> {
         pool_config_overrides: PoolBuilderConfigOverrides,
     ) -> Self {
         self.pool_config_overrides = pool_config_overrides;
+        self
+    }
+
+    /// Sets the supervisor client
+    pub fn with_supervisor_client(mut self, supervisor_client: Option<SupervisorClient>) -> Self {
+        self.supervisor_client = supervisor_client;
+        self
+    }
+
+    /// Sets the supervisor safety level
+    pub fn with_supervisor_safety_level(mut self, supervisor_safety_level: Option<SafetyLevel>) -> Self {
+        self.supervisor_safety_level = supervisor_safety_level.unwrap_or(SafetyLevel::CrossUnsafe);
         self
     }
 }
@@ -535,6 +556,7 @@ where
                     // In --dev mode we can't require gas fees because we're unable to decode
                     // the L1 block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev)
+                    .with_supervisor(self.supervisor_client.clone(), self.supervisor_safety_level)
             });
 
         let transaction_pool = reth_transaction_pool::Pool::new(

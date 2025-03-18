@@ -763,6 +763,8 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Overdraft { cost, balance } => {
                 Self::Invalid(RpcInvalidTransactionError::InsufficientFunds { cost, balance })
             }
+            // TODO: change to correct error
+            InvalidPoolTransactionError::InvalidCrossTx => Self::TxPoolOverflow,
         }
     }
 }
