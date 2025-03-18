@@ -76,6 +76,7 @@ eyre.workspace = true
 fdlimit.workspace = true
 jsonrpsee.workspace = true
 rayon.workspace = true
+serde.workspace = true
 
 # tracing
 tracing.workspace = true
