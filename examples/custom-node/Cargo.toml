@@ -42,13 +42,15 @@ serde.workspace = true
 [features]
 default = []
 arbitrary = [
-	"alloy-consensus/arbitrary",
-	"alloy-eips/arbitrary",
-	"alloy-primitives/arbitrary",
-	"reth-codecs/arbitrary",
-	"reth-optimism-primitives/arbitrary",
-	"reth-primitives-traits/arbitrary",
-	"revm-primitives/arbitrary",
-	"reth-chainspec/arbitrary"
+    "alloy-consensus/arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
+    "op-alloy-rpc-types-engine",
+    "reth-chainspec/arbitrary",
+    "reth-codecs/arbitrary",
+    "reth-optimism-primitives/arbitrary",
+    "reth-primitives",
+    "reth-primitives-traits/arbitrary",
+    "revm-primitives/arbitrary",
 ]
 
