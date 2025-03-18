@@ -341,9 +341,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
     for OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    EngineT: EngineTypes
-        + jsonrpsee_core::Serialize
-        + for<'de> alloy_primitives::private::serde::de::Deserialize<'de>,
+    EngineT: EngineTypes,
     Self: OpEngineApiServer<EngineT>,
 {
     fn into_rpc_module(self) -> RpcModule<()> {
