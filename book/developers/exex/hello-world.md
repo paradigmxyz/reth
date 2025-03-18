@@ -67,7 +67,7 @@ Now, let's extend our simplest ExEx and start actually listening to new notifica
 {{#include ../../sources/exex/hello-world/src/bin/3.rs}}
 ```
 
-Woah, there's a lot of new stuff here! Let's go through it step by step:
+Whoa, there's a lot of new stuff here! Let's go through it step by step:
 
 - First, we've added a `while let Some(notification) = ctx.notifications.recv().await` loop that waits for new notifications to come in.
    - The main node is responsible for sending notifications to the ExEx, so we're waiting for them to come in.
