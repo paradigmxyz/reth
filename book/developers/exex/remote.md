@@ -22,7 +22,7 @@ $ cd exex-remote
 ```
 
 We will also need a bunch of dependencies. Some of them you know from the [Hello World](./hello-world.md) chapter,
-but some of specific to what we need now.
+but some are specific to what we need now.
 
 ```toml
 {{#include ../../sources/exex/remote/Cargo.toml}}
