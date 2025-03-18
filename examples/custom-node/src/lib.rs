@@ -16,7 +16,7 @@ use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
 use reth_optimism_node::{
     node::{OpConsensusBuilder, OpPoolBuilder, OpStorage},
-    OpEngineTypes, OpNode,
+    OpNode,
 };
 
 pub mod chainspec;
@@ -41,7 +41,7 @@ impl<N> Node<N> for CustomNode
 where
     N: FullNodeTypes<
         Types: NodeTypesWithEngine<
-            Engine = OpEngineTypes,
+            Engine = CustomEngineTypes,
             ChainSpec = CustomChainSpec,
             Primitives = CustomNodePrimitives,
             Storage = OpStorage,
