@@ -523,7 +523,7 @@ linked_hash_set = "0.1"
 modular-bitfield = "0.11.2"
 notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
 nybbles = { version = "0.3.0", default-features = false }
-once_cell = { version = "1.21", default-features = false, features = ["critical-section"] }
+once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
 parking_lot = "0.12"
 paste = "1.0"
 rand = "0.8.5"
@@ -681,35 +681,35 @@ visibility = "0.1.1"
 walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
-[patch.crates-io]
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-serde = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-transport = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
-alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "alexey/requests-or-hash-untagged" }
+# [patch.crates-io]
+# alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-network-primitives = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types-debug = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types-mev = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
+# alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 #
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
