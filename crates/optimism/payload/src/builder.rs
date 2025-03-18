@@ -4,15 +4,14 @@ use crate::{
     config::{OpBuilderConfig, OpDAConfig},
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
-    supervisor::SupervisorValidator,
     OpPayloadPrimitives,
 };
+use reth_optimism_rpc::SupervisorClient;
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
-use jsonrpsee::{client_transport::ws::Url, http_client::HttpClientBuilder};
 use kona_interop::{ExecutingDescriptor, SafetyLevel};
 use kona_rpc::{InteropTxValidator, InteropTxValidatorError};
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
@@ -154,16 +153,11 @@ where
             .chain_spec()
             .is_interop_active_at_timestamp(config.attributes.timestamp())
         {
-            let url = Url::parse(
-                self.config
-                    .supervisor_url
-                    .as_ref()
-                    .expect("interop active, getting supervisor url"),
-            )
-            .map_err(|e| PayloadBuilderError::Other(Box::new(e)))?;
-            Some(SupervisorValidator(
-                HttpClientBuilder::default().build(url).expect("building supervisor http client"),
-            ))
+            if let Some(supervisor_url) = self.config.supervisor_url {
+                Some(SupervisorClient::new(supervisor_url))
+            } else {
+                return Err(PayloadBuilderError::Other(Box::new(OpPayloadBuilderError::SupervisorUrlNotSet)));
+            }
         } else {
             None
         };
@@ -520,7 +514,7 @@ pub struct OpPayloadBuilderCtx<Evm: ConfigureEvm, ChainSpec> {
     /// The currently best payload.
     pub best_payload: Option<OpBuiltPayload<Evm::Primitives>>,
     /// Op-supervisor client to perfrom cross chain tx validation.
-    pub supervisor: Option<SupervisorValidator>,
+    pub supervisor: Option<SupervisorClient>,
     /// Safety level for the supervisor
     pub supervisor_safety_level: Option<SafetyLevel>,
 }
@@ -756,68 +750,62 @@ where
 
         Ok(None)
     }
-}
 
-/// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
-/// against supervisor.
-///
-/// If commitment present pre-interop tx rejected.
-///
-/// returns (is_valid, is_recoverable)
-/// is_recoverable to set to false if we can't recover from error, in case supervisor is down,
-/// connection is broken or transaction is invalid deterministically.
-pub fn is_cross_tx_valid<Primitives: OpPayloadPrimitives>(
-    tx: &Primitives::SignedTx,
-    client: &SupervisorValidator,
-    safety_level: SafetyLevel,
-    timestamp: u64,
-) -> (bool, bool) {
-    if tx.access_list().is_none() {
-        return (true, true);
-    }
-    let access_list = tx.access_list().unwrap();
-    let inbox_entries =
-        SupervisorValidator::parse_access_list(access_list).cloned().collect::<Vec<_>>();
-    if !inbox_entries.is_empty() {
-        match tokio::task::block_in_place(move || {
-            tokio::runtime::Handle::current().block_on(async {
-                client
-                    .validate_messages(
-                        inbox_entries.as_slice(),
-                        safety_level,
-                        ExecutingDescriptor::new(timestamp, None),
-                        Some(core::time::Duration::from_millis(100)),
-                    )
-                    .await
-            })
-        }) {
-            Ok(()) => (true, true),
-            Err(err) => {
-                match err {
-                    InteropTxValidatorError::SupervisorServerError(err) => {
-                        warn!(target: "payload_builder", %err, ?tx, "Supervisor error, skipping.");
-                        (false, true)
-                    }
-                    InteropTxValidatorError::ValidationTimeout(_) => {
-                        warn!(target: "payload_builder", %err, ?tx, "Cross tx validation timed out, skipping.");
-                        (false, true)
-                    }
-                    InteropTxValidatorError::RpcClientError(err) => {
-                        // TODO: we should add reconnecting to supervisor in case of disconnect
-                        warn!(target: "payload_builder", %err, ?tx, "Supervisor client error, skipping.");
-                        (false, false)
-                    }
-                    err => {
-                        trace!(target: "payload_builder", %err, ?tx, "Cross tx rejected.");
-                        // It's possible that transaction invalid now, but would be valid later.
-                        // We should keep limited queue for transactions that could become valid.
-                        // We should have the limit to ensure that builder won't get overwhelmed.
-                        (false, false)
+    /// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
+    /// against supervisor.
+    ///
+    /// If commitment present pre-interop tx rejected.
+    pub fn is_cross_tx_valid<Primitives: OpPayloadPrimitives>(
+        &self,
+        tx: &Primitives::SignedTx,
+    ) -> Option<bool> {
+        let client = self.supervisor.as_ref().expect("supervisor client is not set");
+        let access_list = tx.access_list()?;
+        let inbox_entries =
+            SupervisorValidator::parse_access_list(access_list).cloned().collect::<Vec<_>>();
+        if !inbox_entries.is_empty() {
+            match tokio::task::block_in_place(move || {
+                tokio::runtime::Handle::current().block_on(async {
+                    client
+                        .validate_messages(
+                            inbox_entries.as_slice(),
+                            safety_level,
+                            ExecutingDescriptor::new(timestamp, None),
+                            Some(core::time::Duration::from_millis(100)),
+                        )
+                        .await
+                })
+            }) {
+                Ok(()) => (true, true),
+                Err(err) => {
+                    match err {
+                        InteropTxValidatorError::SupervisorServerError(err) => {
+                            warn!(target: "payload_builder", %err, ?tx, "Supervisor error, skipping.");
+                            (false, true)
+                        }
+                        InteropTxValidatorError::ValidationTimeout(_) => {
+                            warn!(target: "payload_builder", %err, ?tx, "Cross tx validation timed out, skipping.");
+                            (false, true)
+                        }
+                        InteropTxValidatorError::RpcClientError(err) => {
+                            // TODO: we should add reconnecting to supervisor in case of disconnect
+                            warn!(target: "payload_builder", %err, ?tx, "Supervisor client error, skipping.");
+                            (false, false)
+                        }
+                        err => {
+                            trace!(target: "payload_builder", %err, ?tx, "Cross tx rejected.");
+                            // It's possible that transaction invalid now, but would be valid later.
+                            // We should keep limited queue for transactions that could become valid.
+                            // We should have the limit to ensure that builder won't get overwhelmed.
+                            (false, false)
+                        }
                     }
                 }
             }
+        } else {
+            None
         }
-    } else {
-        (true, true)
     }
 }
+
+

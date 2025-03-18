@@ -13,7 +13,6 @@ pub mod error;
 pub mod eth;
 pub mod miner;
 pub mod sequencer;
-pub mod supervisor;
 pub mod witness;
 
 #[cfg(feature = "client")]
@@ -22,4 +21,3 @@ pub use engine::{OpEngineApi, OpEngineApiServer, OP_ENGINE_CAPABILITIES};
 pub use error::{OpEthApiError, OpInvalidTransactionError, SequencerClientError};
 pub use eth::{OpEthApi, OpReceiptBuilder};
 pub use sequencer::SequencerClient;
-pub use supervisor::SupervisorClient;

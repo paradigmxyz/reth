@@ -22,3 +22,4 @@ pub mod validator;
 pub use validator::OpExecutionPayloadValidator;
 
 pub mod config;
+pub mod supervisor;
