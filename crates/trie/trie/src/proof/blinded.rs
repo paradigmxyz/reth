@@ -10,7 +10,7 @@ use std::{sync::Arc, time::Instant};
 use tracing::{enabled, trace, Level};
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProofBlindedProviderFactory<T, H> {
     /// The cursor factory for traversing trie nodes.
     trie_cursor_factory: T,
