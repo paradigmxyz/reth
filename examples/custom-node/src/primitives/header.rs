@@ -4,7 +4,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::Compact;
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{BlockHeader, InMemorySize};
 use revm_primitives::keccak256;
 use serde::{Deserialize, Serialize};
 
@@ -161,6 +161,8 @@ impl reth_codecs::Compact for CustomHeader {
         (Self { inner: eth_header, extension }, buf)
     }
 }
+
+impl BlockHeader for CustomHeader {}
 
 mod serde_bincode_compat {
     use alloy_consensus::serde_bincode_compat::Header;
