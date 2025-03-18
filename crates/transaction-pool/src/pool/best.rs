@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_best_iter() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let num_tx = 10;
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_best_iter_invalid() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let num_tx = 10;
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn test_best_transactions_iter_invalid() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let num_tx = 10;
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn test_best_with_fees_iter_base_fee_satisfied() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let num_tx = 5;
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn test_best_with_fees_iter_base_fee_violated() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let num_tx = 5;
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn test_best_with_fees_iter_blob_fee_satisfied() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let num_tx = 5;
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn test_best_with_fees_iter_blob_fee_violated() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let num_tx = 5;
@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn test_best_with_fees_iter_mixed_fees() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let base_fee: u64 = 10;
@@ -621,7 +621,7 @@ mod tests {
 
     #[test]
     fn test_best_add_transaction_with_next_nonce() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         // Add 5 transactions with increasing nonces to the pool
@@ -668,7 +668,7 @@ mod tests {
     #[test]
     fn test_best_add_transaction_with_ancestor() {
         // Initialize a new PendingPool with default MockOrdering and MockTransactionFactory
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         // Add 5 transactions with increasing nonces to the pool
@@ -738,7 +738,7 @@ mod tests {
     #[test]
     fn test_best_transactions_filter_trait_object() {
         // Initialize a new PendingPool with default MockOrdering and MockTransactionFactory
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         // Add 5 transactions with increasing nonces to the pool
@@ -767,7 +767,7 @@ mod tests {
 
     #[test]
     fn test_best_transactions_prioritized_senders() {
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         // Add 5 plain transactions from different senders with increasing gas price
@@ -813,7 +813,7 @@ mod tests {
     #[test]
     fn test_best_with_fees_iter_no_blob_fee_required() {
         // Tests transactions without blob fees where base fees are checked.
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let base_fee: u64 = 10;
@@ -844,7 +844,7 @@ mod tests {
     #[test]
     fn test_best_with_fees_iter_mix_of_blob_and_non_blob_transactions() {
         // Tests mixed scenarios with both blob and non-blob transactions.
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         let base_fee: u64 = 10;
@@ -879,7 +879,7 @@ mod tests {
     #[test]
     fn test_best_transactions_with_skipping_blobs() {
         // Tests the skip_blobs functionality to ensure blob transactions are skipped.
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         // Add a blob transaction
@@ -907,7 +907,7 @@ mod tests {
     fn test_best_transactions_no_updates() {
         // Tests the no_updates functionality to ensure it properly clears the
         // new_transaction_receiver.
-        let mut pool = PendingPool::new(MockOrdering::default(),200);
+        let mut pool = PendingPool::new(MockOrdering::default(), 200);
         let mut f = MockTransactionFactory::default();
 
         // Add a transaction
