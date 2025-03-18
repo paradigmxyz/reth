@@ -10,6 +10,20 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[dependencies]
+# reth
+reth-network-types.workspace = true
+reth-prune-types.workspace = true
+reth-stages-types.workspace = true
+
+# serde
+serde = { workspace = true, optional = true }
+humantime-serde.workspace = true
+
+# toml
+toml.workspace = true
+eyre.workspace = true
+
 [features]
 default = ["serde"]
 serde = [
@@ -19,20 +33,6 @@ serde = [
     "reth-stages-types/serde",
     "alloy-primitives/serde",
 ]
-
-[dependencies]
-# reth
-reth-network-types = { workspace = true }
-reth-prune-types = { workspace = true }
-reth-stages-types = { workspace = true }
-
-# serde
-serde = { workspace = true, optional = true }
-humantime-serde.workspace = true
-
-# toml
-toml.workspace = true
-eyre.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

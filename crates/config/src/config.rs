@@ -1,10 +1,10 @@
 //! Configuration files.
-
+#![allow(dead_code)]
+#![allow(unused_imports)]
 use eyre::eyre;
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
-use serde::{Deserialize, Deserializer};
 use std::{
     ffi::OsStr,
     fs,
@@ -20,20 +20,20 @@ pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
 /// Configuration for the reth node.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {
     /// Configuration for each stage in the pipeline.
     // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
     /// Configuration for pruning.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub prune: Option<PruneConfig>,
     /// Configuration for the discovery service.
     pub peers: PeersConfig,
     /// Configuration for peer sessions.
     pub sessions: SessionsConfig,
 }
-
+#[cfg(feature = "serde")]
 impl Config {
     /// Load a [`Config`] from a specified path.
     ///
@@ -98,7 +98,7 @@ impl Config {
 /// Configuration for each stage in the pipeline.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct StageConfig {
     /// Header stage configuration.
     pub headers: HeadersConfig,
@@ -142,7 +142,7 @@ impl StageConfig {
 /// Header stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct HeadersConfig {
     /// The maximum number of requests to send concurrently.
     ///
@@ -176,7 +176,7 @@ impl Default for HeadersConfig {
 /// Body stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct BodiesConfig {
     /// The batch size of non-empty blocks per one request
     ///
@@ -216,7 +216,7 @@ impl Default for BodiesConfig {
 /// Sender recovery stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct SenderRecoveryConfig {
     /// The maximum number of transactions to process before committing progress to the database.
     pub commit_threshold: u64,
@@ -231,7 +231,7 @@ impl Default for SenderRecoveryConfig {
 /// Execution stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct ExecutionConfig {
     /// The maximum number of blocks to process before the execution stage commits.
     pub max_blocks: Option<u64>,
@@ -240,9 +240,12 @@ pub struct ExecutionConfig {
     /// The maximum cumulative amount of gas to process before the execution stage commits.
     pub max_cumulative_gas: Option<u64>,
     /// The maximum time spent on blocks processing before the execution stage commits.
-    #[serde(
-        serialize_with = "humantime_serde::serialize",
-        deserialize_with = "deserialize_duration"
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            serialize_with = "humantime_serde::serialize",
+            deserialize_with = "deserialize_duration"
+        )
     )]
     pub max_duration: Option<Duration>,
 }
@@ -274,7 +277,7 @@ impl From<ExecutionConfig> for ExecutionStageThresholds {
 /// Prune stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct PruneStageConfig {
     /// The maximum number of entries to prune before committing progress to the database.
     pub commit_threshold: usize,
@@ -289,7 +292,7 @@ impl Default for PruneStageConfig {
 /// Hashing stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct HashingConfig {
     /// The threshold (in number of blocks) for switching between
     /// incremental hashing and full hashing.
@@ -307,7 +310,7 @@ impl Default for HashingConfig {
 /// Merkle stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct MerkleConfig {
     /// The threshold (in number of blocks) for switching from incremental trie building of changes
     /// to whole rebuild.
@@ -323,7 +326,7 @@ impl Default for MerkleConfig {
 /// Transaction Lookup stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct TransactionLookupConfig {
     /// The maximum number of transactions to process before writing to disk.
     pub chunk_size: u64,
@@ -338,7 +341,7 @@ impl Default for TransactionLookupConfig {
 /// Common ETL related configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct EtlConfig {
     /// Data directory where temporary files are created.
     pub dir: Option<PathBuf>,
@@ -373,7 +376,7 @@ impl EtlConfig {
 /// History stage configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct IndexHistoryConfig {
     /// The maximum number of blocks to process before committing progress to the database.
     pub commit_threshold: u64,
@@ -388,12 +391,12 @@ impl Default for IndexHistoryConfig {
 /// Pruning configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[serde(default)]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct PruneConfig {
     /// Minimum pruning interval measured in blocks.
     pub block_interval: usize,
     /// Pruning configuration for every part of the data that can be pruned.
-    #[serde(alias = "parts")]
+    #[cfg_attr(feature = "serde", serde(alias = "parts"))]
     pub segments: PruneModes,
 }
 
@@ -445,11 +448,12 @@ impl PruneConfig {
 }
 
 /// Helper type to support older versions of Duration deserialization.
+#[cfg(feature = "serde")]
 fn deserialize_duration<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
 where
-    D: Deserializer<'de>,
+    D: serde::de::Deserializer<'de>,
 {
-    #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+    #[derive(serde::Deserialize)]
     #[serde(untagged)]
     enum AnyDuration {
         #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -457,12 +461,12 @@ where
         Duration(Option<Duration>),
     }
 
-    AnyDuration::deserialize(deserializer).map(|d| match d {
+    <AnyDuration as serde::Deserialize>::deserialize(deserializer).map(|d| match d {
         AnyDuration::Human(duration) | AnyDuration::Duration(duration) => duration,
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "serde"))]
 mod tests {
     use super::{Config, EXTENSION};
     use crate::PruneConfig;
