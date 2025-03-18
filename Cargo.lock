@@ -9722,6 +9722,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-ethereum-consensus",
  "reth-execution-types",
+ "reth-primitives",
  "reth-primitives-traits",
  "reth-scroll-primitives",
  "scroll-alloy-hardforks",
