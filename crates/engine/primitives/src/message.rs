@@ -12,10 +12,12 @@ use core::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
+use alloy_consensus::BlockHeader;
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use reth_payload_primitives::PayloadTypes;
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -141,11 +143,11 @@ impl Future for PendingPayloadId {
 /// A message for the beacon engine from other components of the node (engine RPC API invoked by the
 /// consensus layer).
 #[derive(Debug)]
-pub enum BeaconEngineMessage<Engine: EngineTypes> {
+pub enum BeaconEngineMessage<Payload: PayloadTypes> {
     /// Message with new payload.
     NewPayload {
         /// The execution payload received by Engine API.
-        payload: Engine::ExecutionData,
+        payload: Payload::ExecutionData,
         /// The sender for returning payload status result.
         tx: oneshot::Sender<Result<PayloadStatus, BeaconOnNewPayloadError>>,
     },
@@ -154,7 +156,7 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
         /// The updated forkchoice state.
         state: ForkchoiceState,
         /// The payload attributes for block building.
-        payload_attrs: Option<Engine::PayloadAttributes>,
+        payload_attrs: Option<Payload::PayloadAttributes>,
         /// The Engine API Version.
         version: EngineApiMessageVersion,
         /// The sender for returning forkchoice updated result.
