@@ -31,10 +31,10 @@ pub struct EthEngineTypes<T: PayloadTypes = EthPayloadTypes> {
 }
 
 impl<T: PayloadTypes> PayloadTypes for EthEngineTypes<T> {
+    type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
-    type ExecutionData = T::ExecutionData;
 }
 
 impl<T> EngineTypes for EthEngineTypes<T>

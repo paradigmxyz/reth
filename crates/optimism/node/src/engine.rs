@@ -36,10 +36,10 @@ pub struct OpEngineTypes<T: PayloadTypes = OpPayloadTypes> {
 }
 
 impl<T: PayloadTypes> PayloadTypes for OpEngineTypes<T> {
+    type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
-    type ExecutionData = T::ExecutionData;
 }
 
 impl<T: PayloadTypes<ExecutionData = OpExecutionData>> EngineTypes for OpEngineTypes<T>
@@ -70,10 +70,10 @@ where
 pub struct OpPayloadTypes<N: NodePrimitives = OpPrimitives>(core::marker::PhantomData<N>);
 
 impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N> {
+    type ExecutionData = OpExecutionData;
     type BuiltPayload = OpBuiltPayload<N>;
     type PayloadAttributes = OpPayloadAttributes;
     type PayloadBuilderAttributes = OpPayloadBuilderAttributes<N::SignedTx>;
-    type ExecutionData = OpExecutionData;
 }
 
 /// Validator for Optimism engine API.
