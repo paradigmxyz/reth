@@ -5,7 +5,7 @@ use reth_network::import::BlockImport;
 use reth_network_peers::PeerId;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives::NodePrimitives;
-use service::{BlockMsg, Outcome};
+use service::{BlockMsg, ImportEvent, Outcome};
 use std::{
     fmt,
     task::{ready, Context, Poll},
@@ -33,7 +33,7 @@ impl<T: PayloadTypes>
         let _ = self.handle.send_block(incoming_block, peer_id);
     }
 
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Outcome<T>> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<ImportEvent<T>> {
         match ready!(self.handle.poll_outcome(cx)) {
             Some(outcome) => Poll::Ready(outcome),
             None => Poll::Pending,
