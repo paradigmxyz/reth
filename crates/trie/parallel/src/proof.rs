@@ -153,6 +153,7 @@ where
             // place when we iterate over the trie
             storage_proofs.insert(hashed_address, receiver);
         }
+        trace!(target: "trie::parallel_proof", ?storage_proofs, "Storage proofs computation started");
 
         let provider_ro = self.view.provider_ro()?;
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
