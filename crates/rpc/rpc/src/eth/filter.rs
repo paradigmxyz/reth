@@ -7,6 +7,7 @@ use alloy_rpc_types_eth::{
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
+use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
 use reth_primitives_traits::RecoveredBlock;
@@ -15,8 +16,8 @@ use reth_provider::{
     ProviderError, ProviderReceipt,
 };
 use reth_rpc_eth_api::{
-    EthApiTypes, EthFilterApiServer, FullEthApiTypes, RpcNodeCoreExt, RpcTransaction,
-    TransactionCompat,
+    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
+    RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
@@ -28,6 +29,7 @@ use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, Transa
 use std::{
     collections::HashMap,
     fmt,
+    future::Future,
     iter::StepBy,
     ops::RangeInclusive,
     sync::Arc,
@@ -38,6 +40,21 @@ use tokio::{
     time::MissedTickBehavior,
 };
 use tracing::{error, trace};
+
+impl<Eth> EngineEthFilter for EthFilter<Eth>
+where
+    Eth: FullEthApiTypes + RpcNodeCoreExt<Provider: BlockIdReader> + 'static,
+{
+    /// Returns logs matching given filter object, no query limits
+    fn logs(
+        &self,
+        filter: Filter,
+        limits: QueryLimits,
+    ) -> impl Future<Output = RpcResult<Vec<Log>>> + Send {
+        trace!(target: "rpc::eth", "Serving eth_getLogs");
+        self.inner.logs_for_filter(filter, limits).map_err(|e| e.into())
+    }
+}
 
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
@@ -100,9 +117,7 @@ where
             max_headers_range: MAX_HEADERS_RANGE,
             task_spawner,
             stale_filter_ttl,
-            // if not set, use the max value, which is effectively no limit
-            max_blocks_per_filter: max_blocks_per_filter.unwrap_or(u64::MAX),
-            max_logs_per_response: max_logs_per_response.unwrap_or(usize::MAX),
+            query_limits: QueryLimits { max_blocks_per_filter, max_logs_per_response },
         };
 
         let eth_filter = Self { inner: Arc::new(inner) };
@@ -230,7 +245,13 @@ where
                 };
                 let logs = self
                     .inner
-                    .get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
+                    .get_logs_in_block_range(
+                        &filter,
+                        from_block_number,
+                        to_block_number,
+                        info,
+                        self.inner.query_limits,
+                    )
                     .await?;
                 Ok(FilterChanges::Logs(logs))
             }
@@ -255,7 +276,7 @@ where
             }
         };
 
-        self.inner.logs_for_filter(filter).await
+        self.inner.logs_for_filter(filter, self.inner.query_limits).await
     }
 }
 
@@ -345,7 +366,7 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        Ok(self.inner.logs_for_filter(filter).await?)
+        Ok(self.inner.logs_for_filter(filter, self.inner.query_limits).await?)
     }
 }
 
@@ -367,10 +388,8 @@ struct EthFilterInner<Eth: EthApiTypes> {
     active_filters: ActiveFilters<RpcTransaction<Eth::NetworkTypes>>,
     /// Provides ids to identify filters
     id_provider: Arc<dyn IdProvider>,
-    /// Maximum number of blocks that could be scanned per filter
-    max_blocks_per_filter: u64,
-    /// Maximum number of logs that can be returned in a response
-    max_logs_per_response: usize,
+    /// limits for logs queries
+    query_limits: QueryLimits,
     /// maximum number of headers to read at once for range filter
     max_headers_range: u64,
     /// The type that can spawn tasks.
@@ -396,7 +415,11 @@ where
     }
 
     /// Returns logs matching given filter object.
-    async fn logs_for_filter(&self, filter: Filter) -> Result<Vec<Log>, EthFilterError> {
+    async fn logs_for_filter(
+        &self,
+        filter: Filter,
+        limits: QueryLimits,
+    ) -> Result<Vec<Log>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
                 // for all matching logs in the block
@@ -449,8 +472,14 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(&filter, from_block_number, to_block_number, info)
-                    .await
+                self.get_logs_in_block_range(
+                    &filter,
+                    from_block_number,
+                    to_block_number,
+                    info,
+                    limits,
+                )
+                .await
             }
         }
     }
@@ -485,6 +514,7 @@ where
         from_block: u64,
         to_block: u64,
         chain_info: ChainInfo,
+        limits: QueryLimits,
     ) -> Result<Vec<Log>, EthFilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
@@ -492,8 +522,10 @@ where
             return Err(EthFilterError::InvalidBlockRangeParams)
         }
 
-        if to_block - from_block > self.max_blocks_per_filter {
-            return Err(EthFilterError::QueryExceedsMaxBlocks(self.max_blocks_per_filter))
+        if let Some(max_blocks_per_filter) =
+            limits.max_blocks_per_filter.filter(|limit| to_block - from_block > *limit)
+        {
+            return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter))
         }
 
         let mut all_logs = Vec::new();
@@ -544,12 +576,14 @@ where
                         // size check but only if range is multiple blocks, so we always return all
                         // logs of a single block
                         let is_multi_block_range = from_block != to_block;
-                        if is_multi_block_range && all_logs.len() > self.max_logs_per_response {
-                            return Err(EthFilterError::QueryExceedsMaxResults {
-                                max_logs: self.max_logs_per_response,
-                                from_block,
-                                to_block: num_hash.number.saturating_sub(1),
-                            });
+                        if let Some(max_logs_per_response) = limits.max_logs_per_response {
+                            if is_multi_block_range && all_logs.len() > max_logs_per_response {
+                                return Err(EthFilterError::QueryExceedsMaxResults {
+                                    max_logs: max_logs_per_response,
+                                    from_block,
+                                    to_block: num_hash.number.saturating_sub(1),
+                                });
+                            }
                         }
                     }
                 }
