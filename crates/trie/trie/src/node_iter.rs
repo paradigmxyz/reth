@@ -50,6 +50,7 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     /// Flag indicating whether we should check the current walker key.
     current_walker_key_checked: bool,
 
+    #[cfg(feature = "metrics")]
     metrics: TrieNodeIterMetrics,
 }
 
@@ -62,6 +63,7 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
             previous_hashed_key: None,
             current_hashed_entry: None,
             current_walker_key_checked: false,
+            #[cfg(feature = "metrics")]
             metrics: TrieNodeIterMetrics::new_with_labels(&[("type", trie_type.as_str())]),
         }
     }
@@ -131,6 +133,7 @@ where
                     self.hashed_cursor.seek(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
 
+                    #[cfg(feature = "metrics")]
                     self.metrics.hashed_cursor_seeks_total.increment(1);
                 }
                 None => {
@@ -143,6 +146,7 @@ where
                     self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
                     self.walker.advance()?;
 
+                    #[cfg(feature = "metrics")]
                     self.metrics.hashed_cursor_seeks_total.increment(1);
                 }
             }
