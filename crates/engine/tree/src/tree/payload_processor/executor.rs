@@ -30,7 +30,7 @@ impl Default for WorkloadExecutor {
 
 impl WorkloadExecutor {
     /// Creates a new executor with the given number of threads for cpu bound work (rayon) and
-    /// and an optional number of worker threads for the tokio runtime.
+    /// an optional number of worker threads for the tokio runtime.
     #[allow(unused)]
     pub(super) fn with_num_cpu_threads(cpu_threads: usize, worker_threads: Option<usize>) -> Self {
         Self {
