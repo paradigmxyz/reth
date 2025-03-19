@@ -6,6 +6,7 @@ pub use kona_rpc::{
     CheckAccessList, InteropTxValidator, InteropTxValidatorError, SupervisorApiClient,
 };
 use std::time::Duration;
+use alloc::string::String;
 
 /// Implementation of the supervisor trait for the interop.
 #[derive(Debug, Clone)]
