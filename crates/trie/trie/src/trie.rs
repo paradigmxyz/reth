@@ -1,6 +1,6 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
-    node_iter::{TrieElement, TrieNodeIter},
+    node_iter::{TrieElement, TrieNodeIter, TrieNodeIterType},
     prefix_set::{PrefixSet, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
     stats::TrieTracker,
@@ -165,15 +165,17 @@ where
                     self.prefix_sets.account_prefix_set,
                 )
                 .with_deletions_retained(retain_updates);
-                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor)
-                    .with_last_hashed_key(state.last_account_key);
+                let node_iter =
+                    TrieNodeIter::new(walker, hashed_account_cursor, TrieNodeIterType::Account)
+                        .with_last_hashed_key(state.last_account_key);
                 (hash_builder, node_iter)
             }
             None => {
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
                 let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
                     .with_deletions_retained(retain_updates);
-                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
+                let node_iter =
+                    TrieNodeIter::new(walker, hashed_account_cursor, TrieNodeIterType::Account);
                 (hash_builder, node_iter)
             }
         };
@@ -412,7 +414,8 @@ where
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
-        let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
+        let mut storage_node_iter =
+            TrieNodeIter::new(walker, hashed_storage_cursor, TrieNodeIterType::Storage);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
