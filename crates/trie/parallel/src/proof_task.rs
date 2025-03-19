@@ -228,7 +228,7 @@ where
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         debug!(
-            target: "trie::parallel_proof",
+            target: "trie::proof_task",
             hashed_address=?input.hashed_address,
             "Starting storage proof task calculation"
         );
@@ -248,7 +248,7 @@ where
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
         debug!(
-            target: "trie::parallel_proof",
+            target: "trie::proof_task",
             hashed_address=?input.hashed_address,
             prefix_set = ?input.prefix_set.len(),
             target_slots = ?target_slots_len,
@@ -259,7 +259,7 @@ where
         // send the result back
         if let Err(error) = result_sender.send(result) {
             debug!(
-                target: "trie::parallel_proof",
+                target: "trie::proof_task",
                 hashed_address = ?input.hashed_address,
                 ?error,
                 task_time = ?proof_start.elapsed(),
@@ -278,6 +278,12 @@ where
         result_sender: Sender<BlindedNodeResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
+        debug!(
+            target: "trie::proof_task",
+            ?path,
+            "Starting blinded account node retrieval"
+        );
+
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
         let blinded_provider_factory = ProofBlindedProviderFactory::new(
@@ -286,10 +292,18 @@ where
             self.task_ctx.prefix_sets.clone(),
         );
 
+        let start = Instant::now();
         let result = blinded_provider_factory.account_node_provider().blinded_node(&path);
+        debug!(
+            target: "trie::proof_task",
+            ?path,
+            elapsed = ?start.elapsed(),
+            "Completed blinded account node retrieval"
+        );
+
         if let Err(error) = result_sender.send(result) {
             tracing::error!(
-                target: "trie::parallel_proof",
+                target: "trie::proof_task",
                 ?path,
                 ?error,
                 "Failed to send blinded account node result"
@@ -308,6 +322,13 @@ where
         result_sender: Sender<BlindedNodeResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
+        debug!(
+            target: "trie::proof_task",
+            ?account,
+            ?path,
+            "Starting blinded storage node retrieval"
+        );
+
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
         let blinded_provider_factory = ProofBlindedProviderFactory::new(
@@ -316,10 +337,19 @@ where
             self.task_ctx.prefix_sets.clone(),
         );
 
+        let start = Instant::now();
         let result = blinded_provider_factory.storage_node_provider(account).blinded_node(&path);
+        debug!(
+            target: "trie::proof_task",
+            ?account,
+            ?path,
+            elapsed = ?start.elapsed(),
+            "Completed blinded storage node retrieval"
+        );
+
         if let Err(error) = result_sender.send(result) {
             tracing::error!(
-                target: "trie::parallel_proof",
+                target: "trie::proof_task",
                 ?account,
                 ?path,
                 ?error,
