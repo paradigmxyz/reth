@@ -21,9 +21,6 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct CustomEngineTypes;
 
-#[derive(Debug, Clone)]
-pub struct CustomBuiltPayload(pub OpBuiltPayload<CustomNodePrimitives>);
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomExecutionData {
     inner: OpExecutionData,
@@ -135,6 +132,9 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         self.inner.withdrawals()
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct CustomBuiltPayload(pub OpBuiltPayload<CustomNodePrimitives>);
 
 impl BuiltPayload for CustomBuiltPayload {
     type Primitives = CustomNodePrimitives;
