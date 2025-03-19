@@ -213,36 +213,7 @@ where
         let metrics = self.metrics.clone();
         let state = self.transact(tx)?;
 
-        let mut targets = MultiProofTargets::with_capacity(state.len());
-        let mut storage_targets = 0;
-
-        for (addr, account) in state {
-            // if the account was not touched, or if the account was selfdestructed, do not
-            // fetch proofs for it
-            //
-            // Since selfdestruct can only happen in the same transaction, we can skip
-            // prefetching proofs for selfdestructed accounts
-            //
-            // See: https://eips.ethereum.org/EIPS/eip-6780
-            if !account.is_touched() || account.is_selfdestructed() {
-                continue
-            }
-
-            let mut storage_set =
-                B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
-            for (key, slot) in account.storage {
-                // do nothing if unchanged
-                if !slot.is_changed() {
-                    continue
-                }
-
-                storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
-            }
-
-            storage_targets += storage_set.len();
-            targets.insert(keccak256(addr), storage_set);
-        }
-
+        let (targets, storage_targets) = multiproof_targets_from_state(state);
         metrics.prefetch_storage_targets.record(storage_targets as f64);
 
         Some(targets)
@@ -312,6 +283,41 @@ where
 
         Some(res.state)
     }
+}
+
+/// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
+/// given state.
+fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
+    let mut targets = MultiProofTargets::with_capacity(state.len());
+    let mut storage_targets = 0;
+    for (addr, account) in state {
+        // if the account was not touched, or if the account was selfdestructed, do not
+        // fetch proofs for it
+        //
+        // Since selfdestruct can only happen in the same transaction, we can skip
+        // prefetching proofs for selfdestructed accounts
+        //
+        // See: https://eips.ethereum.org/EIPS/eip-6780
+        if !account.is_touched() || account.is_selfdestructed() {
+            continue
+        }
+
+        let mut storage_set =
+            B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
+        for (key, slot) in account.storage {
+            // do nothing if unchanged
+            if !slot.is_changed() {
+                continue
+            }
+
+            storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
+        }
+
+        storage_targets += storage_set.len();
+        targets.insert(keccak256(addr), storage_set);
+    }
+
+    (targets, storage_targets)
 }
 
 /// The events the pre-warm task can handle.
