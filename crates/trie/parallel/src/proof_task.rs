@@ -53,7 +53,7 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     view: ConsistentDbView<Factory>,
     /// Proof task context shared across all proof tasks
     task_ctx: ProofTaskCtx,
-    /// Profo tasks pending execution
+    /// Proof tasks pending execution
     pending_tasks: VecDeque<ProofTaskKind>,
     /// The underlying handle from which to spawn proof tasks
     executor: Handle,
