@@ -153,7 +153,6 @@ where
             // place when we iterate over the trie
             storage_proofs.insert(hashed_address, receiver);
         }
-        trace!(target: "trie::parallel_proof", ?storage_proofs, "Storage proofs computation started");
 
         let provider_ro = self.view.provider_ro()?;
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -196,13 +195,16 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let storage_multiproof = match storage_proofs.remove(&hashed_address) {
-                        Some(rx) => rx.recv().map_err(|_| {
-                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                DatabaseError::Other(format!(
-                                    "channel closed for {hashed_address}"
-                                )),
-                            ))
-                        })??,
+                        Some(rx) => {
+                            trace!(target: "trie::parallel_proof", ?hashed_address, "Found storage proof, waiting for it");
+                            rx.recv().map_err(|_| {
+                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                                    DatabaseError::Other(format!(
+                                        "channel closed for {hashed_address}"
+                                    )),
+                                ))
+                            })??
+                        }
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
