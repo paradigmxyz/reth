@@ -69,14 +69,14 @@ struct WorkloadExecutorInner {
 }
 
 impl WorkloadExecutorInner {
-    /// Creates a new `WorkloadExecutorInner` with the given Rayon thread pool and an optional number
-    /// of worker threads for the Tokio runtime.
+    /// Creates a new `WorkloadExecutorInner` with the given Rayon thread pool and an optional
+    /// number of worker threads for the Tokio runtime.
     ///
-    /// Note: The Tokio runtime is lazily initialized using a static `OnceLock`. This means the runtime
-    /// is created only once, on the first call to this function, using the `worker_threads` value
-    /// provided at that time. Subsequent calls will ignore any different `worker_threads` values
-    /// and reuse the existing runtime. This is acceptable for our use case, as the executor is
-    /// initialized only once in the engine.
+    /// Note: The Tokio runtime is lazily initialized using a static `OnceLock`. This means the
+    /// runtime is created only once, on the first call to this function, using the
+    /// `worker_threads` value provided at that time. Subsequent calls will ignore any different
+    /// `worker_threads` values and reuse the existing runtime. This is acceptable for our use
+    /// case, as the executor is initialized only once in the engine.
     fn new(rayon_pool: rayon::ThreadPool, worker_threads: Option<usize>) -> Self {
         fn get_runtime_handle(worker_threads: Option<usize>) -> Handle {
             Handle::try_current().unwrap_or_else(|_| {
