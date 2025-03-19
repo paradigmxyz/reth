@@ -24,7 +24,10 @@ use reth_provider::{
 };
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::TrieInput;
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_parallel::{
+    proof_task::{ProofTaskCtx, ProofTaskManager},
+    root::ParallelStateRootError,
+};
 use std::{
     collections::VecDeque,
     sync::{
@@ -129,8 +132,27 @@ where
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task
         let state_root_config = MultiProofConfig::new_from_input(consistent_view, trie_input);
-        let multi_proof_task =
-            MultiProofTask::new(state_root_config.clone(), self.executor.clone(), to_sparse_trie);
+
+        // Create and spawn the storage proof task
+        let task_ctx = ProofTaskCtx::new(
+            state_root_config.nodes_sorted.clone(),
+            state_root_config.state_sorted.clone(),
+            state_root_config.prefix_sets.clone(),
+        );
+        let max_concurrency = 256;
+        let proof_task = ProofTaskManager::new(
+            self.executor.handle().clone(),
+            state_root_config.consistent_view.clone(),
+            task_ctx,
+            max_concurrency,
+        );
+
+        let multi_proof_task = MultiProofTask::new(
+            state_root_config,
+            self.executor.clone(),
+            proof_task.handle(),
+            to_sparse_trie,
+        );
 
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
@@ -143,18 +165,30 @@ where
             multi_proof_task.run();
         });
 
-        let sparse_trie_task = SparseTrieTask {
-            executor: self.executor.clone(),
-            updates: sparse_trie_rx,
-            config: state_root_config,
-            metrics: self.trie_metrics.clone(),
-        };
+        let sparse_trie_task = SparseTrieTask::new(
+            self.executor.clone(),
+            sparse_trie_rx,
+            proof_task.handle(),
+            self.trie_metrics.clone(),
+        );
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
         self.executor.spawn_blocking(move || {
             let res = sparse_trie_task.run();
             let _ = state_root_tx.send(res);
+        });
+
+        // spawn the proof task
+        self.executor.spawn_blocking(move || {
+            if let Err(err) = proof_task.run() {
+                // At least log if there is an error at any point
+                tracing::error!(
+                    target: "engine::root",
+                    ?err,
+                    "Storage proof task returned an error"
+                );
+            }
         });
 
         PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }

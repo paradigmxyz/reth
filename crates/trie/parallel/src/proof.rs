@@ -1,6 +1,6 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{ProofTaskMessage, StorageProofInput},
+    proof_task::{ProofTaskKind, ProofTaskMessage, StorageProofInput},
     root::ParallelStateRootError,
     stats::ParallelTrieTracker,
     StorageRootTargets,
@@ -145,7 +145,9 @@ where
                 self.collect_branch_node_masks,
             );
             let (sender, receiver) = std::sync::mpsc::channel();
-            let _ = self.storage_proof_task.send(ProofTaskMessage::StorageProof((input, sender)));
+            let _ = self
+                .storage_proof_task
+                .send(ProofTaskMessage::QueueTask(ProofTaskKind::StorageProof(input, sender)));
 
             // store the receiver for that result with the hashed address so we can await this in
             // place when we iterate over the trie
@@ -353,7 +355,8 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
-        let task_ctx = ProofTaskCtx::new(Default::default(), Default::default());
+        let task_ctx =
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
         let proof_task =
             ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
         let proof_task_handle = proof_task.handle();

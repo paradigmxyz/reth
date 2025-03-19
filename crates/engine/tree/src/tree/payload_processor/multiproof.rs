@@ -16,10 +16,7 @@ use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
     HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
 };
-use reth_trie_parallel::{
-    proof::ParallelProof,
-    proof_task::{ProofTaskCtx, ProofTaskManager, ProofTaskManagerHandle},
-};
+use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
@@ -484,35 +481,11 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
+        proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         to_sparse_trie: Sender<SparseTrieUpdate>,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
-
-        // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(config.nodes_sorted.clone(), config.state_sorted.clone());
-        let max_concurrency = 256;
-        let proof_task = ProofTaskManager::new(
-            executor.handle().clone(),
-            config.consistent_view.clone(),
-            task_ctx,
-            max_concurrency,
-        );
-
-        // get proof task handle
-        let proof_task_handle = proof_task.handle();
-
-        // spawn the proof task
-        executor.spawn_blocking(move || {
-            if let Err(err) = proof_task.run() {
-                // At least log if there is an error at any point
-                tracing::error!(
-                    target: "engine::root",
-                    ?err,
-                    "Storage proof task returned an error"
-                );
-            }
-        });
 
         Self {
             config,

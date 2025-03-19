@@ -13,13 +13,14 @@ workspace = true
 
 [dependencies]
 # reth
-reth-storage-errors.workspace = true
-reth-trie.workspace = true
-reth-trie-common.workspace = true
-reth-trie-db.workspace = true
 reth-db-api.workspace = true
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
+reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+reth-trie-db.workspace = true
+reth-trie-sparse.workspace = true
+reth-trie.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
