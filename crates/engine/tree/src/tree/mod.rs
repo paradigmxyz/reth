@@ -1175,18 +1175,7 @@ where
             return Ok(valid_outcome(state.head_block_hash))
         }
 
-        // 2. Check if forkchoice state points to a valid ancestor of the canonical head.
-        if self.is_valid_canonical_ancestor(state.head_block_hash)? {
-            trace!(
-                target: "engine::tree",
-                head=?state.head_block_hash,
-                "fcu head block is a valid ancestor of the canonical head, skipping update"
-            );
-
-            return Ok(valid_outcome(state.head_block_hash));
-        }
-
-        // 3. ensure we can apply a new chain update for the head block
+        // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
             let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
@@ -1203,6 +1192,17 @@ where
             }
 
             return Ok(valid_outcome(state.head_block_hash))
+        }
+
+        // 3. Check if forkchoice state points to a valid ancestor of the canonical head.
+        if self.is_valid_canonical_ancestor(state.head_block_hash)? {
+            trace!(
+                target: "engine::tree",
+                head=?state.head_block_hash,
+                "fcu head block is a valid ancestor of the canonical head, skipping update"
+            );
+
+            return Ok(valid_outcome(state.head_block_hash));
         }
 
         // 4. check if the head is already part of the canonical chain
