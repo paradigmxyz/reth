@@ -48,7 +48,7 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
         + Unpin;
 
     /// Converts a [`BuiltPayload`] into an
-    /// [`PayloadTypes:ExecutionData`](reth_payload_primitives::PayloadTypes::ExecutionData).
+    /// [`PayloadTypes:ExecutionData`].
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,

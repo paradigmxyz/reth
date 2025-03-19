@@ -88,7 +88,7 @@ where
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> <OpPayloadTypes<N> as PayloadTypes>::ExecutionData {
+    ) -> Self::ExecutionData {
         OpExecutionData::from_block_unchecked(block.hash(), &block.into_block())
     }
 }
