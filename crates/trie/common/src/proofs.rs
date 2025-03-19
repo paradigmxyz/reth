@@ -512,7 +512,7 @@ impl DecodedStorageMultiProof {
 pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
-    /// Account info.
+    /// Account info, if any.
     pub info: Option<Account>,
     /// Array of rlp-serialized merkle trie nodes which starting from the root node and
     /// following the path of the hashed address as key.
@@ -547,6 +547,43 @@ impl AccountProof {
                 })
                 .collect(),
         }
+    }
+
+    /// Converts an
+    /// [`EIP1186AccountProofResponse`](alloy_rpc_types_eth::EIP1186AccountProofResponse) to an
+    /// [`AccountProof`].
+    ///
+    /// This is the inverse of [`Self::into_eip1186_response`]
+    pub fn from_eip1186_proof(proof: alloy_rpc_types_eth::EIP1186AccountProofResponse) -> Self {
+        let address = proof.address;
+        let balance = proof.balance;
+        let code_hash = proof.code_hash;
+        let storage_root = proof.storage_hash;
+        let account_proof = proof.account_proof;
+        let storage_proofs = proof.storage_proof.into_iter().map(Into::into).collect();
+
+        let (storage_root, info) = if proof.nonce == 0 &&
+            balance.is_zero() &&
+            storage_root.is_zero() &&
+            code_hash.is_zero()
+        {
+            // Account does not exist in state. Return `None` here to prevent proof verification.
+            (EMPTY_ROOT_HASH, None)
+        } else {
+            (
+                storage_root,
+                Some(Account { nonce: proof.nonce, balance, bytecode_hash: code_hash.into() }),
+            )
+        };
+
+        Self { address, info, proof: account_proof, storage_root, storage_proofs }
+    }
+}
+
+#[cfg(feature = "eip1186")]
+impl From<alloy_rpc_types_eth::EIP1186AccountProofResponse> for AccountProof {
+    fn from(proof: alloy_rpc_types_eth::EIP1186AccountProofResponse) -> Self {
+        Self::from_eip1186_proof(proof)
     }
 }
 
@@ -639,17 +676,6 @@ pub struct StorageProof {
 }
 
 impl StorageProof {
-    /// Convert into an EIP-1186 storage proof
-    #[cfg(feature = "eip1186")]
-    pub fn into_eip1186_proof(
-        self,
-        slot: alloy_serde::JsonStorageKey,
-    ) -> alloy_rpc_types_eth::EIP1186StorageProof {
-        alloy_rpc_types_eth::EIP1186StorageProof { key: slot, value: self.value, proof: self.proof }
-    }
-}
-
-impl StorageProof {
     /// Create new storage proof from the storage slot.
     pub fn new(key: B256) -> Self {
         let nibbles = Nibbles::unpack(keccak256(key));
@@ -677,6 +703,36 @@ impl StorageProof {
         let expected =
             if self.value.is_zero() { None } else { Some(encode_fixed_size(&self.value).to_vec()) };
         verify_proof(root, self.nibbles.clone(), expected, &self.proof)
+    }
+}
+
+#[cfg(feature = "eip1186")]
+impl StorageProof {
+    /// Convert into an EIP-1186 storage proof
+    pub fn into_eip1186_proof(
+        self,
+        slot: alloy_serde::JsonStorageKey,
+    ) -> alloy_rpc_types_eth::EIP1186StorageProof {
+        alloy_rpc_types_eth::EIP1186StorageProof { key: slot, value: self.value, proof: self.proof }
+    }
+
+    /// Convert from an
+    /// [`EIP1186StorageProof`](alloy_rpc_types_eth::EIP1186StorageProof)
+    ///
+    /// This is the inverse of [`Self::into_eip1186_proof`].
+    pub fn from_eip1186_proof(storage_proof: alloy_rpc_types_eth::EIP1186StorageProof) -> Self {
+        Self {
+            value: storage_proof.value,
+            proof: storage_proof.proof,
+            ..Self::new(storage_proof.key.as_b256())
+        }
+    }
+}
+
+#[cfg(feature = "eip1186")]
+impl From<alloy_rpc_types_eth::EIP1186StorageProof> for StorageProof {
+    fn from(proof: alloy_rpc_types_eth::EIP1186StorageProof) -> Self {
+        Self::from_eip1186_proof(proof)
     }
 }
 
