@@ -101,7 +101,7 @@ impl<Factory> ProofTaskManager<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + 'static,
 {
-    /// Inserts the task the pending tasks queue.
+    /// Inserts the task into the pending tasks queue.
     pub fn queue_proof_task(&mut self, task: ProofTaskKind) {
         self.pending_tasks.push_back(task);
     }
