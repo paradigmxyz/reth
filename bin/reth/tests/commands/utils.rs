@@ -38,6 +38,7 @@ use tracing::{debug, info};
 
 /// Local EVM canister ID for testing.
 pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
+
 /// EVM block extractor for devnet running on Digital Ocean.
 pub const DEFAULT_EVM_DATASOURCE_URL: &str =
     "https://block-extractor-testnet-1052151659755.europe-west9.run.app";
@@ -47,7 +48,7 @@ pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     let mut tracer = RethTracer::new();
     let stdout = LayerInfo::new(
         LogFormat::Terminal,
-        "info".to_string(),
+        "debug".to_string(),
         String::new(),
         Some("always".to_string()),
     );
@@ -157,6 +158,9 @@ pub async fn bitfinity_import_config_data(
         backup_rpc_url: backup_evm_datasource_url,
         max_retries: 3,
         retry_delay_secs: 3,
+        check_evm_state_before_importing: false,
+        max_block_age_secs: 600,
+        confirm_unsafe_blocks: false,
     };
 
     Ok((
@@ -200,7 +204,7 @@ pub fn get_dfx_local_port() -> u16 {
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 /// Original code taken from ./`crates/evm/src/test_utils.rs`
 #[derive(Clone, Debug, Default)]
-struct MockExecutorProvider {
+pub struct MockExecutorProvider {
     exec_results: Arc<Mutex<Vec<ExecutionOutcome>>>,
 }
 

@@ -220,10 +220,10 @@ impl Transaction {
     pub fn set_chain_id(&mut self, chain_id: u64) {
         match self {
             Self::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
-            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) |
-            Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) |
-            Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) |
-            Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. })
+            | Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. })
+            | Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. })
+            | Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => { /* noop */ }
         }
@@ -268,7 +268,7 @@ impl Transaction {
 
         // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
-            return None
+            return None;
         }
 
         // Calculate the difference between max_fee_per_gas and base_fee
@@ -815,9 +815,9 @@ impl Hash for TransactionSigned {
 
 impl PartialEq for TransactionSigned {
     fn eq(&self, other: &Self) -> bool {
-        self.signature == other.signature &&
-            self.transaction == other.transaction &&
-            self.tx_hash() == other.tx_hash()
+        self.signature == other.signature
+            && self.transaction == other.transaction
+            && self.tx_hash() == other.tx_hash()
     }
 }
 
@@ -968,7 +968,7 @@ impl SignedTransaction for TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
@@ -979,7 +979,7 @@ impl SignedTransaction for TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);

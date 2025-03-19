@@ -1,12 +1,10 @@
 //!
 //! Integration tests for the bitfinity node command.
-//!
 
 use super::utils::*;
 use did::keccak;
 use eth_server::{EthImpl, EthServer};
-use ethereum_json_rpc_client::CertifiedResult;
-use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
+use ethereum_json_rpc_client::{reqwest::ReqwestClient, CertifiedResult, EthJsonRpcClient};
 use jsonrpsee::{
     server::{Server, ServerHandle},
     Methods, RpcModule,
@@ -33,10 +31,9 @@ use reth_node_ethereum::{
 use reth_provider::providers::BlockchainProvider2;
 use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
-use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool,
-    TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
+    EthTransactionValidator, Pool, TransactionValidationTaskExecutor,
 };
 use revm_primitives::{hex, Address, U256};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
@@ -49,6 +46,85 @@ async fn bitfinity_test_should_start_local_reth_node() {
 
     // Act & Assert
     assert!(reth_client.get_chain_id().await.is_ok());
+}
+
+#[tokio::test]
+async fn bitfinity_test_lb_lag_check() {
+    // Arrange
+    let _log = init_logs();
+
+    let eth_server = EthImpl::new();
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+
+    // Try `eth_lbLagCheck`
+    let result: String = reth_client
+        .single_request(
+            "eth_lbLagCheck".to_owned(),
+            ethereum_json_rpc_client::Params::Array(vec![10.into()]),
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    assert!(result.contains("ACCEPTABLE_LAG"), "{result:?}");
+
+    // Need time to generate extra blocks at `eth_server`
+    // Assuming `EthImpl` ticks 100ms for the each next block
+    let mut lag_check_ok = false;
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(50));
+    for _ in 0..100 {
+        interval.tick().await;
+
+        let result = reth_client
+            .single_request::<String>(
+                "eth_lbLagCheck".to_owned(),
+                ethereum_json_rpc_client::Params::Array(vec![5.into()]),
+                ethereum_json_rpc_client::Id::Num(1),
+            )
+            .await;
+        if let Ok(message) = result {
+            if message.contains("LAGGING") {
+                lag_check_ok = true;
+                break;
+            }
+        }
+    }
+
+    assert!(lag_check_ok);
+
+    // And should not lag with bigger acceptable delta
+    let result: String = reth_client
+        .single_request(
+            "eth_lbLagCheck".to_owned(),
+            ethereum_json_rpc_client::Params::Array(vec![1000.into()]),
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    assert!(result.contains("ACCEPTABLE_LAG"), "{result:?}");
+}
+
+#[tokio::test]
+async fn bitfinity_test_lb_lag_check_fail_safe() {
+    let (reth_client, _reth_node) =
+        start_reth_node(Some("http://local_host:11".to_string()), None).await;
+
+    let message: String = reth_client
+        .single_request(
+            "eth_lbLagCheck".to_owned(),
+            ethereum_json_rpc_client::Params::Array(vec![1000.into()]),
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    // Response should be OK to do not break LB if source temporary not available
+    assert!(message.contains("ACCEPTABLE_LAG"), "{message}");
+    assert!(message.contains("NO_SOURCE"), "{message}");
 }
 
 #[tokio::test]
@@ -124,7 +200,11 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new();
+    let eth_server = EthImpl::new().with_genesis_balances(vec![
+        (Address::from_slice(&[1u8; 20]), U256::from(10)),
+        (Address::from_slice(&[2u8; 20]), U256::from(20)),
+        (Address::from_slice(&[3u8; 20]), U256::from(30)),
+    ]);
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -158,7 +238,11 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new();
+    let eth_server = EthImpl::new().with_genesis_balances(vec![
+        (Address::from_slice(&[1u8; 20]), U256::from(10)),
+        (Address::from_slice(&[2u8; 20]), U256::from(20)),
+        (Address::from_slice(&[3u8; 20]), U256::from(30)),
+    ]);
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -204,7 +288,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
 }
 
 /// Start a local reth node
-async fn start_reth_node(
+pub async fn start_reth_node(
     bitfinity_evm_url: Option<String>,
     import_data: Option<ImportData>,
 ) -> (
@@ -370,12 +454,22 @@ async fn start_reth_node(
 
 /// Start a local Eth server.
 /// Reth requests will be forwarded to this server
-async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, SocketAddr) {
+pub async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, SocketAddr) {
+    mock_multi_server_start([methods.into()]).await
+}
+
+/// Starts a local mock server that combines methods from different sources.
+pub async fn mock_multi_server_start(
+    methods: impl IntoIterator<Item = Methods>,
+) -> (ServerHandle, SocketAddr) {
     let addr = SocketAddr::from(([127, 0, 0, 1], 0));
     let server = Server::builder().build(addr).await.unwrap();
 
     let mut module = RpcModule::new(());
-    module.merge(methods).unwrap();
+
+    for method_group in methods {
+        module.merge(method_group).unwrap();
+    }
 
     let server_address = server.local_addr().unwrap();
     let handle = server.start(module);
@@ -386,10 +480,15 @@ async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, So
 /// Eth server mock for local testing
 pub mod eth_server {
 
+    use std::sync::{atomic::Ordering, Arc};
+
+    use alloy_consensus::constants::{EMPTY_RECEIPTS, EMPTY_TRANSACTIONS};
     use alloy_rlp::Bytes;
-    use did::keccak;
+    use did::{keccak, BlockConfirmationData, BlockConfirmationResult, BlockNumber, H256, U64};
     use ethereum_json_rpc_client::CertifiedResult;
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+
+    use reth_trie::EMPTY_ROOT_HASH;
     use revm_primitives::{Address, B256, U256};
 
     #[rpc(server, namespace = "eth")]
@@ -415,6 +514,35 @@ pub mod eth_server {
         async fn get_last_certified_block(
             &self,
         ) -> RpcResult<CertifiedResult<did::Block<did::H256>>>;
+
+        /// Returns a block by block number
+        #[method(name = "getBlockByNumber")]
+        async fn get_block_by_number(
+            &self,
+            number: BlockNumber,
+        ) -> RpcResult<Option<did::Block<did::H256>>>;
+
+        /// Returns the chain ID
+        #[method(name = "chainId")]
+        async fn chain_id(&self) -> RpcResult<U256>;
+
+        /// Returns the last block number
+        #[method(name = "blockNumber")]
+        async fn block_number(&self) -> RpcResult<U256>;
+
+        /// Returns the EVM global state
+        #[method(name = "getEvmGlobalState", aliases = ["ic_getEvmGlobalState"])]
+        async fn get_evm_global_state(&self) -> RpcResult<did::evm_state::EvmGlobalState>;
+    }
+
+    #[rpc(server, namespace = "ic")]
+    trait BfEvm {
+        /// Send block confirmation request.
+        #[method(name = "sendConfirmBlock")]
+        async fn confirm_block(
+            &self,
+            data: BlockConfirmationData,
+        ) -> RpcResult<BlockConfirmationResult>;
     }
 
     /// Eth server implementation for local testing
@@ -424,12 +552,93 @@ pub mod eth_server {
         pub gas_price: u128,
         /// Current max priority fee per gas
         pub max_priority_fee_per_gas: u128,
+        /// Current block number (atomic for thread safety)
+        pub current_block: Arc<std::sync::atomic::AtomicU64>,
+        /// Chain ID
+        pub chain_id: u64,
+        /// EVM staging mode
+        pub state: did::evm_state::EvmGlobalState,
+        /// Block production task handle
+        #[allow(dead_code)]
+        block_task: Option<tokio::task::JoinHandle<()>>,
+        /// Genesis Balances
+        pub genesis_balances: Vec<(Address, U256)>,
+        /// Unsafe blocks count
+        pub unsafe_blocks_count: u64,
+        /// Custom state root hash
+        pub custom_state_root: H256,
     }
 
     impl EthImpl {
         /// Create a new Eth server implementation
         pub fn new() -> Self {
-            Self { gas_price: rand::random(), max_priority_fee_per_gas: rand::random() }
+            Self::new_with_max_block(u64::MAX)
+        }
+
+        /// Creates a new Eth server implementation that will mint blocks until `max_block` number
+        pub fn new_with_max_block(max_block: u64) -> Self {
+            // Fake block counter
+            let current_block = Arc::new(std::sync::atomic::AtomicU64::new(1));
+            let block_counter = current_block.clone();
+
+            let block_task = Some(tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+                loop {
+                    interval.tick().await;
+                    let block = block_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    tracing::info!("Minted block {}", block + 1);
+
+                    if block + 1 >= max_block {
+                        break;
+                    }
+                }
+            }));
+
+            Self {
+                gas_price: rand::random(),
+                max_priority_fee_per_gas: rand::random(),
+                current_block,
+                chain_id: 1,
+                state: did::evm_state::EvmGlobalState::Staging { max_block_number: None },
+                block_task,
+                genesis_balances: vec![],
+                unsafe_blocks_count: 0,
+                custom_state_root: EMPTY_ROOT_HASH.into(),
+            }
+        }
+
+        /// Create a new instance with custom state
+        pub fn with_evm_state(state: did::evm_state::EvmGlobalState) -> Self {
+            let mut instance = Self::new();
+            instance.state = state;
+            instance
+        }
+
+        /// Set the genesis balances
+        pub fn with_genesis_balances(mut self, balances: Vec<(Address, U256)>) -> Self {
+            self.genesis_balances = balances;
+            self
+        }
+
+        /// Set a custom state root hash
+        pub fn with_state_root(mut self, state_root: did::H256) -> Self {
+            self.custom_state_root = state_root;
+            self
+        }
+
+        /// Returns an implementation of Bitfinity EVM canister API
+        pub fn bf_impl(&mut self, unsafe_blocks_count: u64) -> BfEvmImpl {
+            self.unsafe_blocks_count = unsafe_blocks_count;
+            BfEvmImpl { confirm_until: u64::MAX }
+        }
+    }
+
+    impl Drop for EthImpl {
+        fn drop(&mut self) {
+            // Abort the background task when the EthImpl is dropped
+            if let Some(task) = self.block_task.take() {
+                task.abort();
+            }
         }
     }
 
@@ -441,6 +650,60 @@ pub mod eth_server {
 
     #[async_trait::async_trait]
     impl EthServer for EthImpl {
+        async fn get_block_by_number(
+            &self,
+            number: BlockNumber,
+        ) -> RpcResult<Option<did::Block<did::H256>>> {
+            let current_block = self.current_block.load(Ordering::Relaxed);
+            let block_num = match number {
+                BlockNumber::Safe => current_block - self.unsafe_blocks_count,
+                BlockNumber::Latest | BlockNumber::Finalized => current_block,
+                BlockNumber::Earliest => 0,
+                BlockNumber::Pending => {
+                    self.current_block.load(std::sync::atomic::Ordering::Relaxed) + 1
+                }
+                BlockNumber::Number(num) => num.as_u64(),
+            };
+
+            if block_num > current_block {
+                return Ok(None);
+            }
+
+            let mut block = did::Block {
+                number: block_num.into(),
+                timestamp: did::U256::from(1234567890_u64 + block_num),
+                gas_limit: did::U256::from(30_000_000_u64),
+                base_fee_per_gas: Some(did::U256::from(7_u64)),
+                state_root: self.custom_state_root.clone(),
+                receipts_root: EMPTY_RECEIPTS.into(),
+                transactions_root: EMPTY_TRANSACTIONS.into(),
+                parent_hash: if block_num == 0 {
+                    H256::zero()
+                } else {
+                    self.get_block_by_number(BlockNumber::Number(U64::from(block_num - 1)))
+                        .await?
+                        .unwrap()
+                        .hash
+                },
+                ..Default::default()
+            };
+
+            block.hash = keccak::keccak_hash(&block.header_rlp_encoded());
+            Ok(Some(block))
+        }
+
+        async fn chain_id(&self) -> RpcResult<U256> {
+            Ok(U256::from(self.chain_id))
+        }
+
+        async fn block_number(&self) -> RpcResult<U256> {
+            Ok(U256::from(self.current_block.load(std::sync::atomic::Ordering::Relaxed)))
+        }
+
+        async fn get_evm_global_state(&self) -> RpcResult<did::evm_state::EvmGlobalState> {
+            Ok(self.state.clone())
+        }
+
         async fn gas_price(&self) -> RpcResult<U256> {
             Ok(U256::from(self.gas_price))
         }
@@ -455,21 +718,46 @@ pub mod eth_server {
         }
 
         async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>> {
-            Ok(vec![
-                (Address::from_slice(&[1u8; 20]), U256::from(10)),
-                (Address::from_slice(&[2u8; 20]), U256::from(20)),
-                (Address::from_slice(&[3u8; 20]), U256::from(30)),
-            ])
+            Ok(self.genesis_balances.clone())
         }
 
         async fn get_last_certified_block(
             &self,
         ) -> RpcResult<CertifiedResult<did::Block<did::H256>>> {
             Ok(CertifiedResult {
-                data: Default::default(),
+                data: did::Block {
+                    number: 20_u64.into(),
+                    hash: H256::from_slice(&[20; 32]),
+                    parent_hash: H256::from_slice(&[19; 32]),
+                    timestamp: did::U256::from(1234567890_u64 + 20),
+                    state_root: H256::from_slice(&[20; 32]),
+                    transactions: vec![],
+                    ..Default::default()
+                },
                 witness: vec![],
                 certificate: vec![1u8, 3, 11],
             })
+        }
+    }
+
+    /// Mock implementation of Bitfinity EVM canister API
+    #[derive(Debug)]
+    pub struct BfEvmImpl {
+        /// Will allow confirming block until this block number
+        pub confirm_until: u64,
+    }
+
+    #[async_trait::async_trait]
+    impl BfEvmServer for BfEvmImpl {
+        async fn confirm_block(
+            &self,
+            data: BlockConfirmationData,
+        ) -> RpcResult<BlockConfirmationResult> {
+            if data.block_number > self.confirm_until {
+                Ok(BlockConfirmationResult::NotConfirmed)
+            } else {
+                Ok(BlockConfirmationResult::Confirmed)
+            }
         }
     }
 }

@@ -128,6 +128,7 @@ members = [
     "crates/trie/parallel/",
     "crates/trie/sparse",
     "crates/trie/trie",
+    "crates/bitfinity-block-confirmation",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -649,17 +650,20 @@ tracy-client = "0.17.3"
 
 # Bitfinity Deps
 async-channel = "2"
+bitfinity-block-confirmation = { path = "crates/bitfinity-block-confirmation" }
 candid = "0.10"
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.40.x" }
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.46.0" }
 dirs = "5.0.1"
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.40.x", features = [
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.46.0", features = [
     "reqwest",
 ] }
 evm-canister-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "evm-canister-client", features = [
     "ic-agent-client",
-], tag = "v0.40.x" }
+], tag = "v0.46.0" }
 ic-cbor = "3"
 ic-certificate-verification = "3"
 ic-certification = "3"
 hex = "0.4"
 lightspeed_scheduler = { version = "0.60.0", features = ["tracing"] }
+anyhow = "1"
+jsonrpc-core = "18.0.0"
