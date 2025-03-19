@@ -448,13 +448,13 @@ impl<Tx: DbTx> BlindedProvider for ProofTaskBlindedNodeProvider<Tx> {
     fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let (tx, rx) = channel();
         match self {
-            Self::AccountNode { sender: tx_sender } => {
-                let _ = tx_sender.send(ProofTaskMessage::QueueTask(
+            Self::AccountNode { sender } => {
+                let _ = sender.send(ProofTaskMessage::QueueTask(
                     ProofTaskKind::BlindedAccountNode(path.clone(), tx),
                 ));
             }
-            Self::StorageNode { sender: tx_sender, account } => {
-                let _ = tx_sender.send(ProofTaskMessage::QueueTask(
+            Self::StorageNode { sender, account } => {
+                let _ = sender.send(ProofTaskMessage::QueueTask(
                     ProofTaskKind::BlindedStorageNode(*account, path.clone(), tx),
                 ));
             }
