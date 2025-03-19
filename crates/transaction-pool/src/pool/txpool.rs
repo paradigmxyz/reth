@@ -124,7 +124,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn new(ordering: T, config: PoolConfig) -> Self {
         Self {
             sender_info: Default::default(),
-            pending_pool: PendingPool::new(ordering),
+            pending_pool: PendingPool::with_buffer(
+                ordering,
+                config.max_new_pending_txs_notifications,
+            ),
             queued_pool: Default::default(),
             basefee_pool: Default::default(),
             blob_pool: Default::default(),
