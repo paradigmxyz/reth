@@ -11,7 +11,7 @@ use reth_primitives_traits::{
     SealedHeader,
 };
 use reth_trie_common::updates::TrieUpdates;
-use revm_database::BundleState;
+use revm::database::BundleState;
 
 /// A chain of blocks and their final state.
 ///

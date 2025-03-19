@@ -7946,7 +7946,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
- "revm-database",
 ]
 
 [[package]]
@@ -7998,7 +7997,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-trie-common",
  "revm",
- "revm-database",
  "serde",
  "serde_with",
 ]
@@ -8783,8 +8781,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-revm",
  "revm",
- "revm-database",
- "revm-primitives",
  "thiserror 2.0.12",
  "tracing",
 ]
@@ -9327,8 +9323,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "revm",
- "revm-database",
- "revm-inspector",
 ]
 
 [[package]]
@@ -9611,9 +9605,7 @@ dependencies = [
  "reth-transaction-pool",
  "reth-trie",
  "revm",
- "revm-database",
  "revm-inspectors",
- "revm-primitives",
  "schnellru",
  "serde",
  "serde_json",

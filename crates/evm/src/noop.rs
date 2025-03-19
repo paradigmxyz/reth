@@ -51,7 +51,7 @@ impl<DB: Database, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 
-    fn into_state(self) -> revm_database::State<DB> {
+    fn into_state(self) -> revm::database::State<DB> {
         unreachable!()
     }
 
