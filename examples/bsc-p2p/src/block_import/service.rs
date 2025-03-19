@@ -45,7 +45,7 @@ pub(crate) type IncomingBlock<T> = (BlockMsg<T>, PeerId);
 pub struct ImportService<Provider, T>
 where
     Provider: BlockNumReader + Clone,
-    T: EngineTypes,
+    T: PayloadTypes,
 {
     /// The handle to communicate with the engine service
     engine: BeaconConsensusEngineHandle<T>,
@@ -62,7 +62,7 @@ where
 impl<Provider, T> ImportService<Provider, T>
 where
     Provider: BlockNumReader + Clone + 'static,
-    T: EngineTypes,
+    T: PayloadTypes,
 {
     /// Create a new block import service
     pub fn new(
@@ -195,7 +195,7 @@ where
 impl<Provider, T> Future for ImportService<Provider, T>
 where
     Provider: BlockNumReader + BlockHashReader + Clone + 'static + Unpin,
-    T: EngineTypes,
+    T: PayloadTypes,
 {
     type Output = Result<(), Box<dyn std::error::Error>>;
 
