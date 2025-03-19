@@ -1,5 +1,5 @@
-//! A Task that manages sending storage multiproof requests to a number of tasks that have
-//! longer-running database transactions.
+//! A Task that manages sending proof requests to a number of tasks that have longer-running
+//! database transactions.
 //!
 //! The [`ProofTaskManager`] ensures that there are a max number of currently executing proof tasks,
 //! and is responsible for managing the fixed number of database transactions created at the start
@@ -39,6 +39,7 @@ use tokio::runtime::Handle;
 use tracing::debug;
 
 type StorageProofResult = Result<StorageMultiProof, ParallelStateRootError>;
+type BlindedNodeResult = Result<Option<RevealedNode>, SparseTrieError>;
 
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
 /// database transactions
@@ -276,7 +277,7 @@ where
     fn blinded_account_node(
         self,
         path: Nibbles,
-        result_sender: Sender<Result<Option<RevealedNode>, SparseTrieError>>,
+        result_sender: Sender<BlindedNodeResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         let (trie_cursor_factory, hashed_cursor_factory) = self.prepare_factories();
@@ -299,7 +300,7 @@ where
         self,
         account: B256,
         path: Nibbles,
-        result_sender: Sender<Result<Option<RevealedNode>, SparseTrieError>>,
+        result_sender: Sender<BlindedNodeResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         let (trie_cursor_factory, hashed_cursor_factory) = self.prepare_factories();

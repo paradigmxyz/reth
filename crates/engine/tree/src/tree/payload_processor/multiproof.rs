@@ -938,6 +938,7 @@ mod tests {
     use alloy_primitives::map::B256Set;
     use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
     use reth_trie::TrieInput;
+    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManager};
     use revm_primitives::{B256, U256};
     use std::sync::Arc;
 
@@ -965,9 +966,20 @@ mod tests {
     {
         let executor = WorkloadExecutor::with_num_cpu_threads(2);
         let config = create_state_root_config(factory, TrieInput::default());
+        let task_ctx = ProofTaskCtx::new(
+            config.nodes_sorted.clone(),
+            config.state_sorted.clone(),
+            config.prefix_sets.clone(),
+        );
+        let proof_task = ProofTaskManager::new(
+            executor.handle().clone(),
+            config.consistent_view.clone(),
+            task_ctx,
+            1,
+        );
         let channel = channel();
 
-        MultiProofTask::new(config, executor, channel.0)
+        MultiProofTask::new(config, executor, proof_task.handle(), channel.0)
     }
 
     #[test]
