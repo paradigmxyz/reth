@@ -1,5 +1,7 @@
 use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
+use metrics::Counter;
+use reth_metrics::Metrics;
 use reth_storage_errors::db::DatabaseError;
 
 /// Represents a branch node in the trie.
@@ -44,17 +46,20 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     current_hashed_entry: Option<(B256, <H as HashedCursor>::Value)>,
     /// Flag indicating whether we should check the current walker key.
     current_walker_key_checked: bool,
+
+    metrics: TrieNodeIterMetrics,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     /// Creates a new [`TrieNodeIter`].
-    pub const fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, node_iter_type: TrieNodeIterType) -> Self {
         Self {
             walker,
             hashed_cursor,
             previous_hashed_key: None,
             current_hashed_entry: None,
             current_walker_key_checked: false,
+            metrics: TrieNodeIterMetrics::new_with_labels(&[("type", node_iter_type.as_str())]),
         }
     }
 
@@ -122,6 +127,8 @@ where
                     // Seek to the previous hashed key and get the next hashed entry
                     self.hashed_cursor.seek(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
+
+                    self.metrics.hashed_cursor_seeks_total.increment(1);
                 }
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
@@ -132,10 +139,37 @@ where
                     };
                     self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
                     self.walker.advance()?;
+
+                    self.metrics.hashed_cursor_seeks_total.increment(1);
                 }
             }
         }
 
         Ok(None)
     }
+}
+
+/// The type of the node iter.
+#[derive(Debug)]
+pub enum TrieNodeIterType {
+    /// The node iter for the account trie.
+    Account,
+    /// The node iter for the storage trie.
+    Storage,
+}
+
+impl TrieNodeIterType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Account => "account",
+            Self::Storage => "storage",
+        }
+    }
+}
+
+#[derive(Metrics)]
+#[metrics(scope = "trie.node_iter")]
+struct TrieNodeIterMetrics {
+    /// The number of times the hashed cursor was seeked.
+    pub hashed_cursor_seeks_total: Counter,
 }
