@@ -30,6 +30,7 @@ use reth_trie_sparse::blinded::{BlindedProvider, BlindedProviderFactory, Reveale
 use std::{
     collections::VecDeque,
     sync::{
+        atomic::{AtomicUsize, Ordering},
         mpsc::{channel, Receiver, Sender},
         Arc,
     },
@@ -64,6 +65,11 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     proof_task_rx: Receiver<ProofTaskMessage<FactoryTx<Factory>>>,
     /// A sender for sending back transactions.
     tx_sender: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
+    /// The number of active handles.
+    ///
+    /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
+    /// [`ProofTaskManagerHandle::drop`].
+    active_handles: Arc<AtomicUsize>,
 }
 
 impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
@@ -88,12 +94,13 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
             proof_task_txs: Vec::new(),
             proof_task_rx,
             tx_sender,
+            active_handles: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     /// Returns a handle for sending new proof tasks to the [`ProofTaskManager`].
     pub fn handle(&self) -> ProofTaskManagerHandle<FactoryTx<Factory>> {
-        ProofTaskManagerHandle::new(self.tx_sender.clone())
+        ProofTaskManagerHandle::new(self.tx_sender.clone(), self.active_handles.clone())
     }
 }
 
@@ -435,17 +442,21 @@ pub enum ProofTaskKind {
     BlindedStorageNode(B256, Nibbles, Sender<BlindedNodeResult>),
 }
 
-/// A handle that wraps a single proof task sender that sends a terminate message on `Drop`.
+/// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
+/// number of active handles went to zero.
 #[derive(Debug, Clone)]
 pub struct ProofTaskManagerHandle<Tx> {
     /// The sender for the proof task manager.
     sender: Sender<ProofTaskMessage<Tx>>,
+    /// The number of active handles.
+    active_handles: Arc<AtomicUsize>,
 }
 
 impl<Tx> ProofTaskManagerHandle<Tx> {
     /// Creates a new [`ProofTaskManagerHandle`] with the given sender.
-    pub const fn new(sender: Sender<ProofTaskMessage<Tx>>) -> Self {
-        Self { sender }
+    pub fn new(sender: Sender<ProofTaskMessage<Tx>>, active_handles: Arc<AtomicUsize>) -> Self {
+        active_handles.fetch_add(1, Ordering::SeqCst);
+        Self { sender, active_handles }
     }
 
     /// Clones and returns the inner sender.
@@ -511,6 +522,10 @@ impl<Tx: DbTx> BlindedProvider for ProofTaskBlindedNodeProvider<Tx> {
 
 impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
     fn drop(&mut self) {
-        self.terminate();
+        // Decrement the number of active handles and terminate the manager if it was the last
+        // handle.
+        if self.active_handles.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.terminate();
+        }
     }
 }
