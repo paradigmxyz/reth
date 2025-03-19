@@ -31,7 +31,7 @@ use reth_trie::{
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Sender, Arc};
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Parallel proof calculator.
 ///
@@ -203,6 +203,11 @@ where
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
+                            trace!(
+                                target: "trie::parallel_proof",
+                                ?hashed_address,
+                                "Missing leaf, computing storage proof"
+                            );
                             tracker.inc_missed_leaves();
                             StorageProof::new_hashed(
                                 trie_cursor_factory.clone(),
