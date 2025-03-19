@@ -21,7 +21,7 @@ use std::{
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// The block type for a given engine
-type BscBlock<T> =
+pub type BscBlock<T> =
     <<<T as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block;
 
 /// Network message containing a new block
