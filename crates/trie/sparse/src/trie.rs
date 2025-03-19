@@ -668,8 +668,24 @@ impl RevealedSparseTrie {
                 path,
                 is_in_prefix_set: Some(true),
             });
-            self.rlp_node(&mut prefix_set, &mut buffers);
+
+            self.rlp_node_using_buf(&mut prefix_set, &mut buffers);
         }
+    }
+
+    /// Helper function to take out the rlp buffer while calling the `rlp_node` function.
+    fn rlp_node_using_buf(
+        &mut self,
+        prefix_set: &mut PrefixSet,
+        buffers: &mut RlpNodeBuffers,
+    ) -> RlpNode {
+        // take rlp_buf out, so we can pass it to the function
+        let mut rlp_buf = std::mem::take(&mut self.rlp_buf);
+        let rlp_node = self.rlp_node(prefix_set, buffers, &mut rlp_buf);
+
+        // put the buf back
+        self.rlp_buf = rlp_buf;
+        rlp_node
     }
 
     /// Returns a list of levels and paths to the nodes that were changed according to the prefix
@@ -736,14 +752,15 @@ impl RevealedSparseTrie {
         (targets, unchanged_prefix_set)
     }
 
-    /// Look up or calculate the RLP of the node at the root path.
+    /// Look up or calculate the RLP of the node at the root path. Allocates a new
+    /// [`RlpNodeBuffers`] for the computation.
     ///
     /// # Panics
     ///
     /// If the node at provided path does not exist.
     pub fn rlp_node_allocate(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_root_path();
-        self.rlp_node(prefix_set, &mut buffers)
+        self.rlp_node_using_buf(prefix_set, &mut buffers)
     }
 
     /// Look up or calculate the RLP of the node at the given path specified in [`RlpNodeBuffers`].
@@ -755,6 +772,7 @@ impl RevealedSparseTrie {
         &mut self,
         prefix_set: &mut PrefixSet,
         buffers: &mut RlpNodeBuffers,
+        rlp_buf: &mut Vec<u8>,
     ) -> RlpNode {
         let starting_path = buffers.path_stack.last().map(|item| item.path.clone());
 
@@ -788,8 +806,8 @@ impl RevealedSparseTrie {
                         (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                     } else {
                         let value = self.values.get(&path).unwrap();
-                        self.rlp_buf.clear();
-                        let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
+                        rlp_buf.clear();
+                        let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
                         *hash = rlp_node.as_hash();
                         (rlp_node, SparseNodeType::Leaf)
                     }
@@ -810,8 +828,8 @@ impl RevealedSparseTrie {
                             rlp_node: child,
                             node_type: child_node_type,
                         } = buffers.rlp_node_stack.pop().unwrap();
-                        self.rlp_buf.clear();
-                        let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
+                        rlp_buf.clear();
+                        let rlp_node = ExtensionNodeRef::new(key, &child).rlp(rlp_buf);
                         *hash = rlp_node.as_hash();
 
                         let store_in_db_trie_value = child_node_type.store_in_db_trie();
@@ -962,10 +980,10 @@ impl RevealedSparseTrie {
                         "Branch node masks"
                     );
 
-                    self.rlp_buf.clear();
+                    rlp_buf.clear();
                     let branch_node_ref =
                         BranchNodeRef::new(&buffers.branch_value_stack_buf, *state_mask);
-                    let rlp_node = branch_node_ref.rlp(&mut self.rlp_buf);
+                    let rlp_node = branch_node_ref.rlp(rlp_buf);
                     *hash = rlp_node.as_hash();
 
                     // Save a branch node update only if it's not a root node, and we need to
