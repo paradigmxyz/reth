@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+auto_impl.workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
@@ -22,6 +23,7 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
+revm.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
