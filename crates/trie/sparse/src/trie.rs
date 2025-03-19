@@ -118,7 +118,7 @@ impl SparseTrie {
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie> {
         if self.is_blind() {
-            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_provider_and_root(
+            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root_node(
                 root,
                 masks,
                 retain_updates,
@@ -321,7 +321,7 @@ impl RevealedSparseTrie {
 
 impl RevealedSparseTrie {
     /// Create new revealed sparse trie from the given root node.
-    pub fn from_provider_and_root(
+    pub fn from_root_node(
         node: TrieNode,
         masks: TrieMasks,
         retain_updates: bool,
@@ -1559,6 +1559,7 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
+        metrics::TrieType,
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
@@ -1619,6 +1620,7 @@ mod tests {
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
+            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {

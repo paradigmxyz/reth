@@ -19,6 +19,7 @@ use reth_provider::{
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    metrics::TrieType,
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     proof::StorageProof,
@@ -184,6 +185,7 @@ where
         let mut account_node_iter = TrieNodeIter::new(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+            TrieType::State,
         );
         while let Some(account_node) =
             account_node_iter.try_next().map_err(ProviderError::Database)?

@@ -135,12 +135,14 @@ members = [
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
     "examples/custom-dev-node/",
+    "examples/custom-node/",
     "examples/custom-engine-types/",
     "examples/custom-evm/",
     "examples/custom-inspector/",
     "examples/custom-node-components/",
     "examples/custom-payload-builder/",
     "examples/custom-rlpx-subprotocol",
+    "examples/custom-node",
     "examples/db-access",
     "examples/exex-hello-world",
     "examples/manual-p2p/",
@@ -649,7 +651,7 @@ data-encoding = "2"
 delegate = "0.13"
 digest = "0.10.5"
 hash-db = "=0.15.2"
-hickory-resolver = "0.25.0-alpha.5"
+hickory-resolver = "0.25.0"
 hmac = "0.12.1"
 human_bytes = "0.4.1"
 indexmap = "2"
