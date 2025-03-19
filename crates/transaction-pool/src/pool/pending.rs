@@ -53,7 +53,7 @@ pub struct PendingPool<T: TransactionOrdering> {
 // === impl PendingPool ===
 
 impl<T: TransactionOrdering> PendingPool<T> {
-    /// Create a new pending pool pool instance.
+    /// Create a new pending pool instance.
     pub fn new(ordering: T) -> Self {
         Self::with_buffer(ordering, 200)
     }
