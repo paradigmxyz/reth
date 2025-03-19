@@ -54,7 +54,6 @@ pub trait EngineTypes:
                           + TryInto<Self::ExecutionPayloadEnvelopeV4>,
     > + DeserializeOwned
     + Serialize
-    + 'static
 {
     /// Execution Payload V1 envelope type.
     type ExecutionPayloadEnvelopeV1: DeserializeOwned

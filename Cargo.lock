@@ -3268,6 +3268,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-node"
+version = "0.0.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "derive_more 2.0.1",
+ "op-alloy-rpc-types-engine",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-codecs",
+ "reth-network-peers",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-optimism-chainspec",
+ "reth-optimism-forks",
+ "reth-optimism-node",
+ "reth-optimism-primitives",
+ "reth-primitives-traits",
+ "revm-primitives",
+ "serde",
+]
+
+[[package]]
 name = "example-custom-node-components"
 version = "0.0.0"
 dependencies = [
@@ -5826,6 +5853,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-serde",
+ "arbitrary",
  "derive_more 1.0.0",
  "ethereum_ssz",
  "op-alloy-consensus",
