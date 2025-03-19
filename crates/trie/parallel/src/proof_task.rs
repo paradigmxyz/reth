@@ -432,6 +432,9 @@ pub enum ProofTaskMessage<Tx> {
 }
 
 /// Proof task kind.
+///
+/// When queueing a task using [`ProofTaskMessage::QueueTask`], this enum
+/// specifies the type of proof task to be executed.
 #[derive(Debug)]
 pub enum ProofTaskKind {
     /// A storage proof request.
