@@ -118,7 +118,7 @@ impl SparseTrie {
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie> {
         if self.is_blind() {
-            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_provider_and_root(
+            *self = Self::Revealed(Box::new(RevealedSparseTrie::from_root_node(
                 root,
                 masks,
                 retain_updates,
@@ -321,7 +321,7 @@ impl RevealedSparseTrie {
 
 impl RevealedSparseTrie {
     /// Create new revealed sparse trie from the given root node.
-    pub fn from_provider_and_root(
+    pub fn from_root_node(
         node: TrieNode,
         masks: TrieMasks,
         retain_updates: bool,
