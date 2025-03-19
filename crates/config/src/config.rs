@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "serde")]
 const EXTENSION: &str = "toml";
 
 /// The default prune block interval
