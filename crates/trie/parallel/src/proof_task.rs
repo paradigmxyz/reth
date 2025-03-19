@@ -447,7 +447,7 @@ pub enum ProofTaskKind {
 
 /// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
 /// number of active handles went to zero.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProofTaskManagerHandle<Tx> {
     /// The sender for the proof task manager.
     sender: Sender<ProofTaskMessage<Tx>>,
@@ -470,6 +470,16 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
     /// Sends a terminate message to the proof task manager.
     pub fn terminate(&self) {
         let _ = self.sender.send(ProofTaskMessage::Terminate);
+    }
+}
+
+impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
+    fn drop(&mut self) {
+        // Decrement the number of active handles and terminate the manager if it was the last
+        // handle.
+        if self.active_handles.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.terminate();
+        }
     }
 }
 
@@ -520,15 +530,5 @@ impl<Tx: DbTx> BlindedProvider for ProofTaskBlindedNodeProvider<Tx> {
         }
 
         rx.recv().unwrap()
-    }
-}
-
-impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
-    fn drop(&mut self) {
-        // Decrement the number of active handles and terminate the manager if it was the last
-        // handle.
-        if self.active_handles.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.terminate();
-        }
     }
 }
