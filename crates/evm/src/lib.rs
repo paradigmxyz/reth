@@ -27,8 +27,7 @@ use execute::{BlockAssembler, BlockBuilder};
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::context::TxEnv;
-use revm_database::State;
+use revm::{context::TxEnv, database::State};
 
 pub mod either;
 /// EVM environment configuration.

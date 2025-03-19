@@ -145,7 +145,7 @@ impl StateProofProvider for StateProviderTest {
 }
 
 impl HashedPostStateProvider for StateProviderTest {
-    fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &revm::database::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
 }

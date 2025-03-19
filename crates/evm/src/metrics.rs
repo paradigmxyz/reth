@@ -145,10 +145,10 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_execution_types::BlockExecutionResult;
     use revm::{
+        database::State,
         database_interface::EmptyDB,
         state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
     };
-    use revm_database::State;
     use std::sync::mpsc;
 
     /// A mock executor that simulates state changes
@@ -190,7 +190,7 @@ mod tests {
             })
         }
 
-        fn into_state(self) -> revm_database::State<DB> {
+        fn into_state(self) -> revm::database::State<DB> {
             State::builder().with_database(Default::default()).build()
         }
 
