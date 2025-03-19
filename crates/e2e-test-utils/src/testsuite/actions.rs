@@ -153,7 +153,75 @@ where
         })
     }
 }
+/// Pick the next block producer based on the latest block information.
+#[derive(Debug)]
+pub struct PickNextBlockProducer<Engine> {
+    /// Tracks engine type
+    _phantom: PhantomData<Engine>,
+}
 
+impl<Engine> Default for PickNextBlockProducer<Engine> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<Engine> PickNextBlockProducer<Engine> {
+    /// Create a new `PickNextBlockProducer` action
+    pub fn new() -> Self {
+        Self { _phantom: Default::default() }
+    }
+}
+
+impl<Engine> Action<Engine> for PickNextBlockProducer<Engine>
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let num_clients = env.node_clients.len();
+            if num_clients == 0 {
+                return Err(eyre::eyre!("No node clients available"));
+            }
+
+            let latest_info = env
+                .latest_block_info
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+
+            // Calculate the starting index based on the latest block number
+            let start_idx = ((latest_info.number + 1) % num_clients as u64) as usize;
+
+            for i in 0..num_clients {
+                let idx = (start_idx + i) % num_clients;
+                let node_client = &env.node_clients[idx];
+                let rpc_client = &node_client.rpc;
+
+                let latest_block =
+                    EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+                        rpc_client,
+                        alloy_eips::BlockNumberOrTag::Latest,
+                        false,
+                    )
+                    .await?;
+
+                if let Some(block) = latest_block {
+                    let block_number = block.header.number;
+                    let block_hash = block.header.hash;
+
+                    // Check if the block hash and number match the latest block info
+                    if block_hash == latest_info.hash && block_number == latest_info.number {
+                        env.last_producer_idx = Some(idx);
+                        debug!("Selected node {} as the next block producer", idx);
+                        return Ok(());
+                    }
+                }
+            }
+
+            Err(eyre::eyre!("No suitable block producer found"))
+        })
+    }
+}
 /// Run a sequence of actions in series.
 #[allow(missing_debug_implementations)]
 pub struct Sequence<I> {

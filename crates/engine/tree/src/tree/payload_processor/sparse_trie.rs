@@ -69,7 +69,7 @@ where
         );
 
         let mut num_iterations = 0;
-        let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
+        let mut trie = SparseStateTrie::default().with_updates(true);
 
         while let Ok(mut update) = self.updates.recv() {
             num_iterations += 1;
@@ -87,9 +87,10 @@ where
                 "Updating sparse trie"
             );
 
-            let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
-                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-            })?;
+            let elapsed = update_sparse_trie(&mut trie, update, &blinded_provider_factory)
+                .map_err(|e| {
+                    ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+                })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
@@ -97,9 +98,10 @@ where
         debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let (state_root, trie_updates) = trie.root_with_updates().map_err(|e| {
-            ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-        })?;
+        let (state_root, trie_updates) =
+            trie.root_with_updates(&blinded_provider_factory).map_err(|e| {
+                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+            })?;
 
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
@@ -120,8 +122,9 @@ pub struct StateRootComputeOutcome {
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
 pub(crate) fn update_sparse_trie<BPF>(
-    trie: &mut SparseStateTrie<BPF>,
+    trie: &mut SparseStateTrie,
     SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
+    blinded_provider_factory: &BPF,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,
@@ -152,6 +155,7 @@ where
             let _enter = span.enter();
             trace!(target: "engine::root::sparse", "Updating storage");
             let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
+            let provider = blinded_provider_factory.storage_node_provider(address);
 
             if storage.wiped {
                 trace!(target: "engine::root::sparse", "Wiping storage");
@@ -161,11 +165,14 @@ where
                 let slot_nibbles = Nibbles::unpack(slot);
                 if value.is_zero() {
                     trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
-                    storage_trie.remove_leaf(&slot_nibbles)?;
+                    storage_trie.remove_leaf(&slot_nibbles, &provider)?;
                 } else {
                     trace!(target: "engine::root::sparse", ?slot, "Updating storage slot");
-                    storage_trie
-                        .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                    storage_trie.update_leaf(
+                        slot_nibbles,
+                        alloy_rlp::encode_fixed_size(&value).to_vec(),
+                        &provider,
+                    )?;
                 }
             }
 
@@ -185,18 +192,18 @@ where
             // If the account itself has an update, remove it from the state update and update in
             // one go instead of doing it down below.
             trace!(target: "engine::root::sparse", ?address, "Updating account and its storage root");
-            trie.update_account(address, account.unwrap_or_default())?;
+            trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)?;
         } else if trie.is_account_revealed(address) {
             // Otherwise, if the account is revealed, only update its storage root.
             trace!(target: "engine::root::sparse", ?address, "Updating account storage root");
-            trie.update_account_storage_root(address)?;
+            trie.update_account_storage_root(address, blinded_provider_factory)?;
         }
     }
 
     // Update accounts
     for (address, account) in state.accounts {
         trace!(target: "engine::root::sparse", ?address, "Updating account");
-        trie.update_account(address, account.unwrap_or_default())?;
+        trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)?;
     }
 
     let elapsed_before = started_at.elapsed();

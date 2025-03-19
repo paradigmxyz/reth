@@ -16,7 +16,6 @@ reth-primitives-traits.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
-revm-database.workspace = true
 
 # alloy
 alloy-evm.workspace = true
@@ -47,7 +46,6 @@ serde = [
     "alloy-primitives/serde",
     "reth-primitives-traits/serde",
     "alloy-consensus/serde",
-    "revm-database/serde",
     "reth-trie-common/serde",
 ]
 serde-bincode-compat = [
@@ -70,6 +68,5 @@ std = [
     "derive_more/std",
     "reth-ethereum-primitives/std",
     "reth-trie-common/std",
-    "revm-database/std",
     "alloy-evm/std",
 ]
