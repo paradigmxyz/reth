@@ -1,6 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
-    node_iter::{TrieElement, TrieNodeIter, TrieNodeIterType},
+    metrics::TrieType,
+    node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     trie_cursor::TrieCursorFactory,
     walker::TrieWalker,
@@ -125,7 +126,7 @@ where
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter =
-            TrieNodeIter::new(walker, hashed_account_cursor, TrieNodeIterType::Account);
+            TrieNodeIter::new(walker, hashed_account_cursor, TrieType::State);
         while let Some(account_node) = account_node_iter.try_next()? {
             match account_node {
                 TrieElement::Branch(node) => {
@@ -290,7 +291,7 @@ where
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
         let mut storage_node_iter =
-            TrieNodeIter::new(walker, hashed_storage_cursor, TrieNodeIterType::Storage);
+            TrieNodeIter::new(walker, hashed_storage_cursor, TrieType::Storage);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {

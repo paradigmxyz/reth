@@ -1,4 +1,7 @@
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
+use crate::{
+    hashed_cursor::HashedCursor, metrics::TrieType, trie_cursor::TrieCursor, walker::TrieWalker,
+    Nibbles,
+};
 use alloy_primitives::B256;
 use metrics::Counter;
 use reth_metrics::Metrics;
@@ -57,7 +60,7 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     /// Creates a new [`TrieNodeIter`].
-    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, node_iter_type: TrieNodeIterType) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
@@ -66,7 +69,7 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
             hashed_cursor_next: false,
             current_hashed_entry: None,
             current_walker_key_checked: false,
-            metrics: TrieNodeIterMetrics::new_with_labels(&[("type", node_iter_type.as_str())]),
+            metrics: TrieNodeIterMetrics::new_with_labels(&[("type", trie_type.as_str())]),
         }
     }
 
@@ -163,24 +166,6 @@ where
         }
 
         Ok(None)
-    }
-}
-
-/// The type of the node iter.
-#[derive(Debug)]
-pub enum TrieNodeIterType {
-    /// The node iter for the account trie.
-    Account,
-    /// The node iter for the storage trie.
-    Storage,
-}
-
-impl TrieNodeIterType {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Account => "account",
-            Self::Storage => "storage",
-        }
     }
 }
 
