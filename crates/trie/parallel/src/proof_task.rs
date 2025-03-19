@@ -257,11 +257,11 @@ where
         );
 
         // send the result back
-        if let Err(e) = result_sender.send(result) {
+        if let Err(error) = result_sender.send(result) {
             debug!(
                 target: "trie::parallel_proof",
-                hashed_address=?input.hashed_address,
-                error = ?e,
+                hashed_address = ?input.hashed_address,
+                ?error,
                 task_time = ?proof_start.elapsed(),
                 "Failed to send proof result"
             );
@@ -287,7 +287,14 @@ where
         );
 
         let result = blinded_provider_factory.account_node_provider().blinded_node(&path);
-        let _ = result_sender.send(result);
+        if let Err(error) = result_sender.send(result) {
+            tracing::error!(
+                target: "trie::parallel_proof",
+                ?path,
+                ?error,
+                "Failed to send blinded account node result"
+            );
+        }
 
         // send the tx back
         let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
@@ -310,7 +317,15 @@ where
         );
 
         let result = blinded_provider_factory.storage_node_provider(account).blinded_node(&path);
-        let _ = result_sender.send(result);
+        if let Err(error) = result_sender.send(result) {
+            tracing::error!(
+                target: "trie::parallel_proof",
+                ?account,
+                ?path,
+                ?error,
+                "Failed to send blinded storage node result"
+            );
+        }
 
         // send the tx back
         let _ = tx_sender.send(ProofTaskMessage::Transaction(self));
