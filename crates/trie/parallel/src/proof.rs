@@ -98,6 +98,8 @@ where
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
+        let proof_targets = targets.clone();
+
         // Extend prefix sets with targets
         let mut prefix_sets = (*self.prefix_sets).clone();
         prefix_sets.extend(TriePrefixSetsMut {
@@ -206,6 +208,7 @@ where
                             trace!(
                                 target: "trie::parallel_proof",
                                 ?hashed_address,
+                                ?proof_targets,
                                 "Missing leaf, computing storage proof"
                             );
                             tracker.inc_missed_leaves();
