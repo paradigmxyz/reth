@@ -241,13 +241,6 @@ impl PayloadTypes for CustomEngineTypes {
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
     type ExecutionData = CustomExecutionData;
-}
-
-impl EngineTypes for CustomEngineTypes {
-    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
-    type ExecutionPayloadEnvelopeV2 = ExecutionPayloadV2;
-    type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
 
     fn block_to_payload(
         block: SealedBlock<
@@ -260,4 +253,11 @@ impl EngineTypes for CustomEngineTypes {
         let (payload, sidecar) = OpExecutionPayload::from_block_unchecked(block_hash, &block);
         CustomExecutionData { inner: OpExecutionData { payload, sidecar }, extension }
     }
+}
+
+impl EngineTypes for CustomEngineTypes {
+    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
+    type ExecutionPayloadEnvelopeV2 = ExecutionPayloadV2;
+    type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
 }
