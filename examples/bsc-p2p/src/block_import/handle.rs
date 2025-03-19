@@ -3,6 +3,7 @@ use std::task::{Context, Poll};
 use reth_engine_primitives::EngineTypes;
 use reth_network::import::BlockImportError;
 use reth_network_api::PeerId;
+use reth_payload_primitives::PayloadTypes;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::service::{BlockMsg, IncomingBlock, Outcome};
@@ -13,14 +14,14 @@ use super::service::{BlockMsg, IncomingBlock, Outcome};
 /// [`super::service::ImportService`]:
 /// - Blocks can be sent to the service for import via [`send_block`](ImportHandle::send_block)
 /// - Import outcomes can be received via [`poll_outcome`](ImportHandle::poll_outcome)`
-pub struct ImportHandle<T: EngineTypes> {
+pub struct ImportHandle<T: PayloadTypes> {
     /// Send the new block to the service
     to_import: UnboundedSender<IncomingBlock<T>>,
     /// Receive the outcome of the import
     import_outcome: UnboundedReceiver<Outcome<T>>,
 }
 
-impl<T: EngineTypes> ImportHandle<T> {
+impl<T: PayloadTypes> ImportHandle<T> {
     /// Create a new handle with the provided channels
     pub fn new(
         to_import: UnboundedSender<IncomingBlock<T>>,
