@@ -157,13 +157,15 @@ where
     /// Loops, managing the proof tasks, and sending new tasks to the executor.
     pub fn run(mut self) -> ProviderResult<()> {
         loop {
-            let task = match self.proof_task_rx.recv() {
+            match self.proof_task_rx.recv() {
                 Ok(message) => match message {
-                    ProofTaskMessage::QueueTask(task) => Some(task),
+                    ProofTaskMessage::QueueTask(task) => {
+                        // queue the task
+                        self.queue_proof_task(task)
+                    }
                     ProofTaskMessage::Transaction(tx) => {
                         // return the transaction to the pool
                         self.proof_task_txs.push(tx);
-                        None
                     }
                     ProofTaskMessage::Terminate => return Ok(()),
                 },
@@ -171,10 +173,6 @@ where
                 // However this should never happen, as this struct stores a sender
                 Err(_) => return Ok(()),
             };
-
-            if let Some(task) = task {
-                self.queue_proof_task(task);
-            }
 
             // try spawning the next task
             self.try_spawn_next()?;
@@ -203,7 +201,7 @@ impl<Tx> ProofTaskTx<Tx>
 where
     Tx: DbTx,
 {
-    fn prepare_factories(
+    fn create_factories(
         &self,
     ) -> (
         InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
@@ -235,7 +233,7 @@ where
             "Starting storage proof task calculation"
         );
 
-        let (trie_cursor_factory, hashed_cursor_factory) = self.prepare_factories();
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
         let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
@@ -280,7 +278,7 @@ where
         result_sender: Sender<BlindedNodeResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
-        let (trie_cursor_factory, hashed_cursor_factory) = self.prepare_factories();
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
         let blinded_provider_factory = ProofBlindedProviderFactory::new(
             trie_cursor_factory,
@@ -303,7 +301,7 @@ where
         result_sender: Sender<BlindedNodeResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
-        let (trie_cursor_factory, hashed_cursor_factory) = self.prepare_factories();
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
         let blinded_provider_factory = ProofBlindedProviderFactory::new(
             trie_cursor_factory,
