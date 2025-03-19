@@ -133,6 +133,7 @@ where
             match self.previous_hashed_key.take() {
                 Some(hashed_key) => {
                     // Seek to the previous hashed key and get the next hashed entry
+                    trace!(target: "trie::node_iter", ?hashed_key, "Seeking to hashed key");
                     self.hashed_cursor.seek(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
                 }
@@ -143,6 +144,7 @@ where
                         Some(key) => key,
                         None => break, // no more keys
                     };
+                    trace!(target: "trie::node_iter", ?seek_key, "Seeking to seek key");
                     self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
                     self.walker.advance()?;
                 }
