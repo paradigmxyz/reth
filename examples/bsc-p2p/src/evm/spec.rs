@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -83,9 +85,11 @@ pub mod name {
     pub const BOHR: &str = "Bohr";
 }
 
-impl From<&str> for BscSpecId {
-    fn from(name: &str) -> Self {
-        match name {
+impl FromStr for BscSpecId {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             name::FRONTIER => Self::FRONTIER,
             name::FRONTIER_THAWING => Self::FRONTIER_THAWING,
             name::HOMESTEAD => Self::HOMESTEAD,
@@ -119,8 +123,8 @@ impl From<&str> for BscSpecId {
             name::HABER => Self::HABER,
             name::HABER_FIX => Self::HABER_FIX,
             name::BOHR => Self::BOHR,
-            _ => Self::LATEST,
-        }
+            _ => return Err(format!("Unknown BSC spec: {}", s)),
+        })
     }
 }
 
