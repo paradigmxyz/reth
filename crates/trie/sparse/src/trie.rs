@@ -1591,7 +1591,7 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
-        node_iter::{TrieElement, TrieNodeIter},
+        node_iter::{TrieElement, TrieNodeIter, TrieNodeIterType},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
         BranchNode, ExtensionNode, HashedPostState, LeafNode,
@@ -1651,6 +1651,7 @@ mod tests {
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
+            TrieNodeIterType::Account,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
