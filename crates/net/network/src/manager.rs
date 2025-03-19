@@ -21,7 +21,7 @@ use crate::{
     discovery::Discovery,
     error::{NetworkError, ServiceKind},
     eth_requests::IncomingEthRequest,
-    import::{BlockImport, BlockImportOutcome, BlockValidation},
+    import::{BlockImport, BlockImportEvent, BlockImportOutcome, BlockValidation},
     listener::ConnectionListener,
     message::{NewBlockMessage, PeerMessage},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
@@ -520,23 +520,39 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     /// Invoked after a `NewBlock` message from the peer was validated
-    fn on_block_import_result(&mut self, outcome: BlockImportOutcome<N::Block>) {
-        let BlockImportOutcome { peer, result } = outcome;
-        match result {
-            Ok(validated_block) => match validated_block {
+    fn on_block_import_result(&mut self, event: BlockImportEvent<N::Block>) {
+        match event {
+            BlockImportEvent::Announcement(validation) => match validation {
                 BlockValidation::ValidHeader { block } => {
-                    self.swarm.state_mut().update_peer_block(&peer, block.hash, block.number());
                     self.swarm.state_mut().announce_new_block(block);
                 }
                 BlockValidation::ValidBlock { block } => {
                     self.swarm.state_mut().announce_new_block_hash(block);
                 }
             },
-            Err(_err) => {
-                self.swarm
-                    .state_mut()
-                    .peers_mut()
-                    .apply_reputation_change(&peer, ReputationChangeKind::BadBlock);
+            BlockImportEvent::Outcome(outcome) => {
+                let BlockImportOutcome { peer, result } = outcome;
+                match result {
+                    Ok(validated_block) => match validated_block {
+                        BlockValidation::ValidHeader { block } => {
+                            self.swarm.state_mut().update_peer_block(
+                                &peer,
+                                block.hash,
+                                block.number(),
+                            );
+                            self.swarm.state_mut().announce_new_block(block);
+                        }
+                        BlockValidation::ValidBlock { block } => {
+                            self.swarm.state_mut().announce_new_block_hash(block);
+                        }
+                    },
+                    Err(_err) => {
+                        self.swarm
+                            .state_mut()
+                            .peers_mut()
+                            .apply_reputation_change(&peer, ReputationChangeKind::BadBlock);
+                    }
+                }
             }
         }
     }

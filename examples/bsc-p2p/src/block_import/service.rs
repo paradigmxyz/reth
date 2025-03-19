@@ -4,7 +4,7 @@ use alloy_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::{future::Either, stream::FuturesUnordered, StreamExt};
 use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes};
 use reth_network::{
-    import::{BlockImportError, BlockImportOutcome, BlockValidation},
+    import::{BlockImportError, BlockImportEvent, BlockImportOutcome, BlockValidation},
     message::NewBlockMessage,
 };
 use reth_network_api::PeerId;
@@ -30,6 +30,9 @@ pub(crate) type BlockMsg<T> = NewBlockMessage<BscBlock<T>>;
 /// Import outcome for a block
 pub(crate) type Outcome<T> = BlockImportOutcome<BscBlock<T>>;
 
+/// Import event for a block
+pub(crate) type ImportEvent<T> = BlockImportEvent<BscBlock<T>>;
+
 /// Future that processes a block import and returns its outcome
 type PayloadFut<T> = Pin<Box<dyn Future<Output = Outcome<T>> + Send + Sync>>;
 
@@ -53,8 +56,8 @@ where
     consensus: Arc<ParliaConsensus<Provider>>,
     /// Receive the new block from the network
     from_network: UnboundedReceiver<IncomingBlock<T>>,
-    /// Send the outcome of the import to the network
-    to_network: UnboundedSender<Outcome<T>>,
+    /// Send the event of the import to the network
+    to_network: UnboundedSender<ImportEvent<T>>,
     /// Pending block imports.
     pending_imports: FuturesUnordered<Either<PayloadFut<T>, FcuFut<T>>>,
 }
@@ -207,9 +210,9 @@ where
             this.on_new_block(block, peer_id);
         }
 
-        // Process completed imports and send outcomes to network
+        // Process completed imports and send events to network
         while let Poll::Ready(Some(outcome)) = this.pending_imports.poll_next_unpin(cx) {
-            if let Err(e) = this.to_network.send(outcome) {
+            if let Err(e) = this.to_network.send(BlockImportEvent::Outcome(outcome)) {
                 return Poll::Ready(Err(Box::new(e)));
             }
         }
@@ -241,7 +244,10 @@ mod tests {
             .assert_block_import(|outcome| {
                 matches!(
                     outcome,
-                    BlockImportOutcome { peer: _, result: Ok(BlockValidation::ValidBlock { .. }) }
+                    BlockImportEvent::Outcome(BlockImportOutcome {
+                        peer: _,
+                        result: Ok(BlockValidation::ValidBlock { .. })
+                    })
                 )
             })
             .await;
@@ -254,7 +260,10 @@ mod tests {
             .assert_block_import(|outcome| {
                 matches!(
                     outcome,
-                    BlockImportOutcome { peer: _, result: Err(BlockImportError::Other(_)) }
+                    BlockImportEvent::Outcome(BlockImportOutcome {
+                        peer: _,
+                        result: Err(BlockImportError::Other(_))
+                    })
                 )
             })
             .await;
@@ -267,7 +276,10 @@ mod tests {
             .assert_block_import(|outcome| {
                 matches!(
                     outcome,
-                    BlockImportOutcome { peer: _, result: Err(BlockImportError::Other(_)) }
+                    BlockImportEvent::Outcome(BlockImportOutcome {
+                        peer: _,
+                        result: Err(BlockImportError::Other(_))
+                    })
                 )
             })
             .await;
@@ -356,10 +368,10 @@ mod tests {
             Self { handle }
         }
 
-        /// Run a block import test with the given outcome assertion
+        /// Run a block import test with the given event assertion
         async fn assert_block_import<F>(&mut self, assert_fn: F)
         where
-            F: Fn(&BlockImportOutcome<BscBlock<EthEngineTypes>>) -> bool,
+            F: Fn(&BlockImportEvent<BscBlock<EthEngineTypes>>) -> bool,
         {
             let block_msg = create_test_block();
             self.handle.send_block(block_msg, PeerId::random()).unwrap();

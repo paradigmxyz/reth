@@ -19,7 +19,16 @@ pub trait BlockImport<B = reth_ethereum_primitives::Block>: std::fmt::Debug + Se
     fn on_new_block(&mut self, peer_id: PeerId, incoming_block: NewBlockMessage<B>);
 
     /// Returns the results of a [`BlockImport::on_new_block`]
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BlockImportOutcome<B>>;
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BlockImportEvent<B>>;
+}
+
+/// Represents different types of block import events
+#[derive(Debug)]
+pub enum BlockImportEvent<B = reth_ethereum_primitives::Block> {
+    /// General block announcement and validation status
+    Announcement(BlockValidation<B>),
+    /// Result of a peer-specific block import
+    Outcome(BlockImportOutcome<B>),
 }
 
 /// Outcome of the [`BlockImport`]'s block handling.
@@ -69,7 +78,7 @@ pub struct ProofOfStakeBlockImport;
 impl<B> BlockImport<B> for ProofOfStakeBlockImport {
     fn on_new_block(&mut self, _peer_id: PeerId, _incoming_block: NewBlockMessage<B>) {}
 
-    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockImportOutcome<B>> {
+    fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<BlockImportEvent<B>> {
         Poll::Pending
     }
 }
