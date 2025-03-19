@@ -53,23 +53,14 @@ pub struct PendingPool<T: TransactionOrdering> {
 // === impl PendingPool ===
 
 impl<T: TransactionOrdering> PendingPool<T> {
-    /// Create a new pool instance.
+    /// Create a new pending pool pool instance.
     pub fn new(ordering: T) -> Self {
-        let (new_transaction_notifier, _) = broadcast::channel(200);
-        Self {
-            ordering,
-            submission_id: 0,
-            by_id: Default::default(),
-            independent_transactions: Default::default(),
-            highest_nonces: Default::default(),
-            size_of: Default::default(),
-            new_transaction_notifier,
-        }
+        Self::with_buffer(ordering, 200)
     }
 
-    /// Create a new pool instance with configured `max_new_pending_txs_notifications`
-    pub fn with_buffer(ordering: T, max_new_pending_txs_notifications: usize) -> Self {
-        let (new_transaction_notifier, _) = broadcast::channel(max_new_pending_txs_notifications);
+    /// Create a new pool instance with the given buffer capacity.
+    pub fn with_buffer(ordering: T, buffer_capacity: usize) -> Self {
+        let (new_transaction_notifier, _) = broadcast::channel(buffer_capacity);
         Self {
             ordering,
             submission_id: 0,
@@ -197,7 +188,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this;
+                        break 'this
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
@@ -239,7 +230,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                 // Remove all dependent transactions.
                 'this: while let Some((next_id, next_tx)) = transactions_iter.peek() {
                     if next_id.sender != id.sender {
-                        break 'this;
+                        break 'this
                     }
                     removed.push(Arc::clone(&next_tx.transaction));
                     transactions_iter.next();
@@ -437,7 +428,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                         }
                     }
 
-                    return;
+                    return
                 }
 
                 if !remove_locals && tx.transaction.is_local() {
@@ -445,7 +436,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
                     if local_senders.insert(sender_id) {
                         non_local_senders -= 1;
                     }
-                    continue;
+                    continue
                 }
 
                 total_size += tx.transaction.size();
@@ -463,7 +454,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             // return if either the pool is under limits or there are no more _eligible_
             // transactions to remove
             if !self.exceeds(limit) || non_local_senders == 0 {
-                return;
+                return
             }
         }
     }
@@ -485,13 +476,13 @@ impl<T: TransactionOrdering> PendingPool<T> {
         let mut removed = Vec::new();
         // return early if the pool is already under the limits
         if !self.exceeds(&limit) {
-            return removed;
+            return removed
         }
 
         // first truncate only non-local transactions, returning if the pool end up under the limit
         self.remove_to_limit(&limit, false, &mut removed);
         if !self.exceeds(&limit) {
-            return removed;
+            return removed
         }
 
         // now repeat for local transactions, since local transactions must be removed now for the
