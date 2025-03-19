@@ -1,31 +1,34 @@
 //! This is our custom implementation of validator struct
 
-use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
-use std::time::Duration;
-use url::Url;
-
+use alloy_rpc_client::ReqwestClient;
 pub use kona_interop::{ExecutingDescriptor, SafetyLevel};
-pub use kona_rpc::{InteropTxValidator, InteropTxValidatorError};
+pub use kona_rpc::{
+    CheckAccessList, InteropTxValidator, InteropTxValidatorError, SupervisorApiClient,
+};
+use std::time::Duration;
 
 /// Implementation of the supervisor trait for the interop.
 #[derive(Debug, Clone)]
 pub struct SupervisorClient {
-    client: HttpClient,
+    inner: kona_rpc::SupervisorClient,
     safety: SafetyLevel,
 }
 
 impl SupervisorClient {
     /// Creates a new supervisor validator.
-    pub fn new(supervisor_endpoint: impl Into<String>, safety: Option<String>) -> Self {
-        let url = Url::parse(supervisor_endpoint.into().as_str()).expect("parsing supervisor url");
-        let client =
-            HttpClientBuilder::default().build(url).expect("building supervisor http client");
+    pub async fn new(supervisor_endpoint: impl Into<String>, safety: Option<String>) -> Self {
+        let inner = kona_rpc::SupervisorClient::new(
+            ReqwestClient::builder()
+                .connect(supervisor_endpoint.into().as_str())
+                .await
+                .expect("building supervisor client"),
+        );
         let safety = safety
             .map(|safety| {
                 serde_json::from_str(safety.as_str()).expect("invalid safety level provided")
             })
             .unwrap_or(SafetyLevel::CrossUnsafe);
-        Self { client, safety }
+        Self { inner, safety }
     }
 
     /// Returns safely level
@@ -35,10 +38,10 @@ impl SupervisorClient {
 }
 
 impl InteropTxValidator for SupervisorClient {
-    type SupervisorClient = HttpClient;
+    type SupervisorClient = kona_rpc::SupervisorClient;
     const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
 
     fn supervisor_client(&self) -> &Self::SupervisorClient {
-        &self.client
+        &self.inner
     }
 }

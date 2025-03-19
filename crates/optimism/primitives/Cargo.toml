@@ -32,9 +32,10 @@ op-alloy-consensus.workspace = true
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-network = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
+alloy-rpc-client.workspace = true
 
 # kona
-kona-rpc = { workspace = true, features = ["client", "interop", "jsonrpsee"] }
+kona-rpc = { workspace = true, features = ["client", "interop", "reqwest"] }
 kona-interop.workspace = true
 
 # codec
@@ -46,8 +47,6 @@ serde_with = { workspace = true, optional = true }
 # misc
 derive_more = { workspace = true, features = ["deref", "from", "into", "constructor"] }
 rand = { workspace = true, optional = true }
-jsonrpsee.workspace = true
-url.workspace = true
 serde_json.workspace = true
 
 # test
@@ -87,6 +86,8 @@ std = [
     "serde_json/std",
     "alloy-evm/std",
     "serde_with?/std",
+    "kona-interop/std",
+    "kona-rpc/std",
 ]
 alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth", "op-alloy-consensus/alloy-compat"]
 reth-codec = [

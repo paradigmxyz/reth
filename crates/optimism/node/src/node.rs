@@ -542,13 +542,24 @@ where
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
         // Interop check
-        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) &&
-            self.supervisor_http.is_none()
-        {
-            return Err(eyre::eyre!(
-                "interop is activated. `--rollup.supervisor-http` must be provided"
-            ));
-        }
+        let supervisor_client;
+        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) {
+            match self.supervisor_http.clone() {
+                None => {
+                    return Err(eyre::eyre!(
+                        "interop is activated. `--rollup.supervisor-http` must be provided"
+                    ))
+                }
+                Some(http) => {
+                    supervisor_client = Some(
+                        SupervisorClient::new(http, self.supervisor_safety_level.clone()).await,
+                    )
+                }
+            }
+        } else {
+            supervisor_client = None
+        };
+
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .no_eip4844()
             .with_head_timestamp(ctx.head().timestamp)
@@ -564,9 +575,8 @@ where
                     // In --dev mode we can't require gas fees because we're unable to decode
                     // the L1 block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev)
-                    .with_supervisor(self.supervisor_http.clone().map(|http| {
-                        SupervisorClient::new(http, self.supervisor_safety_level.clone())
-                    }))
+                    // TODO: fix this clone
+                    .with_supervisor(supervisor_client.clone())
             });
 
         let transaction_pool = reth_transaction_pool::Pool::new(

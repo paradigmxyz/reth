@@ -5075,6 +5075,7 @@ source = "git+https://github.com/op-rs/kona?rev=0493d8479e2ca9f0eb6d5c6154e2bedc
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rpc-client",
  "async-trait",
  "derive_more 2.0.1",
  "getrandom 0.3.1",
@@ -9001,13 +9002,13 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-client",
  "alloy-rpc-types-eth",
  "alloy-serde",
  "arbitrary",
  "bincode",
  "bytes",
  "derive_more 2.0.1",
- "jsonrpsee",
  "kona-interop",
  "kona-rpc",
  "modular-bitfield",
@@ -9025,7 +9026,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "url",
 ]
 
 [[package]]
