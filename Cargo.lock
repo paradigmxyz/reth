@@ -3134,7 +3134,7 @@ version = "0.0.0"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-types",
+ "auto_impl",
  "bytes",
  "derive_more 2.0.1",
  "eyre",
@@ -3154,6 +3154,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-tracing",
+ "revm",
  "secp256k1",
  "serde",
  "serde_json",
