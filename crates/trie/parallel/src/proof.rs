@@ -98,8 +98,6 @@ where
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
-        let proof_targets = targets.clone();
-
         // Extend prefix sets with targets
         let mut prefix_sets = (*self.prefix_sets).clone();
         prefix_sets.extend(TriePrefixSetsMut {
@@ -153,6 +151,7 @@ where
             // place when we iterate over the trie
             storage_proofs.insert(hashed_address, receiver);
         }
+        trace!(target: "trie::parallel_proof", keys = ?storage_proofs.keys(), "Starting storage proof computation");
 
         let provider_ro = self.view.provider_ro()?;
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -211,7 +210,7 @@ where
                             trace!(
                                 target: "trie::parallel_proof",
                                 ?hashed_address,
-                                ?proof_targets,
+                                ?targets,
                                 "Missing leaf, computing storage proof"
                             );
                             tracker.inc_missed_leaves();
