@@ -400,9 +400,9 @@ pub enum ProofTaskKind {
     /// A storage proof request.
     StorageProof(StorageProofInput, Sender<StorageProofResult>),
     /// A blinded account node request.
-    BlindedAccountNode(Nibbles, Sender<Result<Option<RevealedNode>, SparseTrieError>>),
+    BlindedAccountNode(Nibbles, Sender<BlindedNodeResult>),
     /// A blinded storage node request.
-    BlindedStorageNode(B256, Nibbles, Sender<Result<Option<RevealedNode>, SparseTrieError>>),
+    BlindedStorageNode(B256, Nibbles, Sender<BlindedNodeResult>),
 }
 
 /// A handle that wraps a single proof task sender that sends a terminate message on `Drop`.
