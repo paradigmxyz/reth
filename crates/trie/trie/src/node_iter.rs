@@ -40,6 +40,11 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     /// used to resume iterating from the last returned leaf node.
     previous_hashed_key: Option<B256>,
 
+    /// The hashed cursor key to seek to.
+    hashed_cursor_seek: Option<B256>,
+    /// Flag indicating whether we should advance the hashed cursor by one after seeking.
+    hashed_cursor_next: bool,
+
     /// Current hashed  entry.
     current_hashed_entry: Option<(B256, <H as HashedCursor>::Value)>,
     /// Flag indicating whether we should check the current walker key.
@@ -53,6 +58,8 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
             walker,
             hashed_cursor,
             previous_hashed_key: None,
+            hashed_cursor_seek: None,
+            hashed_cursor_next: false,
             current_hashed_entry: None,
             current_walker_key_checked: false,
         }
@@ -102,6 +109,17 @@ where
                 }
             }
 
+            // Seek the hashed cursor if we have a key.
+            if let Some(hashed_key) = self.hashed_cursor_seek.take() {
+                let entry = self.hashed_cursor.seek(hashed_key)?;
+                if self.hashed_cursor_next {
+                    self.current_hashed_entry = self.hashed_cursor.next()?;
+                    self.hashed_cursor_next = false;
+                } else {
+                    self.current_hashed_entry = entry;
+                }
+            }
+
             // If there's a hashed entry...
             if let Some((hashed_key, value)) = self.current_hashed_entry.take() {
                 // If the walker's key is less than the unpacked hashed key,
@@ -119,18 +137,19 @@ where
             // Handle seeking and advancing based on the previous hashed key
             match self.previous_hashed_key.take() {
                 Some(hashed_key) => {
-                    // Seek to the previous hashed key and get the next hashed entry
-                    self.hashed_cursor.seek(hashed_key)?;
-                    self.current_hashed_entry = self.hashed_cursor.next()?;
+                    // Lazily seek to the previous hashed key and get the next hashed entry
+                    self.hashed_cursor_seek = Some(hashed_key);
+                    self.hashed_cursor_next = true;
                 }
                 None => {
-                    // Get the seek key and set the current hashed entry based on walker's next
-                    // unprocessed key
+                    // Get the seek key and lazily set the current hashed entry based on walker's
+                    // next unprocessed key
                     let seek_key = match self.walker.next_unprocessed_key() {
                         Some(key) => key,
                         None => break, // no more keys
                     };
-                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
+                    self.hashed_cursor_seek = Some(seek_key);
+                    self.hashed_cursor_next = false;
                     self.walker.advance()?;
                 }
             }
