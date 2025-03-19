@@ -1,13 +1,8 @@
 //! Configuration files.
-#![allow(dead_code)]
-#![allow(unused_imports)]
-use eyre::eyre;
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
 use std::{
-    ffi::OsStr,
-    fs,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -33,6 +28,14 @@ pub struct Config {
     /// Configuration for peer sessions.
     pub sessions: SessionsConfig,
 }
+
+impl Config {
+    /// Sets the pruning configuration.
+    pub fn update_prune_config(&mut self, prune_config: PruneConfig) {
+        self.prune = Some(prune_config);
+    }
+}
+
 #[cfg(feature = "serde")]
 impl Config {
     /// Load a [`Config`] from a specified path.
@@ -41,22 +44,23 @@ impl Config {
     /// exists.
     pub fn from_path(path: impl AsRef<Path>) -> eyre::Result<Self> {
         let path = path.as_ref();
-        match fs::read_to_string(path) {
+        match std::fs::read_to_string(path) {
             Ok(cfg_string) => {
-                toml::from_str(&cfg_string).map_err(|e| eyre!("Failed to parse TOML: {e}"))
+                toml::from_str(&cfg_string).map_err(|e| eyre::eyre!("Failed to parse TOML: {e}"))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| eyre!("Failed to create directory: {e}"))?;
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| eyre::eyre!("Failed to create directory: {e}"))?;
                 }
                 let cfg = Self::default();
                 let s = toml::to_string_pretty(&cfg)
-                    .map_err(|e| eyre!("Failed to serialize to TOML: {e}"))?;
-                fs::write(path, s).map_err(|e| eyre!("Failed to write configuration file: {e}"))?;
+                    .map_err(|e| eyre::eyre!("Failed to serialize to TOML: {e}"))?;
+                std::fs::write(path, s)
+                    .map_err(|e| eyre::eyre!("Failed to write configuration file: {e}"))?;
                 Ok(cfg)
             }
-            Err(e) => Err(eyre!("Failed to load configuration: {e}")),
+            Err(e) => Err(eyre::eyre!("Failed to load configuration: {e}")),
         }
     }
 
@@ -75,7 +79,7 @@ impl Config {
 
     /// Save the configuration to toml file.
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
-        if path.extension() != Some(OsStr::new(EXTENSION)) {
+        if path.extension() != Some(std::ffi::OsStr::new(EXTENSION)) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("reth config file extension must be '{EXTENSION}'"),
@@ -87,11 +91,6 @@ impl Config {
             toml::to_string(self)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
         )
-    }
-
-    /// Sets the pruning configuration.
-    pub fn update_prune_config(&mut self, prune_config: PruneConfig) {
-        self.prune = Some(prune_config);
     }
 }
 
