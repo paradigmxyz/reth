@@ -1,0 +1,50 @@
+[package]
+name = "example-custom-node"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth-chain-state.workspace = true
+reth-chainspec.workspace = true
+reth-codecs.workspace = true
+reth-network-peers.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-forks.workspace = true
+reth-optimism-node.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
+reth-primitives-traits.workspace = true
+
+# revm
+revm-primitives.workspace = true
+
+# alloy
+alloy-consensus = { workspace = true, features = ["serde"] }
+alloy-eips.workspace = true
+alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+alloy-rpc-types-engine.workspace = true
+op-alloy-rpc-types-engine.workspace = true
+
+# misc
+derive_more.workspace = true
+serde.workspace = true
+
+[features]
+default = []
+arbitrary = [
+    "alloy-consensus/arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
+    "op-alloy-rpc-types-engine/arbitrary",
+    "reth-chainspec/arbitrary",
+    "reth-codecs/arbitrary",
+    "reth-optimism-primitives/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "revm-primitives/arbitrary",
+]

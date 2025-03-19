@@ -125,6 +125,12 @@ impl<T: InMemorySize> InMemorySize for Vec<T> {
     }
 }
 
+impl InMemorySize for u64 {
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>()
+    }
+}
+
 /// Implementation for optimism types
 #[cfg(feature = "op")]
 mod op {
