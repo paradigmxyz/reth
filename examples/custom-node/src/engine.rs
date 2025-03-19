@@ -1,7 +1,4 @@
-use crate::{
-    chainspec::CustomChainSpec,
-    primitives::{Block, CustomHeader, CustomNodePrimitives},
-};
+use crate::primitives::CustomNodePrimitives;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
@@ -11,17 +8,11 @@ use op_alloy_rpc_types_engine::{
 };
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_node_api::{
-    validate_version_specific_fields, AddOnsContext, BuiltPayload, EngineApiMessageVersion,
-    EngineObjectValidationError, EngineTypes, EngineValidator, ExecutionPayload,
-    FullNodeComponents, InvalidPayloadAttributesError, NewPayloadError, NodePrimitives,
-    NodeTypesWithEngine, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
-    PayloadTypes, PayloadValidator,
+    BuiltPayload, EngineTypes, ExecutionPayload, NodePrimitives, PayloadAttributes,
+    PayloadBuilderAttributes, PayloadTypes,
 };
-use reth_node_builder::rpc::EngineValidatorBuilder;
 use reth_optimism_node::{OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes};
-use reth_optimism_payload_builder::OpExecutionPayloadValidator;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::SealedBlock;
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
@@ -268,117 +259,5 @@ impl EngineTypes for CustomEngineTypes {
         let block = block.into_block().map_header(|header| header.inner);
         let (payload, sidecar) = OpExecutionPayload::from_block_unchecked(block_hash, &block);
         CustomExecutionData { inner: OpExecutionData { payload, sidecar }, extension }
-    }
-}
-
-/// Custom engine validator
-#[derive(Debug, Clone)]
-pub struct CustomEngineValidator {
-    inner: OpExecutionPayloadValidator<CustomChainSpec>,
-}
-
-impl CustomEngineValidator {
-    /// Instantiates a new validator.
-    pub const fn new(chain_spec: Arc<CustomChainSpec>) -> Self {
-        Self { inner: OpExecutionPayloadValidator::new(chain_spec) }
-    }
-
-    /// Returns the chain spec used by the validator.
-    #[inline]
-    fn chain_spec(&self) -> &CustomChainSpec {
-        self.inner.chain_spec()
-    }
-}
-
-impl PayloadValidator for CustomEngineValidator {
-    type Block = Block;
-    type ExecutionData = CustomExecutionData;
-
-    fn ensure_well_formed_payload(
-        &self,
-        payload: CustomExecutionData,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block = self
-            .inner
-            .ensure_well_formed_payload(payload.inner)
-            .map_err(|e| NewPayloadError::Other(e.into()))?;
-
-        // First recover the block with the original header
-        let recovered = sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))?;
-
-        let senders = recovered.senders().to_vec();
-        let block_hash = recovered.hash();
-
-        // Create a new block with CustomHeader
-        let block = recovered.into_block().map_header(|header| {
-            // Create CustomHeader using the original header and the extension
-            CustomHeader { inner: header, extension: payload.extension }
-        });
-
-        // Create a new RecoveredBlock with our custom block type
-        Ok(RecoveredBlock::new(block, senders, block_hash))
-    }
-}
-
-impl<T> EngineValidator<T> for CustomEngineValidator
-where
-    T: EngineTypes<
-        PayloadAttributes = CustomPayloadAttributes,
-        ExecutionData = CustomExecutionData,
-    >,
-{
-    fn validate_version_specific_fields(
-        &self,
-        version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, T::PayloadAttributes>,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
-    }
-
-    fn ensure_well_formed_attributes(
-        &self,
-        version: EngineApiMessageVersion,
-        attributes: &T::PayloadAttributes,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(
-            self.chain_spec(),
-            version,
-            PayloadOrAttributes::<Self::ExecutionData, T::PayloadAttributes>::PayloadAttributes(
-                attributes,
-            ),
-        )?;
-
-        Ok(())
-    }
-
-    fn validate_payload_attributes_against_header(
-        &self,
-        _attr: &<T as PayloadTypes>::PayloadAttributes,
-        _header: &<Self::Block as reth::api::Block>::Header,
-    ) -> Result<(), InvalidPayloadAttributesError> {
-        // skip default timestamp validation
-        Ok(())
-    }
-}
-
-/// Custom engine validator builder
-#[derive(Debug, Default, Clone, Copy)]
-#[non_exhaustive]
-pub struct CustomEngineValidatorBuilder;
-
-impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
-where
-    N: FullNodeComponents<
-        Types: NodeTypesWithEngine<
-            Engine = CustomEngineTypes,
-            ChainSpec = CustomChainSpec,
-            Primitives = CustomNodePrimitives,
-        >,
-    >,
-{
-    type Validator = CustomEngineValidator;
-
-    async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
-        Ok(CustomEngineValidator::new(ctx.config.chain.clone()))
     }
 }
