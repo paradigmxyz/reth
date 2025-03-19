@@ -1,10 +1,5 @@
-use crate::{
-    hashed_cursor::HashedCursor, metrics::TrieType, trie_cursor::TrieCursor, walker::TrieWalker,
-    Nibbles,
-};
+use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
-use metrics::Counter;
-use reth_metrics::Metrics;
 use reth_storage_errors::db::DatabaseError;
 
 /// Represents a branch node in the trie.
@@ -51,12 +46,16 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     current_walker_key_checked: bool,
 
     #[cfg(feature = "metrics")]
-    metrics: TrieNodeIterMetrics,
+    metrics: crate::metrics::TrieNodeIterMetrics,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     /// Creates a new [`TrieNodeIter`].
-    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, trie_type: TrieType) -> Self {
+    pub fn new(
+        walker: TrieWalker<C>,
+        hashed_cursor: H,
+        #[cfg(feature = "metrics")] trie_type: crate::metrics::TrieType,
+    ) -> Self {
         Self {
             walker,
             hashed_cursor,
@@ -64,7 +63,10 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
             current_hashed_entry: None,
             current_walker_key_checked: false,
             #[cfg(feature = "metrics")]
-            metrics: TrieNodeIterMetrics::new_with_labels(&[("type", trie_type.as_str())]),
+            metrics: crate::metrics::TrieNodeIterMetrics::new_with_labels(&[(
+                "type",
+                trie_type.as_str(),
+            )]),
         }
     }
 
@@ -154,11 +156,4 @@ where
 
         Ok(None)
     }
-}
-
-#[derive(Metrics)]
-#[metrics(scope = "trie.node_iter")]
-struct TrieNodeIterMetrics {
-    /// The number of times the hashed cursor was seeked.
-    pub hashed_cursor_seeks_total: Counter,
 }

@@ -83,3 +83,11 @@ impl WalkerMetrics {
         self.out_of_order_subnode.increment(amount);
     }
 }
+
+/// Metrics for trie node iterator.
+#[derive(Metrics)]
+#[metrics(scope = "trie.node_iter")]
+pub struct TrieNodeIterMetrics {
+    /// The number of times the hashed cursor was seeked.
+    pub hashed_cursor_seeks_total: Counter,
+}
