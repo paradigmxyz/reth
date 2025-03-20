@@ -123,7 +123,7 @@ impl Serialize for CombinedResult {
 #[derive(Debug)]
 pub(crate) struct TotalGasRow {
     /// The block number of the block being processed.
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub(crate) block_number: u64,
     /// The total gas used in the block.
     pub(crate) gas_used: u64,
