@@ -162,14 +162,17 @@ mod tests {
     fn test_trie_node_iter() {
         reth_tracing::init_test_tracing();
 
+        // Extension (Key = 000000000000000000000000000000000000000000000000000000000000)
+        // └── Branch
+        //     ├── 0 -> Branch
+        //     │      ├── 0 -> Leaf (Empty Account, marked as changed)
+        //     │      └── 1 -> Leaf (Empty Account)
+        //     └── 1 -> Leaf (Empty Account)
+
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
         let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
         let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
-        let hashed_accounts = BTreeMap::from([
-            (account_1, Account::default()),
-            (account_2, Account::default()),
-            (account_3, Account::default()),
-        ]);
+        let empty_account = Account::default();
 
         let empty_account_rlp = RlpNode::from_rlp(&alloy_rlp::encode(TrieAccount::default()));
 
@@ -205,9 +208,10 @@ mod tests {
             ),
         );
 
-        let trie_nodes = BTreeMap::from([root_branch_node.clone(), child_branch_node.clone()]);
-
-        let trie_cursor_factory = MockTrieCursorFactory::new(trie_nodes, B256Map::default());
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            BTreeMap::from([root_branch_node.clone(), child_branch_node.clone()]),
+            B256Map::default(),
+        );
 
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.insert(Nibbles::unpack(account_1));
@@ -217,12 +221,19 @@ mod tests {
             prefix_set.freeze(),
         );
 
-        let hashed_cursor_factory =
-            MockHashedCursorFactory::new(hashed_accounts, B256Map::default());
+        let hashed_cursor_factory = MockHashedCursorFactory::new(
+            BTreeMap::from([
+                (account_1, empty_account),
+                (account_2, empty_account),
+                (account_3, empty_account),
+            ]),
+            B256Map::default(),
+        );
 
         let mut iter =
             TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
 
+        // Walk the iterator until it's exhausted.
         while iter.try_next().unwrap().is_some() {}
 
         pretty_assertions::assert_eq!(
