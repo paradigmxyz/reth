@@ -2,16 +2,11 @@
 
 use crate::tree::payload_processor::{
     executor::WorkloadExecutor,
-    multiproof::{MultiProofConfig, MultiProofTaskMetrics, SparseTrieUpdate},
+    multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
 };
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_provider::{BlockReader, DBProvider, DatabaseProviderFactory, StateCommitmentProvider};
-use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, Nibbles,
-};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie::{updates::TrieUpdates, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
@@ -29,21 +24,32 @@ use tracing::{debug, trace, trace_span};
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// A task responsible for populating the sparse trie.
-pub(super) struct SparseTrieTask<F> {
+pub(super) struct SparseTrieTask<BPF> {
     /// Executor used to spawn subtasks.
     #[allow(unused)] // TODO use this for spawning trie tasks
     pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
     pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,
-    // TODO: ideally we need a way to create multiple readers on demand.
-    pub(super) config: MultiProofConfig<F>,
+    pub(super) blinded_provider_factory: BPF,
     pub(super) metrics: MultiProofTaskMetrics,
 }
 
-impl<F> SparseTrieTask<F>
+impl<BPF> SparseTrieTask<BPF>
 where
-    F: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
+    BPF: BlindedProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
+    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
 {
+    /// Creates a new sparse trie task.
+    pub(super) fn new(
+        executor: WorkloadExecutor,
+        updates: mpsc::Receiver<SparseTrieUpdate>,
+        blinded_provider_factory: BPF,
+        metrics: MultiProofTaskMetrics,
+    ) -> Self {
+        Self { executor, updates, blinded_provider_factory, metrics }
+    }
+
     /// Runs the sparse trie task to completion.
     ///
     /// This waits for new incoming [`SparseTrieUpdate`].
@@ -54,19 +60,6 @@ where
     /// drop.
     pub(super) fn run(&self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
-        let provider_ro = self.config.consistent_view.provider_ro()?;
-        let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
-            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-            &self.config.nodes_sorted,
-        );
-        let blinded_provider_factory = ProofBlindedProviderFactory::new(
-            in_memory_trie_cursor.clone(),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                &self.config.state_sorted,
-            ),
-            self.config.prefix_sets.clone(),
-        );
 
         let mut num_iterations = 0;
         let mut trie = SparseStateTrie::default().with_updates(true);
@@ -87,7 +80,7 @@ where
                 "Updating sparse trie"
             );
 
-            let elapsed = update_sparse_trie(&mut trie, update, &blinded_provider_factory)
+            let elapsed = update_sparse_trie(&mut trie, update, &self.blinded_provider_factory)
                 .map_err(|e| {
                     ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
                 })?;
@@ -99,7 +92,7 @@ where
 
         let start = Instant::now();
         let (state_root, trie_updates) =
-            trie.root_with_updates(&blinded_provider_factory).map_err(|e| {
+            trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
 

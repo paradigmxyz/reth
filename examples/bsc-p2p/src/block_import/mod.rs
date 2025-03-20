@@ -1,11 +1,11 @@
 #![allow(unused)]
 use handle::ImportHandle;
 use reth_engine_primitives::EngineTypes;
-use reth_network::import::BlockImport;
+use reth_network::import::{BlockImport, BlockImportOutcome, NewBlockEvent};
 use reth_network_peers::PeerId;
-use reth_payload_primitives::BuiltPayload;
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives::NodePrimitives;
-use service::{BlockMsg, Outcome};
+use service::{BlockMsg, BscBlock, ImportEvent, Outcome};
 use std::{
     fmt,
     task::{ready, Context, Poll},
@@ -15,25 +15,24 @@ mod handle;
 mod parlia;
 mod service;
 
-pub struct BscBlockImport<EngineT: EngineTypes> {
-    handle: ImportHandle<EngineT>,
+pub struct BscBlockImport<T: PayloadTypes> {
+    handle: ImportHandle<T>,
 }
 
-impl<EngineT: EngineTypes> BscBlockImport<EngineT> {
-    pub fn new(handle: ImportHandle<EngineT>) -> Self {
+impl<T: PayloadTypes> BscBlockImport<T> {
+    pub fn new(handle: ImportHandle<T>) -> Self {
         Self { handle }
     }
 }
 
-impl<EngineT: EngineTypes>
-    BlockImport<<<EngineT::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block>
-    for BscBlockImport<EngineT>
-{
-    fn on_new_block(&mut self, peer_id: PeerId, incoming_block: BlockMsg<EngineT>) {
-        let _ = self.handle.send_block(incoming_block, peer_id);
+impl<T: PayloadTypes> BlockImport<BscBlock<T>> for BscBlockImport<T> {
+    fn on_new_block(&mut self, peer_id: PeerId, incoming_block: NewBlockEvent<BscBlock<T>>) {
+        if let NewBlockEvent::Block(block) = incoming_block {
+            let _ = self.handle.send_block(block, peer_id);
+        }
     }
 
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Outcome<EngineT>> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<ImportEvent<T>> {
         match ready!(self.handle.poll_outcome(cx)) {
             Some(outcome) => Poll::Ready(outcome),
             None => Poll::Pending,
@@ -41,7 +40,7 @@ impl<EngineT: EngineTypes>
     }
 }
 
-impl<EngineT: EngineTypes> fmt::Debug for BscBlockImport<EngineT> {
+impl<T: PayloadTypes> fmt::Debug for BscBlockImport<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BscBlockImport")
             .field("engine_handle", &"BeaconConsensusEngineHandle")

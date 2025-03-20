@@ -4,7 +4,7 @@ use crate::{
     RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloy_primitives::{
-    map::{B256Map, HashSet},
+    map::{B256Map, HashMap, HashSet},
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -12,9 +12,10 @@ use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, Spa
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
+    proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, Nibbles, RlpNode, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    MultiProof, Nibbles, RlpNode, StorageMultiProof, TrieAccount, TrieMask, TrieNode,
+    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use std::{collections::VecDeque, iter::Peekable};
 
@@ -203,7 +204,36 @@ impl SparseStateTrie {
     /// Reveal unknown trie paths from multiproof.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_multiproof(&mut self, multiproof: MultiProof) -> SparseStateTrieResult<()> {
-        let account_subtree = multiproof.account_subtree.into_nodes_sorted();
+        let MultiProof {
+            account_subtree,
+            storages,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+        } = multiproof;
+
+        // first reveal the account proof nodes
+        self.reveal_account_multiproof(
+            account_subtree,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+        )?;
+
+        // then reveal storage proof nodes for each storage trie
+        for (account, storage_subtree) in storages {
+            self.reveal_storage_multiproof(account, storage_subtree)?;
+        }
+
+        Ok(())
+    }
+
+    /// Reveals an account multiproof.
+    pub fn reveal_account_multiproof(
+        &mut self,
+        account_subtree: ProofNodes,
+        branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+        branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    ) -> SparseStateTrieResult<()> {
+        let account_subtree = account_subtree.into_nodes_sorted();
         let mut account_nodes = account_subtree.into_iter().peekable();
 
         if let Some(root_node) = self.validate_root_node(&mut account_nodes)? {
@@ -211,8 +241,8 @@ impl SparseStateTrie {
             let trie = self.state.reveal_root_with_provider(
                 root_node,
                 TrieMasks {
-                    hash_mask: multiproof.branch_node_hash_masks.get(&Nibbles::default()).copied(),
-                    tree_mask: multiproof.branch_node_tree_masks.get(&Nibbles::default()).copied(),
+                    hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
+                    tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
                 },
                 self.retain_updates,
             )?;
@@ -228,8 +258,8 @@ impl SparseStateTrie {
                 let node = TrieNode::decode(&mut &bytes[..])?;
                 let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
                     (
-                        multiproof.branch_node_hash_masks.get(&path).copied(),
-                        multiproof.branch_node_tree_masks.get(&path).copied(),
+                        branch_node_hash_masks.get(&path).copied(),
+                        branch_node_tree_masks.get(&path).copied(),
                     )
                 } else {
                     (None, None)
@@ -243,52 +273,59 @@ impl SparseStateTrie {
             }
         }
 
-        for (account, storage_subtree) in multiproof.storages {
-            let subtree = storage_subtree.subtree.into_nodes_sorted();
-            let mut nodes = subtree.into_iter().peekable();
+        Ok(())
+    }
 
-            if let Some(root_node) = self.validate_root_node(&mut nodes)? {
-                // Reveal root node if it wasn't already.
-                let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
-                    root_node,
-                    TrieMasks {
-                        hash_mask: storage_subtree
-                            .branch_node_hash_masks
-                            .get(&Nibbles::default())
-                            .copied(),
-                        tree_mask: storage_subtree
-                            .branch_node_tree_masks
-                            .get(&Nibbles::default())
-                            .copied(),
-                    },
-                    self.retain_updates,
-                )?;
-                let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
+    /// Reveals a storage multiproof for the given address.
+    pub fn reveal_storage_multiproof(
+        &mut self,
+        account: B256,
+        storage_subtree: StorageMultiProof,
+    ) -> SparseStateTrieResult<()> {
+        let subtree = storage_subtree.subtree.into_nodes_sorted();
+        let mut nodes = subtree.into_iter().peekable();
 
-                // Reveal the remaining proof nodes.
-                for (path, bytes) in nodes {
-                    self.metrics.increment_total_storage_nodes();
-                    // If the node is already revealed, skip it.
-                    if revealed_nodes.contains(&path) {
-                        self.metrics.increment_skipped_storage_nodes();
-                        continue
-                    }
-                    let node = TrieNode::decode(&mut &bytes[..])?;
-                    let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
-                        (
-                            storage_subtree.branch_node_hash_masks.get(&path).copied(),
-                            storage_subtree.branch_node_tree_masks.get(&path).copied(),
-                        )
-                    } else {
-                        (None, None)
-                    };
+        if let Some(root_node) = self.validate_root_node(&mut nodes)? {
+            // Reveal root node if it wasn't already.
+            let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
+                root_node,
+                TrieMasks {
+                    hash_mask: storage_subtree
+                        .branch_node_hash_masks
+                        .get(&Nibbles::default())
+                        .copied(),
+                    tree_mask: storage_subtree
+                        .branch_node_tree_masks
+                        .get(&Nibbles::default())
+                        .copied(),
+                },
+                self.retain_updates,
+            )?;
+            let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
-                    trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
-                    trie.reveal_node(path.clone(), node, TrieMasks { hash_mask, tree_mask })?;
-
-                    // Track the revealed path.
-                    revealed_nodes.insert(path);
+            // Reveal the remaining proof nodes.
+            for (path, bytes) in nodes {
+                self.metrics.increment_total_storage_nodes();
+                // If the node is already revealed, skip it.
+                if revealed_nodes.contains(&path) {
+                    self.metrics.increment_skipped_storage_nodes();
+                    continue
                 }
+                let node = TrieNode::decode(&mut &bytes[..])?;
+                let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
+                    (
+                        storage_subtree.branch_node_hash_masks.get(&path).copied(),
+                        storage_subtree.branch_node_tree_masks.get(&path).copied(),
+                    )
+                } else {
+                    (None, None)
+                };
+
+                trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
+                trie.reveal_node(path.clone(), node, TrieMasks { hash_mask, tree_mask })?;
+
+                // Track the revealed path.
+                revealed_nodes.insert(path);
             }
         }
 

@@ -35,9 +35,7 @@ alloy-consensus.workspace = true
 alloy-sol-types.workspace = true
 alloy-rpc-types-eth.workspace = true
 revm.workspace = true
-revm-database.workspace = true
 revm-inspectors.workspace = true
-revm-primitives.workspace = true
 
 # rpc
 jsonrpsee-core.workspace = true
