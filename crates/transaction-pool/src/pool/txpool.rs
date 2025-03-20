@@ -11,7 +11,7 @@ use crate::{
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
         pending::PendingPool,
         state::{SubPool, TxState},
-        update::{Destination, PoolUpdate},
+        update::{Destination, PoolUpdate, UpdateOutcome},
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
@@ -1939,21 +1939,6 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
 impl<T: PoolTransaction> PoolInternalTransaction<T> {
     fn next_cumulative_cost(&self) -> U256 {
         self.cumulative_cost + self.transaction.cost()
-    }
-}
-
-/// Tracks the result after updating the pool
-#[derive(Debug)]
-pub(crate) struct UpdateOutcome<T: PoolTransaction> {
-    /// transactions promoted to the pending pool
-    pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
-    /// transaction that failed and were discarded
-    pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
-}
-
-impl<T: PoolTransaction> Default for UpdateOutcome<T> {
-    fn default() -> Self {
-        Self { promoted: vec![], discarded: vec![] }
     }
 }
 
