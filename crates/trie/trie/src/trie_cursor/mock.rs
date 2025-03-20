@@ -137,10 +137,7 @@ impl TrieCursor for MockTrieCursor {
         iter.find(|(k, _)| self.current_key.as_ref().is_none_or(|current| k.starts_with(current)))
             .expect("current key should exist in trie nodes");
         // Get the next key-value pair.
-        let entry = iter
-            .next()
-            .or_else(|| self.trie_nodes.first_key_value())
-            .map(|(k, v)| (k.clone(), v.clone()));
+        let entry = iter.next().map(|(k, v)| (k.clone(), v.clone()));
         if let Some((key, _)) = &entry {
             self.current_key = Some(key.clone());
             self.visited_keys.lock().push(KeyVisitType::Next(key.clone()));

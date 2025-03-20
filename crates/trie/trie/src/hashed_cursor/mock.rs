@@ -128,8 +128,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         })
         .expect("current key should exist in values");
         // Get the next key-value pair.
-        let entry =
-            iter.next().or_else(|| self.values.first_key_value()).map(|(k, v)| (*k, v.clone()));
+        let entry = iter.next().map(|(k, v)| (*k, v.clone()));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
             self.visited_keys.lock().push(KeyVisitType::Next(*key));

@@ -167,16 +167,19 @@ mod tests {
         //     ├── 0 -> Branch
         //     │      ├── 0 -> Leaf (Empty Account, marked as changed)
         //     │      └── 1 -> Leaf (Empty Account)
-        //     └── 1 -> Leaf (Empty Account)
+        //     ├── 1 -> Branch
+        //     │      ├── 0 -> Leaf (Empty Account)
+        //     │      └── 1 -> Leaf (Empty Account)
 
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
         let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
         let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
+        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000101");
         let empty_account = Account::default();
 
         let empty_account_rlp = RlpNode::from_rlp(&alloy_rlp::encode(TrieAccount::default()));
 
-        let child_branch_node = (
+        let child_branch_node_1 = (
             Nibbles::unpack(hex!(
                 "0x00000000000000000000000000000000000000000000000000000000000000"
             )),
@@ -188,28 +191,48 @@ mod tests {
                 None,
             ),
         );
-        let child_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+        let child_branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
             vec![empty_account_rlp.clone(), empty_account_rlp.clone()],
             TrieMask::new(0b11),
         )));
 
+        let child_branch_node_2 = (
+            Nibbles::unpack(hex!(
+                "0x00000000000000000000000000000000000000000000000000000000000001"
+            )),
+            BranchNodeCompact::new(
+                TrieMask::new(0b11),
+                TrieMask::new(0b00),
+                TrieMask::new(0b00),
+                vec![],
+                None,
+            ),
+        );
+        let child_branch_node_2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+            vec![empty_account_rlp.clone(), empty_account_rlp],
+            TrieMask::new(0b11),
+        )));
+
         let root_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![child_branch_node_rlp.clone(), empty_account_rlp],
+            vec![child_branch_node_1_rlp.clone(), child_branch_node_2_rlp.clone()],
             TrieMask::new(0b11),
         )));
         let root_branch_node = (
             Nibbles::unpack(hex!("0x000000000000000000000000000000000000000000000000000000000000")),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
-                TrieMask::new(0b01),
-                TrieMask::new(0b01),
-                vec![child_branch_node_rlp.as_hash().unwrap()],
+                TrieMask::new(0b00),
+                TrieMask::new(0b11),
+                vec![
+                    child_branch_node_1_rlp.as_hash().unwrap(),
+                    child_branch_node_2_rlp.as_hash().unwrap(),
+                ],
                 Some(root_branch_node_rlp.as_hash().unwrap()),
             ),
         );
 
         let trie_cursor_factory = MockTrieCursorFactory::new(
-            BTreeMap::from([root_branch_node.clone(), child_branch_node.clone()]),
+            BTreeMap::from([root_branch_node.clone(), child_branch_node_1, child_branch_node_2]),
             B256Map::default(),
         );
 
@@ -226,6 +249,7 @@ mod tests {
                 (account_1, empty_account),
                 (account_2, empty_account),
                 (account_3, empty_account),
+                (account_4, empty_account),
             ]),
             B256Map::default(),
         );
@@ -238,21 +262,18 @@ mod tests {
 
         pretty_assertions::assert_eq!(
             *trie_cursor_factory.visited_account_keys(),
-            vec![
-                KeyVisitType::SeekNonExact(root_branch_node.0),
-                KeyVisitType::SeekNonExact(child_branch_node.0),
-            ]
+            vec![KeyVisitType::SeekNonExact(root_branch_node.0),]
         );
         pretty_assertions::assert_eq!(
             *hashed_cursor_factory.visited_account_keys(),
-            // Why do we seek the same key three additional times?
+            // Why do we seek the same key two additional times?
             vec![
-                KeyVisitType::SeekExact(account_1),
                 KeyVisitType::SeekExact(account_1),
                 KeyVisitType::SeekExact(account_1),
                 KeyVisitType::SeekExact(account_1),
                 KeyVisitType::Next(account_2),
                 KeyVisitType::Next(account_3),
+                KeyVisitType::Next(account_4),
             ]
         );
     }
