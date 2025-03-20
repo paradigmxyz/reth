@@ -52,6 +52,10 @@ hardfork!(
         HaberFix,
         /// BSC `Bohr` hardfork
         Bohr,
+        /// BSC `Pascal` hardfork
+        Pascal,
+        /// BSC `Prague` hardfork
+        Prague,
     }
 );
 
@@ -91,6 +95,8 @@ impl BscHardfork {
             (Self::Haber.boxed(), ForkCondition::Timestamp(1718863500)),
             (Self::HaberFix.boxed(), ForkCondition::Timestamp(1727316120)),
             (Self::Bohr.boxed(), ForkCondition::Timestamp(1727317200)),
+            (Self::Pascal.boxed(), ForkCondition::Timestamp(1742436600)),
+            (Self::Prague.boxed(), ForkCondition::Timestamp(1742436600)),
         ])
     }
 }
@@ -136,7 +142,7 @@ pub fn boot_nodes() -> Vec<NodeRecord> {
 }
 
 pub fn head() -> Head {
-    Head { number: 40_000_000, timestamp: 1727317200, ..Default::default() }
+    Head { number: 40_000_000, timestamp: 1742436600, ..Default::default() }
 }
 #[cfg(test)]
 mod tests {
@@ -146,7 +152,7 @@ mod tests {
 
     #[test]
     fn can_create_forkid() {
-        let b = hex::decode("60adae27").unwrap();
+        let b = hex::decode("ce18f5d3").unwrap();
         let expected = [b[0], b[1], b[2], b[3]];
         let expected_f_id = ForkId { hash: ForkHash(expected), next: 0 };
 
