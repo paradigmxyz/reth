@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 
@@ -36,6 +36,16 @@ impl MockHashedCursorFactory {
             visited_account_keys: Default::default(),
             visited_storage_keys,
         }
+    }
+
+    /// Returns a reference to the list of visited hashed account keys.
+    pub fn visited_account_keys(&self) -> MutexGuard<'_, Vec<B256>> {
+        self.visited_account_keys.lock()
+    }
+
+    /// Returns a reference to the list of visited hashed storage keys for the given hashed address.
+    pub fn visited_storage_keys(&self, hashed_address: B256) -> MutexGuard<'_, Vec<B256>> {
+        self.visited_storage_keys.get(&hashed_address).expect("storage trie should exist").lock()
     }
 }
 
