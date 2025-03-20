@@ -11,7 +11,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{B256, U256};
-use core::sync::atomic::AtomicBool;
+use core::sync::atomic::{AtomicBool, Ordering};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
@@ -85,7 +85,7 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
             config,
             builder,
             pre_cached: None,
-            is_resolving,
+            is_resolving: self.is_resolving.clone(),
         }
     }
 
@@ -180,6 +180,7 @@ where
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
+            is_resolving: self.is_resolving.clone(),
         };
 
         // start the first job right away
@@ -331,6 +332,7 @@ where
     ///
     /// See [`PayloadBuilder`]
     builder: Builder,
+    is_resolving:Arc<AtomicBool>
 }
 
 impl<Tasks, Builder> BasicPayloadJob<Tasks, Builder>
@@ -360,7 +362,7 @@ where
                 config: payload_config,
                 cancel,
                 best_payload,
-                is_resolving,
+                is_resolving: self.is_resolving.clone(),
             };
             let result = builder.try_build(args);
             let _ = tx.send(result);
@@ -807,6 +809,7 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
+        is_resolving: Arc<AtomicBool>
     ) -> Self {
         Self { cached_reads, config, cancel, best_payload, is_resolving }
     }
