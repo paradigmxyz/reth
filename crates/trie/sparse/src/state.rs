@@ -731,9 +731,8 @@ impl SparseStateTrie {
 
 #[cfg(test)]
 mod tests {
-    use crate::blinded::DefaultBlindedProviderFactory;
-
     use super::*;
+    use crate::blinded::DefaultBlindedProviderFactory;
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},
@@ -747,8 +746,9 @@ mod tests {
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, EMPTY_ROOT_HASH};
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
-        BranchNode, LeafNode, StorageMultiProof, TrieMask,
+        BranchNode, BranchNodeCompact, LeafNode, StorageMultiProof, TrieMask,
     };
+    use std::sync::Arc;
 
     #[test]
     fn validate_root_node_first_node_not_root() {
@@ -1105,7 +1105,23 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse_updates,
             TrieUpdates {
-                account_nodes: HashMap::default(),
+                account_nodes: HashMap::from_iter([(
+                    Nibbles::from_nibbles([0x1]),
+                    BranchNodeCompact {
+                        state_mask: TrieMask::new(0b11),
+                        tree_mask: TrieMask::default(),
+                        hash_mask: TrieMask::new(0b11),
+                        hashes: Arc::new(vec![
+                            RlpNode::word_rlp(&b256!(
+                                "0x60a609d341cf463fbba963c8c0ee4e29561a1e6d63eaeb2e613b84b3734efa4d"
+                            )),
+                            RlpNode::word_rlp(&b256!(
+                                "0x467e50cc243214ee52e747be078661fd75884c0ac83879818f4730c6146d75d1"
+                            ))
+                        ]),
+                        root_hash: None
+                    }
+                )]),
                 storage_tries: HashMap::from_iter([(
                     b256!("0x1100000000000000000000000000000000000000000000000000000000000000"),
                     StorageTrieUpdates {

@@ -5,6 +5,7 @@ use crate::{
 };
 use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::RlpNode;
 
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
@@ -86,7 +87,7 @@ impl<C> TrieWalker<C> {
     }
 
     /// Returns the current hash in the trie if any.
-    pub fn hash(&self) -> Option<B256> {
+    pub fn hash(&self) -> Option<RlpNode> {
         self.stack.last().and_then(|n| n.hash())
     }
 

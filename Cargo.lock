@@ -917,8 +917,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.7.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d95a94854e420f07e962f7807485856cde359ab99ab6413883e15235ad996e8b"
+source = "git+https://github.com/alloy-rs/trie?branch=alexey%2Falways-store-branch-nodes#e70c06d999e63b9739a2bcf4e3d2b5dbab8f8c5c"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -9942,6 +9941,7 @@ dependencies = [
  "itertools 0.14.0",
  "metrics",
  "parking_lot",
+ "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-ethereum-primitives",
@@ -9950,6 +9950,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-stages-types",
  "reth-storage-errors",
+ "reth-tracing",
  "reth-trie-common",
  "reth-trie-sparse",
  "revm-database",
