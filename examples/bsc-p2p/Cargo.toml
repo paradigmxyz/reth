@@ -42,7 +42,6 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [features]
-default = ["serde"]
 serde = [
     "dep:serde",
     "alloy-primitives/serde",
@@ -53,4 +52,5 @@ serde = [
     "reth-primitives-traits/serde",
     "secp256k1/serde",
     "bytes/serde",
+    "reth-network/serde",
 ]
