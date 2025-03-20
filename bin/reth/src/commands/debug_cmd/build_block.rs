@@ -215,6 +215,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             payload_config,
             CancelOnDrop::default(),
             None,
+            Arc::new(AtomicBool::new(false)),
         );
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
