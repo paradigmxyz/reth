@@ -44,13 +44,14 @@ tracing.workspace = true
 [features]
 default = ["serde"]
 serde = [
-    "dep:serde",
-    "alloy-primitives/serde",
-    "reth-eth-wire/serde",
-    "reth-eth-wire-types/serde",
-    "reth-ethereum-forks/serde",
-    "reth-provider/serde",
-    "reth-primitives-traits/serde",
-    "secp256k1/serde",
-    "bytes/serde",
+	"dep:serde",
+	"alloy-primitives/serde",
+	"reth-eth-wire/serde",
+	"reth-eth-wire-types/serde",
+	"reth-ethereum-forks/serde",
+	"reth-provider/serde",
+	"reth-primitives-traits/serde",
+	"secp256k1/serde",
+	"bytes/serde",
+	"reth-network/serde"
 ]

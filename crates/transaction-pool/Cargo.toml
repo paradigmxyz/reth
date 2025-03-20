@@ -72,7 +72,6 @@ tempfile.workspace = true
 serde_json.workspace = true
 
 [features]
-default = ["serde"]
 serde = [
     "dep:serde",
     "reth-execution-types/serde",
