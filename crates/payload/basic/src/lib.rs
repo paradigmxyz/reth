@@ -11,6 +11,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_eips::merge::SLOT_DURATION;
 use alloy_primitives::{B256, U256};
+use core::sync::atomic::AtomicBool;
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chain_state::CanonStateNotification;
@@ -63,6 +64,7 @@ pub struct BasicPayloadJobGenerator<Client, Tasks, Builder> {
     builder: Builder,
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
+    is_resolving: Arc<AtomicBool>,
 }
 
 // === impl BasicPayloadJobGenerator ===
@@ -83,6 +85,7 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
             config,
             builder,
             pre_cached: None,
+            is_resolving,
         }
     }
 
@@ -353,7 +356,7 @@ where
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
             let args =
-                BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
+                BuildArguments { cached_reads, config: payload_config, cancel, best_payload, is_resolving, };
             let result = builder.try_build(args);
             let _ = tx.send(result);
         }));
@@ -460,6 +463,7 @@ where
         kind: PayloadKind,
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let best_payload = self.best_payload.payload().cloned();
+        self.is_resolving.store(true, Ordering::SeqCst);
         if best_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
             self.spawn_build_job();
@@ -476,6 +480,7 @@ where
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
+                is_resolving: self.is_resolving.clone(),
             };
 
             match self.builder.on_missing_payload(args) {
@@ -787,6 +792,7 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub cancel: CancelOnDrop,
     /// The best payload achieved so far.
     pub best_payload: Option<Payload>,
+    pub is_resolving: Arc<AtomicBool>,
 }
 
 impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
@@ -797,7 +803,7 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, config, cancel, best_payload }
+        Self { cached_reads, config, cancel, best_payload, is_resolving, }
     }
 }
 
