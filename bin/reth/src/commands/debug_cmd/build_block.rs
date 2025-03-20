@@ -38,7 +38,11 @@ use reth_transaction_pool::{
 };
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
-use std::{path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    path::PathBuf,
+    str::FromStr,
+    sync::{atomic::AtomicBool, Arc},
+};
 use tracing::*;
 
 /// `reth debug build-block` command
