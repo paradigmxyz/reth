@@ -341,7 +341,7 @@ where
             state_root_message_sender,
         }: MultiproofInput<Factory>,
     ) {
-        let to_storage_proof_task = self.storage_proof_task_handle.sender();
+        let storage_proof_task_handle = self.storage_proof_task_handle.clone();
 
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
@@ -361,7 +361,7 @@ where
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
-                to_storage_proof_task.clone(),
+                storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
             .multiproof(proof_targets);

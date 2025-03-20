@@ -31,7 +31,7 @@ use std::{
     collections::VecDeque,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{channel, Receiver, SendError, Sender},
         Arc,
     },
     time::Instant,
@@ -462,14 +462,24 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
         Self { sender, active_handles }
     }
 
-    /// Clones and returns the inner sender.
-    pub fn sender(&self) -> Sender<ProofTaskMessage<Tx>> {
-        self.sender.clone()
+    /// Sends a message to the proof task manager.
+    pub fn send(
+        &self,
+        message: ProofTaskMessage<Tx>,
+    ) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
+        self.sender.send(message)
     }
 
     /// Sends a terminate message to the proof task manager.
     pub fn terminate(&self) {
         let _ = self.sender.send(ProofTaskMessage::Terminate);
+    }
+}
+
+impl<Tx> Clone for ProofTaskManagerHandle<Tx> {
+    fn clone(&self) -> Self {
+        self.active_handles.fetch_add(1, Ordering::SeqCst);
+        Self { sender: self.sender.clone(), active_handles: self.active_handles.clone() }
     }
 }
 
