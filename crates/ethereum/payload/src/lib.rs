@@ -25,6 +25,7 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
+use std::sync::atomic::AtomicBool;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
@@ -148,7 +149,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let BuildArguments { mut cached_reads, config, cancel, best_payload, is_resolving } = args;
+    let BuildArguments { mut cached_reads, config, cancel, best_payload, is_resolving: _ } = args;
     let PayloadConfig { parent_header, attributes } = config;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
