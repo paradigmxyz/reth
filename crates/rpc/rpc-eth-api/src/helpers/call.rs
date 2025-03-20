@@ -65,7 +65,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// The transactions are packed into individual blocks. Overrides can be provided.
     ///
     /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
-    #[expect(clippy::type_complexity)]
+    #[allow(clippy::type_complexity)]
     fn simulate_v1(
         &self,
         payload: SimulatePayload,
