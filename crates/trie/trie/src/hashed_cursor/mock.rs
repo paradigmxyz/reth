@@ -1,10 +1,13 @@
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 
+use crate::mock::{KeyVisit, KeyVisitType};
+
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
 use parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
+use tracing::instrument;
 
 /// Mock hashed cursor factory.
 #[derive(Clone, Default, Debug)]
@@ -13,9 +16,9 @@ pub struct MockHashedCursorFactory {
     hashed_storage_tries: B256Map<Arc<BTreeMap<B256, U256>>>,
 
     /// List of keys that the hashed accounts cursor has visited.
-    visited_account_keys: Arc<Mutex<Vec<B256>>>,
+    visited_account_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>,
     /// List of keys that the hashed storages cursor has visited, per storage trie.
-    visited_storage_keys: B256Map<Arc<Mutex<Vec<B256>>>>,
+    visited_storage_keys: B256Map<Arc<Mutex<Vec<KeyVisit<B256>>>>>,
 }
 
 impl MockHashedCursorFactory {
@@ -38,12 +41,15 @@ impl MockHashedCursorFactory {
     }
 
     /// Returns a reference to the list of visited hashed account keys.
-    pub fn visited_account_keys(&self) -> MutexGuard<'_, Vec<B256>> {
+    pub fn visited_account_keys(&self) -> MutexGuard<'_, Vec<KeyVisit<B256>>> {
         self.visited_account_keys.lock()
     }
 
     /// Returns a reference to the list of visited hashed storage keys for the given hashed address.
-    pub fn visited_storage_keys(&self, hashed_address: B256) -> MutexGuard<'_, Vec<B256>> {
+    pub fn visited_storage_keys(
+        &self,
+        hashed_address: B256,
+    ) -> MutexGuard<'_, Vec<KeyVisit<B256>>> {
         self.visited_storage_keys.get(&hashed_address).expect("storage trie should exist").lock()
     }
 }
@@ -83,23 +89,19 @@ pub struct MockHashedCursor<T> {
     /// The current key. If set, it is guaranteed to exist in `values`.
     current_key: Option<B256>,
     values: Arc<BTreeMap<B256, T>>,
-    visited_keys: Arc<Mutex<Vec<B256>>>,
+    visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>,
 }
 
 impl<T> MockHashedCursor<T> {
-    fn new(values: Arc<BTreeMap<B256, T>>, visited_keys: Arc<Mutex<Vec<B256>>>) -> Self {
+    fn new(values: Arc<BTreeMap<B256, T>>, visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>) -> Self {
         Self { current_key: None, values, visited_keys }
-    }
-
-    fn set_current_key(&mut self, key: B256) {
-        self.current_key = Some(key);
-        self.visited_keys.lock().push(key);
     }
 }
 
 impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
     type Value = T;
 
+    #[instrument(level = "trace", skip(self), ret)]
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         // Find the first key that has a prefix of the given key.
         let entry = self
@@ -107,11 +109,16 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
             .iter()
             .find_map(|(k, v)| k.starts_with(key.as_slice()).then(|| (*k, v.clone())));
         if let Some((key, _)) = &entry {
-            self.set_current_key(*key);
+            self.current_key = Some(*key);
         }
+        self.visited_keys.lock().push(KeyVisit {
+            visit_type: KeyVisitType::SeekNonExact(key),
+            visited_key: entry.as_ref().map(|(k, _)| *k),
+        });
         Ok(entry)
     }
 
+    #[instrument(level = "trace", skip(self), ret)]
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let mut iter = self.values.iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
@@ -121,16 +128,20 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         })
         .expect("current key should exist in values");
         // Get the next key-value pair.
-        let entry =
-            iter.next().or_else(|| self.values.first_key_value()).map(|(k, v)| (*k, v.clone()));
+        let entry = iter.next().map(|(k, v)| (*k, v.clone()));
         if let Some((key, _)) = &entry {
-            self.set_current_key(*key);
+            self.current_key = Some(*key);
         }
+        self.visited_keys.lock().push(KeyVisit {
+            visit_type: KeyVisitType::Next,
+            visited_key: entry.as_ref().map(|(k, _)| *k),
+        });
         Ok(entry)
     }
 }
 
 impl<T: Debug + Clone> HashedStorageCursor for MockHashedCursor<T> {
+    #[instrument(level = "trace", skip(self), ret)]
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         Ok(self.values.is_empty())
     }
