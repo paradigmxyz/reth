@@ -392,7 +392,7 @@ where
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments { cached_reads, config, cancel, best_payload, is_resolving: _ } = args;
         let PayloadConfig { parent_header, attributes } = config;
 
         // This reuses the default EthereumPayloadBuilder to build the payload
@@ -402,6 +402,7 @@ where
             config: PayloadConfig { parent_header, attributes: attributes.0 },
             cancel,
             best_payload,
+            is_resolving: Arc::new(AtomicBool::new(false)),
         })
     }
 
