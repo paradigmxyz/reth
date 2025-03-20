@@ -35,9 +35,12 @@ bytes.workspace = true
 derive_more.workspace = true
 eyre.workspace = true
 futures.workspace = true
+once_cell = { version = "1.19", default-features = false, features = ["alloc"] }
+parity-bytes = { version = "0.1.2", default-features = false }
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
+tendermint = { git = "https://github.com/bnb-chain/tendermint-rs-parlia", rev = "8c21ccbd58a174e07eed2c9343e63ccd00f0fbd5", features = ["secp256k1"] }
 thiserror.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
