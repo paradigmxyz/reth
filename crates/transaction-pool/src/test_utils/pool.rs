@@ -167,7 +167,7 @@ impl MockSimulatorConfig {
 
 /// Represents
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) enum ScenarioType {
     OnchainNonce,
     HigherNonce { skip: u64 },
@@ -179,7 +179,7 @@ pub(crate) enum ScenarioType {
 ///
 /// An executed scenario can affect previous executed transactions
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) enum Scenario {
     /// Send a tx with the same nonce as on chain.
     OnchainNonce { nonce: u64 },
@@ -193,7 +193,7 @@ pub(crate) enum Scenario {
 
 /// Represents an executed scenario
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ExecutedScenario {
     /// balance at the time of execution
     balance: U256,
@@ -205,7 +205,7 @@ pub(crate) struct ExecutedScenario {
 
 /// All executed scenarios by a sender
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ExecutedScenarios {
     sender: Address,
     scenarios: Vec<ExecutedScenario>,
