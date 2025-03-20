@@ -2,10 +2,10 @@ use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob, WalHandle};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use futures::{Stream, StreamExt};
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
-use reth_primitives::EthPrimitives;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_tracing::tracing::debug;
 use std::{
@@ -463,8 +463,8 @@ mod tests {
     use eyre::OptionExt;
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
+    use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::Block;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,

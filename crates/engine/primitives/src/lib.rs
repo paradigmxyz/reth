@@ -14,11 +14,10 @@ extern crate alloc;
 use alloy_consensus::BlockHeader;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError,
-    InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes, PayloadOrAttributes,
-    PayloadTypes,
+    EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
+    NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -55,7 +54,6 @@ pub trait EngineTypes:
                           + TryInto<Self::ExecutionPayloadEnvelopeV4>,
     > + DeserializeOwned
     + Serialize
-    + 'static
 {
     /// Execution Payload V1 envelope type.
     type ExecutionPayloadEnvelopeV1: DeserializeOwned
@@ -89,15 +87,6 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
-    /// Execution data.
-    type ExecutionData: ExecutionPayload;
-
-    /// Converts a [`BuiltPayload`] into an [`Self::ExecutionData`].
-    fn block_to_payload(
-        block: SealedBlock<
-            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
-        >,
-    ) -> Self::ExecutionData;
 }
 
 /// Type that validates an [`ExecutionPayload`].

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_primitives::{keccak256, Bytes, B256};
 use reth_trie::{HashedPostState, HashedStorage};
-use revm_database::State;
+use revm::database::State;
 
 /// Tracks state changes during execution.
 #[derive(Debug, Clone, Default)]

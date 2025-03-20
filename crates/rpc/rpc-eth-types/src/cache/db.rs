@@ -8,10 +8,10 @@ use reth_revm::{database::StateProviderDatabase, DatabaseRef};
 use reth_storage_api::{HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
+    database::{BundleState, CacheDB},
     state::{AccountInfo, Bytecode},
     Database,
 };
-use revm_database::CacheDB;
 
 /// Helper alias type for the state's [`CacheDB`]
 pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
@@ -83,7 +83,7 @@ impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
     fn proof(
         &self,
         input: reth_trie::TrieInput,
-        address: revm_primitives::Address,
+        address: Address,
         slots: &[B256],
     ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
         self.0.proof(input, address, slots)
@@ -109,7 +109,7 @@ impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
 impl reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'_> {
     fn basic_account(
         &self,
-        address: &revm_primitives::Address,
+        address: &Address,
     ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Account>> {
         self.0.basic_account(address)
     }
@@ -140,10 +140,7 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
 }
 
 impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
-    fn hashed_post_state(
-        &self,
-        bundle_state: &revm_database::BundleState,
-    ) -> reth_trie::HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> reth_trie::HashedPostState {
         self.0.hashed_post_state(bundle_state)
     }
 }
@@ -151,7 +148,7 @@ impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
 impl StateProvider for StateProviderTraitObjWrapper<'_> {
     fn storage(
         &self,
-        account: revm_primitives::Address,
+        account: Address,
         storage_key: alloy_primitives::StorageKey,
     ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
         self.0.storage(account, storage_key)
@@ -166,22 +163,16 @@ impl StateProvider for StateProviderTraitObjWrapper<'_> {
 
     fn account_code(
         &self,
-        addr: &revm_primitives::Address,
+        addr: &Address,
     ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         self.0.account_code(addr)
     }
 
-    fn account_balance(
-        &self,
-        addr: &revm_primitives::Address,
-    ) -> reth_errors::ProviderResult<Option<U256>> {
+    fn account_balance(&self, addr: &Address) -> reth_errors::ProviderResult<Option<U256>> {
         self.0.account_balance(addr)
     }
 
-    fn account_nonce(
-        &self,
-        addr: &revm_primitives::Address,
-    ) -> reth_errors::ProviderResult<Option<u64>> {
+    fn account_nonce(&self, addr: &Address) -> reth_errors::ProviderResult<Option<u64>> {
         self.0.account_nonce(addr)
     }
 }
@@ -193,10 +184,7 @@ pub struct StateCacheDbRefMutWrapper<'a, 'b>(pub &'b mut StateCacheDb<'a>);
 
 impl<'a> Database for StateCacheDbRefMutWrapper<'a, '_> {
     type Error = <StateCacheDb<'a> as Database>::Error;
-    fn basic(
-        &mut self,
-        address: revm_primitives::Address,
-    ) -> Result<Option<AccountInfo>, Self::Error> {
+    fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         self.0.basic(address)
     }
 
@@ -204,11 +192,7 @@ impl<'a> Database for StateCacheDbRefMutWrapper<'a, '_> {
         self.0.code_by_hash(code_hash)
     }
 
-    fn storage(
-        &mut self,
-        address: revm_primitives::Address,
-        index: U256,
-    ) -> Result<U256, Self::Error> {
+    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         self.0.storage(address, index)
     }
 
@@ -220,10 +204,7 @@ impl<'a> Database for StateCacheDbRefMutWrapper<'a, '_> {
 impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
     type Error = <StateCacheDb<'a> as Database>::Error;
 
-    fn basic_ref(
-        &self,
-        address: revm_primitives::Address,
-    ) -> Result<Option<AccountInfo>, Self::Error> {
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         self.0.basic_ref(address)
     }
 
@@ -231,11 +212,7 @@ impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
         self.0.code_by_hash_ref(code_hash)
     }
 
-    fn storage_ref(
-        &self,
-        address: revm_primitives::Address,
-        index: U256,
-    ) -> Result<U256, Self::Error> {
+    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
         self.0.storage_ref(address, index)
     }
 

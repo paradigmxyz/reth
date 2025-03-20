@@ -6,10 +6,12 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;
-use reth_rpc_api::{EngineEthApiServer, EthApiServer, EthFilterApiServer};
+use reth_rpc_api::{EngineEthApiServer, EthApiServer};
 /// Re-export for convenience
 pub use reth_rpc_engine_api::EngineApi;
-use reth_rpc_eth_api::{FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
+use reth_rpc_eth_api::{
+    EngineEthFilter, FullEthApiTypes, QueryLimits, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+};
 use tracing_futures::Instrument;
 
 macro_rules! engine_span {
@@ -43,7 +45,7 @@ where
             RpcReceipt<Eth::NetworkTypes>,
             RpcHeader<Eth::NetworkTypes>,
         > + FullEthApiTypes,
-    EthFilter: EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>>,
+    EthFilter: EngineEthFilter,
 {
     /// Handler for: `eth_syncing`
     fn syncing(&self) -> Result<SyncStatus> {
@@ -124,7 +126,7 @@ where
 
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
-        self.eth_filter.logs(filter).instrument(engine_span!()).await
+        self.eth_filter.logs(filter, QueryLimits::no_limits()).instrument(engine_span!()).await
     }
 
     /// Handler for `eth_getProof`

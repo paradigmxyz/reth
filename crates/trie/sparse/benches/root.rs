@@ -13,7 +13,7 @@ use reth_trie::{
     HashedStorage,
 };
 use reth_trie_common::{HashBuilder, Nibbles};
-use reth_trie_sparse::SparseTrie;
+use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
 
 fn calculate_root_from_leaves(c: &mut Criterion) {
     let mut group = c.benchmark_group("calculate root from leaves");
@@ -47,6 +47,7 @@ fn calculate_root_from_leaves(c: &mut Criterion) {
                         .update_leaf(
                             Nibbles::unpack(key),
                             alloy_rlp::encode_fixed_size(value).to_vec(),
+                            &DefaultBlindedProvider,
                         )
                         .unwrap();
                 }
@@ -188,6 +189,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                     .update_leaf(
                                         Nibbles::unpack(key),
                                         alloy_rlp::encode_fixed_size(value).to_vec(),
+                                        &DefaultBlindedProvider,
                                     )
                                     .unwrap();
                             }
@@ -201,6 +203,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                         .update_leaf(
                                             Nibbles::unpack(key),
                                             alloy_rlp::encode_fixed_size(value).to_vec(),
+                                            &DefaultBlindedProvider,
                                         )
                                         .unwrap();
                                 }

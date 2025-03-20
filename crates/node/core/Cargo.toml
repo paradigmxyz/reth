@@ -14,7 +14,6 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits = { workspace = true, features = ["rayon"] }
 reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -27,7 +26,7 @@ reth-rpc-server-types.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-transaction-pool.workspace = true
 reth-tracing.workspace = true
-reth-config.workspace = true
+reth-config = { workspace = true, features = ["serde"] }
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
@@ -75,7 +74,7 @@ tokio.workspace = true
 [features]
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
-asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
+asm-keccak = ["alloy-primitives/asm-keccak"]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }

@@ -17,8 +17,11 @@ use reth_primitives_traits::{
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::noop::NoopProvider;
-use revm::{context_interface::result::ExecutionResult, Database};
-use revm_primitives::{Address, Bytes, TxKind};
+use revm::{
+    context_interface::result::ExecutionResult,
+    primitives::{Address, Bytes, TxKind},
+    Database,
+};
 
 use crate::{
     error::{

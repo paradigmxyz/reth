@@ -8,14 +8,15 @@ use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx,
+    StateCommitmentProvider,
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
     HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
 };
-use reth_trie_parallel::proof::ParallelProof;
+use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
@@ -254,15 +255,17 @@ struct MultiproofInput<Factory> {
 /// concurrency, further calculation requests are queued and spawn later, after
 /// availability has been signaled.
 #[derive(Debug)]
-pub struct MultiproofManager<Factory> {
+pub struct MultiproofManager<Factory: DatabaseProviderFactory> {
     /// Maximum number of concurrent calculations.
     max_concurrent: usize,
     /// Currently running calculations.
     inflight: usize,
     /// Queued calculations.
     pending: VecDeque<MultiproofInput<Factory>>,
-    /// Executor for tassks
+    /// Executor for tasks
     executor: WorkloadExecutor,
+    /// Sender to the storage proof task.
+    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
 }
@@ -273,7 +276,11 @@ where
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
-    fn new(executor: WorkloadExecutor, metrics: MultiProofTaskMetrics) -> Self {
+    fn new(
+        executor: WorkloadExecutor,
+        metrics: MultiProofTaskMetrics,
+        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    ) -> Self {
         let max_concurrent = executor.rayon_pool().current_num_threads();
         Self {
             pending: VecDeque::with_capacity(max_concurrent),
@@ -281,6 +288,7 @@ where
             executor,
             inflight: 0,
             metrics,
+            storage_proof_task_handle,
         }
     }
 
@@ -333,7 +341,7 @@ where
             state_root_message_sender,
         }: MultiproofInput<Factory>,
     ) {
-        let executor = self.executor.clone();
+        let storage_proof_task_handle = self.storage_proof_task_handle.clone();
 
         self.executor.spawn_blocking(move || {
             let account_targets = proof_targets.len();
@@ -353,7 +361,7 @@ where
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
-                executor.handle().clone(),
+                storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
             .multiproof(proof_targets);
@@ -445,7 +453,7 @@ pub(crate) struct MultiProofTaskMetrics {
 /// Then it updates relevant leaves according to the result of the transaction.
 /// This feeds updates to the sparse trie task.
 #[derive(Debug)]
-pub(super) struct MultiProofTask<Factory> {
+pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
     /// Task configuration.
     config: MultiProofConfig<Factory>,
     /// Receiver for state root related messages.
@@ -473,10 +481,12 @@ where
     pub(super) fn new(
         config: MultiProofConfig<Factory>,
         executor: WorkloadExecutor,
+        proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         to_sparse_trie: Sender<SparseTrieUpdate>,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
+
         Self {
             config,
             rx,
@@ -484,7 +494,11 @@ where
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::default(),
-            multiproof_manager: MultiproofManager::new(executor, metrics.clone()),
+            multiproof_manager: MultiproofManager::new(
+                executor,
+                metrics.clone(),
+                proof_task_handle,
+            ),
             metrics,
         }
     }
@@ -924,6 +938,7 @@ mod tests {
     use alloy_primitives::map::B256Set;
     use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
     use reth_trie::TrieInput;
+    use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManager};
     use revm_primitives::{B256, U256};
     use std::sync::Arc;
 
@@ -951,9 +966,20 @@ mod tests {
     {
         let executor = WorkloadExecutor::with_num_cpu_threads(2);
         let config = create_state_root_config(factory, TrieInput::default());
+        let task_ctx = ProofTaskCtx::new(
+            config.nodes_sorted.clone(),
+            config.state_sorted.clone(),
+            config.prefix_sets.clone(),
+        );
+        let proof_task = ProofTaskManager::new(
+            executor.handle().clone(),
+            config.consistent_view.clone(),
+            task_ctx,
+            1,
+        );
         let channel = channel();
 
-        MultiProofTask::new(config, executor, channel.0)
+        MultiProofTask::new(config, executor, proof_task.handle(), channel.0)
     }
 
     #[test]
