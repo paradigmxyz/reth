@@ -145,7 +145,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use alloy_primitives::{b256, hex, map::B256Map};
-    use alloy_trie::{BranchNodeCompact, Nibbles, TrieMask, EMPTY_ROOT_HASH};
+    use alloy_trie::{BranchNodeCompact, Nibbles, TrieAccount, TrieMask};
     use reth_primitives_traits::Account;
     use reth_trie_common::{prefix_set::PrefixSetMut, BranchNode, RlpNode};
 
@@ -171,9 +171,7 @@ mod tests {
             (account_3, Account::default()),
         ]);
 
-        let empty_account_rlp = RlpNode::from_rlp(&alloy_rlp::encode(
-            Account::default().into_trie_account(EMPTY_ROOT_HASH),
-        ));
+        let empty_account_rlp = RlpNode::from_rlp(&alloy_rlp::encode(TrieAccount::default()));
 
         let child_branch_node = (
             Nibbles::unpack(hex!(
