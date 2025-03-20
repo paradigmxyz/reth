@@ -173,7 +173,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                             #[allow(clippy::nonminimal_bool)]
                             if !segment
                                 .extension()
-                                .is_none_or(|s| s.to_str() != Some(CONFIG_FILE_EXTENSION))
+                                .is_some_and(|s| s.to_str() == Some(CONFIG_FILE_EXTENSION))
                             {
                                 continue
                             }
