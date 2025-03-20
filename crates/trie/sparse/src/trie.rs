@@ -2286,7 +2286,7 @@ mod tests {
         assert_eq!(sparse, sparse_old);
     }
 
-    #[expect(clippy::type_complexity)]
+    #[allow(clippy::type_complexity)]
     #[test]
     fn sparse_trie_fuzz() {
         // Having only the first 3 nibbles set, we narrow down the range of keys
