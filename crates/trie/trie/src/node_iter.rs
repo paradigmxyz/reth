@@ -172,6 +172,16 @@ mod tests {
         ]);
 
         let root_branch_node = (
+            Nibbles::unpack(hex!("0x000000000000000000000000000000000000000000000000000000000000")),
+            BranchNodeCompact::new(
+                TrieMask::new(0b11),
+                TrieMask::new(0b01),
+                TrieMask::new(0b01),
+                vec![b256!("0x0000000000000000000000000000000000000000000000000000000000000000")],
+                None,
+            ),
+        );
+        let child_branch_node = (
             Nibbles::unpack(hex!(
                 "0x00000000000000000000000000000000000000000000000000000000000000"
             )),
@@ -180,16 +190,6 @@ mod tests {
                 TrieMask::new(0b00),
                 TrieMask::new(0b00),
                 vec![],
-                None,
-            ),
-        );
-        let child_branch_node = (
-            Nibbles::unpack(hex!("0x000000000000000000000000000000000000000000000000000000000000")),
-            BranchNodeCompact::new(
-                TrieMask::new(0b11),
-                TrieMask::new(0b01),
-                TrieMask::new(0b01),
-                vec![b256!("0x0000000000000000000000000000000000000000000000000000000000000000")],
                 None,
             ),
         );
@@ -218,8 +218,8 @@ mod tests {
         assert_eq!(
             *trie_cursor_factory.visited_account_keys(),
             vec![
-                KeyVisitType::SeekNonExact(child_branch_node.0),
                 KeyVisitType::SeekNonExact(root_branch_node.0),
+                KeyVisitType::SeekNonExact(child_branch_node.0),
             ]
         );
         assert_eq!(
