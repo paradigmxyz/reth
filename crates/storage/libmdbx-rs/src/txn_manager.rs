@@ -53,7 +53,7 @@ impl TxnManager {
     /// - [`TxnManagerMessage::Commit`] commits a transaction with [`ffi::mdbx_txn_commit_ex`]
     fn start_message_listener(&self, env: EnvPtr, rx: Receiver<TxnManagerMessage>) {
         let task = move || {
-            #[expect(clippy::redundant_locals)]
+            #[allow(clippy::redundant_locals)]
             let env = env;
             loop {
                 match rx.recv() {
