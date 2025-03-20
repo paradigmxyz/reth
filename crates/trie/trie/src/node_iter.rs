@@ -170,10 +170,10 @@ mod tests {
         // └── Branch
         //     ├── 0 -> Branch
         //     │      ├── 0 -> Leaf (Empty Account, marked as changed)
-        //     │      └── 1 -> Leaf (Empty Account)
+        //     │      └── 1 -> Leaf (Empty Account 2)
         //     ├── 1 -> Branch
-        //     │      ├── 0 -> Leaf (Empty Account)
-        //     │      └── 1 -> Leaf (Empty Account)
+        //     │      ├── 0 -> Leaf (Empty Account 3)
+        //     │      └── 1 -> Leaf (Empty Account 4)
 
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
         let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
@@ -212,11 +212,11 @@ mod tests {
             ),
         );
 
-        let root_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+        let branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
             vec![child_branch_node_rlp.clone(), child_branch_node_rlp.clone()],
             TrieMask::new(0b11),
         )));
-        let root_branch_node = (
+        let branch_node = (
             Nibbles::unpack(hex!("0x000000000000000000000000000000000000000000000000000000000000")),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
@@ -229,12 +229,12 @@ mod tests {
                     child_branch_node_rlp.as_hash().unwrap(),
                     child_branch_node_rlp.as_hash().unwrap(),
                 ],
-                Some(root_branch_node_rlp.as_hash().unwrap()),
+                Some(branch_node_rlp.as_hash().unwrap()),
             ),
         );
 
         let trie_cursor_factory = MockTrieCursorFactory::new(
-            BTreeMap::from([root_branch_node.clone(), child_branch_node_1, child_branch_node_2]),
+            BTreeMap::from([branch_node.clone(), child_branch_node_1, child_branch_node_2]),
             B256Map::default(),
         );
 
@@ -271,7 +271,7 @@ mod tests {
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x0])),
-                    visited_key: Some(root_branch_node.0)
+                    visited_key: Some(branch_node.0)
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
@@ -297,6 +297,7 @@ mod tests {
                 },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_2) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_3) },
+                // Why do we go to account 4 if we can just take the branch node hash?
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
                 KeyVisit {
