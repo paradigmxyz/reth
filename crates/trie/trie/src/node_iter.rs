@@ -237,7 +237,7 @@ mod tests {
         let empty_account_rlp = RlpNode::from_rlp(&alloy_rlp::encode(TrieAccount::default()));
 
         let child_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![empty_account_rlp.clone(), empty_account_rlp],
+            vec![empty_account_rlp.clone(), empty_account_rlp.clone()],
             TrieMask::new(0b11),
         )));
         let child_branch_node_1 = (
@@ -246,9 +246,9 @@ mod tests {
             )),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
-                TrieMask::new(0b00),
-                TrieMask::new(0b00),
-                vec![],
+                TrieMask::new(0b11),
+                TrieMask::new(0b11),
+                vec![empty_account_rlp.clone(), empty_account_rlp.clone()],
                 None,
             ),
         );
@@ -258,9 +258,9 @@ mod tests {
             )),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
-                TrieMask::new(0b00),
-                TrieMask::new(0b00),
-                vec![],
+                TrieMask::new(0b11),
+                TrieMask::new(0b11),
+                vec![empty_account_rlp.clone(), empty_account_rlp],
                 None,
             ),
         );
@@ -273,10 +273,7 @@ mod tests {
             Nibbles::unpack(hex!("0x000000000000000000000000000000000000000000000000000000000000")),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
-                // Tree mask has no bits set, because both child branch nodes have empty tree and
-                // hash masks.
-                TrieMask::new(0b00),
-                // Hash mask bits are set, because both child nodes are branches.
+                TrieMask::new(0b11),
                 TrieMask::new(0b11),
                 vec![child_branch_node_rlp.clone(), child_branch_node_rlp],
                 Some(root_branch_node_rlp.as_hash().unwrap()),
@@ -327,7 +324,11 @@ mod tests {
                     visited_key: Some(root_branch_node.0)
                 },
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
+                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0; 61])),
+                    visited_key: Some(Nibbles::from_nibbles([0; 62]))
+                },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0; 63])),
                     visited_key: None
                 }
             ]
@@ -335,7 +336,11 @@ mod tests {
         pretty_assertions::assert_eq!(
             *hashed_cursor_factory.visited_account_keys(),
             vec![
-                // Why do we seek account 1 two additional times?
+                // Why do we seek account 1 three additional times?
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_1),
+                    visited_key: Some(account_1)
+                },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_1),
                     visited_key: Some(account_1)
@@ -352,12 +357,6 @@ mod tests {
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_3) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(b256!(
-                        "0x0000000000000000000000000000000000000000000000000000000000002000"
-                    )),
-                    visited_key: None
-                },
             ],
         );
     }
