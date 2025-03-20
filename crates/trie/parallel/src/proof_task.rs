@@ -462,15 +462,12 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
         Self { sender, active_handles }
     }
 
-    /// Sends a message to the proof task manager.
-    pub fn send(
-        &self,
-        message: ProofTaskMessage<Tx>,
-    ) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
-        self.sender.send(message)
+    /// Queues a task to the proof task manager.
+    pub fn queue_task(&self, task: ProofTaskKind) -> Result<(), SendError<ProofTaskMessage<Tx>>> {
+        self.sender.send(ProofTaskMessage::QueueTask(task))
     }
 
-    /// Sends a terminate message to the proof task manager.
+    /// Terminates the proof task manager.
     pub fn terminate(&self) {
         let _ = self.sender.send(ProofTaskMessage::Terminate);
     }
