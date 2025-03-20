@@ -70,7 +70,7 @@ where
             return Ok(InitialAndFloorGas { initial_gas: 0, floor_gas: 0 });
         }
 
-        Ok(self.mainnet.validate_initial_tx_gas(evm)?)
+        self.mainnet.validate_initial_tx_gas(evm)
     }
 
     fn reward_beneficiary(
