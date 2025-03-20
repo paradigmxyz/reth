@@ -116,7 +116,7 @@ mod tests {
     use revm::primitives::Address;
 
     #[test]
-    fn test_deposit_transaction_fields() {
+    fn test_bsc_transaction_fields() {
         let bsc_tx = BscTransaction {
             base: TxEnv {
                 tx_type: 0,
