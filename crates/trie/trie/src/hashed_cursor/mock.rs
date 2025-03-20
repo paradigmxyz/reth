@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 
-use crate::mock::KeyVisitType;
+use crate::mock::{KeyVisit, KeyVisitType};
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
@@ -16,9 +16,9 @@ pub struct MockHashedCursorFactory {
     hashed_storage_tries: B256Map<Arc<BTreeMap<B256, U256>>>,
 
     /// List of keys that the hashed accounts cursor has visited.
-    visited_account_keys: Arc<Mutex<Vec<KeyVisitType<B256>>>>,
+    visited_account_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>,
     /// List of keys that the hashed storages cursor has visited, per storage trie.
-    visited_storage_keys: B256Map<Arc<Mutex<Vec<KeyVisitType<B256>>>>>,
+    visited_storage_keys: B256Map<Arc<Mutex<Vec<KeyVisit<B256>>>>>,
 }
 
 impl MockHashedCursorFactory {
@@ -41,7 +41,7 @@ impl MockHashedCursorFactory {
     }
 
     /// Returns a reference to the list of visited hashed account keys.
-    pub fn visited_account_keys(&self) -> MutexGuard<'_, Vec<KeyVisitType<B256>>> {
+    pub fn visited_account_keys(&self) -> MutexGuard<'_, Vec<KeyVisit<B256>>> {
         self.visited_account_keys.lock()
     }
 
@@ -49,7 +49,7 @@ impl MockHashedCursorFactory {
     pub fn visited_storage_keys(
         &self,
         hashed_address: B256,
-    ) -> MutexGuard<'_, Vec<KeyVisitType<B256>>> {
+    ) -> MutexGuard<'_, Vec<KeyVisit<B256>>> {
         self.visited_storage_keys.get(&hashed_address).expect("storage trie should exist").lock()
     }
 }
@@ -89,14 +89,11 @@ pub struct MockHashedCursor<T> {
     /// The current key. If set, it is guaranteed to exist in `values`.
     current_key: Option<B256>,
     values: Arc<BTreeMap<B256, T>>,
-    visited_keys: Arc<Mutex<Vec<KeyVisitType<B256>>>>,
+    visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>,
 }
 
 impl<T> MockHashedCursor<T> {
-    fn new(
-        values: Arc<BTreeMap<B256, T>>,
-        visited_keys: Arc<Mutex<Vec<KeyVisitType<B256>>>>,
-    ) -> Self {
+    fn new(values: Arc<BTreeMap<B256, T>>, visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>) -> Self {
         Self { current_key: None, values, visited_keys }
     }
 }
@@ -113,8 +110,11 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
             .find_map(|(k, v)| k.starts_with(key.as_slice()).then(|| (*k, v.clone())));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
-            self.visited_keys.lock().push(KeyVisitType::SeekNonExact(*key));
         }
+        self.visited_keys.lock().push(KeyVisit {
+            visit_type: KeyVisitType::SeekNonExact(key),
+            visited_key: entry.as_ref().map(|(k, _)| *k),
+        });
         Ok(entry)
     }
 
@@ -131,8 +131,11 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         let entry = iter.next().map(|(k, v)| (*k, v.clone()));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
-            self.visited_keys.lock().push(KeyVisitType::Next(*key));
         }
+        self.visited_keys.lock().push(KeyVisit {
+            visit_type: KeyVisitType::Next,
+            visited_key: entry.as_ref().map(|(k, _)| *k),
+        });
         Ok(entry)
     }
 }

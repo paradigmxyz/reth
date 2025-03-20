@@ -1,6 +1,7 @@
 use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
+use tracing::trace;
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
@@ -112,6 +113,7 @@ where
                 }
 
                 // Set the next hashed entry as a leaf node and return
+                trace!(target: "trie::node_iter", ?hashed_key, "next hashed entry");
                 self.current_hashed_entry = self.hashed_cursor.next()?;
                 return Ok(Some(TrieElement::Leaf(hashed_key, value)))
             }
@@ -119,6 +121,7 @@ where
             // Handle seeking and advancing based on the previous hashed key
             match self.previous_hashed_key.take() {
                 Some(hashed_key) => {
+                    trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
                     self.hashed_cursor.seek(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
@@ -130,6 +133,7 @@ where
                         Some(key) => key,
                         None => break, // no more keys
                     };
+                    trace!(target: "trie::node_iter", ?seek_key, "seeking to the next unprocessed hashed entry");
                     self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
                     self.walker.advance()?;
                 }
@@ -151,7 +155,7 @@ mod tests {
 
     use crate::{
         hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
-        mock::KeyVisitType,
+        mock::{KeyVisit, KeyVisitType},
         trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
         walker::TrieWalker,
     };
@@ -260,19 +264,48 @@ mod tests {
 
         pretty_assertions::assert_eq!(
             *trie_cursor_factory.visited_account_keys(),
-            vec![KeyVisitType::SeekNonExact(root_branch_node.0),]
+            vec![
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekExact(Nibbles::default()),
+                    visited_key: None
+                },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x0])),
+                    visited_key: Some(root_branch_node.0)
+                },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
+                    visited_key: None
+                }
+            ]
         );
         pretty_assertions::assert_eq!(
             *hashed_cursor_factory.visited_account_keys(),
-            // Why do we seek the same key two additional times?
             vec![
-                KeyVisitType::SeekNonExact(account_1),
-                KeyVisitType::SeekNonExact(account_1),
-                KeyVisitType::SeekNonExact(account_1),
-                KeyVisitType::Next(account_2),
-                KeyVisitType::Next(account_3),
-                KeyVisitType::Next(account_4),
-            ]
+                // Why do we seek account 1 two additional times?
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_1),
+                    visited_key: Some(account_1)
+                },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_1),
+                    visited_key: Some(account_1)
+                },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_1),
+                    visited_key: Some(account_1)
+                },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_2) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_3) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(b256!(
+                        "0x0000000000000000000000000000000000000000000000000000000000002000"
+                    )),
+                    visited_key: None
+                },
+            ],
         );
     }
 }
