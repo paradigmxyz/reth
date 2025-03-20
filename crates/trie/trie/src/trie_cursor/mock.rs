@@ -1,5 +1,6 @@
 use parking_lot::{Mutex, MutexGuard};
 use std::{collections::BTreeMap, sync::Arc};
+use tracing::instrument;
 
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{BranchNodeCompact, Nibbles};
@@ -100,6 +101,7 @@ impl MockTrieCursor {
 }
 
 impl TrieCursor for MockTrieCursor {
+    #[instrument(level = "trace", skip(self), ret)]
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -111,6 +113,7 @@ impl TrieCursor for MockTrieCursor {
         Ok(entry)
     }
 
+    #[instrument(level = "trace", skip(self), ret)]
     fn seek(
         &mut self,
         key: Nibbles,
@@ -126,6 +129,7 @@ impl TrieCursor for MockTrieCursor {
         Ok(entry)
     }
 
+    #[instrument(level = "trace", skip(self), ret)]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let mut iter = self.trie_nodes.iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
@@ -143,6 +147,7 @@ impl TrieCursor for MockTrieCursor {
         Ok(entry)
     }
 
+    #[instrument(level = "trace", skip(self), ret)]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.current_key.clone())
     }

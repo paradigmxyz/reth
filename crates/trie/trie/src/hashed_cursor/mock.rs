@@ -5,6 +5,7 @@ use alloy_primitives::{map::B256Map, B256, U256};
 use parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
+use tracing::instrument;
 
 /// Mock hashed cursor factory.
 #[derive(Clone, Default, Debug)]
@@ -100,6 +101,7 @@ impl<T> MockHashedCursor<T> {
 impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
     type Value = T;
 
+    #[instrument(level = "trace", skip(self), ret)]
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         // Find the first key that has a prefix of the given key.
         let entry = self
@@ -112,6 +114,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         Ok(entry)
     }
 
+    #[instrument(level = "trace", skip(self), ret)]
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let mut iter = self.values.iter();
         // Jump to the first key that has a prefix of the current key if it's set, or to the first
@@ -131,6 +134,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
 }
 
 impl<T: Debug + Clone> HashedStorageCursor for MockHashedCursor<T> {
+    #[instrument(level = "trace", skip(self), ret)]
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         Ok(self.values.is_empty())
     }

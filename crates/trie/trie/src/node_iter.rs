@@ -139,3 +139,88 @@ where
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use alloy_primitives::{b256, hex, map::B256Map};
+    use alloy_trie::{BranchNodeCompact, Nibbles, TrieMask};
+    use reth_primitives_traits::Account;
+    use reth_trie_common::prefix_set::PrefixSetMut;
+
+    use crate::{
+        hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
+        trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
+        walker::TrieWalker,
+    };
+
+    use super::TrieNodeIter;
+
+    #[test]
+    fn test_trie_node_iter() {
+        reth_tracing::init_test_tracing();
+
+        let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
+        let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
+        let hashed_accounts = BTreeMap::from([
+            (account_1, Account::default()),
+            (account_2, Account::default()),
+            (account_3, Account::default()),
+        ]);
+
+        let root_branch_node = (
+            Nibbles::unpack(hex!(
+                "0x00000000000000000000000000000000000000000000000000000000000000"
+            )),
+            BranchNodeCompact::new(
+                TrieMask::new(0b11),
+                TrieMask::new(0b00),
+                TrieMask::new(0b00),
+                vec![],
+                None,
+            ),
+        );
+        let child_branch_node = (
+            Nibbles::unpack(hex!("0x000000000000000000000000000000000000000000000000000000000000")),
+            BranchNodeCompact::new(
+                TrieMask::new(0b11),
+                TrieMask::new(0b01),
+                TrieMask::new(0b01),
+                vec![b256!("0x0000000000000000000000000000000000000000000000000000000000000000")],
+                None,
+            ),
+        );
+
+        let trie_nodes = BTreeMap::from([root_branch_node.clone(), child_branch_node.clone()]);
+
+        let trie_cursor_factory = MockTrieCursorFactory::new(trie_nodes, B256Map::default());
+
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.insert(Nibbles::unpack(account_1));
+
+        let walker = TrieWalker::new(
+            trie_cursor_factory.account_trie_cursor().unwrap(),
+            prefix_set.freeze(),
+        );
+        println!("{walker:?}");
+
+        let hashed_cursor_factory =
+            MockHashedCursorFactory::new(hashed_accounts, B256Map::default());
+
+        let mut iter =
+            TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
+
+        while iter.try_next().unwrap().is_some() {}
+
+        assert_eq!(
+            trie_cursor_factory.visited_account_keys().to_vec(),
+            vec![child_branch_node.0, root_branch_node.0]
+        );
+        assert_eq!(
+            hashed_cursor_factory.visited_account_keys().to_vec(),
+            vec![account_1, account_1, account_1, account_2, account_3]
+        );
+    }
+}
