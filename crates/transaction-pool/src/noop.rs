@@ -6,10 +6,8 @@
 use crate::{
     blobstore::BlobStoreError,
     error::PoolError,
-    traits::{
-        BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar,
-        TransactionListenerKind,
-    },
+    pool::TransactionListenerKind,
+    traits::{BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar},
     validate::ValidTransaction,
     AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPoolTransaction,
     EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
