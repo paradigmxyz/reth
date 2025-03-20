@@ -251,13 +251,9 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
+            // Create a sequence for producing a single block
+            let mut sequence = Sequence::new(vec![Box::new(PickNextBlockProducer::default())]);
             for _ in 0..self.num_blocks {
-                // Create a sequence for producing a single block
-                let mut sequence = Sequence::new(vec![
-                    Box::new(PickNextBlockProducer::default()),
-                    Box::new(AssertMineBlock::new(0, vec![], None)),
-                ]);
-
                 sequence.execute(env).await?;
             }
             Ok(())
