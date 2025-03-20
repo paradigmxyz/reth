@@ -37,7 +37,7 @@ use reth_revm::{
 };
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::{Block, BlockEnv};
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
@@ -143,7 +143,7 @@ where
     where
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
-        let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments { mut cached_reads, config, cancel, best_payload, is_resolving: _ } = args;
 
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
@@ -234,6 +234,7 @@ where
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
+            is_resolving: Arc::new(AtomicBool::new(false)),
         };
         self.build_payload(args, |_| NoopPayloadTransactions::<Pool::Transaction>::default())?
             .into_payload()
