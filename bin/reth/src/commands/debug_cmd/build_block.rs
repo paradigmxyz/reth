@@ -6,6 +6,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
+use std::sync::atomic::AtomicBool;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
