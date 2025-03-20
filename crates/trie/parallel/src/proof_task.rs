@@ -475,8 +475,7 @@ impl<Tx> ProofTaskManagerHandle<Tx> {
 
 impl<Tx> Clone for ProofTaskManagerHandle<Tx> {
     fn clone(&self) -> Self {
-        self.active_handles.fetch_add(1, Ordering::SeqCst);
-        Self { sender: self.sender.clone(), active_handles: self.active_handles.clone() }
+        Self::new(self.sender.clone(), self.active_handles.clone())
     }
 }
 
