@@ -2,13 +2,12 @@ use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 
 /// Mock hashed cursor factory.
 #[derive(Clone, Default, Debug)]
-#[non_exhaustive]
 pub struct MockHashedCursorFactory {
     hashed_accounts: Arc<BTreeMap<B256, Account>>,
     hashed_storage_tries: B256Map<Arc<BTreeMap<B256, U256>>>,
@@ -36,6 +35,16 @@ impl MockHashedCursorFactory {
             visited_account_keys: Default::default(),
             visited_storage_keys,
         }
+    }
+
+    /// Returns a reference to the list of visited hashed account keys.
+    pub fn visited_account_keys(&self) -> MutexGuard<'_, Vec<B256>> {
+        self.visited_account_keys.lock()
+    }
+
+    /// Returns a reference to the list of visited hashed storage keys for the given hashed address.
+    pub fn visited_storage_keys(&self, hashed_address: B256) -> MutexGuard<'_, Vec<B256>> {
+        self.visited_storage_keys.get(&hashed_address).expect("storage trie should exist").lock()
     }
 }
 
@@ -70,7 +79,6 @@ impl HashedCursorFactory for MockHashedCursorFactory {
 
 /// Mock hashed cursor.
 #[derive(Default, Debug)]
-#[non_exhaustive]
 pub struct MockHashedCursor<T> {
     /// The current key. If set, it is guaranteed to exist in `values`.
     current_key: Option<B256>,
