@@ -6,7 +6,7 @@ use crate::{
     StorageRootTargets,
 };
 use alloy_primitives::{
-    map::{B256Map, HashMap},
+    map::{B256Map, B256Set, HashMap},
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
@@ -91,6 +91,50 @@ where
     Factory:
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
+    /// Generate a storage multiproof according to the specified targets and hashed address.
+    pub fn storage_proof(
+        self,
+        hashed_address: B256,
+        target_slots: B256Set,
+    ) -> Result<StorageMultiProof, ParallelStateRootError> {
+        let total_targets = target_slots.len();
+        let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
+        let prefix_set = prefix_set.freeze();
+
+        let input = StorageProofInput::new(
+            hashed_address,
+            prefix_set,
+            target_slots,
+            self.collect_branch_node_masks,
+        );
+
+        debug!(
+            target: "trie::parallel_proof",
+            total_targets,
+            ?hashed_address,
+            "Starting storage proof generation"
+        );
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let _ =
+            self.storage_proof_task_handle.queue_task(ProofTaskKind::StorageProof(input, sender));
+
+        let proof_result = receiver.recv().map_err(|_| {
+            ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
+                format!("channel closed for {hashed_address}"),
+            )))
+        })?;
+
+        debug!(
+            target: "trie::parallel_proof",
+            total_targets,
+            ?hashed_address,
+            "Storage proof generation completed"
+        );
+
+        proof_result
+    }
+
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         self,
