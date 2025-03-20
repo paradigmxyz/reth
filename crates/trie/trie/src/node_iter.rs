@@ -179,6 +179,10 @@ mod tests {
 
         let empty_account_rlp = RlpNode::from_rlp(&alloy_rlp::encode(TrieAccount::default()));
 
+        let child_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+            vec![empty_account_rlp.clone(), empty_account_rlp],
+            TrieMask::new(0b11),
+        )));
         let child_branch_node_1 = (
             Nibbles::unpack(hex!(
                 "0x00000000000000000000000000000000000000000000000000000000000000"
@@ -191,11 +195,6 @@ mod tests {
                 None,
             ),
         );
-        let child_branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![empty_account_rlp.clone(), empty_account_rlp.clone()],
-            TrieMask::new(0b11),
-        )));
-
         let child_branch_node_2 = (
             Nibbles::unpack(hex!(
                 "0x00000000000000000000000000000000000000000000000000000000000001"
@@ -208,13 +207,9 @@ mod tests {
                 None,
             ),
         );
-        let child_branch_node_2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![empty_account_rlp.clone(), empty_account_rlp],
-            TrieMask::new(0b11),
-        )));
 
         let root_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![child_branch_node_1_rlp.clone(), child_branch_node_2_rlp.clone()],
+            vec![child_branch_node_rlp.clone(), child_branch_node_rlp.clone()],
             TrieMask::new(0b11),
         )));
         let root_branch_node = (
@@ -227,8 +222,8 @@ mod tests {
                 // Hash mask bits are set, because both child nodes are branches.
                 TrieMask::new(0b11),
                 vec![
-                    child_branch_node_1_rlp.as_hash().unwrap(),
-                    child_branch_node_2_rlp.as_hash().unwrap(),
+                    child_branch_node_rlp.as_hash().unwrap(),
+                    child_branch_node_rlp.as_hash().unwrap(),
                 ],
                 Some(root_branch_node_rlp.as_hash().unwrap()),
             ),
@@ -239,13 +234,13 @@ mod tests {
             B256Map::default(),
         );
 
+        // Mark the account 1 as changed.
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.insert(Nibbles::unpack(account_1));
+        let prefix_set = prefix_set.freeze();
 
-        let walker = TrieWalker::new(
-            trie_cursor_factory.account_trie_cursor().unwrap(),
-            prefix_set.freeze(),
-        );
+        let walker =
+            TrieWalker::new(trie_cursor_factory.account_trie_cursor().unwrap(), prefix_set);
 
         let hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::from([
