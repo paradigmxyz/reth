@@ -1,7 +1,10 @@
 //! Support types for updating the pool.
 
-use crate::{identifier::TransactionId, pool::state::SubPool};
+use crate::{
+    identifier::TransactionId, pool::state::SubPool, PoolTransaction, ValidPoolTransaction,
+};
 use alloy_primitives::TxHash;
+use std::sync::Arc;
 
 /// A change of the transaction's location
 ///
@@ -30,5 +33,20 @@ pub(crate) enum Destination {
 impl From<SubPool> for Destination {
     fn from(sub_pool: SubPool) -> Self {
         Self::Pool(sub_pool)
+    }
+}
+
+/// Tracks the result after updating the pool
+#[derive(Debug)]
+pub(crate) struct UpdateOutcome<T: PoolTransaction> {
+    /// transactions promoted to the pending pool
+    pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
+    /// transaction that failed and were discarded
+    pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
+}
+
+impl<T: PoolTransaction> Default for UpdateOutcome<T> {
+    fn default() -> Self {
+        Self { promoted: vec![], discarded: vec![] }
     }
 }
