@@ -115,6 +115,7 @@ impl TrieCursor for MockTrieCursor {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        // Find the first key that has a prefix of the given key.
         let entry = self
             .trie_nodes
             .iter()
@@ -127,8 +128,11 @@ impl TrieCursor for MockTrieCursor {
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let mut iter = self.trie_nodes.iter();
+        // Jump to the first key that has a prefix of the current key if it's set, or to the first
+        // key otherwise.
         iter.find(|(k, _)| self.current_key.as_ref().is_none_or(|current| k.starts_with(current)))
             .expect("current key should exist in trie nodes");
+        // Get the next key-value pair.
         let entry = iter
             .next()
             .or_else(|| self.trie_nodes.first_key_value())
