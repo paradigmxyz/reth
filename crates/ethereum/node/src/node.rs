@@ -1,8 +1,9 @@
 //! Ethereum Node types config.
 
+use std::default::Default;
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
@@ -42,6 +43,8 @@ use reth_transaction_pool::{
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
 use std::sync::Arc;
+use std::time::SystemTime;
+use reth_transaction_pool::blobstore::DiskFileBlobStoreConfig;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -338,7 +341,23 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let pool_config = ctx.pool_config();
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
+        let current_timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs();
+
+        let blob_params = ctx.chain_spec().blob_params_at_timestamp(current_timestamp)
+            .unwrap_or(ctx.chain_spec().blob_params.cancun);
+
+        let target_blob_count = blob_params.target_blob_count;
+
+        // - Previously, the cache defaulted to 100, which was ~33x Cancun's target (3 blobs)
+        // - To scale better for future upgrades, we multiply `blob_target * 64`
+        let cache_size = target_blob_count * 64;
+
+        let custom_config = DiskFileBlobStoreConfig::default()
+            .with_max_cached_entries(cache_size as u32);
+
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), custom_config)?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
