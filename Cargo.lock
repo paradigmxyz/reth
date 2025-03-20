@@ -5873,8 +5873,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "1.0.0-alpha.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61d0efbcc12d851c5f1e034d97f055491424b35515a2956ff8c3886fd9e0c148"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "auto_impl",
  "once_cell",
@@ -10091,8 +10090,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "20.0.0-alpha.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33790dc343daaa413e5426a508094e2055db97200e6e1a9362339e672058259d"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10110,8 +10108,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "1.0.0-alpha.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a1f19307417b325447bcb4bb12586d47c91df6551d33e4b6ced89eeedae7f5b"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "bitvec",
  "phf",
@@ -10122,8 +10119,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "1.0.0-alpha.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e100b379bda77580ad0fe7cc54b87675bfb1d4762ac6747b7933f01984e238cb"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "cfg-if",
  "derive-where",
@@ -10138,8 +10134,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "1.0.0-alpha.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "828f3d1147ac4eff5c98e4c3714f659a97781aa4f8f0f67087c9639bdc44cb61"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10153,8 +10148,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "1.0.0-alpha.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af1ade2662c72125f191296da438fdb42388311b0080db660459015dacfeeb9f"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "alloy-eips",
  "auto_impl",
@@ -10168,8 +10162,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "1.0.0-alpha.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830335bea29c435ad60d532198444af1fa9d9de6724887c36156dc643c3b6f62"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "auto_impl",
  "revm-primitives",
@@ -10180,8 +10173,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "1.0.0-alpha.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "278c4ce30c07a5a5ac26b4f5f72fed5120e764bd051ec5eeb6fbdb4ff537383e"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "auto_impl",
  "revm-bytecode",
@@ -10198,15 +10190,13 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "1.0.0-alpha.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8faa8ebce23b85a42f660560dd3553371e5b97352a2fe229a9e849e91cd0a113"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "auto_impl",
  "revm-context",
  "revm-database-interface",
  "revm-handler",
  "revm-interpreter",
- "revm-precompile",
  "revm-primitives",
  "revm-state",
  "serde",
@@ -10236,8 +10226,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "16.0.0-alpha.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a86403b3a0ddf4b5aa8da800a73ab500e947150ecd5b453a93b42482dde2c1c"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10248,8 +10237,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "17.0.0-alpha.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20da0ec6e79a5420d7619e8d5fa900b8632f076fb35579b5463949fe2b328da7"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -10259,7 +10247,6 @@ dependencies = [
  "libsecp256k1",
  "once_cell",
  "p256",
- "revm-context-interface",
  "revm-primitives",
  "ripemd",
  "secp256k1",
@@ -10270,8 +10257,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "16.0.0-alpha.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b719ced7ba199ea5e7a18fe62d75537e852dfc6b6afe608aac0c4cdc51af87d"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "alloy-primitives",
  "enumn",
@@ -10281,8 +10267,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "1.0.0-alpha.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a268b9798bbaa1e7d52c22d94ef231dae692d66f7c5ef29ff03e0776357156e"
+source = "git+https://github.com/refcell/revm?branch=rf%2Foperator-fee-fixes#8e76013f5dc7459042c5cda13be561e077a1f2fe"
 dependencies = [
  "bitflags 2.9.0",
  "revm-bytecode",

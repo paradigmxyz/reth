@@ -303,7 +303,6 @@ where
             EVMError::Header(err) => err.into(),
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
-            EVMError::Precompile(err) => Self::EvmPrecompile(err),
         }
     }
 }
@@ -540,11 +539,11 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
                 // tx.gas > block.gas_limit
                 Self::GasTooHigh
             }
-            InvalidTransaction::CallGasCostMoreThanGasLimit => {
+            InvalidTransaction::CallGasCostMoreThanGasLimit { .. } => {
                 // tx.gas < cost
                 Self::GasTooLow
             }
-            InvalidTransaction::GasFloorMoreThanGasLimit => {
+            InvalidTransaction::GasFloorMoreThanGasLimit { .. } => {
                 // Post prague EIP-7623 tx floor calldata gas cost > tx.gas_limit
                 // where floor gas is the minimum amount of gas that will be spent
                 // In other words, the tx's gas limit is lower that the minimum gas requirements of
