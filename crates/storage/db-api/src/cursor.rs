@@ -21,7 +21,7 @@ pub trait DbCursorRO<T: Table> {
     fn seek(&mut self, key: T::Key) -> PairResult<T>;
 
     /// Position the cursor at the next KV pair, returning it.
-    #[expect(clippy::should_implement_trait)]
+    #[allow(clippy::should_implement_trait)]
     fn next(&mut self) -> PairResult<T>;
 
     /// Position the cursor at the previous KV pair, returning it.
