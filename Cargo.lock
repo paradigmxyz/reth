@@ -9951,6 +9951,7 @@ dependencies = [
  "codspeed-criterion-compat",
  "itertools 0.14.0",
  "metrics",
+ "parking_lot",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-ethereum-primitives",

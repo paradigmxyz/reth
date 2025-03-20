@@ -56,10 +56,11 @@ revm-state.workspace = true
 triehash.workspace = true
 
 # misc
-proptest.workspace = true
-proptest-arbitrary-interop.workspace = true
-serde_json.workspace = true
 criterion.workspace = true
+parking_lot.workspace = true
+proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
@@ -78,6 +79,7 @@ serde = [
     "revm-database/serde",
     "reth-stages-types/serde",
     "revm-state/serde",
+    "parking_lot/serde",
 ]
 test-utils = [
     "triehash",
