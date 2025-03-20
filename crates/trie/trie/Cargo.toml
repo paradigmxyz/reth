@@ -45,8 +45,9 @@ triehash = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
-reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-ethereum-primitives = { workspace = true, features = ["arbitrary", "std"] }
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
 # revm
@@ -58,6 +59,7 @@ triehash.workspace = true
 # misc
 criterion.workspace = true
 parking_lot.workspace = true
+pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
