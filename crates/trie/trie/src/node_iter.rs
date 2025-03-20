@@ -151,6 +151,7 @@ mod tests {
 
     use crate::{
         hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
+        mock::KeyVisitType,
         trie_cursor::{mock::MockTrieCursorFactory, TrieCursorFactory},
         walker::TrieWalker,
     };
@@ -215,12 +216,21 @@ mod tests {
         while iter.try_next().unwrap().is_some() {}
 
         assert_eq!(
-            trie_cursor_factory.visited_account_keys().to_vec(),
-            vec![child_branch_node.0, root_branch_node.0]
+            *trie_cursor_factory.visited_account_keys(),
+            vec![
+                KeyVisitType::SeekNonExact(child_branch_node.0),
+                KeyVisitType::SeekNonExact(root_branch_node.0),
+            ]
         );
         assert_eq!(
-            hashed_cursor_factory.visited_account_keys().to_vec(),
-            vec![account_1, account_1, account_1, account_2, account_3]
+            *hashed_cursor_factory.visited_account_keys(),
+            vec![
+                KeyVisitType::SeekExact(account_1),
+                KeyVisitType::SeekExact(account_1),
+                KeyVisitType::SeekExact(account_1),
+                KeyVisitType::Next(account_2),
+                KeyVisitType::Next(account_3),
+            ]
         );
     }
 }
