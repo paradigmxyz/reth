@@ -64,6 +64,7 @@ pub struct BasicPayloadJobGenerator<Client, Tasks, Builder> {
     builder: Builder,
     /// Stored `cached_reads` for new payload jobs.
     pre_cached: Option<PrecachedState>,
+    /// Flag indicating if a payload job is currently being resolved.
     pub is_resolving: Arc<AtomicBool>,
 }
 
@@ -85,7 +86,7 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
             config,
             builder,
             pre_cached: None,
-            is_resolving: self.is_resolving.clone(),
+            is_resolving: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -332,6 +333,7 @@ where
     ///
     /// See [`PayloadBuilder`]
     builder: Builder,
+    /// Flag indicating whether this payload job is currently resolving.
     is_resolving:Arc<AtomicBool>
 }
 
@@ -354,6 +356,7 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
+        let is_resolving= self.is_resolving.clone();
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
@@ -362,7 +365,7 @@ where
                 config: payload_config,
                 cancel,
                 best_payload,
-                is_resolving: self.is_resolving.clone(),
+                is_resolving,
             };
             let result = builder.try_build(args);
             let _ = tx.send(result);
@@ -799,6 +802,7 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub cancel: CancelOnDrop,
     /// The best payload achieved so far.
     pub best_payload: Option<Payload>,
+    /// Flag indicating if a payload job is currently being resolved.
     pub is_resolving: Arc<AtomicBool>,
 }
 
