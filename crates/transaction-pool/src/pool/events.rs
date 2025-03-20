@@ -2,9 +2,6 @@ use crate::{traits::PropagateKind, PoolTransaction, SubPool, ValidPoolTransactio
 use alloy_primitives::{TxHash, B256};
 use std::sync::Arc;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 /// An event that happened to a transaction and contains its full body where possible.
 #[derive(Debug)]
 pub enum FullTransactionEvent<T: PoolTransaction> {
@@ -56,7 +53,7 @@ impl<T: PoolTransaction> Clone for FullTransactionEvent<T> {
 
 /// Various events that describe status changes of a transaction.
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TransactionEvent {
     /// Transaction has been added to the pending pool.
     Pending,

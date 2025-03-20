@@ -27,8 +27,6 @@ use reth_primitives_traits::{
     transaction::error::TransactionConversionError, Block, InMemorySize, Recovered, SealedBlock,
     SignedTransaction,
 };
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -583,7 +581,7 @@ pub struct PropagatedTransactions(pub HashMap<TxHash, Vec<PropagateKind>>);
 
 /// Represents how a transaction was propagated over the network.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PropagateKind {
     /// The full transaction object was sent to the peer.
     ///
