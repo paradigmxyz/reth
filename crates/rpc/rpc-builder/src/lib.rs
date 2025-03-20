@@ -176,7 +176,7 @@ where
     N: NodePrimitives,
 {
     /// Create a new instance of the builder
-    #[expect(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         provider: Provider,
         pool: Pool,
