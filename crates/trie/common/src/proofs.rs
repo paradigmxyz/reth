@@ -555,25 +555,28 @@ impl AccountProof {
     ///
     /// This is the inverse of [`Self::into_eip1186_response`]
     pub fn from_eip1186_proof(proof: alloy_rpc_types_eth::EIP1186AccountProofResponse) -> Self {
-        let address = proof.address;
-        let balance = proof.balance;
-        let code_hash = proof.code_hash;
-        let storage_root = proof.storage_hash;
-        let account_proof = proof.account_proof;
-        let storage_proofs = proof.storage_proof.into_iter().map(Into::into).collect();
+        let alloy_rpc_types_eth::EIP1186AccountProofResponse {
+            nonce,
+            address,
+            balance,
+            code_hash,
+            storage_hash,
+            account_proof,
+            storage_proof,
+            ..
+        } = proof;
+        let storage_proofs = storage_proof.into_iter().map(Into::into).collect();
 
-        let (storage_root, info) = if proof.nonce == 0 &&
+        let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
-            storage_root.is_zero() &&
-            code_hash.is_zero()
+            storage_hash.is_zero() &&
+            code_hash == KECCAK_EMPTY
         {
-            // Account does not exist in state. Return `None` here to prevent proof verification.
+            // Account does not exist in state. Return `None` here to prevent proof
+            // verification.
             (EMPTY_ROOT_HASH, None)
         } else {
-            (
-                storage_root,
-                Some(Account { nonce: proof.nonce, balance, bytecode_hash: code_hash.into() }),
-            )
+            (storage_hash, Some(Account { nonce, balance, bytecode_hash: code_hash.into() }))
         };
 
         Self { address, info, proof: account_proof, storage_root, storage_proofs }
@@ -980,5 +983,31 @@ mod tests {
         assert_eq!(retained.get(&addr1), Some(&B256Set::from_iter([slot3])));
         assert!(retained.contains_key(&addr2));
         assert_eq!(retained.get(&addr2), Some(&B256Set::from_iter([slot2])));
+    }
+
+    #[test]
+    #[cfg(feature = "eip1186")]
+    fn eip_1186_roundtrip() {
+        let mut acc = AccountProof {
+            address: Address::random(),
+            info: Some(
+                // non-empty account
+                Account { nonce: 100, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) },
+            ),
+            proof: vec![],
+            storage_root: B256::ZERO,
+            storage_proofs: vec![],
+        };
+
+        let rpc_proof = acc.clone().into_eip1186_response(Vec::new());
+        let inverse: AccountProof = rpc_proof.into();
+        assert_eq!(acc, inverse);
+
+        // make account empty
+        acc.info.as_mut().unwrap().nonce = 0;
+        let rpc_proof = acc.clone().into_eip1186_response(Vec::new());
+        let mut inverse: AccountProof = rpc_proof.into();
+        inverse.info.take();
+        assert_eq!(acc, inverse);
     }
 }
