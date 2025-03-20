@@ -85,7 +85,20 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        Ok(None)
+        let mut iter = self.values.iter();
+        // Jump to the first key that has a prefix of the current key if it's set, or to the first
+        // key otherwise.
+        iter.find(|(k, _)| {
+            self.current_key.as_ref().is_none_or(|current| k.starts_with(current.as_slice()))
+        })
+        .expect("current key should exist in values");
+        // Get the next key-value pair.
+        let entry =
+            iter.next().or_else(|| self.values.first_key_value()).map(|(k, v)| (*k, v.clone()));
+        if let Some((key, _)) = &entry {
+            self.set_current_key(*key);
+        }
+        Ok(entry)
     }
 }
 
