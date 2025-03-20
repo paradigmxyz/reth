@@ -25,7 +25,6 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
-use std::sync::atomic::AtomicBool;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
@@ -38,7 +37,7 @@ use reth_transaction_pool::{
     PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
 use revm::context_interface::Block as _;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 use tracing::{debug, trace, warn};
 
 mod config;
@@ -114,8 +113,13 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments::new(Default::default(), config, Default::default(), None, Arc::new(AtomicBool::new(false)));
-
+        let args = BuildArguments::new(
+            Default::default(),
+            config,
+            Default::default(),
+            None,
+            Arc::new(AtomicBool::new(false)),
+        );
         default_ethereum_payload(
             self.evm_config.clone(),
             self.client.clone(),
