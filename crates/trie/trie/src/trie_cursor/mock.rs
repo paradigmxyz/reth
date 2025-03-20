@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use super::{TrieCursor, TrieCursorFactory};
@@ -15,9 +15,9 @@ pub struct MockTrieCursorFactory {
     storage_tries: B256Map<Arc<BTreeMap<Nibbles, BranchNodeCompact>>>,
 
     /// List of keys that the account trie cursor has visited.
-    pub visited_account_keys: Arc<Mutex<Vec<Nibbles>>>,
+    visited_account_keys: Arc<Mutex<Vec<Nibbles>>>,
     /// List of keys that the storage trie cursor has visited, per storage trie.
-    pub visited_storage_keys: B256Map<Arc<Mutex<Vec<Nibbles>>>>,
+    visited_storage_keys: B256Map<Arc<Mutex<Vec<Nibbles>>>>,
 }
 
 impl MockTrieCursorFactory {
@@ -33,6 +33,20 @@ impl MockTrieCursorFactory {
             visited_account_keys: Default::default(),
             visited_storage_keys,
         }
+    }
+
+    /// Returns a reference to the list of visited account keys.
+    pub fn visited_account_keys(&self) -> MutexGuard<'_, Vec<Nibbles>> {
+        self.visited_account_keys.lock().unwrap()
+    }
+
+    /// Returns a reference to the list of visited storage keys for the given hashed address.
+    pub fn visited_storage_keys(&self, hashed_address: B256) -> MutexGuard<'_, Vec<Nibbles>> {
+        self.visited_storage_keys
+            .get(&hashed_address)
+            .expect("storage trie should exist")
+            .lock()
+            .unwrap()
     }
 }
 
