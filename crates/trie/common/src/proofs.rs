@@ -1006,8 +1006,9 @@ mod tests {
         // make account empty
         acc.info.as_mut().unwrap().nonce = 0;
         let rpc_proof = acc.clone().into_eip1186_response(Vec::new());
-        let mut inverse: AccountProof = rpc_proof.into();
-        inverse.info.take();
+        let inverse: AccountProof = rpc_proof.into();
+        acc.info.take();
+        acc.storage_root = EMPTY_ROOT_HASH;
         assert_eq!(acc, inverse);
     }
 }
