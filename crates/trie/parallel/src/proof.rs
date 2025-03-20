@@ -1,6 +1,6 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{ProofTaskMessage, StorageProofInput},
+    proof_task::{ProofTaskKind, ProofTaskManagerHandle, StorageProofInput},
     root::ParallelStateRootError,
     stats::ParallelTrieTracker,
     StorageRootTargets,
@@ -30,7 +30,7 @@ use reth_trie::{
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::sync::{mpsc::Sender, Arc};
+use std::sync::Arc;
 use tracing::debug;
 
 /// Parallel proof calculator.
@@ -52,8 +52,8 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     pub prefix_sets: Arc<TriePrefixSetsMut>,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
-    /// Sender to the storage proof task.
-    storage_proof_task: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
+    /// Handle to the storage proof task.
+    storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -65,7 +65,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        storage_proof_task: Sender<ProofTaskMessage<FactoryTx<Factory>>>,
+        storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     ) -> Self {
         Self {
             view,
@@ -73,7 +73,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             state_sorted,
             prefix_sets,
             collect_branch_node_masks: false,
-            storage_proof_task,
+            storage_proof_task_handle,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
@@ -145,7 +145,9 @@ where
                 self.collect_branch_node_masks,
             );
             let (sender, receiver) = std::sync::mpsc::channel();
-            let _ = self.storage_proof_task.send(ProofTaskMessage::StorageProof((input, sender)));
+            let _ = self
+                .storage_proof_task_handle
+                .queue_task(ProofTaskKind::StorageProof(input, sender));
 
             // store the receiver for that result with the hashed address so we can await this in
             // place when we iterate over the trie
@@ -353,11 +355,11 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
-        let task_ctx = ProofTaskCtx::new(Default::default(), Default::default());
+        let task_ctx =
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
         let proof_task =
             ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
         let proof_task_handle = proof_task.handle();
-        let proof_task_sender = proof_task_handle.sender();
 
         // keep the join handle around to make sure it does not return any errors
         // after we compute the state root
@@ -368,7 +370,7 @@ mod tests {
             Default::default(),
             Default::default(),
             Default::default(),
-            proof_task_sender,
+            proof_task_handle.clone(),
         )
         .multiproof(targets.clone())
         .unwrap();
