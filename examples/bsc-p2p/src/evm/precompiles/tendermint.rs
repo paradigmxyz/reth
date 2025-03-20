@@ -15,7 +15,7 @@ pub(crate) const TENDERMINT_HEADER_VALIDATION_NANO: PrecompileWithAddress =
 
 /// Run the Tendermint header validation precompile after Nano hardfork.
 fn tendermint_header_validation_run_nano(_input: &Bytes, _gas_limit: u64) -> PrecompileResult {
-    Err(PrecompileError::other("suspended").into())
+    Err(PrecompileError::other("suspended"))
 }
 
 /// Run the Tendermint header validation precompile.
@@ -23,7 +23,7 @@ fn tendermint_header_validation_run(input: &Bytes, gas_limit: u64) -> Precompile
     const TENDERMINT_HEADER_VALIDATION_BASE: u64 = 3_000;
 
     if TENDERMINT_HEADER_VALIDATION_BASE > gas_limit {
-        return Err(PrecompileError::OutOfGas.into());
+        return Err(PrecompileError::OutOfGas);
     }
 
     let mut output = vec![0u8, 0, 0];
@@ -31,7 +31,7 @@ fn tendermint_header_validation_run(input: &Bytes, gas_limit: u64) -> Precompile
     let res = light_client::TmHeaderVerifier::execute(input.as_ref(), &mut bytes);
     match res {
         Ok(()) => Ok(PrecompileOutput::new(TENDERMINT_HEADER_VALIDATION_BASE, Bytes::from(output))),
-        Err(str) => Err(PrecompileError::other(str).into()),
+        Err(str) => Err(PrecompileError::other(str)),
     }
 }
 
