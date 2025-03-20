@@ -1,7 +1,10 @@
 use crate::{
     blobstore::BlobStoreError,
     error::{InvalidPoolTransactionError, PoolResult},
-    pool::{state::SubPool, BestTransactionFilter, TransactionEvents},
+    pool::{
+        state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
+        TransactionListenerKind,
+    },
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
@@ -535,27 +538,6 @@ pub trait TransactionPoolExt: TransactionPool {
     fn cleanup_blobs(&self);
 }
 
-/// Determines what kind of new transactions should be emitted by a stream of transactions.
-///
-/// This gives control whether to include transactions that are allowed to be propagated.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum TransactionListenerKind {
-    /// Any new pending transactions
-    All,
-    /// Only transactions that are allowed to be propagated.
-    ///
-    /// See also [`ValidPoolTransaction`]
-    PropagateOnly,
-}
-
-impl TransactionListenerKind {
-    /// Returns true if we're only interested in transactions that are allowed to be propagated.
-    #[inline]
-    pub const fn is_propagate_only(&self) -> bool {
-        matches!(self, Self::PropagateOnly)
-    }
-}
-
 /// A Helper type that bundles all transactions in the pool.
 #[derive(Debug, Clone)]
 pub struct AllPoolTransactions<T: PoolTransaction> {
@@ -595,7 +577,7 @@ impl<T: PoolTransaction> Default for AllPoolTransactions<T> {
     }
 }
 
-/// Represents a transaction that was propagated over the network.
+/// Represents transactions that were propagated over the network.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct PropagatedTransactions(pub HashMap<TxHash, Vec<PropagateKind>>);
 
@@ -637,21 +619,6 @@ impl From<PropagateKind> for PeerId {
         match value {
             PropagateKind::Full(peer) | PropagateKind::Hash(peer) => peer,
         }
-    }
-}
-
-/// Represents a new transaction
-#[derive(Debug)]
-pub struct NewTransactionEvent<T: PoolTransaction> {
-    /// The pool which the transaction was moved to.
-    pub subpool: SubPool,
-    /// Actual transaction
-    pub transaction: Arc<ValidPoolTransaction<T>>,
-}
-
-impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
-    fn clone(&self) -> Self {
-        Self { subpool: self.subpool, transaction: self.transaction.clone() }
     }
 }
 
