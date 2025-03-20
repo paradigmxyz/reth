@@ -79,6 +79,7 @@ serde = [
     "revm-database/serde",
     "reth-stages-types/serde",
     "revm-state/serde",
+    "parking_lot/serde",
 ]
 test-utils = [
     "triehash",
