@@ -5,13 +5,14 @@ use crate::{
     NodeBuilderHelper, PayloadAttributesBuilder,
 };
 use alloy_primitives::B256;
+use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{NodeTypesWithEngine, PayloadTypes};
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
-use std::marker::PhantomData;
+use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
 
@@ -46,6 +47,12 @@ pub struct Environment<I> {
     pub latest_block_info: Option<LatestBlockInfo>,
     /// Last producer index
     pub last_producer_idx: Option<usize>,
+    /// Stores payload attributes indexed by block number
+    pub payload_attributes: HashMap<u64, PayloadAttributes>,
+    /// Tracks the latest block header timestamp
+    pub latest_header_time: u64,
+    /// Defines the increment for block timestamps (default: 2 seconds)
+    pub block_timestamp_increment: u64,
 }
 
 impl<I> Default for Environment<I> {
@@ -55,6 +62,9 @@ impl<I> Default for Environment<I> {
             _phantom: Default::default(),
             latest_block_info: None,
             last_producer_idx: None,
+            payload_attributes: Default::default(),
+            latest_header_time: 0,
+            block_timestamp_increment: 2,
         }
     }
 }
