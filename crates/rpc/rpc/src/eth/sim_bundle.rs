@@ -446,7 +446,7 @@ struct EthSimBundleInner<Eth> {
     #[allow(dead_code)]
     eth_api: Eth,
     // restrict the number of concurrent tracing calls.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     blocking_task_guard: BlockingTaskGuard,
 }
 

@@ -13,7 +13,7 @@ use reth_primitives_traits::block::Block as _;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_layer::JwtSecret;
 
-#[allow(unused_must_use)]
+#[expect(unused_must_use)]
 async fn test_basic_engine_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync + EngineApiClient<EthEngineTypes>,

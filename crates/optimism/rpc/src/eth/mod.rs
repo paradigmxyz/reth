@@ -276,7 +276,7 @@ impl<N: OpNodeCore> fmt::Debug for OpEthApi<N> {
 }
 
 /// Container type `OpEthApi`
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 struct OpEthApiInner<N: OpNodeCore> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N>,

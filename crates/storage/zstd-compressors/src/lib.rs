@@ -86,7 +86,7 @@ pub fn create_receipt_decompressor() -> ReusableDecompressor {
 }
 
 /// Reusable decompressor that uses its own internal buffer.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct ReusableDecompressor {
     /// The `zstd` decompressor.
     decompressor: Decompressor<'static>,

@@ -1,7 +1,7 @@
 /// Stage IDs for all known stages.
 ///
 /// For custom stages, use [`StageId::Other`]
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StageId {
     #[deprecated(
@@ -61,7 +61,7 @@ impl StageId {
     /// Return stage id formatted as string.
     pub const fn as_str(&self) -> &str {
         match self {
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             Self::StaticFile => "StaticFile",
             Self::Headers => "Headers",
             Self::Bodies => "Bodies",

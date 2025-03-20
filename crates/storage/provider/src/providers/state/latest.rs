@@ -219,7 +219,7 @@ mod tests {
     use super::*;
 
     const fn assert_state_provider<T: StateProvider>() {}
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn assert_latest_state_provider<
         T: DBProvider + BlockHashReader + StateCommitmentProvider,
     >() {

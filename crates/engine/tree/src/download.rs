@@ -55,7 +55,7 @@ pub enum DownloadOutcome<B: Block> {
 }
 
 /// Basic [`BlockDownloader`].
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct BasicBlockDownloader<Client, B: Block>
 where
     Client: BlockClient + 'static,

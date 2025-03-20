@@ -21,7 +21,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
 
     for size in [1_000, 3_000, 5_000, 10_000] {
         // Too slow.
-        #[allow(unexpected_cfgs)]
+        #[expect(unexpected_cfgs)]
         if cfg!(codspeed) && size > 3_000 {
             continue;
         }

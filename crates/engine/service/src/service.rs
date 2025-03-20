@@ -51,7 +51,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 // TODO(mattsse): remove hidde once fixed : <https://github.com/rust-lang/rust/issues/135363>
 //  otherwise rustdoc fails to resolve the alias
 #[doc(hidden)]
@@ -72,7 +72,7 @@ where
     E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     /// Constructor for `EngineService`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new<V, C>(
         consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: E,

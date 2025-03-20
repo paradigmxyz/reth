@@ -72,7 +72,7 @@ mod metrics;
 mod payload_processor;
 mod persistence_state;
 // TODO(alexey): compare trie updates in `insert_block_inner`
-#[allow(unused)]
+#[expect(unused)]
 mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
@@ -3126,7 +3126,7 @@ mod tests {
         }
 
         /// Signals to the channel task that a value should be released
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         fn release(&self) {
             let _ = self.release.send(());
         }

@@ -170,7 +170,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // appending/truncating rows
                         for segment in event.paths {
                             // Ensure it's a file with the .conf extension
-                            #[allow(clippy::nonminimal_bool)]
+                            #[expect(clippy::nonminimal_bool)]
                             if !segment
                                 .extension()
                                 .is_some_and(|s| s.to_str() == Some(CONFIG_FILE_EXTENSION))
@@ -655,7 +655,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
-    #[allow(clippy::while_let_loop)]
+    #[expect(clippy::while_let_loop)]
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,

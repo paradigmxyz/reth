@@ -12,7 +12,7 @@ macro_rules! general_state_test {
     };
 }
 
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 mod general_state_tests {
     use super::*;
 

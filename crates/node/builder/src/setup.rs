@@ -24,7 +24,7 @@ use reth_tracing::tracing::debug;
 use tokio::sync::watch;
 
 /// Constructs a [Pipeline] that's wired to the network
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn build_networked_pipeline<N, Client, Executor>(
     config: &StageConfig,
     client: Client,
@@ -70,7 +70,7 @@ where
 }
 
 /// Builds the [Pipeline] with the given [`ProviderFactory`] and downloaders.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn build_pipeline<N, H, B, Executor>(
     provider_factory: ProviderFactory<N>,
     stage_config: &StageConfig,

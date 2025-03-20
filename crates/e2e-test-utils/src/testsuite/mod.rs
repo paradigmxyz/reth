@@ -60,7 +60,7 @@ impl<I> Default for Environment<I> {
 }
 
 /// Builder for creating test scenarios
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 #[derive(Default)]
 pub struct TestBuilder<I> {
     setup: Option<Setup<I>>,
