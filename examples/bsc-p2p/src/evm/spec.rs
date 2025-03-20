@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use revm::primitives::hardfork::SpecId;
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -46,6 +48,45 @@ pub enum BscSpecId {
 impl BscSpecId {
     pub const fn is_enabled_in(self, other: BscSpecId) -> bool {
         other as u8 <= self as u8
+    }
+
+    /// Converts the [`BscSpecId`] into a [`SpecId`].
+    pub const fn into_eth_spec(self) -> SpecId {
+        match self {
+            Self::FRONTIER | Self::FRONTIER_THAWING => SpecId::FRONTIER,
+            Self::HOMESTEAD => SpecId::HOMESTEAD,
+            Self::TANGERINE => SpecId::TANGERINE,
+            Self::SPURIOUS_DRAGON => SpecId::SPURIOUS_DRAGON,
+            Self::BYZANTIUM => SpecId::BYZANTIUM,
+            Self::CONSTANTINOPLE | Self::PETERSBURG => SpecId::PETERSBURG,
+            Self::ISTANBUL |
+            Self::MUIR_GLACIER |
+            Self::RAMANUJAN |
+            Self::NIELS |
+            Self::MIRROR_SYNC |
+            Self::BRUNO |
+            Self::EULER => SpecId::ISTANBUL,
+            Self::NANO => SpecId::SHANGHAI,
+            Self::MORAN | Self::GIBBS => SpecId::LONDON,
+            Self::PLANCK => SpecId::SHANGHAI,
+            Self::LUBAN => SpecId::SHANGHAI,
+            Self::PLATO => SpecId::SHANGHAI,
+            Self::BERLIN => SpecId::BERLIN,
+            Self::LONDON => SpecId::LONDON,
+            Self::HERTZ | Self::HERTZ_FIX => SpecId::SHANGHAI,
+            Self::SHANGHAI => SpecId::SHANGHAI,
+            Self::KEPLER => SpecId::SHANGHAI,
+            Self::FEYNMAN | Self::FEYNMAN_FIX => SpecId::CANCUN,
+            Self::CANCUN => SpecId::CANCUN,
+            Self::HABER | Self::HABER_FIX | Self::BOHR => SpecId::CANCUN,
+            Self::LATEST => SpecId::CANCUN,
+        }
+    }
+}
+
+impl From<BscSpecId> for SpecId {
+    fn from(spec: BscSpecId) -> Self {
+        spec.into_eth_spec()
     }
 }
 
