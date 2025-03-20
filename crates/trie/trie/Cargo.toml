@@ -67,21 +67,22 @@ serde_json.workspace = true
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
-    "alloy-primitives/serde",
-    "alloy-consensus/serde",
-    "alloy-trie/serde",
-    "alloy-eips/serde",
-    "reth-trie-common/serde",
-    "reth-primitives-traits/serde",
-    "alloy-primitives/serde",
-    "alloy-consensus/serde",
-    "alloy-trie/serde",
-    "alloy-eips/serde",
-    "reth-trie-common/serde",
-    "revm-database/serde",
-    "reth-stages-types/serde",
-    "revm-state/serde",
-    "parking_lot/serde",
+	"alloy-primitives/serde",
+	"alloy-consensus/serde",
+	"alloy-trie/serde",
+	"alloy-eips/serde",
+	"reth-trie-common/serde",
+	"reth-primitives-traits/serde",
+	"alloy-primitives/serde",
+	"alloy-consensus/serde",
+	"alloy-trie/serde",
+	"alloy-eips/serde",
+	"reth-trie-common/serde",
+	"revm-database/serde",
+	"reth-stages-types/serde",
+	"revm-state/serde",
+	"parking_lot/serde",
+	"reth-ethereum-primitives/serde"
 ]
 test-utils = [
     "triehash",

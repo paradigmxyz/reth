@@ -35,12 +35,13 @@ rand.workspace = true
 [features]
 default = []
 serde = [
-    "dep:serde",
-    "reth-execution-types/serde",
-    "alloy-eips/serde",
-    "alloy-primitives/serde",
-    "rand/serde",
-    "reth-primitives-traits/serde",
+	"dep:serde",
+	"reth-execution-types/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"rand/serde",
+	"reth-primitives-traits/serde",
+	"reth-ethereum-primitives/serde"
 ]
 serde-bincode-compat = [
     "reth-execution-types/serde-bincode-compat",
