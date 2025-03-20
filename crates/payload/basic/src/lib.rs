@@ -355,8 +355,13 @@ where
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
-            let args =
-                BuildArguments { cached_reads, config: payload_config, cancel, best_payload, is_resolving, };
+            let args = BuildArguments { 
+                cached_reads,
+                config: payload_config,
+                cancel,
+                best_payload,
+                is_resolving,
+            };
             let result = builder.try_build(args);
             let _ = tx.send(result);
         }));
@@ -803,7 +808,7 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { cached_reads, config, cancel, best_payload, is_resolving, }
+        Self { cached_reads, config, cancel, best_payload, is_resolving }
     }
 }
 
