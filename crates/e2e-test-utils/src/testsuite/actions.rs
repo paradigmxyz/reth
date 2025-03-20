@@ -222,6 +222,45 @@ where
         })
     }
 }
+/// Action that produces a sequence of blocks using the available clients
+#[derive(Debug)]
+pub struct ProduceBlocks<Engine> {
+    /// Number of blocks to produce
+    pub num_blocks: u64,
+    /// Tracks engine type
+    _phantom: PhantomData<Engine>,
+}
+
+impl<Engine> ProduceBlocks<Engine> {
+    /// Create a new `ProduceBlocks` action
+    pub fn new(num_blocks: u64) -> Self {
+        Self { num_blocks, _phantom: Default::default() }
+    }
+}
+
+impl<Engine> Default for ProduceBlocks<Engine> {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+impl<Engine> Action<Engine> for ProduceBlocks<Engine>
+where
+    Engine: EngineTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // Create a sequence for producing a single block
+            let mut sequence = Sequence::new(vec![Box::new(PickNextBlockProducer::default())]);
+            for _ in 0..self.num_blocks {
+                sequence.execute(env).await?;
+            }
+            Ok(())
+        })
+    }
+}
+
 /// Run a sequence of actions in series.
 #[allow(missing_debug_implementations)]
 pub struct Sequence<I> {
