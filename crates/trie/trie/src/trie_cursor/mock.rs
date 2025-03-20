@@ -1,7 +1,5 @@
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex, MutexGuard},
-};
+use parking_lot::{Mutex, MutexGuard};
+use std::{collections::BTreeMap, sync::Arc};
 
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{BranchNodeCompact, Nibbles};
@@ -37,16 +35,12 @@ impl MockTrieCursorFactory {
 
     /// Returns a reference to the list of visited account keys.
     pub fn visited_account_keys(&self) -> MutexGuard<'_, Vec<Nibbles>> {
-        self.visited_account_keys.lock().unwrap()
+        self.visited_account_keys.lock()
     }
 
     /// Returns a reference to the list of visited storage keys for the given hashed address.
     pub fn visited_storage_keys(&self, hashed_address: B256) -> MutexGuard<'_, Vec<Nibbles>> {
-        self.visited_storage_keys
-            .get(&hashed_address)
-            .expect("storage trie should exist")
-            .lock()
-            .unwrap()
+        self.visited_storage_keys.get(&hashed_address).expect("storage trie should exist").lock()
     }
 }
 
@@ -101,7 +95,7 @@ impl MockTrieCursor {
 
     fn set_current_key(&mut self, key: &Nibbles) {
         self.current_key = Some(key.clone());
-        self.visited_keys.lock().unwrap().push(key.clone());
+        self.visited_keys.lock().push(key.clone());
     }
 }
 

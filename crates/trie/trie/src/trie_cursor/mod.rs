@@ -12,6 +12,7 @@ mod subnode;
 pub mod noop;
 
 /// Mock trie cursor implementations.
+#[cfg(test)]
 pub mod mock;
 
 pub use self::{in_memory::*, subnode::CursorSubNode};
