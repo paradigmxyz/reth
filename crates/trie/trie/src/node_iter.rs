@@ -221,7 +221,10 @@ mod tests {
             Nibbles::unpack(hex!("0x000000000000000000000000000000000000000000000000000000000000")),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
+                // Tree mask has no bits set, because both child branch nodes have empty tree and
+                // hash masks.
                 TrieMask::new(0b00),
+                // Hash mask bits are set, because both child nodes are branches.
                 TrieMask::new(0b11),
                 vec![
                     child_branch_node_1_rlp.as_hash().unwrap(),
