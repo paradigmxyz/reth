@@ -8,7 +8,6 @@ use reth_storage_errors::db::DatabaseError;
 
 /// Mock hashed cursor factory.
 #[derive(Clone, Default, Debug)]
-#[non_exhaustive]
 pub struct MockHashedCursorFactory {
     hashed_accounts: Arc<BTreeMap<B256, Account>>,
     hashed_storage_tries: B256Map<Arc<BTreeMap<B256, U256>>>,
@@ -80,7 +79,6 @@ impl HashedCursorFactory for MockHashedCursorFactory {
 
 /// Mock hashed cursor.
 #[derive(Default, Debug)]
-#[non_exhaustive]
 pub struct MockHashedCursor<T> {
     /// The current key. If set, it is guaranteed to exist in `values`.
     current_key: Option<B256>,
