@@ -266,9 +266,9 @@ mod tests {
             *hashed_cursor_factory.visited_account_keys(),
             // Why do we seek the same key two additional times?
             vec![
-                KeyVisitType::SeekExact(account_1),
-                KeyVisitType::SeekExact(account_1),
-                KeyVisitType::SeekExact(account_1),
+                KeyVisitType::SeekNonExact(account_1),
+                KeyVisitType::SeekNonExact(account_1),
+                KeyVisitType::SeekNonExact(account_1),
                 KeyVisitType::Next(account_2),
                 KeyVisitType::Next(account_3),
                 KeyVisitType::Next(account_4),

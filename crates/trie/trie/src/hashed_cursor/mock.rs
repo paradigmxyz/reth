@@ -113,7 +113,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
             .find_map(|(k, v)| k.starts_with(key.as_slice()).then(|| (*k, v.clone())));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
-            self.visited_keys.lock().push(KeyVisitType::SeekExact(*key));
+            self.visited_keys.lock().push(KeyVisitType::SeekNonExact(*key));
         }
         Ok(entry)
     }
