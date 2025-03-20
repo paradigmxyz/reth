@@ -145,9 +145,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use alloy_primitives::{b256, hex, map::B256Map};
-    use alloy_trie::{BranchNodeCompact, Nibbles, TrieMask};
+    use alloy_trie::{BranchNodeCompact, Nibbles, TrieMask, EMPTY_ROOT_HASH};
     use reth_primitives_traits::Account;
-    use reth_trie_common::prefix_set::PrefixSetMut;
+    use reth_trie_common::{prefix_set::PrefixSetMut, BranchNode, RlpNode};
 
     use crate::{
         hashed_cursor::{mock::MockHashedCursorFactory, HashedCursorFactory},
@@ -171,16 +171,10 @@ mod tests {
             (account_3, Account::default()),
         ]);
 
-        let root_branch_node = (
-            Nibbles::unpack(hex!("0x000000000000000000000000000000000000000000000000000000000000")),
-            BranchNodeCompact::new(
-                TrieMask::new(0b11),
-                TrieMask::new(0b01),
-                TrieMask::new(0b01),
-                vec![b256!("0x0000000000000000000000000000000000000000000000000000000000000000")],
-                None,
-            ),
-        );
+        let empty_account_rlp = RlpNode::from_rlp(&alloy_rlp::encode(
+            Account::default().into_trie_account(EMPTY_ROOT_HASH),
+        ));
+
         let child_branch_node = (
             Nibbles::unpack(hex!(
                 "0x00000000000000000000000000000000000000000000000000000000000000"
@@ -191,6 +185,25 @@ mod tests {
                 TrieMask::new(0b00),
                 vec![],
                 None,
+            ),
+        );
+        let child_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+            vec![empty_account_rlp.clone(), empty_account_rlp.clone()],
+            TrieMask::new(0b11),
+        )));
+
+        let root_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+            vec![child_branch_node_rlp.clone(), empty_account_rlp],
+            TrieMask::new(0b11),
+        )));
+        let root_branch_node = (
+            Nibbles::unpack(hex!("0x000000000000000000000000000000000000000000000000000000000000")),
+            BranchNodeCompact::new(
+                TrieMask::new(0b11),
+                TrieMask::new(0b01),
+                TrieMask::new(0b01),
+                vec![child_branch_node_rlp.as_hash().unwrap()],
+                Some(root_branch_node_rlp.as_hash().unwrap()),
             ),
         );
 
@@ -205,7 +218,6 @@ mod tests {
             trie_cursor_factory.account_trie_cursor().unwrap(),
             prefix_set.freeze(),
         );
-        println!("{walker:?}");
 
         let hashed_cursor_factory =
             MockHashedCursorFactory::new(hashed_accounts, B256Map::default());
@@ -215,16 +227,18 @@ mod tests {
 
         while iter.try_next().unwrap().is_some() {}
 
-        assert_eq!(
+        pretty_assertions::assert_eq!(
             *trie_cursor_factory.visited_account_keys(),
             vec![
                 KeyVisitType::SeekNonExact(root_branch_node.0),
                 KeyVisitType::SeekNonExact(child_branch_node.0),
             ]
         );
-        assert_eq!(
+        pretty_assertions::assert_eq!(
             *hashed_cursor_factory.visited_account_keys(),
+            // Why do we seek the same key three additional times?
             vec![
+                KeyVisitType::SeekExact(account_1),
                 KeyVisitType::SeekExact(account_1),
                 KeyVisitType::SeekExact(account_1),
                 KeyVisitType::SeekExact(account_1),

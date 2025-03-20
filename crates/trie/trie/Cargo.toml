@@ -59,6 +59,7 @@ triehash.workspace = true
 # misc
 criterion.workspace = true
 parking_lot.workspace = true
+pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 serde_json.workspace = true

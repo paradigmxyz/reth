@@ -9952,6 +9952,7 @@ dependencies = [
  "itertools 0.14.0",
  "metrics",
  "parking_lot",
+ "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-ethereum-primitives",
