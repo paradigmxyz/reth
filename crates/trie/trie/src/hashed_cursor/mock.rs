@@ -19,6 +19,26 @@ pub struct MockHashedCursorFactory {
     visited_storage_keys: B256Map<Arc<Mutex<Vec<B256>>>>,
 }
 
+impl MockHashedCursorFactory {
+    /// Creates a new mock hashed cursor factory.
+    pub fn new(
+        hashed_accounts: BTreeMap<B256, Account>,
+        hashed_storage_tries: B256Map<BTreeMap<B256, U256>>,
+    ) -> Self {
+        let visited_storage_keys =
+            hashed_storage_tries.keys().map(|k| (*k, Default::default())).collect();
+        Self {
+            hashed_accounts: Arc::new(hashed_accounts),
+            hashed_storage_tries: hashed_storage_tries
+                .into_iter()
+                .map(|(k, v)| (k, Arc::new(v)))
+                .collect(),
+            visited_account_keys: Default::default(),
+            visited_storage_keys,
+        }
+    }
+}
+
 impl HashedCursorFactory for MockHashedCursorFactory {
     type AccountCursor = MockHashedCursor<Account>;
     type StorageCursor = MockHashedCursor<U256>;
