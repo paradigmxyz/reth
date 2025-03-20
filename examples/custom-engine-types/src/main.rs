@@ -28,6 +28,7 @@ use alloy_rpc_types::{
     },
     Withdrawal,
 };
+use std::sync::atomic::AtomicBool;
 use reth::{
     api::{InvalidPayloadAttributesError, PayloadTypes},
     builder::{
