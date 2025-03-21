@@ -6,11 +6,37 @@ use alloy_consensus::{
 use alloy_primitives::PrimitiveSignature;
 use bytes::{Buf, BufMut};
 
+/// A trait for extracting transaction without type and signature and serializing it using
+/// [`Compact`] encoding.
+///
+/// It is not a responsibility of this trait to encode transaction type and signature. Likely this
+/// will be a part of a serialization scenario with a greater scope where these values are
+/// serialized separately.
+///
+/// See [`ToTxCompact::to_tx_compact`].
 trait ToTxCompact {
+    /// Serializes inner transaction using [`Compact`] encoding. Writes the result into `buf`.
+    ///
+    /// The written bytes do not contain signature and transaction type. This information be needs
+    /// to be serialized extra if needed.
     fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>));
 }
 
+/// A trait for deserializing transaction without type and signature using [`Compact`] encoding.
+///
+/// It is not a responsibility of this trait to extract transaction type and signature, but both
+/// are needed to create the value. While these values can come from anywhere, likely this will be
+/// a part of a deserialization scenario with a greater scope where these values are deserialized
+/// separately.
+///
+/// See [`FromTxCompact::from_tx_compact`].
 trait FromTxCompact {
+    /// Deserializes inner transaction using [`Compact`] encoding. The concrete type is determined
+    /// by `tx_type`. The `signature` is added to create typed and signed transaction.
+    ///
+    /// Returns a tuple of 2 elements. The first element is the deserialized value and the second
+    /// is a byte slice created from `buf` with a starting position advanced by the exact amount
+    /// of bytes consumed for this process.  
     fn from_tx_compact(buf: &[u8], tx_type: TxType, signature: PrimitiveSignature) -> (Self, &[u8])
     where
         Self: Sized;
