@@ -6,7 +6,7 @@ use revm::{
     context_interface::ContextTr,
     handler::{EthPrecompiles, PrecompileProvider},
     interpreter::InterpreterResult,
-    precompile::{u64_to_address, PrecompileError, PrecompileWithAddress, Precompiles},
+    precompile::{bls12_381, kzg_point_evaluation, secp256r1, PrecompileError, Precompiles},
     primitives::{Address, Bytes},
 };
 use std::boxed::Box;
