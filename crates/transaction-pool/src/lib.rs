@@ -151,7 +151,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 pub use crate::{
     blobstore::{BlobStore, BlobStoreError},
     config::{
@@ -181,7 +180,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, Recovered};
 use reth_storage_api::StateProviderFactory;
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, fmt::Debug, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
 
@@ -332,10 +331,10 @@ where
 /// implements the `TransactionPool` interface for various transaction pool API consumers.
 impl<V, T, S> TransactionPool for Pool<V, T, S>
 where
-    V: TransactionValidator,
+    V: TransactionValidator + Debug,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
-    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction> + Debug,
+    S: BlobStore + Debug,
 {
     type Transaction = T::Transaction;
 
@@ -612,10 +611,10 @@ where
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
 where
-    V: TransactionValidator,
+    V: TransactionValidator + Debug,
     <V as TransactionValidator>::Transaction: EthPoolTransaction,
-    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction> + Debug,
+    S: BlobStore + Debug,
 {
     #[instrument(skip(self), target = "txpool")]
     fn set_block_info(&self, info: BlockInfo) {
