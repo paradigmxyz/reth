@@ -2,11 +2,11 @@
 
 use alloc::string::String;
 use alloy_rpc_client::ReqwestClient;
+use core::time::Duration;
 pub use kona_interop::{ExecutingDescriptor, InvalidInboxEntry, SafetyLevel};
 pub use kona_rpc::{
     CheckAccessList, InteropTxValidator, InteropTxValidatorError, SupervisorApiClient,
 };
-use std::time::Duration;
 
 /// Supervisor hosted by op-labs
 // TODO: This should be changes to actual supervisor url
