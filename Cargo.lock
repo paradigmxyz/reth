@@ -1214,6 +1214,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-serialize-derive"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae3281bc6d0fd7e549af32b52511e1302185bd688fd3359fa36423346ff682ea"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "ark-std"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1608,6 +1619,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
 dependencies = [
  "generic-array 0.14.7",
+]
+
+[[package]]
+name = "bls_on_arkworks"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4107cadb31de0d0c1282dd57efe395706b1d81feb697799871f95c3324af7c44"
+dependencies = [
+ "ark-bls12-381",
+ "ark-ec",
+ "ark-ff 0.4.2",
+ "ark-serialize 0.4.2",
+ "ark-std 0.4.0",
+ "hkdf",
+ "hmac 0.12.1",
+ "libm",
+ "sha2 0.10.8",
 ]
 
 [[package]]
@@ -3198,6 +3226,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519-consensus"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c8465edc8ee7436ffea81d21a019b16676ee3db267aa8d5a8d729581ecf998b"
+dependencies = [
+ "curve25519-dalek-ng",
+ "hex 0.4.3",
+ "rand_core 0.6.4",
+ "sha2 0.9.9",
+ "zeroize",
+]
+
+[[package]]
 name = "ed25519-dalek"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3481,12 +3522,19 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types",
  "auto_impl",
+ "bls_on_arkworks",
  "bytes 1.10.1",
+ "cfg-if",
+ "cometbft",
+ "cometbft-light-client",
+ "cometbft-light-client-verifier",
+ "cometbft-proto",
  "derive_more 2.0.1",
  "eyre",
  "futures",
  "once_cell",
  "parity-bytes",
+ "prost 0.12.6",
  "reth-chainspec",
  "reth-discv4",
  "reth-engine-primitives",
@@ -4848,7 +4896,7 @@ dependencies = [
  "bytes 0.5.6",
  "failure",
  "hex 0.4.3",
- "prost",
+ "prost 0.6.1",
  "ripemd160 0.8.0",
  "sha2 0.8.2",
  "sha3 0.8.2",
@@ -7149,7 +7197,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce49aefe0a6144a45de32927c77bd2859a5f7677b55f220ae5b744e87389c212"
 dependencies = [
  "bytes 0.5.6",
- "prost-derive",
+ "prost-derive 0.6.1",
+]
+
+[[package]]
+name = "prost"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "deb1435c188b76130da55f17a466d252ff7b1418b2ad3e037d127b94e3411f29"
+dependencies = [
+ "bytes 1.10.1",
+ "prost-derive 0.12.6",
 ]
 
 [[package]]
@@ -7209,7 +7267,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1834f67c0697c001304b75be76f67add9c89742eda3a085ad8ee0bb38c3417aa"
 dependencies = [
  "bytes 0.5.6",
- "prost",
+ "prost 0.6.1",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9091c90b0a32608e984ff2fa4091273cbdd755d54935c51d520887f4a1dbd5b0"
+dependencies = [
+ "prost 0.12.6",
 ]
 
 [[package]]
@@ -11788,6 +11855,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_cbor"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bef2ebfde456fb76bbcf9f59315333decc4fda0b2b44b420243c11e0f5ec1f5"
+dependencies = [
+ "half 1.8.3",
+ "serde",
+]
+
+[[package]]
 name = "serde_combinators"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12369,6 +12446,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "subtle-ng"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "734676eb262c623cec13c3155096e08d1f8f29adce39ba17948b18dad1e54142"
+
+[[package]]
 name = "symbolic-common"
 version = "12.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12542,10 +12625,10 @@ dependencies = [
  "num-traits",
  "once_cell",
  "parity-bytes",
- "prost",
+ "prost 0.6.1",
  "prost-amino",
  "prost-amino-derive",
- "prost-types",
+ "prost-types 0.6.1",
  "ripemd160 0.9.1",
  "serde",
  "serde_bytes",
@@ -12569,12 +12652,12 @@ dependencies = [
  "anomaly",
  "bytes 0.5.6",
  "chrono",
- "num-derive",
+ "num-derive 0.3.3",
  "num-traits",
- "prost",
+ "prost 0.6.1",
  "prost-amino",
  "prost-amino-derive",
- "prost-types",
+ "prost-types 0.6.1",
  "serde",
  "serde_bytes",
  "subtle-encoding",
