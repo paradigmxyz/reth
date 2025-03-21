@@ -22,7 +22,7 @@ pub trait StateCommitment: std::fmt::Debug + Send + Sync + Unpin + 'static {
 }
 
 /// The state commitment type for Ethereum's Merkle Patricia Trie.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MerklePatriciaTrie;
 
