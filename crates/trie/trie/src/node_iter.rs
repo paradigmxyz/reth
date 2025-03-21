@@ -88,6 +88,14 @@ where
     ) -> Result<Option<TrieElement<<H as HashedCursor>::Value>>, DatabaseError> {
         loop {
             // If the walker has a key...
+            trace!(
+                target: "trie::node_iter",
+                key = ?self.walker.key(),
+                current_walker_key_checked = self.current_walker_key_checked,
+                previous_hashed_key = ?self.previous_hashed_key,
+                can_skip_current_node = self.walker.can_skip_current_node,
+                "If the walker has a key..."
+            );
             if let Some(key) = self.walker.key() {
                 // Check if the current walker key is unchecked and there's no previous hashed key
                 if !self.current_walker_key_checked && self.previous_hashed_key.is_none() {
@@ -104,6 +112,11 @@ where
             }
 
             // If there's a hashed entry...
+            trace!(
+                target: "trie::node_iter",
+                current_hashed_entry = ?self.current_hashed_entry,
+                "If there's a hashed entry..."
+            );
             if let Some((hashed_key, value)) = self.current_hashed_entry.take() {
                 // If the walker's key is less than the unpacked hashed key,
                 // reset the checked status and continue
@@ -119,9 +132,14 @@ where
             }
 
             // Handle seeking and advancing based on the previous hashed key
+            trace!(
+                target: "trie::node_iter",
+                previous_hashed_key = ?self.previous_hashed_key,
+                "Handle seeking and advancing based on the previous hashed key"
+            );
             match self.previous_hashed_key.take() {
                 Some(hashed_key) => {
-                    trace!(target: "trie::node_iter", ?hashed_key, "seeking to the previous hashed entry");
+                    trace!(target: "trie::node_iter", ?hashed_key, "Seeking to the previous hashed entry");
                     // Seek to the previous hashed key and get the next hashed entry
                     self.hashed_cursor.seek(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
@@ -137,7 +155,7 @@ where
                         target: "trie::node_iter",
                         ?seek_key,
                         can_skip_current_node = self.walker.can_skip_current_node,
-                        "seeking to the next unprocessed hashed entry"
+                        "Seeking to the next unprocessed hashed entry"
                     );
                     self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
                     self.walker.advance()?;
@@ -233,20 +251,24 @@ mod tests {
 
         // Extension (Key = 0000000000000000000000000000000000000000000000000000000000000)
         // └── Branch (`branch_node`)
-        //     ├── 0 -> Branch (`child_branch_node`)
-        //     │      ├── 0 -> Leaf (account_1, marked as changed)
-        //     │      └── 1 -> Leaf (account_2)
-        //     ├── 1 -> Leaf (account_3)
+        //     ├── 1 -> Branch (`child_branch_node`)
+        //     │      ├── 1 -> Leaf (account_1, marked as changed)
+        //     │      └── 2 -> Leaf (account_2)
+        //     ├── 2 -> Branch (`child_branch_node`)
+        //     │      ├── 1 -> Leaf (account_3)
+        //     │      └── 2 -> Leaf (account_4)
 
-        let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
-        let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
-        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000010");
+        let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000011");
+        let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000012");
+        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000021");
+        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000022");
         let empty_account = Account::default();
 
         let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
             (Nibbles::unpack(account_1), empty_account),
             (Nibbles::unpack(account_2), empty_account),
             (Nibbles::unpack(account_3), empty_account),
+            (Nibbles::unpack(account_4), empty_account),
         ]);
 
         let empty_leaf_rlp = RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
@@ -256,19 +278,22 @@ mod tests {
 
         let child_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
             vec![empty_leaf_rlp.clone(), empty_leaf_rlp],
-            TrieMask::new(0b11),
+            TrieMask::new(0b110),
         )));
 
         let branch_node = (
             Nibbles::from_nibbles([0; 62]),
             BranchNodeCompact::new(
-                TrieMask::new(0b11),
+                TrieMask::new(0b110),
                 // Tree mask has no bits set, because the child branch node has empty tree and hash
                 // masks.
-                TrieMask::new(0b00),
-                // Only the child branch node hash mask bit is set.
-                TrieMask::new(0b01),
-                vec![child_branch_node_rlp.as_hash().unwrap()],
+                TrieMask::new(0b000),
+                // Only the child branch nodes hash mask bits are set.
+                TrieMask::new(0b110),
+                vec![
+                    child_branch_node_rlp.as_hash().unwrap(),
+                    child_branch_node_rlp.as_hash().unwrap(),
+                ],
                 None,
             ),
         );
@@ -295,6 +320,7 @@ mod tests {
                 (account_1, empty_account),
                 (account_2, empty_account),
                 (account_3, empty_account),
+                (account_4, empty_account),
             ]),
             B256Map::default(),
         );
@@ -319,30 +345,30 @@ mod tests {
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
                     visited_key: None
-                }
+                },
             ]
         );
         pretty_assertions::assert_eq!(
             *hashed_cursor_factory.visited_account_keys(),
             vec![
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_1),
-                    visited_key: Some(account_1)
+                    visit_type: KeyVisitType::SeekNonExact(b256!(
+                        "0x0000000000000000000000000000000000000000000000000000000000000000"
+                    )),
+                    visited_key: None
                 },
-                // Why do we seek account 1 one additional time?
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_1),
-                    visited_key: Some(account_1)
-                },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_2) },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_3) },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(b256!(
                         "0x0000000000000000000000000000000000000000000000000000000000000010"
                     )),
-                    visited_key: Some(account_3)
+                    visited_key: None
                 },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(b256!(
+                        "0x0000000000000000000000000000000000000000000000000000000000000030"
+                    )),
+                    visited_key: None
+                },
             ],
         );
     }
