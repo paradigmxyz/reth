@@ -31,6 +31,8 @@ jobs:
             command: 'make PROFILE=profiling docker-build-push-profiling'
           - name: 'Build and push the nightly op-reth image'
             command: 'make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push-nightly'
+          - name: 'Build and push the nightly profiling op-reth image'
+            command: 'make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push-nightly-profiling'
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
