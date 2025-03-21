@@ -36,7 +36,7 @@ pub(super) struct SparseTrieTask<BPF> {
 
 impl<BPF> SparseTrieTask<BPF>
 where
-    BPF: BlindedProviderFactory + Clone + Send + Sync,
+    BPF: BlindedProviderFactory + Send + Sync,
     BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
     BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
 {
@@ -62,8 +62,7 @@ where
         let now = Instant::now();
 
         let mut num_iterations = 0;
-        let mut trie =
-            SparseStateTrie::new(self.blinded_provider_factory.clone()).with_updates(true);
+        let mut trie = SparseStateTrie::new(&self.blinded_provider_factory).with_updates(true);
 
         while let Ok(mut update) = self.updates.recv() {
             num_iterations += 1;
