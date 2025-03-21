@@ -1943,6 +1943,76 @@ impl TransportRpcModules {
         Ok(())
     }
 
+    /// Filters methods for the specified transport type based on the given filter function.
+    ///
+    /// A `Methods` instance containing only the methods that pass the given filter function.
+    pub fn filter_methods<F>(&self, module: RethRpcModule, filter: F) -> Methods
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+        if self.module_config().contains_http(&module) {
+            methods = self.filter_http(filter)
+        } else if self.module_config().contains_ws(&module) {
+            methods = self.filter_ws(filter)
+        } else if self.module_config().contains_ipc(&module) {
+            methods = self.filter_ipc(filter)
+        }
+
+        methods
+    }
+
+    /// Filters HTTP methods based on the given filter function.
+    pub fn filter_http<F>(&self, filter: F) -> Methods
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+        let method_names = self.http.as_ref().expect("REASON").method_names().filter(|s| filter(s));
+
+        for name in method_names {
+            if let Some(matched_method) = self.http.as_ref().and_then(|m| m.method(name)).cloned() {
+                let _ = methods.verify_and_insert(name, matched_method);
+            }
+        }
+
+        methods
+    }
+
+    /// Filters WS methods based on the given filter function
+    pub fn filter_ws<F>(&self, filter: F) -> Methods
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+        let method_names = self.ws.as_ref().expect("REASON").method_names().filter(|s| filter(s));
+
+        for name in method_names {
+            if let Some(matched_method) = self.ws.as_ref().and_then(|m| m.method(name)).cloned() {
+                let _ = methods.verify_and_insert(name, matched_method);
+            }
+        }
+
+        methods
+    }
+
+    /// Filters the IPC methods based on the given filter function
+    pub fn filter_ipc<F>(&self, filter: F) -> Methods
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut methods = Methods::new();
+        let method_names = self.ipc.as_ref().expect("REASON").method_names().filter(|s| filter(s));
+
+        for name in method_names {
+            if let Some(matched_method) = self.ipc.as_ref().and_then(|m| m.method(name)).cloned() {
+                let _ = methods.verify_and_insert(name, matched_method);
+            }
+        }
+
+        methods
+    }
+
     /// Removes the method with the given name from the configured http methods.
     ///
     /// Returns `true` if the method was found and removed, `false` otherwise.
