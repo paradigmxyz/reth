@@ -143,8 +143,8 @@ where
     where
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
-        let BuildArguments { mut cached_reads, config, cancel, best_payload, is_resolving: _ } = args;
-
+        let BuildArguments { mut cached_reads, config, cancel, best_payload, is_resolving: _ } =
+            args;
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             da_config: self.config.da_config.clone(),
