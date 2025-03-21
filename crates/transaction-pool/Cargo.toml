@@ -76,7 +76,6 @@ serde = [
     "dep:serde",
     "reth-execution-types/serde",
     "reth-eth-wire-types/serde",
-    "reth-provider/serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
