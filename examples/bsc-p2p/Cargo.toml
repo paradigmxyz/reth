@@ -90,7 +90,6 @@ serde = [
     "secp256k1/serde",
     "bytes/serde",
     "reth-network/serde",
-    "reth-network-api/serde",
 ]
 # See comments in `revm-precompile`
 secp256k1 = ["revm/secp256k1"]
