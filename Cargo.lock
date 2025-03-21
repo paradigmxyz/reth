@@ -5020,6 +5020,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-sol-types",
+ "arbitrary",
  "async-trait",
  "derive_more 2.0.1",
  "kona-genesis",

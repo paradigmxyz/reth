@@ -136,6 +136,7 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "rand",
+    "kona-interop/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-serde?/arbitrary",
 ]
