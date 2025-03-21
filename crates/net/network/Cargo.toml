@@ -105,7 +105,6 @@ pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 
 [features]
-default = ["serde"]
 geth-tests = []
 serde = [
     "dep:serde",
@@ -125,6 +124,7 @@ serde = [
     "url/serde",
     "reth-primitives-traits/serde",
     "reth-ethereum-forks/serde",
+    "reth-network/serde",
     "reth-transaction-pool/serde",
 ]
 test-utils = [
