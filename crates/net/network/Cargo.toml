@@ -125,7 +125,6 @@ serde = [
     "url/serde",
     "reth-primitives-traits/serde",
     "reth-ethereum-forks/serde",
-    "reth-provider/serde",
     "reth-transaction-pool/serde",
 ]
 test-utils = [
