@@ -213,11 +213,11 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     ) -> WithLaunchContext<
         NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, ChainSpec>,
     > {
-        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(
-            reth_db::test_utils::tempdir_path(),
-        );
+        let temp_path = reth_db::test_utils::tempdir_path();
+        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(temp_path.clone());
+        
         self.config = self.config.with_datadir_args(reth_node_core::args::DatadirArgs {
-            datadir: path.clone(),
+            datadir: Some(temp_path),
             ..Default::default()
         });
 
