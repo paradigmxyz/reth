@@ -232,13 +232,13 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         // Extension (Key = 0000000000000000000000000000000000000000000000000000000000000)
-        // ├── 0 -> Branch (`branch_node`)
-        //       ├── 0 -> Branch (`child_branch_node`)
-        //       │      ├── 0 -> Leaf (account_1, marked as changed)
-        //       │      └── 1 -> Leaf (account_2)
-        //       ├── 1 -> Branch (`child_branch_node`)
-        //       │      ├── 0 -> Leaf (account_5)
-        //       │      └── 1 -> Leaf (account_6)
+        // └── Branch (`branch_node`)
+        //     ├── 0 -> Branch (`child_branch_node`)
+        //     │      ├── 0 -> Leaf (account_1, marked as changed)
+        //     │      └── 1 -> Leaf (account_2)
+        //     ├── 1 -> Branch (`child_branch_node`)
+        //     │      ├── 0 -> Leaf (account_5)
+        //     │      └── 1 -> Leaf (account_6)
 
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
         let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
@@ -267,7 +267,10 @@ mod tests {
             Nibbles::from_nibbles([0; 62]),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
+                // Tree mask has no bits set, because both child branch nodes have empty tree and
+                // hash masks.
                 TrieMask::new(0b00),
+                // Hash mask bits are set, because both child nodes are branches.
                 TrieMask::new(0b11),
                 vec![
                     child_branch_node_rlp.as_hash().unwrap(),
