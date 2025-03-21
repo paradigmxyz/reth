@@ -72,7 +72,6 @@ serde = [
     "alloy-primitives/serde",
     "reth-trie/serde",
     "reth-trie-common/serde",
-    "reth-provider/serde",
     "reth-primitives-traits/serde",
     "revm-database/serde",
 ]
