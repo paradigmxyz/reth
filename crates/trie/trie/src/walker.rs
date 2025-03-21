@@ -274,7 +274,7 @@ impl<C: TrieCursor> TrieWalker<C> {
                 trace!(target: "trie::walker", nibble, "found next sibling with state");
                 return Ok(())
             }
-            if subnode.nibble() == 0xf {
+            if nibble == 0xf {
                 trace!(target: "trie::walker", nibble, "checked all siblings");
                 break
             }

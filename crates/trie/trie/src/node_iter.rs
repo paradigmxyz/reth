@@ -181,10 +181,8 @@ mod tests {
 
     use super::{TrieElement, TrieNodeIter};
 
-    /// Calculate the state root by feeding the provided state to the hash builder and retaining the
-    /// proofs for the provided targets.
-    ///
-    /// Returns the state root and the retained proof nodes.
+    /// Calculate the branch node stored in the database by feeding the provided state to the hash
+    /// builder and taking the trie updates.
     fn get_hash_builder_branch_nodes(
         state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
     ) -> HashMap<Nibbles, BranchNodeCompact> {
