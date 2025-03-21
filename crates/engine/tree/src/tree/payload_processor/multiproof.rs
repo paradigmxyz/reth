@@ -2,7 +2,7 @@
 
 use crate::tree::payload_processor::executor::WorkloadExecutor;
 use alloy_evm::block::StateChangeSource;
-use alloy_primitives::{keccak256, map::HashSet, B256};
+use alloy_primitives::{keccak256, map::{HashSet, B256Set}, B256};
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
@@ -15,6 +15,7 @@ use reth_revm::state::EvmState;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
     HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
+    StorageProofTargets,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
@@ -248,6 +249,15 @@ struct MultiproofInput<Factory> {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
+}
+
+/// Either proof targets for storage proofs only, or proof targets for storage and account proofs.
+#[derive(Debug)]
+enum ProofTargetsInput {
+    /// Proof targets for storage proofs only.
+    Storage(StorageProofTargets),
+    /// Proof targets for storage and account proofs.
+    StorageAndAccount(MultiProofTargets),
 }
 
 /// Manages concurrent multiproof calculations.
@@ -512,8 +522,9 @@ where
     ///
     /// Returns a number of proofs that were spawned.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
-        let proof_targets = self.get_prefetch_proof_targets(targets);
+        let (proof_targets, storage_proof_targets) = self.get_prefetch_proof_targets(targets);
         self.fetched_proof_targets.extend_ref(&proof_targets);
+        self.fetched_proof_targets.extend_storage_targets_ref(&storage_proof_targets);
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
         self.metrics
@@ -562,7 +573,7 @@ where
     }
 
     /// Calls `get_proof_targets` with existing proof targets for prefetching.
-    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
+    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> (MultiProofTargets, StorageProofTargets) {
         // Here we want to filter out any targets that are already fetched
         //
         // This means we need to remove any storage slots that have already been fetched
@@ -586,9 +597,16 @@ where
             keep
         });
 
+
+        // Filter out all the targets that have accounts already fetched, removing them from the
+        // original multiproof targets
+        let mut proof_targets = MultiProofTargets::default();
+        let mut storage_proof_targets = StorageProofTargets::default();
+
         // For all non-subset remaining targets, we have to calculate the difference
-        for (hashed_address, target_storage) in targets.deref_mut() {
-            let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
+        for (hashed_address, mut target_storage) in targets {
+            let Some(fetched_storage) = self.fetched_proof_targets.get(&hashed_address) else {
+                proof_targets.insert(hashed_address, B256Set::default());
                 // this means the account has not been fetched yet, so we must fetch everything
                 // associated with this account
                 continue
@@ -601,14 +619,20 @@ where
             // we already removed subsets, so this should only remove duplicates
             target_storage.retain(|slot| !fetched_storage.contains(slot));
 
+            // keep track of duplicates
             duplicates += prev_target_storage_len - target_storage.len();
+
+            // insert the account into the storage proof targets if there are any storage slots left
+            if !target_storage.is_empty() {
+                storage_proof_targets.insert(hashed_address, target_storage);
+            }
         }
 
         if duplicates > 0 {
             trace!(target: "engine::root", duplicates, "Removed duplicate prefetch proof targets");
         }
 
-        targets
+        (proof_targets, storage_proof_targets)
     }
 
     /// Handles state updates.
@@ -636,8 +660,9 @@ where
         let mut chunks = 0;
         let mut spawned_proof_targets = MultiProofTargets::default();
         for chunk in not_fetched_state_update.chunks(MULTIPROOF_TARGETS_CHUNK_SIZE) {
-            let proof_targets = get_proof_targets(&chunk, &self.fetched_proof_targets);
+            let (proof_targets, storage_proof_targets) = get_proof_targets(&chunk, &self.fetched_proof_targets);
             spawned_proof_targets.extend_ref(&proof_targets);
+            spawned_proof_targets.extend_storage_targets_ref(&storage_proof_targets);
 
             self.multiproof_manager.spawn_or_queue(MultiproofInput {
                 config: self.config.clone(),
@@ -905,8 +930,12 @@ where
 fn get_proof_targets(
     state_update: &HashedPostState,
     fetched_proof_targets: &MultiProofTargets,
-) -> MultiProofTargets {
+) -> (MultiProofTargets, StorageProofTargets) {
+    // targets for multiproofs
     let mut targets = MultiProofTargets::default();
+
+    // targets for storage multiproofs only
+    let mut storage_targets = StorageProofTargets::default();
 
     // first collect all new accounts (not previously fetched)
     for &hashed_address in state_update.accounts.keys() {
@@ -925,11 +954,19 @@ fn get_proof_targets(
             .peekable();
 
         if changed_slots.peek().is_some() {
-            targets.entry(*hashed_address).or_default().extend(changed_slots);
+            if fetched.is_some() {
+                // if we have already fetched proof targets for the account, this should be only
+                // storage slots
+                let mut new_slots = B256Set::default();
+                new_slots.extend(changed_slots);
+                storage_targets.insert(*hashed_address, new_slots);
+            } else {
+                targets.entry(*hashed_address).or_default().extend(changed_slots);
+            }
         }
     }
 
-    targets
+    (targets, storage_targets)
 }
 
 #[cfg(test)]
