@@ -42,7 +42,7 @@ pub struct RollupArgs {
 
     /// HTTP endpoint for the supervisor
     #[arg(long = "rollup.supervisor-http", value_name = "SUPERVISOR_HTTP_URL")]
-    pub supervisor_http: Option<String>,
+    pub supervisor_http: String,
 
     /// Safety level for the supervisor
     #[arg(long = "rollup.supervisor-safety-level")]
@@ -59,7 +59,8 @@ impl Default for RollupArgs {
             compute_pending_block: false,
             discovery_v4: false,
             enable_tx_conditional: false,
-            supervisor_http: None,
+            // TODO: this should be changed to actual optimism supervisor
+            supervisor_http: "http://localhost:1137".to_string(),
             supervisor_safety_level: SafetyLevel::CrossUnsafe,
         }
     }

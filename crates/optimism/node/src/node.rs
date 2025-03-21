@@ -115,8 +115,10 @@ impl OpNode {
             .pool(
                 OpPoolBuilder::default()
                     .with_enable_tx_conditional(self.args.enable_tx_conditional)
-                    .with_supervisor_client(self.args.supervisor_http.clone())
-                    .with_supervisor_safety_level(self.args.supervisor_safety_level),
+                    .with_supervisor(
+                        self.args.supervisor_http.clone(),
+                        self.args.supervisor_safety_level,
+                    ),
             )
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
@@ -483,7 +485,7 @@ pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     /// Enable transaction conditionals.
     pub enable_tx_conditional: bool,
     /// Supervisor client url
-    pub supervisor_http: Option<String>,
+    pub supervisor_http: String,
     /// Supervisor safety level
     pub supervisor_safety_level: SafetyLevel,
     /// Marker for the pooled transaction type.
@@ -495,7 +497,8 @@ impl<T> Default for OpPoolBuilder<T> {
         Self {
             pool_config_overrides: Default::default(),
             enable_tx_conditional: false,
-            supervisor_http: None,
+            // TODO: this should be changed to actual optimism supervisor
+            supervisor_http: "http://localhost:1137".to_string(),
             supervisor_safety_level: SafetyLevel::CrossUnsafe,
             _pd: Default::default(),
         }
@@ -519,13 +522,12 @@ impl<T> OpPoolBuilder<T> {
     }
 
     /// Sets the supervisor client
-    pub fn with_supervisor_client(mut self, supervisor_client: Option<String>) -> Self {
+    pub fn with_supervisor(
+        mut self,
+        supervisor_client: String,
+        supervisor_safety_level: SafetyLevel,
+    ) -> Self {
         self.supervisor_http = supervisor_client;
-        self
-    }
-
-    /// Sets the supervisor safety level
-    pub fn with_supervisor_safety_level(mut self, supervisor_safety_level: SafetyLevel) -> Self {
         self.supervisor_safety_level = supervisor_safety_level;
         self
     }
@@ -542,23 +544,9 @@ where
         let Self { pool_config_overrides, .. } = self;
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-        // Interop check
-        let supervisor_client;
-        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) {
-            match self.supervisor_http.clone() {
-                None => {
-                    return Err(eyre::eyre!(
-                        "interop is activated. `--rollup.supervisor-http` must be provided"
-                    ))
-                }
-                Some(http) => {
-                    supervisor_client =
-                        Some(SupervisorClient::new(http, self.supervisor_safety_level).await)
-                }
-            }
-        } else {
-            supervisor_client = None
-        };
+        // supervisor used for interop
+        let supervisor_client =
+            SupervisorClient::new(self.supervisor_http.clone(), self.supervisor_safety_level).await;
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .no_eip4844()

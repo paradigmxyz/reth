@@ -21,7 +21,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
-use tracing::{trace, error};
+use tracing::trace;
 
 /// Tracks additional infos for the current block.
 #[derive(Debug, Default)]
@@ -127,8 +127,8 @@ where
     }
 
     /// Set the supervisor client and safety level
-    pub fn with_supervisor(mut self, supervisor_client: Option<SupervisorClient>) -> Self {
-        self.supervisor_client = supervisor_client;
+    pub fn with_supervisor(mut self, supervisor_client: SupervisorClient) -> Self {
+        self.supervisor_client = Some(supervisor_client);
         self
     }
 
@@ -147,12 +147,10 @@ where
             *self.block_info.l1_block_info.write() = cost_addition;
         }
 
-        if self.chain_spec().is_interop_active_at_timestamp(header.timestamp())
-            && !self.fork_tracker.interop.load(Ordering::Relaxed) {
+        if self.chain_spec().is_interop_active_at_timestamp(header.timestamp()) &&
+            !self.fork_tracker.interop.load(Ordering::Relaxed)
+        {
             self.fork_tracker.interop.store(true, Ordering::Relaxed);
-            if self.supervisor_client.is_none() {
-                error!("Interop is activated. Set `--rollup.supervisor-http` to process cross chain transactions");
-            }
         }
     }
 
@@ -275,7 +273,7 @@ where
         }
         let timestamp = self.block_info.timestamp.load(Ordering::Relaxed);
         // Interop check
-        if self.fork_tracker.interop.load(Ordering::Relaxed) {
+        if self.fork_tracker.is_interop_activated() {
             // No cross chain tx allowed before interop
             return Some(Ok(false))
         }
@@ -338,14 +336,14 @@ where
 
 /// Keeps track of whether certain forks are activated
 #[derive(Debug)]
-pub struct ForkTracker {
+pub(crate) struct ForkTracker {
     /// Tracks if interop is activated at the block's timestamp.
-    pub interop: AtomicBool,
+    interop: AtomicBool,
 }
 
 impl ForkTracker {
     /// Returns `true` if Interop fork is activated.
-    pub fn is_interop_activated(&self) -> bool {
+    pub(crate) fn is_interop_activated(&self) -> bool {
         self.interop.load(Ordering::Relaxed)
     }
 }
