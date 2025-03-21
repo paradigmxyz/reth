@@ -39,7 +39,6 @@ parity-bytes = { version = "0.1.2", default-features = false }
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"], optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json.workspace = true
-tendermint = { git = "https://github.com/bnb-chain/tendermint-rs-parlia", rev = "8c21ccbd58a174e07eed2c9343e63ccd00f0fbd5", features = ["secp256k1"] }
 thiserror.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
@@ -49,18 +48,16 @@ tracing.workspace = true
 bls_on_arkworks = "0.3.0"
 
 cometbft = { git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
-cometbft-light-client-verifier = {  git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
-cometbft-proto = {  git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
-cometbft-light-client = {  git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
+cometbft-light-client-verifier = { git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
+cometbft-proto = { git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
+cometbft-light-client = { git = "https://github.com/bnb-chain/greenfield-cometbft-rs.git", rev = "1282547" }
 
 prost = { version = "0.12.6" }
 
 tendermint = { git = "https://github.com/bnb-chain/tendermint-rs-parlia", rev = "8c21ccbd58a174e07eed2c9343e63ccd00f0fbd5", features = ["secp256k1"] }
 
 # KZG point evaluation precompile
-c-kzg = { version = "1.0.3", default-features = false, optional = true, features = [
-    "ethereum_kzg_settings",
-] }
+c-kzg = { version = "1.0.3", default-features = false, optional = true, features = ["ethereum_kzg_settings"] }
 
 # Optionally use `kzg-rs` for a pure Rust implementation of KZG point evaluation.
 kzg-rs = { version = "0.2.3", default-features = false, optional = true }
@@ -69,10 +66,7 @@ kzg-rs = { version = "0.2.3", default-features = false, optional = true }
 blst = { version = "0.3.13", optional = true }
 
 # p256verify precompile
-p256 = { version = "0.13.2", optional = true, default-features = false, features = [
-    "ecdsa",
-] }
-
+p256 = { version = "0.13.2", optional = true, default-features = false, features = ["ecdsa"] }
 
 [dev-dependencies]
 reth-node-ethereum.workspace = true
