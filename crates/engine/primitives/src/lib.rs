@@ -123,7 +123,7 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
 }
 
 /// Type that validates the payloads processed by the engine.
-pub trait EngineValidator<Types: EngineTypes>:
+pub trait EngineValidator<Types: PayloadTypes>:
     PayloadValidator<ExecutionData = Types::ExecutionData>
 {
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
