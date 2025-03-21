@@ -6,7 +6,7 @@ use revm::{
     context_interface::ContextTr,
     handler::{EthPrecompiles, PrecompileProvider},
     interpreter::InterpreterResult,
-    precompile::{bls12_381, kzg_point_evaluation, secp256r1, PrecompileError, Precompiles},
+    precompile::{bls12_381, kzg_point_evaluation, secp256r1, Precompiles},
     primitives::{Address, Bytes},
 };
 use std::boxed::Box;
@@ -258,7 +258,7 @@ where
         address: &Address,
         bytes: &Bytes,
         gas_limit: u64,
-    ) -> Result<Option<Self::Output>, PrecompileError> {
+    ) -> Result<Option<Self::Output>, String> {
         self.inner.run(context, address, bytes, gas_limit)
     }
 
