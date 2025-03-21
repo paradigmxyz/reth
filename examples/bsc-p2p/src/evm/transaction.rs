@@ -31,7 +31,7 @@ impl Default for BscTransaction<TxEnv> {
 }
 
 impl<T: Transaction> Transaction for BscTransaction<T> {
-    type AccessList = T::AccessList;
+    type AccessListItem = T::AccessListItem;
     type Authorization = T::Authorization;
 
     fn tx_type(&self) -> u8 {
@@ -66,7 +66,7 @@ impl<T: Transaction> Transaction for BscTransaction<T> {
         self.base.chain_id()
     }
 
-    fn access_list(&self) -> Option<&Self::AccessList> {
+    fn access_list(&self) -> Option<impl Iterator<Item = &Self::AccessListItem>> {
         self.base.access_list()
     }
 
