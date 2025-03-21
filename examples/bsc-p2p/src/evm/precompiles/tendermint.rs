@@ -1,3 +1,5 @@
+//! Credits to <https://github.com/bnb-chain/revm/blob/d66170e712460ae766fc26a063f106658ce33e9d/crates/precompile/src/tendermint.rs>
+
 use alloy_primitives::Bytes;
 use parity_bytes::BytesRef;
 use revm::precompile::{
