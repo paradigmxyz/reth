@@ -28,7 +28,6 @@ use alloy_rpc_types::{
     },
     Withdrawal,
 };
-use std::sync::atomic::AtomicBool;
 use reth::{
     api::{InvalidPayloadAttributesError, PayloadTypes},
     builder::{
@@ -65,7 +64,10 @@ use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, Payload
 use reth_tracing::{RethTracer, Tracer};
 use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, sync::Arc};
+use std::{
+    convert::Infallible,
+    sync::{atomic::AtomicBool, Arc},
+};
 use thiserror::Error;
 
 /// A custom payload attributes type.
