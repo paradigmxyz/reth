@@ -35,7 +35,6 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::{debug, trace, warn};
-
 mod better_payload_emitter;
 mod metrics;
 mod stack;
@@ -787,6 +786,8 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub cancel: CancelOnDrop,
     /// The best payload achieved so far.
     pub best_payload: Option<Payload>,
+    /// The supervisor validator client
+    pub supervisor: Option<SupervisorClient>,
 }
 
 impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
@@ -796,8 +797,9 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
+        supervisor: Option<SupervisorClient>,
     ) -> Self {
-        Self { cached_reads, config, cancel, best_payload }
+        Self { cached_reads, config, cancel, best_payload, supervisor }
     }
 }
 

@@ -10,6 +10,14 @@ pub struct RollupArgs {
     #[arg(long = "rollup.sequencer-http", value_name = "HTTP_URL")]
     pub sequencer_http: Option<String>,
 
+    /// HTTP endpoint to the supervisor
+    #[arg(long = "rollup.supervisor-http")]
+    pub supervisor_http: Option<String>,
+
+    /// Safety level for the supervisor
+    #[arg(long = "rollup.supervisor-safety-level")]
+    pub supervisor_safety_level: Option<String>,
+
     /// Disable transaction pool gossip
     #[arg(long = "rollup.disable-tx-pool-gossip")]
     pub disable_txpool_gossip: bool,
@@ -49,6 +57,8 @@ impl Default for RollupArgs {
             compute_pending_block: false,
             discovery_v4: false,
             enable_tx_conditional: false,
+            supervisor_http: None,
+            supervisor_safety_level: None,
         }
     }
 }
