@@ -99,12 +99,16 @@ impl<Eip4844: Compact + RlpEcdsaEncodableTx + Transaction + Send + Sync> Compact
     {
         let start = buf.as_mut().len();
 
+        // Placeholder for bitflags.
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+        buf.put_u8(0);
+
         let sig_bit = self.signature().to_compact(buf) as u8;
         let zstd_bit = self.input().len() >= 32;
         let tx_bits = self.tx_type().to_compact(buf) as u8;
         let flags = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
 
-        buf.put_u8(flags);
+        buf.as_mut()[start] = flags;
 
         if zstd_bit {
             let mut tx_buf = Vec::with_capacity(256);
@@ -142,8 +146,8 @@ impl<Eip4844: Compact + RlpEcdsaEncodableTx + Transaction + Send + Sync> Compact
         let tx_bits = (flags & 0b110) >> 1;
         let zstd_bit = flags >> 3;
 
-        let (tx_type, buf) = TxType::from_compact(buf, tx_bits);
         let (signature, buf) = PrimitiveSignature::from_compact(buf, sig_bit);
+        let (tx_type, buf) = TxType::from_compact(buf, tx_bits);
 
         let (transaction, buf) = if zstd_bit != 0 {
             #[cfg(feature = "std")]
