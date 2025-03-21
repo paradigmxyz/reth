@@ -1,5 +1,6 @@
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use eyre::Result;
+use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_e2e_test_utils::testsuite::{
     actions::AssertMineBlock,
     setup::{NetworkSetup, Setup},
@@ -23,9 +24,28 @@ async fn test_testsuite_op_assert_mine_block() -> Result<()> {
         ))
         .with_network(NetworkSetup::single_node());
 
-    let test = TestBuilder::new()
-        .with_setup(setup)
-        .with_action(AssertMineBlock::<OpEngineTypes>::new(0, vec![], Some(B256::ZERO)));
+    let test =
+        TestBuilder::new().with_setup(setup).with_action(AssertMineBlock::<OpEngineTypes>::new(
+            0,
+            vec![],
+            Some(B256::ZERO),
+            OpPayloadAttributes {
+                payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                    prev_randao: B256::random(),
+                    suggested_fee_recipient: Address::random(),
+                    withdrawals: Some(vec![]),
+                    parent_beacon_block_root: Some(B256::ZERO),
+                },
+                transactions: None,
+                no_tx_pool: None,
+                eip_1559_params: None,
+                gas_limit: None,
+            },
+        ));
 
     test.run::<OpNode>().await?;
 

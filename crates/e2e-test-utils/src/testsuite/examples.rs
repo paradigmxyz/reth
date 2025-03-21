@@ -5,7 +5,8 @@ use crate::testsuite::{
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
@@ -25,9 +26,22 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
         ))
         .with_network(NetworkSetup::single_node());
 
-    let test = TestBuilder::new()
-        .with_setup(setup)
-        .with_action(AssertMineBlock::<EthEngineTypes>::new(0, vec![], Some(B256::ZERO)));
+    let test =
+        TestBuilder::new().with_setup(setup).with_action(AssertMineBlock::<EthEngineTypes>::new(
+            0,
+            vec![],
+            Some(B256::ZERO),
+            PayloadAttributes {
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                prev_randao: B256::random(),
+                suggested_fee_recipient: Address::random(),
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
+            },
+        ));
 
     test.run::<EthereumNode>().await?;
 
