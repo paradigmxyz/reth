@@ -9130,6 +9130,7 @@ dependencies = [
  "rayon",
  "reth-chainspec",
  "reth-codecs",
+ "reth-static-file-types",
  "revm-bytecode",
  "revm-primitives",
  "revm-state",

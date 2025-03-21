@@ -11,7 +11,7 @@ use reth_db_api::models::{
 };
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
-use reth_primitives::{
+use reth_primitives_traits::{
     static_file::{SegmentHeader, SegmentRangeInclusive},
     StaticFileSegment,
 };

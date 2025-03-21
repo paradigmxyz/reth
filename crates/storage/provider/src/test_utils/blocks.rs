@@ -9,11 +9,10 @@ use alloy_consensus::Header;
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_primitives::PrimitiveSignature as Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
+use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
 use reth_node_types::NodeTypes;
-use reth_primitives::{
-    Account, BlockBody, Receipt, RecoveredBlock, SealedBlock, SealedHeader, Transaction,
-    TransactionSigned, TxType,
-};
+use reth_primitives::SealedBlock;
+use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader};
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
@@ -127,7 +126,7 @@ pub struct BlockchainTestData {
     /// Genesis
     pub genesis: SealedBlock,
     /// Blocks with its execution result
-    pub blocks: Vec<(RecoveredBlock<reth_primitives::Block>, ExecutionOutcome)>,
+    pub blocks: Vec<(RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome)>,
 }
 
 impl BlockchainTestData {
@@ -192,7 +191,9 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
 }
 
 /// Block one that points to genesis
-fn block1(number: BlockNumber) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+fn block1(
+    number: BlockNumber,
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     // block changes
     let account1: Address = [0x60; 20].into();
     let account2: Address = [0x61; 20].into();
@@ -242,7 +243,7 @@ fn block2(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     // block changes
     let account: Address = [0x60; 20].into();
     let slot = U256::from(5);
@@ -300,7 +301,7 @@ fn block3(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -358,7 +359,7 @@ fn block4(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -441,7 +442,7 @@ fn block5(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 

@@ -90,6 +90,8 @@ pub use alloy_consensus::{
     transaction::{Recovered, TransactionMeta},
     ReceiptWithBloom,
 };
+pub use reth_static_file_types as static_file;
+pub use static_file::StaticFileSegment;
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},

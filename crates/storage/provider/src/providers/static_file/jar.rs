@@ -19,8 +19,7 @@ use reth_db_api::{
     table::{Decompress, Value},
 };
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
-use reth_primitives::SealedHeader;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{SealedHeader, SignedTransaction};
 use reth_storage_api::{BlockBodyIndicesProvider, OmmersProvider, WithdrawalsProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{

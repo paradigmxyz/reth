@@ -30,16 +30,16 @@ use reth_db_api::{
     tables,
     transaction::DbTx,
 };
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
-use reth_primitives::{
+use reth_primitives_traits::{
     static_file::{
         find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
-    Receipt, RecoveredBlock, SealedBlock, SealedHeader, StaticFileSegment, TransactionSigned,
+    RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction, StaticFileSegment,
 };
-use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_storage_api::{BlockBodyIndicesProvider, DBProvider, OmmersProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};

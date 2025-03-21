@@ -20,13 +20,13 @@ use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
+use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
-use reth_primitives::{
-    Account, Block, Bytecode, EthPrimitives, GotExpected, Receipt, RecoveredBlock, SealedBlock,
-    SealedHeader, TransactionSigned,
+use reth_primitives::Block;
+use reth_primitives_traits::{
+    Account, Bytecode, GotExpected, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction,
 };
-use reth_primitives_traits::SignedTransaction;
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
