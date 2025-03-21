@@ -18,10 +18,10 @@ use reth_transaction_pool::{
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
 };
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
-use tracing::trace;
+use tracing::{trace, error};
 
 /// Tracks additional infos for the current block.
 #[derive(Debug, Default)]
@@ -47,6 +47,8 @@ pub struct OpTransactionValidator<Client, Tx> {
     require_l1_data_gas_fee: bool,
     /// Client used to check transaction validity with op-supervisor
     supervisor_client: Option<SupervisorClient>,
+    /// tracks activated forks relevant for transaction validation
+    fork_tracker: Arc<ForkTracker>,
 }
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx> {
@@ -120,6 +122,7 @@ where
             block_info: Arc::new(block_info),
             require_l1_data_gas_fee: true,
             supervisor_client: None,
+            fork_tracker: Arc::new(ForkTracker { interop: AtomicBool::from(false) }),
         }
     }
 
@@ -142,6 +145,14 @@ where
 
         if let Some(Ok(cost_addition)) = tx.map(reth_optimism_evm::extract_l1_info_from_tx) {
             *self.block_info.l1_block_info.write() = cost_addition;
+        }
+
+        if self.chain_spec().is_interop_active_at_timestamp(header.timestamp())
+            && !self.fork_tracker.interop.load(Ordering::Relaxed) {
+            self.fork_tracker.interop.store(true, Ordering::Relaxed);
+            if self.supervisor_client.is_none() {
+                error!("Interop is activated. Set `--rollup.supervisor-http` to process cross chain transactions");
+            }
         }
     }
 
@@ -264,7 +275,7 @@ where
         }
         let timestamp = self.block_info.timestamp.load(Ordering::Relaxed);
         // Interop check
-        if !self.chain_spec().is_interop_active_at_timestamp(timestamp) {
+        if self.fork_tracker.interop.load(Ordering::Relaxed) {
             // No cross chain tx allowed before interop
             return Some(Ok(false))
         }
@@ -322,5 +333,19 @@ where
             new_tip_block.header(),
             new_tip_block.body().transactions().first(),
         );
+    }
+}
+
+/// Keeps track of whether certain forks are activated
+#[derive(Debug)]
+pub struct ForkTracker {
+    /// Tracks if interop is activated at the block's timestamp.
+    pub interop: AtomicBool,
+}
+
+impl ForkTracker {
+    /// Returns `true` if Interop fork is activated.
+    pub fn is_interop_activated(&self) -> bool {
+        self.interop.load(Ordering::Relaxed)
     }
 }
