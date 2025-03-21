@@ -77,6 +77,13 @@ impl MultiProofTargets {
         self.extend_inner(Cow::Borrowed(other));
     }
 
+    /// Extend multi proof targets with contents of other storage proof targets.
+    pub fn extend_storage_targets_ref(&mut self, other: &StorageProofTargets) {
+        for (hashed_address, hashed_slots) in other.iter() {
+            self.entry(*hashed_address).or_default().extend(hashed_slots.iter().copied());
+        }
+    }
+
     fn extend_inner(&mut self, other: Cow<'_, Self>) {
         for (hashed_address, hashed_slots) in other.iter() {
             self.entry(*hashed_address).or_default().extend(hashed_slots);
@@ -90,6 +97,11 @@ impl MultiProofTargets {
         ChunkedMultiProofTargets::new(self, size)
     }
 }
+
+/// This represents a list of proof targets for storage slots. The accounts are assumed to already
+/// have proofs fetched.
+#[derive(Deref, DerefMut, IntoIterator, Clone, PartialEq, Eq, Default, Debug)]
+pub struct StorageProofTargets(B256Map<B256Set>);
 
 /// An iterator that yields chunks of the proof targets of at most `size` account and storage
 /// targets.
