@@ -1,12 +1,12 @@
 //! This is our custom implementation of validator struct
 
+use alloc::string::String;
 use alloy_rpc_client::ReqwestClient;
-pub use kona_interop::{ExecutingDescriptor, SafetyLevel};
+pub use kona_interop::{ExecutingDescriptor, InvalidInboxEntry, SafetyLevel};
 pub use kona_rpc::{
     CheckAccessList, InteropTxValidator, InteropTxValidatorError, SupervisorApiClient,
 };
 use std::time::Duration;
-use alloc::string::String;
 
 /// Implementation of the supervisor trait for the interop.
 #[derive(Debug, Clone)]
@@ -17,18 +17,13 @@ pub struct SupervisorClient {
 
 impl SupervisorClient {
     /// Creates a new supervisor validator.
-    pub async fn new(supervisor_endpoint: impl Into<String>, safety: Option<String>) -> Self {
+    pub async fn new(supervisor_endpoint: impl Into<String>, safety: SafetyLevel) -> Self {
         let inner = kona_rpc::SupervisorClient::new(
             ReqwestClient::builder()
                 .connect(supervisor_endpoint.into().as_str())
                 .await
                 .expect("building supervisor client"),
         );
-        let safety = safety
-            .map(|safety| {
-                serde_json::from_str(safety.as_str()).expect("invalid safety level provided")
-            })
-            .unwrap_or(SafetyLevel::CrossUnsafe);
         Self { inner, safety }
     }
 

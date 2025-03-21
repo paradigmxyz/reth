@@ -232,9 +232,6 @@ pub enum InvalidPoolTransactionError {
     /// invocation.
     #[error("intrinsic gas too low")]
     IntrinsicGasTooLow,
-    /// Cross chain transaction didn't pass supervisor validation
-    #[error("cross chain transaction invalid")]
-    CrossTxInvalid,
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -322,7 +319,6 @@ impl InvalidPoolTransactionError {
             Self::Eip7702(eip7702_err) => match eip7702_err {
                 Eip7702PoolTransactionError::MissingEip7702AuthorizationList => false,
             },
-            Self::CrossTxInvalid => true,
         }
     }
 

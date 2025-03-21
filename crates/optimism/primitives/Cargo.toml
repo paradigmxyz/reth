@@ -47,7 +47,6 @@ serde_with = { workspace = true, optional = true }
 # misc
 derive_more = { workspace = true, features = ["deref", "from", "into", "constructor"] }
 rand = { workspace = true, optional = true }
-serde_json.workspace = true
 
 # test
 arbitrary = { workspace = true, features = ["derive"], optional = true }

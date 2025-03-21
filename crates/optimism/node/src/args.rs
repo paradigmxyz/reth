@@ -2,6 +2,8 @@
 
 //! clap [Args](clap::Args) for optimism rollup configuration
 
+use reth_optimism_primitives::supervisor::SafetyLevel;
+
 /// Parameters for rollup configuration
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "Rollup")]
@@ -44,7 +46,7 @@ pub struct RollupArgs {
 
     /// Safety level for the supervisor
     #[arg(long = "rollup.supervisor-safety-level")]
-    pub supervisor_safety_level: Option<String>,
+    pub supervisor_safety_level: SafetyLevel,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -58,7 +60,7 @@ impl Default for RollupArgs {
             discovery_v4: false,
             enable_tx_conditional: false,
             supervisor_http: None,
-            supervisor_safety_level: None,
+            supervisor_safety_level: SafetyLevel::CrossUnsafe,
         }
     }
 }

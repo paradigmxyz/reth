@@ -34,7 +34,8 @@ use reth_optimism_payload_builder::{
     config::{OpBuilderConfig, OpDAConfig},
 };
 use reth_optimism_primitives::{
-    DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned, SupervisorClient,
+    supervisor::SafetyLevel, DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned,
+    SupervisorClient,
 };
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
@@ -115,7 +116,7 @@ impl OpNode {
                 OpPoolBuilder::default()
                     .with_enable_tx_conditional(self.args.enable_tx_conditional)
                     .with_supervisor_client(self.args.supervisor_http.clone())
-                    .with_supervisor_safety_level(self.args.supervisor_safety_level.clone()),
+                    .with_supervisor_safety_level(self.args.supervisor_safety_level),
             )
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
@@ -484,7 +485,7 @@ pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     /// Supervisor client url
     pub supervisor_http: Option<String>,
     /// Supervisor safety level
-    pub supervisor_safety_level: Option<String>,
+    pub supervisor_safety_level: SafetyLevel,
     /// Marker for the pooled transaction type.
     _pd: core::marker::PhantomData<T>,
 }
@@ -495,7 +496,7 @@ impl<T> Default for OpPoolBuilder<T> {
             pool_config_overrides: Default::default(),
             enable_tx_conditional: false,
             supervisor_http: None,
-            supervisor_safety_level: None,
+            supervisor_safety_level: SafetyLevel::CrossUnsafe,
             _pd: Default::default(),
         }
     }
@@ -524,7 +525,7 @@ impl<T> OpPoolBuilder<T> {
     }
 
     /// Sets the supervisor safety level
-    pub fn with_supervisor_safety_level(mut self, supervisor_safety_level: Option<String>) -> Self {
+    pub fn with_supervisor_safety_level(mut self, supervisor_safety_level: SafetyLevel) -> Self {
         self.supervisor_safety_level = supervisor_safety_level;
         self
     }
@@ -551,9 +552,8 @@ where
                     ))
                 }
                 Some(http) => {
-                    supervisor_client = Some(
-                        SupervisorClient::new(http, self.supervisor_safety_level.clone()).await,
-                    )
+                    supervisor_client =
+                        Some(SupervisorClient::new(http, self.supervisor_safety_level).await)
                 }
             }
         } else {

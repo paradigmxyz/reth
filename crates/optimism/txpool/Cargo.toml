@@ -45,6 +45,7 @@ derive_more.workspace = true
 futures-util.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true

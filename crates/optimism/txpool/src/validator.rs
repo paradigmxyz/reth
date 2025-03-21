@@ -1,3 +1,4 @@
+use crate::InvalidCrossTx;
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::Encodable2718;
 use op_revm::L1BlockInfo;
@@ -163,10 +164,10 @@ where
         }
 
         // Interop cross tx validation
-        if self.is_valid_cross_tx(&transaction).await == Some(false) {
+        if let Some(Err(err)) = self.is_valid_cross_tx(&transaction).await {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::CrossTxInvalid,
+                InvalidPoolTransactionError::Other(Box::new(err)),
             )
         }
 
@@ -246,7 +247,13 @@ where
     /// against supervisor.
     ///
     /// If commitment present pre-interop tx rejected.
-    pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<bool> {
+    ///
+    /// Returns:
+    /// None - if tx is not cross chain,
+    /// Some(Ok(true)) - if tx is valid cross chain,
+    /// Some(Ok(false)) - if tx is cross chain but interop is not active,
+    /// Some(Err(e)) - if tx is not valid
+    pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<bool, InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
         let access_list = tx.access_list()?;
@@ -259,7 +266,7 @@ where
         // Interop check
         if !self.chain_spec().is_interop_active_at_timestamp(timestamp) {
             // No cross chain tx allowed before interop
-            return Some(false)
+            return Some(Ok(false))
         }
         let client = self
             .supervisor_client
@@ -275,10 +282,10 @@ where
             )
             .await
         {
-            Ok(()) => Some(true),
-            Err(_) => {
+            Ok(()) => Some(Ok(true)),
+            Err(err) => {
                 trace!(target: "txpool", hash=%tx.hash(), "Cross chain transaction invalid");
-                Some(false)
+                Some(Err(InvalidCrossTx::new(err)))
             }
         }
     }
