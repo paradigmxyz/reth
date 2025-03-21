@@ -21,7 +21,7 @@ use std::{future::Future, marker::PhantomData};
 /// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
+pub trait FullNodeTypes: Clone + Send + Sync + Unpin + 'static {
     /// Node's types with the database.
     type Types: NodeTypesWithEngine;
     /// Underlying database type used by the node to store and retrieve data.
@@ -31,7 +31,7 @@ pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FullNodeTypesAdapter<Types, DB, Provider>(PhantomData<(Types, DB, Provider)>);
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
