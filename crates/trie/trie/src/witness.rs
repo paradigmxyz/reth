@@ -117,7 +117,7 @@ where
             ),
             tx,
         );
-        let mut sparse_trie = SparseStateTrie::default();
+        let mut sparse_trie = SparseStateTrie::new(blinded_provider_factory);
         sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
@@ -132,7 +132,6 @@ where
                     SparseTrieErrorKind::Blind,
                 ),
             )?;
-            let provider = blinded_provider_factory.storage_node_provider(hashed_address);
             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
                 let storage_nibbles = Nibbles::unpack(hashed_slot);
                 let maybe_leaf_value = storage
@@ -141,11 +140,11 @@ where
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
 
                 if let Some(value) = maybe_leaf_value {
-                    storage_trie.update_leaf(storage_nibbles, value, &provider).map_err(|err| {
+                    storage_trie.update_leaf(storage_nibbles, value).map_err(|err| {
                         SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
                     })?;
                 } else {
-                    storage_trie.remove_leaf(&storage_nibbles, &provider).map_err(|err| {
+                    storage_trie.remove_leaf(&storage_nibbles).map_err(|err| {
                         SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
                     })?;
                 }
@@ -159,7 +158,7 @@ where
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
                 .unwrap_or_default();
-            sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)?;
+            sparse_trie.update_account(hashed_address, account)?;
 
             while let Ok(node) = rx.try_recv() {
                 self.witness.insert(keccak256(&node), node);
