@@ -334,7 +334,7 @@ where
     /// See [`PayloadBuilder`]
     builder: Builder,
     /// Flag indicating whether this payload job is currently resolving.
-    is_resolving:Arc<AtomicBool>
+    is_resolving: Arc<AtomicBool>,
 }
 
 impl<Tasks, Builder> BasicPayloadJob<Tasks, Builder>
@@ -356,11 +356,11 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
-        let is_resolving= self.is_resolving.clone();
+        let is_resolving = self.is_resolving.clone();
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
-            let args = BuildArguments { 
+            let args = BuildArguments {
                 cached_reads,
                 config: payload_config,
                 cancel,
@@ -813,7 +813,7 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
-        is_resolving: Arc<AtomicBool>
+        is_resolving: Arc<AtomicBool>,
     ) -> Self {
         Self { cached_reads, config, cancel, best_payload, is_resolving }
     }
