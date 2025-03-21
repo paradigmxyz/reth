@@ -8,6 +8,10 @@ pub use kona_rpc::{
 };
 use std::time::Duration;
 
+/// Supervisor hosted by op-labs
+// TODO: This should be changes to actual supervisor url
+pub const DEFAULT_SUPERVISOR_URL: &str = "http://localhost:1337/";
+
 /// Implementation of the supervisor trait for the interop.
 #[derive(Debug, Clone)]
 pub struct SupervisorClient {

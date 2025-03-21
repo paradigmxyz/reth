@@ -34,8 +34,8 @@ use reth_optimism_payload_builder::{
     config::{OpBuilderConfig, OpDAConfig},
 };
 use reth_optimism_primitives::{
-    supervisor::SafetyLevel, DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned,
-    SupervisorClient,
+    supervisor::{SafetyLevel, DEFAULT_SUPERVISOR_URL},
+    DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned, SupervisorClient,
 };
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
@@ -49,7 +49,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::ext::L2EthApiExtServer;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
-use reth_tracing::tracing::{debug, info};
+use reth_tracing::tracing::{debug, info, warn};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
@@ -497,8 +497,7 @@ impl<T> Default for OpPoolBuilder<T> {
         Self {
             pool_config_overrides: Default::default(),
             enable_tx_conditional: false,
-            // TODO: this should be changed to actual optimism supervisor
-            supervisor_http: "http://localhost:1137".to_string(),
+            supervisor_http: DEFAULT_SUPERVISOR_URL.to_string(),
             supervisor_safety_level: SafetyLevel::CrossUnsafe,
             _pd: Default::default(),
         }
@@ -545,6 +544,11 @@ where
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
         // supervisor used for interop
+        if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) &&
+            self.supervisor_http == DEFAULT_SUPERVISOR_URL
+        {
+            warn!("Default supervisor url is used, consider changing --rollup.supervisor-http.");
+        }
         let supervisor_client =
             SupervisorClient::new(self.supervisor_http.clone(), self.supervisor_safety_level).await;
 

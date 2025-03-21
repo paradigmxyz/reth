@@ -114,7 +114,7 @@ serde = [
     "alloy-rpc-types-eth?/serde",
     "revm-context/serde",
     "kona-interop/serde",
-    "kona-rpc/serde"
+    "kona-rpc/serde",
 ]
 serde-bincode-compat = [
     "serde",
