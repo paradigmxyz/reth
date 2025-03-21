@@ -297,7 +297,7 @@ op-docker-build-push-nightly: ## Build and push cross-arch Docker image tagged w
 # `docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64`
 # `docker buildx create --use --name cross-builder`
 .PHONY: docker-build-push-nightly-profiling
-docker-build-push-profiling: ## Build and push cross-arch Docker image with profiling profile tagged with nightly-profiling.
+docker-build-push-nightly-profiling: ## Build and push cross-arch Docker image with profiling profile tagged with nightly-profiling.
 	$(call docker_build_push,nightly-profiling,nightly-profiling)
 
 	# Note: This requires a buildx builder with emulation support. For example:
