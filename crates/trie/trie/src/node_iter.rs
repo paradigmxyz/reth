@@ -154,20 +154,17 @@ mod tests {
     use std::collections::BTreeMap;
 
     use alloy_primitives::{
-        b256, hex,
+        b256,
         map::{B256Map, HashMap},
-        B256,
     };
-    use alloy_rlp::Decodable;
     use alloy_trie::{
-        proof::ProofNodes, BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask,
-        EMPTY_ROOT_HASH,
+        BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
     };
     use itertools::Itertools;
     use reth_primitives_traits::Account;
     use reth_trie_common::{
         prefix_set::PrefixSetMut, updates::TrieUpdates, BranchNode, HashedPostState, LeafNode,
-        LeafNodeRef, RlpNode, TrieNode,
+        RlpNode,
     };
 
     use crate::{
@@ -237,24 +234,18 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         // Extension (Key = 0000000000000000000000000000000000000000000000000000000000000)
-        // └── Branch (`top_level_branch_node`)
-        //     ├── 0 -> Branch (`child_branch_node`)
-        //            ├── 0 -> Branch (`lowest_branch_node`)
-        //            │      ├── 0 -> Leaf (account_1, marked as changed)
-        //            │      └── 1 -> Leaf (account_2)
-        //            ├── 1 -> Branch (`lowest_branch_node`)
-        //            │      ├── 0 -> Leaf (account_5)
-        //            │      └── 1 -> Leaf (account_6)
-        //     ├── 1 -> Branch (`lowest_branch_node`)
-        //     │      ├── 0 -> Leaf (account_5)
-        //     │      └── 1 -> Leaf (account_6)
+        // ├── 0 -> Branch (`branch_node`)
+        //       ├── 0 -> Branch (`child_branch_node`)
+        //       │      ├── 0 -> Leaf (account_1, marked as changed)
+        //       │      └── 1 -> Leaf (account_2)
+        //       ├── 1 -> Branch (`child_branch_node`)
+        //       │      ├── 0 -> Leaf (account_5)
+        //       │      └── 1 -> Leaf (account_6)
 
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
         let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
         let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000010");
         let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000011");
-        let account_5 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
-        let account_6 = b256!("0x0000000000000000000000000000000000000000000000000000000000000101");
         let empty_account = Account::default();
 
         let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
@@ -262,8 +253,6 @@ mod tests {
             (Nibbles::unpack(account_2), empty_account),
             (Nibbles::unpack(account_3), empty_account),
             (Nibbles::unpack(account_4), empty_account),
-            (Nibbles::unpack(account_5), empty_account),
-            (Nibbles::unpack(account_6), empty_account),
         ]);
 
         let empty_leaf_rlp = RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
@@ -271,41 +260,26 @@ mod tests {
             alloy_rlp::encode(TrieAccount::default()),
         )));
 
-        let lowest_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+        let child_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
             vec![empty_leaf_rlp.clone(), empty_leaf_rlp],
             TrieMask::new(0b11),
         )));
 
-        let child_branch_node = (
+        let branch_node = (
             Nibbles::from_nibbles([0; 62]),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
                 TrieMask::new(0b00),
                 TrieMask::new(0b11),
                 vec![
-                    lowest_branch_node_rlp.as_hash().unwrap(),
-                    lowest_branch_node_rlp.as_hash().unwrap(),
+                    child_branch_node_rlp.as_hash().unwrap(),
+                    child_branch_node_rlp.as_hash().unwrap(),
                 ],
                 None,
             ),
         );
-        let child_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![lowest_branch_node_rlp.clone(), lowest_branch_node_rlp],
-            TrieMask::new(0b11),
-        )));
 
-        let top_level_branch_node = (
-            Nibbles::from_nibbles([0; 61]),
-            BranchNodeCompact::new(
-                TrieMask::new(0b11),
-                TrieMask::new(0b01),
-                TrieMask::new(0b01),
-                vec![child_branch_node_rlp.as_hash().unwrap()],
-                None,
-            ),
-        );
-
-        let mock_trie_nodes = vec![top_level_branch_node.clone(), child_branch_node.clone()];
+        let mock_trie_nodes = vec![branch_node.clone()];
         pretty_assertions::assert_eq!(
             hash_builder_branch_nodes.into_iter().sorted().collect::<Vec<_>>(),
             mock_trie_nodes,
@@ -347,11 +321,7 @@ mod tests {
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x0])),
-                    visited_key: Some(top_level_branch_node.0)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(child_branch_node.0.clone()),
-                    visited_key: Some(child_branch_node.0)
+                    visited_key: Some(branch_node.0)
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
@@ -371,21 +341,11 @@ mod tests {
                     visit_type: KeyVisitType::SeekNonExact(account_1),
                     visited_key: Some(account_1)
                 },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_1),
-                    visited_key: Some(account_1)
-                },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_2) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_3) },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(b256!(
                         "0x0000000000000000000000000000000000000000000000000000000000000020"
-                    )),
-                    visited_key: None
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(b256!(
-                        "0x0000000000000000000000000000000000000000000000000000000000000100"
                     )),
                     visited_key: None
                 },
