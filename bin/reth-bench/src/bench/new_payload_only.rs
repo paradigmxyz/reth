@@ -54,10 +54,10 @@ impl Command {
 
                 let blob_versioned_hashes =
                     block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
-                let payload = ExecutionPayload::from_block_slow(&block).0;
+                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
 
                 next_block += 1;
-                sender.send((block.header, blob_versioned_hashes, payload)).await.unwrap();
+                sender.send((block.header, blob_versioned_hashes, payload, sidecar)).await.unwrap();
             }
         });
 
@@ -66,7 +66,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, versioned_hashes, payload)) = {
+        while let Some((header, versioned_hashes, payload, sidecar)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -87,6 +87,7 @@ impl Command {
             call_new_payload(
                 &auth_provider,
                 payload,
+                sidecar,
                 header.parent_beacon_block_root,
                 versioned_hashes,
             )

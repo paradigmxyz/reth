@@ -741,6 +741,7 @@ where
             client,
             EngineCapabilities::default(),
             engine_validator,
+            ctx.config.engine.accept_execution_requests_hash,
         ))
     }
 }

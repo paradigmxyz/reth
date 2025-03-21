@@ -11,6 +11,10 @@ mod subnode;
 /// Noop trie cursor implementations.
 pub mod noop;
 
+/// Mock trie cursor implementations.
+#[cfg(test)]
+pub mod mock;
+
 pub use self::{in_memory::*, subnode::CursorSubNode};
 
 /// Factory for creating trie cursors.

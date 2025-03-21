@@ -165,19 +165,33 @@ impl reth_codecs::Compact for Bytecode {
 
         use compact_ids::*;
 
-        let len = buf.read_u32::<byteorder::BigEndian>().expect("could not read bytecode length");
-        let bytes = Bytes::from(buf.copy_to_bytes(len as usize));
+        let len = buf.read_u32::<byteorder::BigEndian>().expect("could not read bytecode length")
+            as usize;
+        let bytes = Bytes::from(buf.copy_to_bytes(len));
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
             LEGACY_RAW_BYTECODE_ID => Self(RevmBytecode::new_raw(bytes)),
             REMOVED_BYTECODE_ID => {
                 unreachable!("Junk data in database: checked Bytecode variant was removed")
             }
-            LEGACY_ANALYZED_BYTECODE_ID => Self(RevmBytecode::new_analyzed(
-                bytes,
-                buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
-                revm_bytecode::JumpTable::from_slice(buf),
-            )),
+            LEGACY_ANALYZED_BYTECODE_ID => {
+                let original_len = buf.read_u64::<byteorder::BigEndian>().unwrap() as usize;
+                // When saving jumptable, its length is getting aligned to u8 boundary. Thus, we
+                // need to re-calculate the internal length of bitvec and truncate it when loading
+                // jumptables to avoid inconsistencies during `Compact` roundtrip.
+                let jump_table_len = if buf.len() * 8 >= bytes.len() {
+                    // Use length of padded bytecode if we can fit it
+                    bytes.len()
+                } else {
+                    // Otherwise, use original_len
+                    original_len
+                };
+                Self(RevmBytecode::new_analyzed(
+                    bytes,
+                    original_len,
+                    revm_bytecode::JumpTable::from_slice(buf, jump_table_len),
+                ))
+            }
             EOF_BYTECODE_ID | EIP7702_BYTECODE_ID => {
                 // EOF and EIP-7702 bytecode objects will be decoded from the raw bytecode
                 Self(RevmBytecode::new_raw(bytes))
@@ -293,7 +307,7 @@ mod tests {
         let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(LegacyAnalyzedBytecode::new(
             Bytes::from(&hex!("ff00")),
             2,
-            JumpTable::from_slice(&[0]),
+            JumpTable::from_slice(&[0], 2),
         )));
         let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);

@@ -53,6 +53,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         client,
         EngineCapabilities::default(),
         EthereumEngineValidator::new(MAINNET.clone()),
+        false,
     );
     let module = AuthRpcModule::new(engine_api);
     module.start_server(config).await.unwrap()

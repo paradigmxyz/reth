@@ -6,6 +6,8 @@ use reth_primitives_traits::constants::GAS_LIMIT_BOUND_DIVISOR;
 pub struct EthereumBuilderConfig {
     /// Desired gas limit.
     pub desired_gas_limit: u64,
+    /// Waits for a payload when there is no payload yet.
+    pub await_payload_on_missing: bool,
 }
 
 impl Default for EthereumBuilderConfig {
@@ -17,7 +19,7 @@ impl Default for EthereumBuilderConfig {
 impl EthereumBuilderConfig {
     /// Create new payload builder config.
     pub const fn new() -> Self {
-        Self { desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M }
+        Self { desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M, await_payload_on_missing: false }
     }
 
     /// Set desired gas limit.

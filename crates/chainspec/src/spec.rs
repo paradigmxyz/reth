@@ -9,8 +9,8 @@ use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::V
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
-        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH,
-        SEPOLIA_GENESIS_HASH,
+        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH,
+        MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
     },
     Header,
 };
@@ -27,7 +27,8 @@ use reth_ethereum_forks::{
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::{
-    holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes, NodeRecord,
+    holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes,
+    NodeRecord,
 };
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
@@ -161,6 +162,35 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         hardforks,
         deposit_contract: Some(DepositContract::new(
             address!("0x4242424242424242424242424242424242424242"),
+            0,
+            b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
+        )),
+        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+        prune_delete_limit: 10000,
+        blob_params: HardforkBlobParams::default(),
+    };
+    spec.genesis.config.dao_fork_support = true;
+    spec.into()
+});
+
+/// The Hoodi spec
+///
+/// Genesis files from: <https://github.com/eth-clients/hoodi>
+pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
+    let genesis = serde_json::from_str(include_str!("../res/genesis/hoodi.json"))
+        .expect("Can't deserialize Hoodi genesis json");
+    let hardforks = EthereumHardfork::hoodi().into();
+    let mut spec = ChainSpec {
+        chain: Chain::hoodi(),
+        genesis_header: SealedHeader::new(
+            make_genesis_header(&genesis, &hardforks),
+            HOODI_GENESIS_HASH,
+        ),
+        genesis,
+        paris_block_and_final_difficulty: Some((0, U256::from(0))),
+        hardforks,
+        deposit_contract: Some(DepositContract::new(
+            address!("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
             0,
             b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
@@ -631,6 +661,7 @@ impl ChainSpec {
             C::Mainnet => Some(mainnet_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
+            C::Hoodi => Some(hoodi_nodes()),
             // opstack uses the same bootnodes for all chains: <https://github.com/paradigmxyz/reth/issues/14603>
             C::Base | C::Optimism | C::Unichain | C::World => Some(op_nodes()),
             C::OptimismSepolia | C::BaseSepolia | C::UnichainSepolia | C::WorldSepolia => {
@@ -1480,6 +1511,24 @@ Post-merge hard forks (timestamp based):
                 ),
             ],
         );
+    }
+
+    #[test]
+    fn hoodi_fork_ids() {
+        test_fork_ids(
+            &HOODI,
+            &[
+                (
+                    Head { number: 0, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbe, 0xf7, 0x1d, 0x30]), next: 1742999832 },
+                ),
+                // First Prague block
+                (
+                    Head { number: 0, timestamp: 1742999833, ..Default::default() },
+                    ForkId { hash: ForkHash([0x09, 0x29, 0xe2, 0x4e]), next: 0 },
+                ),
+            ],
+        )
     }
 
     #[test]

@@ -4,7 +4,7 @@ use alloy_consensus::{BlockHeader, Transaction};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus};
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, ExecutionPayload as _,
     OnForkChoiceUpdated, PayloadValidator,
@@ -18,8 +18,8 @@ use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
-use reth_provider::{BlockReader, ChainSpecProvider, ProviderError, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_storage_api::{errors::ProviderError, BlockReader, StateProviderFactory};
 use std::{
     collections::VecDeque,
     future::Future,
