@@ -7047,6 +7047,7 @@ dependencies = [
  "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "secp256k1",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -8413,7 +8414,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "9.0.0"
-source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#337a98f982e165c5a84cfc25d965344bfd4081bc"
+source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#876966668d0e5bf497dc427cf7b76d4bd1b7cd92"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -8458,7 +8459,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "5.0.0"
-source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#337a98f982e165c5a84cfc25d965344bfd4081bc"
+source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#876966668d0e5bf497dc427cf7b76d4bd1b7cd92"
 dependencies = [
  "revm-primitives 4.0.0 (git+https://github.com/taikoxyz/revm.git?branch=v36-taiko)",
  "serde",
@@ -8476,7 +8477,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "7.0.0"
-source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#337a98f982e165c5a84cfc25d965344bfd4081bc"
+source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#876966668d0e5bf497dc427cf7b76d4bd1b7cd92"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -8509,7 +8510,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "4.0.0"
-source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#337a98f982e165c5a84cfc25d965344bfd4081bc"
+source = "git+https://github.com/taikoxyz/revm.git?branch=v36-taiko#876966668d0e5bf497dc427cf7b76d4bd1b7cd92"
 dependencies = [
  "alloy-primitives",
  "auto_impl",

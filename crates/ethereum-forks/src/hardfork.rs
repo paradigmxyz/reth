@@ -71,6 +71,9 @@ pub enum Hardfork {
     /// Ontake: the 2nd taiko mainnet fork: <>
     #[cfg(feature = "taiko")]
     Ontake,
+    /// Pacaya: the 3rd taiko mainnet fork: <>
+    #[cfg(feature = "taiko")]
+    Pacaya,
     /// Canyon:
     /// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#canyon>.
     #[cfg(feature = "optimism")]

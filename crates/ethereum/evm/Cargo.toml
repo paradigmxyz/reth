@@ -31,6 +31,7 @@ alloy-sol-types.workspace = true
 # Misc
 lazy_static.workspace = true
 anyhow.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 reth-testing-utils.workspace = true

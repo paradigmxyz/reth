@@ -2,7 +2,7 @@
 
 use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    taiko::{check_anchor_tx, check_anchor_tx_ontake, TaikoData},
+    taiko::{check_anchor_tx, check_anchor_tx_ontake, check_anchor_tx_pacaya, TaikoData},
     EthEvmConfig,
 };
 use reth_chainspec::{ChainSpec, MAINNET};
@@ -37,6 +37,7 @@ use revm_primitives::{
 };
 use std::sync::Arc;
 use anyhow::Result;
+use tracing::{debug, warn};
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
@@ -176,13 +177,23 @@ where
         for (idx, (sender, transaction)) in block.transactions_with_sender().enumerate() {
             let is_anchor = is_taiko && idx == 0;
 
+            debug!("Executing {} tx {:?}", idx, transaction.hash);
+
             // verify the anchor tx
             if is_anchor {
                 let spec_id = revm_spec(
                     &self.chain_spec,
                     Head { number: block.number, ..Default::default() },
                 );
-                if spec_id.is_enabled_in(SpecId::ONTAKE) {
+                if spec_id.is_enabled_in(SpecId::PACAYA) {
+                    check_anchor_tx_pacaya(
+                        transaction,
+                        sender,
+                        &block.block,
+                        taiko_data.clone().unwrap(),
+                    )
+                    .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
+                } else if spec_id.is_enabled_in(SpecId::ONTAKE) {
                     check_anchor_tx_ontake(
                         transaction,
                         sender,
@@ -248,6 +259,17 @@ where
                 evm.context.evm.journaled_state = JournaledState::new(evm.context.evm.journaled_state.spec, HashSet::new());
 
                 if optimistic {
+                    match res {
+                        Err(BlockValidationError::EVM { hash: _, error }) => match *error {
+                            EVMError::Transaction(_invalid_transaction) => {}
+                            _ => {
+                                debug!("optimistic skipping tx due to evm error: {:?}", error);
+                            }
+                        },
+                        _ => {
+                            debug!("optimistic skipping tx due to other error: {:?}", &res);
+                        }
+                    }
                     continue;
                 }
 
@@ -275,10 +297,20 @@ where
                 }
             }
             let ResultAndState { result, state } = res?;
-            evm.db_mut().commit(state);
-
             // append gas used
             cumulative_gas_used += result.gas_used();
+            if is_taiko {
+                let mining_gas_limit = taiko_data.clone().unwrap().gas_limit;
+                if cumulative_gas_used > mining_gas_limit {
+                    warn!(
+                        "mining gas limit exceeded: {} > {}",
+                        cumulative_gas_used, mining_gas_limit
+                    );
+                    break;
+                }
+            }
+
+            evm.db_mut().commit(state);
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(
