@@ -32,6 +32,7 @@ op-alloy-consensus.workspace = true
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-network = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
+alloy-rpc-client.workspace = true
 
 # kona
 kona-rpc = { workspace = true, features = ["client", "interop", "reqwest"] }
