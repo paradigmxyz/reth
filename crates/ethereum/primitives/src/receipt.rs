@@ -35,10 +35,10 @@ pub struct Receipt {
 impl Receipt {
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
-        self.success.length() +
-            self.cumulative_gas_used.length() +
-            bloom.length() +
-            self.logs.length()
+        self.success.length()
+            + self.cumulative_gas_used.length()
+            + bloom.length()
+            + self.logs.length()
     }
 
     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
@@ -134,7 +134,7 @@ impl RlpDecodableReceipt for Receipt {
 
         // Legacy receipt, reuse initial buffer without advancing
         if header.list {
-            return Self::rlp_decode_inner(buf, TxType::Legacy)
+            return Self::rlp_decode_inner(buf, TxType::Legacy);
         }
 
         // Otherwise, advance the buffer and try decoding type flag followed by receipt
@@ -184,10 +184,10 @@ impl Typed2718 for Receipt {
 
 impl InMemorySize for Receipt {
     fn size(&self) -> usize {
-        self.tx_type.size() +
-            core::mem::size_of::<bool>() +
-            core::mem::size_of::<u64>() +
-            self.logs.capacity() * core::mem::size_of::<Log>()
+        self.tx_type.size()
+            + core::mem::size_of::<bool>()
+            + core::mem::size_of::<u64>()
+            + self.logs.capacity() * core::mem::size_of::<Log>()
     }
 }
 

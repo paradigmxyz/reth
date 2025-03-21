@@ -69,7 +69,7 @@ where
         request: TransactionRequest,
     ) -> Result<TransactionSigned, Self::Error> {
         let Ok(tx) = request.build_typed_tx() else {
-            return Err(EthApiError::TransactionConversionError)
+            return Err(EthApiError::TransactionConversionError);
         };
 
         // Create an empty signature for the transaction.

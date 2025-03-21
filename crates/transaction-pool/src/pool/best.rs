@@ -55,8 +55,9 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             let best = Iterator::next(&mut self.best)?;
             // If both the base fee and blob fee (if applicable for EIP-4844) are satisfied, return
             // the transaction
-            if best.transaction.max_fee_per_gas() >= self.base_fee as u128 &&
-                best.transaction
+            if best.transaction.max_fee_per_gas() >= self.base_fee as u128
+                && best
+                    .transaction
                     .max_fee_per_blob_gas()
                     .is_none_or(|fee| fee >= self.base_fee_per_blob_gas as u128)
             {
@@ -198,7 +199,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     "[{:?}] skipping invalid transaction",
                     best.transaction.hash()
                 );
-                continue
+                continue;
             }
 
             // Insert transactions that just got unlocked.
@@ -216,7 +217,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     ),
                 )
             } else {
-                return Some(best.transaction)
+                return Some(best.transaction);
             }
         }
     }
@@ -250,7 +251,7 @@ where
         loop {
             let best = self.best.next()?;
             if (self.predicate)(&best) {
-                return Some(best)
+                return Some(best);
             }
             self.best.mark_invalid(
                 &best,
@@ -330,12 +331,12 @@ where
         // If we have space, try prioritizing transactions
         if self.prioritized_gas < self.max_prioritized_gas {
             for item in &mut self.inner {
-                if self.prioritized_senders.contains(&item.transaction.sender()) &&
-                    self.prioritized_gas + item.transaction.gas_limit() <=
-                        self.max_prioritized_gas
+                if self.prioritized_senders.contains(&item.transaction.sender())
+                    && self.prioritized_gas + item.transaction.gas_limit()
+                        <= self.max_prioritized_gas
                 {
                     self.prioritized_gas += item.transaction.gas_limit();
-                    return Some(item)
+                    return Some(item);
                 }
                 self.buffer.push_back(item);
             }

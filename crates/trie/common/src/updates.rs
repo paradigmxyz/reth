@@ -22,9 +22,9 @@ pub struct TrieUpdates {
 impl TrieUpdates {
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
-        self.account_nodes.is_empty() &&
-            self.removed_nodes.is_empty() &&
-            self.storage_tries.is_empty()
+        self.account_nodes.is_empty()
+            && self.removed_nodes.is_empty()
+            && self.storage_tries.is_empty()
     }
 
     /// Returns reference to updated account nodes.

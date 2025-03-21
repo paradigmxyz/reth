@@ -192,7 +192,7 @@ where
         };
 
         if bytes.len() > MAX_MESSAGE_SIZE {
-            return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))))
+            return Poll::Ready(Some(Err(EthStreamError::MessageTooBig(bytes.len()))));
         }
 
         let msg = match ProtocolMessage::decode_message(*this.version, &mut bytes.as_ref()) {
@@ -208,14 +208,14 @@ where
                     %msg,
                     "failed to decode protocol message"
                 );
-                return Poll::Ready(Some(Err(EthStreamError::InvalidMessage(err))))
+                return Poll::Ready(Some(Err(EthStreamError::InvalidMessage(err))));
             }
         };
 
         if matches!(msg.message, EthMessage::Status(_)) {
             return Poll::Ready(Some(Err(EthStreamError::EthHandshakeError(
                 EthHandshakeError::StatusNotInHandshake,
-            ))))
+            ))));
         }
 
         Poll::Ready(Some(Ok(msg.message)))
@@ -245,7 +245,7 @@ where
             // allowing for its start_disconnect method to be called.
             //
             // self.project().inner.start_disconnect(DisconnectReason::ProtocolBreach);
-            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
+            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));
         }
 
         self.project()

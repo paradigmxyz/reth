@@ -62,7 +62,7 @@ impl Metadata {
 
         let num_chunks = self.chunks.len();
         if index >= self.chunks.len() {
-            return Err(DownloaderError::InvalidChunk(index, num_chunks))
+            return Err(DownloaderError::InvalidChunk(index, num_chunks));
         }
 
         // Update chunk with downloaded range

@@ -134,7 +134,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
-                return Ok(factory)
+                return Ok(factory);
             }
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic

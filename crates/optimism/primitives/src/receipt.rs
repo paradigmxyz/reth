@@ -40,10 +40,10 @@ impl OpReceipt {
     /// Returns inner [`Receipt`],
     pub const fn as_receipt(&self) -> &Receipt {
         match self {
-            Self::Legacy(receipt) |
-            Self::Eip2930(receipt) |
-            Self::Eip1559(receipt) |
-            Self::Eip7702(receipt) => receipt,
+            Self::Legacy(receipt)
+            | Self::Eip2930(receipt)
+            | Self::Eip1559(receipt)
+            | Self::Eip7702(receipt) => receipt,
             Self::Deposit(receipt) => &receipt.inner,
         }
     }
@@ -51,10 +51,10 @@ impl OpReceipt {
     /// Returns a mutable reference to the inner [`Receipt`],
     pub const fn as_receipt_mut(&mut self) -> &mut Receipt {
         match self {
-            Self::Legacy(receipt) |
-            Self::Eip2930(receipt) |
-            Self::Eip1559(receipt) |
-            Self::Eip7702(receipt) => receipt,
+            Self::Legacy(receipt)
+            | Self::Eip2930(receipt)
+            | Self::Eip1559(receipt)
+            | Self::Eip7702(receipt) => receipt,
             Self::Deposit(receipt) => &mut receipt.inner,
         }
     }
@@ -62,10 +62,10 @@ impl OpReceipt {
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
         match self {
-            Self::Legacy(receipt) |
-            Self::Eip2930(receipt) |
-            Self::Eip1559(receipt) |
-            Self::Eip7702(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
+            Self::Legacy(receipt)
+            | Self::Eip2930(receipt)
+            | Self::Eip1559(receipt)
+            | Self::Eip7702(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
             Self::Deposit(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
         }
     }
@@ -73,10 +73,10 @@ impl OpReceipt {
     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encode_fields(&self, bloom: &Bloom, out: &mut dyn BufMut) {
         match self {
-            Self::Legacy(receipt) |
-            Self::Eip2930(receipt) |
-            Self::Eip1559(receipt) |
-            Self::Eip7702(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
+            Self::Legacy(receipt)
+            | Self::Eip2930(receipt)
+            | Self::Eip1559(receipt)
+            | Self::Eip7702(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
             Self::Deposit(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
         }
     }
@@ -166,7 +166,7 @@ impl RlpDecodableReceipt for OpReceipt {
 
         // Legacy receipt, reuse initial buffer without advancing
         if header.list {
-            return Self::rlp_decode_inner(buf, OpTxType::Legacy)
+            return Self::rlp_decode_inner(buf, OpTxType::Legacy);
         }
 
         // Otherwise, advance the buffer and try decoding type flag followed by receipt

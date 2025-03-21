@@ -133,7 +133,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         // get the result if it exists
         if let Some(precompiles) = cache.cache.get_mut(address) {
             if let Some(result) = precompiles.get(&key) {
-                return result.clone().map(Some)
+                return result.clone().map(Some);
             }
         }
 

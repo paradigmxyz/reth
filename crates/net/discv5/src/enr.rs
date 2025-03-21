@@ -11,7 +11,7 @@ use secp256k1::{PublicKey, SecretKey};
 pub fn enr_to_discv4_id(enr: &discv5::Enr) -> Option<PeerId> {
     let pk = enr.public_key();
     if !matches!(pk, CombinedPublicKey::Secp256k1(_)) {
-        return None
+        return None;
     }
 
     let pk = PublicKey::from_slice(&pk.encode()).unwrap();

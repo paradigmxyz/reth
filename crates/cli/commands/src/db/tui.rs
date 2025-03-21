@@ -297,7 +297,7 @@ where
             }
         }
 
-        return Ok(false)
+        return Ok(false);
     }
 
     match event {

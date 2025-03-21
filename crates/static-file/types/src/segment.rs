@@ -115,14 +115,14 @@ impl StaticFileSegment {
     pub fn parse_filename(name: &str) -> Option<(Self, SegmentRangeInclusive)> {
         let mut parts = name.split('_');
         if !(parts.next() == Some("static") && parts.next() == Some("file")) {
-            return None
+            return None;
         }
 
         let segment = Self::from_str(parts.next()?).ok()?;
         let (block_start, block_end) = (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
 
         if block_start > block_end {
-            return None
+            return None;
         }
 
         Some((segment, SegmentRangeInclusive::new(block_start, block_end)))
@@ -303,7 +303,7 @@ impl SegmentHeader {
     /// Returns the row offset which depends on whether the segment is block or transaction based.
     pub fn start(&self) -> Option<u64> {
         if self.segment.is_block_based() {
-            return self.block_start()
+            return self.block_start();
         }
         self.tx_start()
     }

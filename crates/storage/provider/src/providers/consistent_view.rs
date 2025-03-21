@@ -71,7 +71,7 @@ where
         // data source that we used during initialization. In this case, that is static files
         if let Some((hash, number)) = self.tip {
             if provider_ro.sealed_header(number)?.is_none_or(|header| header.hash() != hash) {
-                return Err(ConsistentViewError::Reorged { block: hash }.into())
+                return Err(ConsistentViewError::Reorged { block: hash }.into());
             }
         }
 

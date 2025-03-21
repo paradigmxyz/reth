@@ -69,7 +69,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
             } else if last_block_number > 0 && last_block_number < BEDROCK_HEADER.number {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-ovm."
-                ))
+                ));
             }
         }
 

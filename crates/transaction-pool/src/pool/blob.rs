@@ -96,16 +96,16 @@ impl<T: PoolTransaction> BlobTransactions<T> {
                 let mut iter = self.by_id.iter().peekable();
 
                 while let Some((id, tx)) = iter.next() {
-                    if tx.transaction.max_fee_per_blob_gas().unwrap_or_default() <
-                        blob_fee_to_satisfy ||
-                        tx.transaction.max_fee_per_gas() <
-                            best_transactions_attributes.basefee as u128
+                    if tx.transaction.max_fee_per_blob_gas().unwrap_or_default()
+                        < blob_fee_to_satisfy
+                        || tx.transaction.max_fee_per_gas()
+                            < best_transactions_attributes.basefee as u128
                     {
                         // does not satisfy the blob fee or base fee
                         // still parked in blob pool -> skip descendant transactions
                         'this: while let Some((peek, _)) = iter.peek() {
                             if peek.sender != id.sender {
-                                break 'this
+                                break 'this;
                             }
                             iter.next();
                         }
@@ -150,13 +150,13 @@ impl<T: PoolTransaction> BlobTransactions<T> {
             let mut iter = self.by_id.iter().peekable();
 
             while let Some((id, tx)) = iter.next() {
-                if tx.transaction.max_fee_per_blob_gas() < Some(pending_fees.blob_fee) ||
-                    tx.transaction.max_fee_per_gas() < pending_fees.base_fee as u128
+                if tx.transaction.max_fee_per_blob_gas() < Some(pending_fees.blob_fee)
+                    || tx.transaction.max_fee_per_gas() < pending_fees.base_fee as u128
                 {
                     // still parked in blob pool -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
-                            break 'this
+                            break 'this;
                         }
                         iter.next();
                     }
@@ -350,7 +350,7 @@ const LOG_2_1_125: f64 = 0.16992500144231237;
 pub fn fee_delta(max_tx_fee: u128, current_fee: u128) -> i64 {
     if max_tx_fee == current_fee {
         // if these are equal, then there's no fee jump
-        return 0
+        return 0;
     }
 
     let max_tx_fee_jumps = if max_tx_fee == 0 {

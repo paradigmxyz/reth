@@ -215,7 +215,7 @@ impl HashedPostState {
                     let mut storage_not_in_targets = HashedStorage::default();
                     storage.storage.retain(|&slot, value| {
                         if storage_in_targets.contains(&slot) {
-                            return true
+                            return true;
                         }
 
                         storage_not_in_targets.storage.insert(slot, *value);
@@ -250,7 +250,7 @@ impl HashedPostState {
         });
         self.accounts.retain(|&address, account| {
             if targets.contains_key(&address) {
-                return true
+                return true;
             }
 
             state_updates_not_in_targets.accounts.insert(address, *account);

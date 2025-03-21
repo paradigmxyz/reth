@@ -146,8 +146,8 @@ impl BlobStoreSize {
 
 impl PartialEq for BlobStoreSize {
     fn eq(&self, other: &Self) -> bool {
-        self.data_size.load(Ordering::Relaxed) == other.data_size.load(Ordering::Relaxed) &&
-            self.num_blobs.load(Ordering::Relaxed) == other.num_blobs.load(Ordering::Relaxed)
+        self.data_size.load(Ordering::Relaxed) == other.data_size.load(Ordering::Relaxed)
+            && self.num_blobs.load(Ordering::Relaxed) == other.num_blobs.load(Ordering::Relaxed)
     }
 }
 

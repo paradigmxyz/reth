@@ -158,7 +158,7 @@ impl ProofSequencer {
 
         // return early if we don't have the next expected proof
         if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
@@ -305,7 +305,7 @@ where
                 sequence_number: input.proof_sequence_number,
                 state: input.hashed_state_update,
             });
-            return
+            return;
         }
 
         if self.inflight >= self.max_concurrent {
@@ -591,7 +591,7 @@ where
             let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
                 // this means the account has not been fetched yet, so we must fetch everything
                 // associated with this account
-                continue
+                continue;
             };
 
             let prev_target_storage_len = target_storage.len();
@@ -794,7 +794,7 @@ where
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
-                            break
+                            break;
                         }
                     }
                     MultiProofMessage::EmptyProof { sequence_number, state } => {
@@ -819,7 +819,7 @@ where
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation"
                             );
-                            break
+                            break;
                         }
                     }
                     MultiProofMessage::ProofCalculated(proof_calculated) => {
@@ -858,7 +858,7 @@ where
                             debug!(
                                 target: "engine::root",
                                 "State updates finished and all proofs processed, ending calculation");
-                            break
+                            break;
                         }
                     }
                     MultiProofMessage::ProofCalculationError(err) => {
@@ -867,7 +867,7 @@ where
                             ?err,
                             "proof calculation error"
                         );
-                        return
+                        return;
                     }
                 },
                 Err(_) => {

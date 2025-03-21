@@ -66,7 +66,7 @@ impl NodeRecord {
         if let IpAddr::V6(v6) = self.address {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 self.address = v4.into();
-                return true
+                return true;
             }
         }
         false
@@ -215,15 +215,15 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
     fn try_from(enr: &Enr<secp256k1::SecretKey>) -> Result<Self, Self::Error> {
         let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
         else {
-            return Err(NodeRecordParseError::InvalidUrl("ip missing".to_string()))
+            return Err(NodeRecordParseError::InvalidUrl("ip missing".to_string()));
         };
 
         let Some(udp_port) = enr.udp4().or_else(|| enr.udp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("udp port missing".to_string()))
+            return Err(NodeRecordParseError::InvalidUrl("udp port missing".to_string()));
         };
 
         let Some(tcp_port) = enr.tcp4().or_else(|| enr.tcp6()) else {
-            return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
+            return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()));
         };
 
         let id = crate::pk2id(&enr.public_key());

@@ -159,7 +159,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         if in_memory_state_root == block.state_root() {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
-            return Ok(())
+            return Ok(());
         }
 
         let provider_rw = provider_factory.database_provider_rw()?;
@@ -203,8 +203,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
                 (Some(in_mem), Some(incr)) => {
                     similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
-                    if in_mem.1 != incr.1 &&
-                        in_mem.0.len() > self.skip_node_depth.unwrap_or_default()
+                    if in_mem.1 != incr.1
+                        && in_mem.0.len() > self.skip_node_depth.unwrap_or_default()
                     {
                         in_mem_mismatched.push(in_mem);
                         incremental_mismatched.push(incr);

@@ -331,7 +331,7 @@ where
                 let old = if entry.value.is_zero() {
                     let old = storage.remove(&entry.key);
                     if matches!(old, Some(U256::ZERO)) {
-                        return None
+                        return None;
                     }
                     old
                 } else {

@@ -47,7 +47,7 @@ pub async fn fetch(
     let data_file = download_dir.join(filename);
     let mut metadata = metadata(&data_file, url).await?;
     if metadata.is_done() {
-        return Ok(())
+        return Ok(());
     }
 
     // Ensure the file is preallocated so we can download it concurrently
@@ -95,7 +95,7 @@ pub async fn fetch(
                 }
                 WorkerResponse::Err { worker_id, error } => {
                     error!(target: "sync::stages::s3::downloader", ?worker_id, "Worker found an error: {:?}", error);
-                    return Err(error)
+                    return Err(error);
                 }
             };
 
@@ -133,7 +133,7 @@ pub async fn fetch(
 async fn metadata(data_file: &Path, url: &str) -> Result<Metadata, DownloaderError> {
     if Metadata::file_path(data_file).exists() {
         debug!(target: "sync::stages::s3::downloader", ?data_file, "Loading metadata ");
-        return Metadata::load(data_file)
+        return Metadata::load(data_file);
     }
 
     let client = Client::new();
@@ -158,7 +158,7 @@ fn check_file_hash(path: &Path, expected: &B256) -> Result<(), DownloaderError> 
 
     let file_hash = hasher.finalize();
     if file_hash.as_bytes() != expected {
-        return Err(DownloaderError::InvalidFileHash(file_hash.as_bytes().into(), *expected))
+        return Err(DownloaderError::InvalidFileHash(file_hash.as_bytes().into(), *expected));
     }
 
     Ok(())

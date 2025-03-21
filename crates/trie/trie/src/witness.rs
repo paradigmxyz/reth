@@ -87,7 +87,7 @@ where
     /// `state` - state transition containing both modified and touched accounts and storage slots.
     pub fn compute(mut self, state: HashedPostState) -> Result<B256Map<Bytes>, TrieWitnessError> {
         if state.is_empty() {
-            return Ok(self.witness)
+            return Ok(self.witness);
         }
 
         let proof_targets = self.get_proof_targets(&state)?;

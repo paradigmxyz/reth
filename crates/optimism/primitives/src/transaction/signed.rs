@@ -105,7 +105,7 @@ impl SignedTransaction for OpTransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Ok(from)
+            return Ok(from);
         }
 
         let Self { transaction, signature, .. } = self;
@@ -117,7 +117,7 @@ impl SignedTransaction for OpTransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = &self.transaction {
-            return Ok(*from)
+            return Ok(*from);
         }
 
         let Self { transaction, signature, .. } = self;
@@ -514,9 +514,9 @@ impl Typed2718 for OpTransactionSigned {
 
 impl PartialEq for OpTransactionSigned {
     fn eq(&self, other: &Self) -> bool {
-        self.signature == other.signature &&
-            self.transaction == other.transaction &&
-            self.tx_hash() == other.tx_hash()
+        self.signature == other.signature
+            && self.transaction == other.transaction
+            && self.tx_hash() == other.tx_hash()
     }
 }
 

@@ -196,9 +196,9 @@ impl Error {
             Self::DecodeErrorLenDiff | Self::DecodeError => ffi::MDBX_EINVAL,
             Self::TooLarge => ffi::MDBX_TOO_LARGE,
             Self::BadSignature => ffi::MDBX_EBADSIGN,
-            Self::Access |
-            Self::WriteTransactionUnsupportedInReadOnlyMode |
-            Self::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
+            Self::Access
+            | Self::WriteTransactionUnsupportedInReadOnlyMode
+            | Self::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
             Self::ReadTransactionTimeout => -96000, // Custom non-MDBX error code
             Self::Permission => ffi::MDBX_EPERM,
             Self::Other(err_code) => *err_code,

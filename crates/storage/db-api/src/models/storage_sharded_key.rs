@@ -68,7 +68,7 @@ impl Encode for StorageShardedKey {
 impl Decode for StorageShardedKey {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
         if value.len() != STORAGE_SHARD_KEY_BYTES_SIZE {
-            return Err(DatabaseError::Decode)
+            return Err(DatabaseError::Decode);
         }
         let tx_num_index = value.len() - 8;
 

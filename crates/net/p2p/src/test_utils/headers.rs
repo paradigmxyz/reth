@@ -80,7 +80,7 @@ impl Stream for TestHeaderDownloader {
         let this = self.get_mut();
         loop {
             if this.queued_headers.len() == this.batch_size {
-                return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers))))
+                return Poll::Ready(Some(Ok(std::mem::take(&mut this.queued_headers))));
             }
             if this.download.is_none() {
                 this.download = Some(this.create_download());
@@ -140,9 +140,9 @@ impl Stream for TestDownload {
 
         loop {
             if let Some(header) = this.buffer.pop() {
-                return Poll::Ready(Some(Ok(header)))
+                return Poll::Ready(Some(Ok(header)));
             } else if this.done {
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             }
 
             let empty: SealedHeader = SealedHeader::default();
@@ -152,7 +152,7 @@ impl Stream for TestDownload {
                     hash: empty.hash(),
                     number: empty.number,
                     error: Box::new(error),
-                })))
+                })));
             }
 
             match ready!(this.get_or_init_fut().poll_unpin(cx)) {
@@ -169,7 +169,7 @@ impl Stream for TestDownload {
                     return Poll::Ready(Some(Err(match err {
                         RequestError::Timeout => DownloadError::Timeout,
                         _ => DownloadError::RequestError(err),
-                    })))
+                    })));
                 }
             }
         }
@@ -235,7 +235,7 @@ impl HeadersClient for TestHeadersClient {
 
         Box::pin(async move {
             if let Some(err) = &mut *error.lock().await {
-                return Err(err.clone())
+                return Err(err.clone());
             }
 
             let mut lock = responses.lock().await;

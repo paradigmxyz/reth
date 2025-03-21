@@ -218,7 +218,7 @@ where
     ) -> Result<Option<LocalizedTransactionTrace>, Eth::Error> {
         if indices.len() != 1 {
             // The OG impl failed if it gets more than a single index
-            return Ok(None)
+            return Ok(None);
         }
         self.trace_get_index(hash, indices[0]).await
     }
@@ -256,7 +256,7 @@ where
             return Err(EthApiError::InvalidParams(
                 "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),
             )
-            .into())
+            .into());
         }
 
         // ensure that the range is not too large, since we need to fetch all blocks in the range
@@ -265,7 +265,7 @@ where
             return Err(EthApiError::InvalidParams(
                 "Block range too large; currently limited to 100 blocks".to_string(),
             )
-            .into())
+            .into());
         }
 
         // fetch all blocks in that range
@@ -318,7 +318,7 @@ where
             } else {
                 // no block reward, means we're past the Paris hardfork and don't expect any rewards
                 // because the blocks in ascending order
-                break
+                break;
             }
         }
 
@@ -329,7 +329,7 @@ where
             if after < all_traces.len() {
                 all_traces.drain(..after);
             } else {
-                return Ok(vec![])
+                return Ok(vec![]);
             }
         }
 
@@ -504,7 +504,7 @@ where
         };
 
         if is_paris_activated {
-            return Ok(None)
+            return Ok(None);
         }
 
         Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))

@@ -106,7 +106,7 @@ impl FeeHistoryCache {
         if entries.is_empty() {
             self.inner.upper_bound.store(0, SeqCst);
             self.inner.lower_bound.store(0, SeqCst);
-            return
+            return;
         }
 
         let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
@@ -153,7 +153,7 @@ impl FeeHistoryCache {
                 .collect::<Vec<_>>();
 
             if result.is_empty() {
-                return None
+                return None;
             }
 
             Some(result)
@@ -317,7 +317,7 @@ where
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
             rewards_in_block.push(0);
-            continue
+            continue;
         }
 
         let threshold = (gas_used as f64 * percentile / 100.) as u64;
@@ -377,8 +377,8 @@ impl FeeHistoryEntry {
                 .header()
                 .excess_blob_gas()
                 .and_then(|excess_blob_gas| Some(blob_params?.calc_blob_fee(excess_blob_gas))),
-            blob_gas_used_ratio: block.body().blob_gas_used() as f64 /
-                alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+            blob_gas_used_ratio: block.body().blob_gas_used() as f64
+                / alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             excess_blob_gas: block.header().excess_blob_gas(),
             blob_gas_used: block.header().blob_gas_used(),
             gas_used: block.header().gas_used(),

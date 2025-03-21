@@ -350,8 +350,8 @@ impl Config {
 /// Returns the IPv4 discovery socket if one is configured.
 pub const fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
     match listen_config {
-        ListenConfig::Ipv4 { ip, port } |
-        ListenConfig::DualStack { ipv4: ip, ipv4_port: port, .. } => {
+        ListenConfig::Ipv4 { ip, port }
+        | ListenConfig::DualStack { ipv4: ip, ipv4_port: port, .. } => {
             Some(SocketAddrV4::new(*ip, *port))
         }
         ListenConfig::Ipv6 { .. } => None,
@@ -362,8 +362,8 @@ pub const fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
 pub const fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
     match listen_config {
         ListenConfig::Ipv4 { .. } => None,
-        ListenConfig::Ipv6 { ip, port } |
-        ListenConfig::DualStack { ipv6: ip, ipv6_port: port, .. } => {
+        ListenConfig::Ipv6 { ip, port }
+        | ListenConfig::DualStack { ipv6: ip, ipv6_port: port, .. } => {
             Some(SocketAddrV6::new(*ip, *port, 0, 0))
         }
     }
@@ -511,9 +511,9 @@ mod test {
         for node in config.bootstrap_nodes {
             let BootNode::Enr(node) = node else { panic!() };
             assert!(
-                socket_1 == node.udp4_socket().unwrap() && socket_1 == node.tcp4_socket().unwrap() ||
-                    socket_2 == node.udp4_socket().unwrap() &&
-                        socket_2 == node.tcp4_socket().unwrap()
+                socket_1 == node.udp4_socket().unwrap() && socket_1 == node.tcp4_socket().unwrap()
+                    || socket_2 == node.udp4_socket().unwrap()
+                        && socket_2 == node.tcp4_socket().unwrap()
             );
             assert_eq!("84b4940500", hex::encode(node.get_raw_rlp("opstack").unwrap()));
         }
