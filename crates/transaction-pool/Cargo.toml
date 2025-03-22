@@ -72,12 +72,10 @@ tempfile.workspace = true
 serde_json.workspace = true
 
 [features]
-default = ["serde"]
 serde = [
     "dep:serde",
     "reth-execution-types/serde",
     "reth-eth-wire-types/serde",
-    "reth-provider/serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",

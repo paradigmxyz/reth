@@ -20,9 +20,7 @@ use reth::{
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
         interpreter::{interpreter::EthInterpreter, InterpreterResult},
-        precompile::{
-            PrecompileError, PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles,
-        },
+        precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
         primitives::hardfork::SpecId,
         MainBuilder, MainContext,
     },
@@ -186,16 +184,16 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
         address: &Address,
         bytes: &Bytes,
         gas_limit: u64,
-    ) -> Result<Option<Self::Output>, PrecompileError> {
+    ) -> Result<Option<Self::Output>, String> {
         self.precompiles.run(context, address, bytes, gas_limit)
-    }
-
-    fn contains(&self, address: &Address) -> bool {
-        self.precompiles.contains(address)
     }
 
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
         self.precompiles.warm_addresses()
+    }
+
+    fn contains(&self, address: &Address) -> bool {
+        self.precompiles.contains(address)
     }
 }
 
