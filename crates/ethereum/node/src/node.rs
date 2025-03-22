@@ -2,6 +2,7 @@
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
+use alloy_eips::merge::EPOCH_SLOTS;
 use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -338,18 +339,17 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let pool_config = ctx.pool_config();
-        let current_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
 
+        // get the current blob params
+        let current_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
         let blob_params = ctx
             .chain_spec()
             .blob_params_at_timestamp(current_timestamp)
             .unwrap_or(ctx.chain_spec().blob_params.cancun);
 
-        let target_blob_count = blob_params.target_blob_count;
-
-        // - Previously, the cache defaulted to 100, which was ~33x Cancun's target (3 blobs)
-        // - To scale better for future upgrades, we multiply `blob_target * 64`
-        let cache_size = target_blob_count * 64;
+        // Derive the blob cache size from the target blob count, to auto scale it by multiplying it
+        // with the slot count for 2 epochs: 384 for pectra
+        let cache_size = blob_params.target_blob_count * EPOCH_SLOTS * 2;
 
         let custom_config =
             DiskFileBlobStoreConfig::default().with_max_cached_entries(cache_size as u32);
