@@ -159,6 +159,7 @@ struct DiskFileBlobStoreInner {
     size_tracker: BlobStoreSize,
     file_lock: RwLock<()>,
     txs_to_delete: RwLock<HashSet<B256>>,
+    versioned_hashes_to_txhash: Mutex<LruMap<B256, B256>>,
 }
 
 impl DiskFileBlobStoreInner {
@@ -170,6 +171,7 @@ impl DiskFileBlobStoreInner {
             size_tracker: Default::default(),
             file_lock: Default::default(),
             txs_to_delete: Default::default(),
+            versioned_hashes_to_txhash: Mutex::new(LruMap::new(ByLength::new(10_000))),
         }
     }
 
@@ -194,6 +196,18 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
+        let versioned_mappings: Vec<(B256, B256)> = data.blobs
+            .iter()
+            .map(|blob| (blob.versioned_hash(), tx))
+            .collect();
+
+        if !versioned_mappings.is_empty() {
+            let mut map = self.versioned_hashes_to_txhash.lock();
+            for (versioned_hash, tx_hash) in versioned_mappings {
+                map.insert(versioned_hash, tx_hash);
+            }
+        }
+
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
         data.rlp_encode_fields(&mut buf);
         self.blob_cache.lock().insert(tx, Arc::new(data));
@@ -206,6 +220,23 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blobs are in the blob cache and written to the disk.
     fn insert_many(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
+        let versioned_hash_mappings: Vec<(B256, B256)> = txs
+            .iter()
+            .flat_map(|(tx, data)| {
+                data.blobs
+                    .iter()
+                    .map(|blob| (blob.versioned_hash(), *tx))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        if !versioned_hash_mappings.is_empty() {
+            let mut versioned_map = self.versioned_hashes_to_txhash.lock();
+            for (versioned_hash, tx) in versioned_hash_mappings {
+                versioned_map.insert(versioned_hash, tx);
+            }
+        }
+
         let raw = txs
             .iter()
             .map(|(tx, data)| {
