@@ -306,11 +306,11 @@ mod tests {
     use crate::{EthVersion, Status, StatusEth69};
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
+    use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
     use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
-    use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
     use std::str::FromStr;
 
     #[test]
