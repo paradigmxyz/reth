@@ -196,6 +196,7 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
+        // WIP : Need to have a method to get the version hash to insert into the versioned_hashes_to_txhash
         let versioned_mappings: Vec<(B256, B256)> =
             data.blobs.iter().map(|blob| (blob.versioned_hash(), tx)).collect();
 
@@ -218,6 +219,7 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blobs are in the blob cache and written to the disk.
     fn insert_many(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
+        // WIP : Need to have a method to get the version hash to insert into the versioned_hashes_to_txhash
         let versioned_hash_mappings: Vec<(B256, B256)> = txs
             .iter()
             .flat_map(|(tx, data)| {
