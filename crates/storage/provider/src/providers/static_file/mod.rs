@@ -8,9 +8,8 @@ mod writer;
 pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
-
 use reth_nippy_jar::NippyJar;
-use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
+use reth_static_file_types::{SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::Deref, sync::Arc};
 

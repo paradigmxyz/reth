@@ -12,7 +12,7 @@ use reth_db_api::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_primitives::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BlockNumReader, DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };

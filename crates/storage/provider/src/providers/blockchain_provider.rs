@@ -26,14 +26,13 @@ use reth_db_api::{
     transaction::DbTx,
     Database,
 };
+use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives::{
-    Account, Block, EthPrimitives, NodePrimitives, Receipt, RecoveredBlock, SealedBlock,
-    SealedHeader, StorageEntry, TransactionSigned,
+use reth_primitives_traits::{
+    Account, BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
 };
-use reth_primitives_traits::BlockBody;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{

@@ -11,10 +11,7 @@ use reth_db_api::models::{
 };
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
-use reth_primitives::{
-    static_file::{SegmentHeader, SegmentRangeInclusive},
-    StaticFileSegment,
-};
+use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{
     borrow::Borrow,
