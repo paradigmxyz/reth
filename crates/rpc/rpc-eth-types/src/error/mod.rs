@@ -139,9 +139,6 @@ pub enum EthApiError {
     /// 7702 bytecode.
     #[error("Invalid bytecode: {0}")]
     InvalidBytecode(String),
-    /// Evm precompile error
-    #[error("Revm precompile error: {0}")]
-    EvmPrecompile(String),
     /// Error encountered when converting a transaction type
     #[error("Transaction conversion error")]
     TransactionConversionError,
@@ -192,7 +189,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::Internal(_) |
             EthApiError::TransactionNotFound |
             EthApiError::EvmCustom(_) |
-            EthApiError::EvmPrecompile(_) |
             EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
             EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
@@ -303,7 +299,6 @@ where
             EVMError::Header(err) => err.into(),
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
-            EVMError::Precompile(err) => Self::EvmPrecompile(err),
         }
     }
 }
@@ -540,11 +535,11 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
                 // tx.gas > block.gas_limit
                 Self::GasTooHigh
             }
-            InvalidTransaction::CallGasCostMoreThanGasLimit => {
+            InvalidTransaction::CallGasCostMoreThanGasLimit { .. } => {
                 // tx.gas < cost
                 Self::GasTooLow
             }
-            InvalidTransaction::GasFloorMoreThanGasLimit => {
+            InvalidTransaction::GasFloorMoreThanGasLimit { .. } => {
                 // Post prague EIP-7623 tx floor calldata gas cost > tx.gas_limit
                 // where floor gas is the minimum amount of gas that will be spent
                 // In other words, the tx's gas limit is lower that the minimum gas requirements of

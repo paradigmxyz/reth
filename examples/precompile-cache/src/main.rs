@@ -17,7 +17,6 @@ use reth::{
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
         interpreter::{interpreter::EthInterpreter, InterpreterResult},
-        precompile::PrecompileError,
         primitives::hardfork::SpecId,
         MainBuilder, MainContext,
     },
@@ -36,7 +35,7 @@ use schnellru::{ByLength, LruMap};
 use std::{collections::HashMap, sync::Arc};
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
-type PrecompileLRUCache = LruMap<(SpecId, Bytes, u64), Result<InterpreterResult, PrecompileError>>;
+type PrecompileLRUCache = LruMap<(SpecId, Bytes, u64), Result<InterpreterResult, String>>;
 
 type WrappedEthEvm<DB, I> = EthEvm<DB, I, WrappedPrecompile<EthPrecompiles>>;
 
@@ -126,7 +125,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         address: &Address,
         bytes: &Bytes,
         gas_limit: u64,
-    ) -> Result<Option<Self::Output>, PrecompileError> {
+    ) -> Result<Option<Self::Output>, String> {
         let mut cache = self.cache.write();
         let key = (self.spec, bytes.clone(), gas_limit);
 
@@ -152,12 +151,12 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX, Output = InterpreterResult>> Pre
         output
     }
 
-    fn contains(&self, address: &Address) -> bool {
-        self.precompile.contains(address)
-    }
-
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
         self.precompile.warm_addresses()
+    }
+
+    fn contains(&self, address: &Address) -> bool {
+        self.precompile.contains(address)
     }
 }
 
