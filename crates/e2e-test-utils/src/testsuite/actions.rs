@@ -249,7 +249,6 @@ impl<Engine> Default for ProduceBlocks<Engine> {
 impl<Engine> Action<Engine> for ProduceBlocks<Engine>
 where
     Engine: EngineTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
