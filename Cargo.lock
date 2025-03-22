@@ -7115,6 +7115,7 @@ dependencies = [
  "alloy-trie",
  "arbitrary",
  "bytes",
+ "lazy_static",
  "modular-bitfield",
  "op-alloy-consensus",
  "proptest",

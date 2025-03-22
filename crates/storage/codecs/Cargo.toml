@@ -31,6 +31,7 @@ modular-bitfield.workspace = true
 visibility = { workspace = true, optional = true }
 serde.workspace = true
 arbitrary = { workspace = true, features = ["derive"], optional = true }
+lazy_static = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloy-eips = { workspace = true, default-features = false, features = ["arbitrary", "serde"] }
@@ -65,7 +66,7 @@ alloy = [
     "dep:alloy-trie",
     "dep:reth-zstd-compressors",
 ]
-op = ["alloy", "dep:op-alloy-consensus"]
+op = ["alloy", "dep:op-alloy-consensus", "dep:lazy_static"]
 test-utils = [
     "std",
     "alloy",

@@ -55,7 +55,7 @@ where
 
 cond_mod!(eip1559, eip2930, eip4844, eip7702, legacy, txtype);
 
-mod ethereum;
+mod envelope;
 #[cfg(all(feature = "test-utils", feature = "op"))]
 pub mod optimism;
 #[cfg(all(not(feature = "test-utils"), feature = "op"))]
