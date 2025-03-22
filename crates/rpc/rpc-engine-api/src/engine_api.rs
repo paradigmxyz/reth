@@ -2,7 +2,9 @@ use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
 use alloy_eips::{
-    eip1898::BlockHashOrNumber, eip4844::BlobAndProofV1, eip4895::Withdrawals,
+    eip1898::BlockHashOrNumber,
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
@@ -1136,6 +1138,14 @@ where
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
         Ok(self.get_blobs_v1_metered(versioned_hashes)?)
+    }
+
+    async fn get_blobs_v2(
+        &self,
+        _versioned_hashes: Vec<B256>,
+    ) -> RpcResult<Vec<Option<BlobAndProofV2>>> {
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
+        unimplemented!("get_blobs_v2 is not yet implemented")
     }
 }
 
