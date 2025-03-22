@@ -82,6 +82,7 @@ serde = [
     "reth-stages-types/serde",
     "revm-state/serde",
     "parking_lot/serde",
+    "reth-ethereum-primitives/serde",
 ]
 test-utils = [
     "triehash",

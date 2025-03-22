@@ -956,7 +956,7 @@ mod tests {
         Ok((provider, database_blocks.clone(), in_memory_blocks.clone(), receipts))
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn provider_with_random_blocks(
         rng: &mut impl Rng,
         database_blocks: usize,

@@ -71,7 +71,7 @@ impl<'a, ProviderDB, ProviderSF> UnifiedStorageWriter<'a, ProviderDB, ProviderSF
     /// # Returns
     /// - `Ok(())` if the static file instance is set.
     /// - `Err(StorageWriterError::MissingStaticFileWriter)` if the static file instance is not set.
-    #[allow(unused)]
+    #[expect(unused)]
     const fn ensure_static_file(&self) -> Result<(), UnifiedStorageWriterError> {
         if self.static_file.is_none() {
             return Err(UnifiedStorageWriterError::MissingStaticFileWriter)

@@ -20,7 +20,7 @@ pub use transaction::*;
 mod alloy_compat;
 
 /// Bincode-compatible serde implementations.
-#[cfg(feature = "serde-bincode-compat")]
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
     pub use super::{receipt::serde_bincode_compat::*, transaction::serde_bincode_compat::*};
 }
@@ -33,7 +33,8 @@ pub type BlockBody = alloy_consensus::BlockBody<TransactionSigned>;
 
 /// Helper struct that specifies the ethereum
 /// [`NodePrimitives`](reth_primitives_traits::NodePrimitives) types.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub struct EthPrimitives;
 

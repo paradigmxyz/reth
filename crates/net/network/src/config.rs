@@ -227,7 +227,7 @@ impl NetworkConfigBuilder<EthNetworkPrimitives> {
 
 // === impl NetworkConfigBuilder ===
 
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// Create a new builder instance with a random secret key.
     pub fn with_rng_secret_key() -> Self {

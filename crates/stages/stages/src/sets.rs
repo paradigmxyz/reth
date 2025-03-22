@@ -105,7 +105,7 @@ where
     E: BlockExecutorProvider<Primitives: NodePrimitives<BlockHeader = H::Header, Block = B::Block>>,
 {
     /// Create a new set of default stages with default values.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,

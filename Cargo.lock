@@ -7120,6 +7120,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs-derive",
+ "reth-zstd-compressors",
  "rstest",
  "serde",
  "serde_json",

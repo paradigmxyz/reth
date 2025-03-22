@@ -86,6 +86,7 @@ serde = [
     "revm-interpreter/serde",
     "revm-primitives/serde",
     "reth-primitives-traits/serde",
+    "reth-ethereum-primitives/serde",
 ]
 test-utils = [
     "rand",

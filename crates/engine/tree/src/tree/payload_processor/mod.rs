@@ -400,7 +400,7 @@ impl ExecutionCache {
     }
 
     /// Clears the tracked cache
-    #[allow(unused)]
+    #[expect(unused)]
     pub(crate) fn clear(&self) {
         self.inner.write().take();
     }

@@ -369,7 +369,7 @@ mod tests {
                 self.clean_threshold = threshold;
             }
 
-            #[allow(dead_code)]
+            #[expect(dead_code)]
             pub(crate) fn set_commit_threshold(&mut self, threshold: u64) {
                 self.commit_threshold = threshold;
             }

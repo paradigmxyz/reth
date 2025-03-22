@@ -22,7 +22,7 @@ pub trait Action<I>: Send + 'static {
 }
 
 /// Simplified action container for storage in tests
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct ActionBox<I>(Box<dyn Action<I>>);
 
 impl<I: 'static> ActionBox<I> {
@@ -262,7 +262,7 @@ where
 }
 
 /// Run a sequence of actions in series.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct Sequence<I> {
     /// Actions to execute in sequence
     pub actions: Vec<Box<dyn Action<I>>>,

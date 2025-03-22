@@ -506,7 +506,7 @@ pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     /// Best block of the peer.
     pub(crate) best_hash: B256,
     /// The capabilities of the remote peer.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
