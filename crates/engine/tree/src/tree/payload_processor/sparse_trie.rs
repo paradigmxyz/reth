@@ -26,7 +26,7 @@ const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF> {
     /// Executor used to spawn subtasks.
-    #[allow(unused)] // TODO use this for spawning trie tasks
+    #[expect(unused)] // TODO use this for spawning trie tasks
     pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
     pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,

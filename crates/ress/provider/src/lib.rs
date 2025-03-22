@@ -26,7 +26,7 @@ mod pending_state;
 pub use pending_state::*;
 
 /// Reth provider implementing [`RessProtocolProvider`].
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct RethRessProtocolProvider<P, E> {
     provider: P,
     block_executor: E,

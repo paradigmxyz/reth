@@ -581,7 +581,7 @@ where
     }
 
     /// Creates a `BlockchainProvider` and attaches it to the launch context.
-    #[allow(clippy::complexity)]
+    #[expect(clippy::complexity)]
     pub fn with_blockchain_db<T, F>(
         self,
         create_blockchain_provider: F,
@@ -1014,7 +1014,7 @@ pub struct WithMeteredProvider<N: NodeTypesWithDB> {
 
 /// Helper container to bundle the [`ProviderFactory`], [`FullNodeTypes::Provider`]
 /// and a metrics sender.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct WithMeteredProviders<T>
 where
     T: FullNodeTypes,
@@ -1024,7 +1024,7 @@ where
 }
 
 /// Helper container to bundle the metered providers container and [`NodeAdapter`].
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct WithComponents<T, CB>
 where
     T: FullNodeTypes,

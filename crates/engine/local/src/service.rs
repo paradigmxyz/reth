@@ -64,7 +64,7 @@ where
     N: EngineNodeTypes,
 {
     /// Constructor for [`LocalEngineService`].
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new<B, V, C>(
         consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
