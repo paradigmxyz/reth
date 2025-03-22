@@ -37,7 +37,11 @@ use reth_transaction_pool::{
 };
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
-use std::{path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    path::PathBuf,
+    str::FromStr,
+    sync::{atomic::AtomicBool, Arc},
+};
 use tracing::*;
 
 /// `reth debug build-block` command
@@ -215,6 +219,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             payload_config,
             CancelOnDrop::default(),
             None,
+            Arc::new(AtomicBool::new(false)),
         );
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
