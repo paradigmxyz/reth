@@ -64,7 +64,7 @@ where
     }
 
     /// Returns an iterator over database items.
-    #[allow(clippy::should_implement_trait)]
+    #[expect(clippy::should_implement_trait)]
     pub fn into_iter<Key, Value>(self) -> IntoIter<K, Key, Value>
     where
         Key: TableObject,
@@ -211,7 +211,7 @@ where
     }
 
     /// Position at next data item
-    #[allow(clippy::should_implement_trait)]
+    #[expect(clippy::should_implement_trait)]
     pub fn next<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
         Key: TableObject,

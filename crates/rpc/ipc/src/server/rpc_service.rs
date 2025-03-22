@@ -21,7 +21,7 @@ pub struct RpcService {
 }
 
 /// Configuration of the `RpcService`.
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) enum RpcServiceCfg {
     /// The server supports only calls.

@@ -11,12 +11,12 @@ macro_rules! impl_fuzzer_with_input {
     ($(($name:tt, $input_type:tt, $encode:tt, $encode_method:tt, $decode:tt, $decode_method:tt)),+) => {
         $(
             /// Macro generated module to be used by test-fuzz and `bench` if it applies.
-            #[allow(non_snake_case)]
+            #[expect(non_snake_case)]
             #[cfg(any(test, feature = "bench"))]
             pub mod $name {
                 use crate::table;
 
-                #[allow(unused_imports)]
+                #[expect(unused_imports)]
                 use reth_primitives_traits::*;
 
                 #[allow(unused_imports)]
@@ -37,7 +37,7 @@ macro_rules! impl_fuzzer_with_input {
 
                 #[cfg(test)]
                 #[allow(dead_code)]
-                #[allow(missing_docs)]
+                #[expect(missing_docs)]
                 #[test_fuzz::test_fuzz]
                 pub fn fuzz(obj: $input_type)  {
                     let obj: $name = obj.into();
@@ -45,7 +45,7 @@ macro_rules! impl_fuzzer_with_input {
                 }
 
                 #[test]
-                #[allow(missing_docs)]
+                #[expect(missing_docs)]
                 pub fn test() {
                     fuzz($input_type::default())
                 }
@@ -67,7 +67,7 @@ macro_rules! impl_fuzzer_key {
 
 /// Fuzzer generates a random instance of the object and proceeds to compress and decompress it. It
 /// then makes sure that it matches the original object.
-#[allow(unused_macros)]
+#[expect(unused_macros)]
 macro_rules! impl_fuzzer_value {
     ($($name:tt),+) => {
         $(

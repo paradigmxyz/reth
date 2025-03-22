@@ -967,7 +967,7 @@ pub(super) mod serde_bincode_compat {
     /// Bincode-compatible [`super::Transaction`] serde implementation.
     #[derive(Debug)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[allow(missing_docs)]
+    #[expect(missing_docs)]
     pub enum Transaction<'a> {
         Legacy(TxLegacy<'a>),
         Eip2930(TxEip2930<'a>),

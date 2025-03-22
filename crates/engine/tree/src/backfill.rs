@@ -99,7 +99,7 @@ impl<N: ProviderNodeTypes> PipelineSync<N> {
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn is_pipeline_sync_pending(&self) -> bool {
         self.pending_pipeline_target.is_some() && self.pipeline_state.is_idle()
     }
@@ -212,7 +212,7 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 enum PipelineState<N: ProviderNodeTypes> {
     /// Pipeline is idle.
     Idle(Option<Pipeline<N>>),

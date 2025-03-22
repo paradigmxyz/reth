@@ -92,7 +92,7 @@ where
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Create new instance of [`EngineApi`].
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,

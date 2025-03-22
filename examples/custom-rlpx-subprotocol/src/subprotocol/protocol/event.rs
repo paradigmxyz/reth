@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 #[derive(Debug)]
 pub(crate) enum ProtocolEvent {
     Established {
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         direction: Direction,
         peer_id: PeerId,
         to_connection: mpsc::UnboundedSender<CustomCommand>,

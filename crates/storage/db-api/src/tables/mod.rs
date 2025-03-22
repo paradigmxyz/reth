@@ -263,7 +263,7 @@ macro_rules! tables {
         }
 
         // Need constants to match on in the `FromStr` implementation.
-        #[allow(non_upper_case_globals)]
+        #[expect(non_upper_case_globals)]
         mod table_names {
             $(
                 pub(super) const $name: &'static str = stringify!($name);

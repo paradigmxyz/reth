@@ -100,7 +100,7 @@ use reth_rpc::eth::sim_bundle::EthSimBundle;
 pub mod rate_limiter;
 
 /// Convenience function for starting a server in one step.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn launch<N, Provider, Pool, Network, Tasks, EvmConfig, EthApi, BlockExecutor>(
     provider: Provider,
     pool: Pool,
@@ -552,7 +552,7 @@ where
     /// This behaves exactly as [`RpcModuleBuilder::build`] for the [`TransportRpcModules`], but
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub fn build_with_auth_server<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
@@ -790,7 +790,7 @@ where
     BlockExecutor: BlockExecutorProvider<Primitives = N>,
 {
     /// Creates a new, empty instance.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new<EvmConfig>(
         provider: Provider,
         pool: Pool,

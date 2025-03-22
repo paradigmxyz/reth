@@ -77,7 +77,7 @@ where
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    #[allow(unused)]
+    #[expect(unused)]
     pub(crate) fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
         F: OnRpcStarted<Node, EthApi> + 'static,
@@ -96,7 +96,7 @@ where
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    #[allow(unused)]
+    #[expect(unused)]
     pub(crate) fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
         F: ExtendRpcModules<Node, EthApi> + 'static,
@@ -187,7 +187,7 @@ where
 
 /// Helper wrapper type to encapsulate the [`RpcRegistryInner`] over components trait.
 #[derive(Debug, Clone)]
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub(crate) registry: RpcRegistryInner<
         Node::Provider,
@@ -237,7 +237,7 @@ where
 /// [`reth_rpc::eth::EthApi`], and ultimately merge additional rpc handler into the configured
 /// transport modules [`TransportRpcModules`] as well as configured authenticated methods
 /// [`AuthRpcModule`].
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct RpcContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// The node components.
     pub(crate) node: Node,

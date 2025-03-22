@@ -392,7 +392,7 @@ impl MockTransaction {
     /// * [`MockTransaction::eip1559`]
     /// * [`MockTransaction::eip4844`]
     pub fn new_from_type(tx_type: TxType) -> Self {
-        #[allow(unreachable_patterns)]
+        #[expect(unreachable_patterns)]
         match tx_type {
             TxType::Legacy => Self::legacy(),
             TxType::Eip2930 => Self::eip2930(),
@@ -922,7 +922,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
         let hash = *transaction.tx_hash();
         let size = transaction.size();
 
-        #[allow(unreachable_patterns)]
+        #[expect(unreachable_patterns)]
         match transaction.into_transaction() {
             Transaction::Legacy(TxLegacy {
                 chain_id,

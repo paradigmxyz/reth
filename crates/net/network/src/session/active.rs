@@ -76,7 +76,7 @@ const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
 ///    - incoming _internal_ requests/broadcasts via the request/command channel
 ///    - incoming requests/broadcasts _from remote_ via the connection
 ///    - responses for handled ETH requests received from the remote peer.
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// Keeps track of request ids.
     pub(crate) next_id: u64,
@@ -324,7 +324,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Send a message back to the [`SessionManager`](super::SessionManager).
     ///
     /// Returns the message if the bounded channel is currently unable to handle this message.
-    #[allow(clippy::result_large_err)]
+    #[expect(clippy::result_large_err)]
     fn try_emit_broadcast(&self, message: PeerMessage<N>) -> Result<(), ActiveSessionMessage<N>> {
         let Some(sender) = self.to_session_manager.inner().get_ref() else { return Ok(()) };
 
@@ -350,7 +350,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// covering both broadcasts and incoming requests.
     ///
     /// Returns the message if the bounded channel is currently unable to handle this message.
-    #[allow(clippy::result_large_err)]
+    #[expect(clippy::result_large_err)]
     fn try_emit_request(&self, message: PeerMessage<N>) -> Result<(), ActiveSessionMessage<N>> {
         let Some(sender) = self.to_session_manager.inner().get_ref() else { return Ok(()) };
 
@@ -702,7 +702,7 @@ pub(crate) struct ReceivedRequest<N: NetworkPrimitives> {
     /// Receiver half of the channel that's supposed to receive the proper response.
     rx: PeerResponse<N>,
     /// Timestamp when we read this msg from the wire.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     received: Instant,
 }
 

@@ -63,7 +63,7 @@ pub fn generate_from_to(
     } else {
         quote! {
             #[cfg(test)]
-            #[allow(dead_code)]
+            #[expect(dead_code)]
             #[test_fuzz::test_fuzz]
             fn #fuzz(obj: #ident)  {
                 use #reth_codecs::Compact;
@@ -74,7 +74,7 @@ pub fn generate_from_to(
             }
 
             #[test]
-            #[allow(missing_docs)]
+            #[expect(missing_docs)]
             pub fn #test() {
                 #fuzz(#ident::default())
             }

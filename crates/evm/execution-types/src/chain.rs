@@ -498,7 +498,7 @@ impl From<BlockHash> for ChainSplitTarget {
 
 /// Result of a split chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 pub enum ChainSplit<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// Chain is not split. Pending chain is returned.
     /// Given block split is higher than last block.
