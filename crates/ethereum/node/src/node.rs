@@ -358,7 +358,7 @@ where
         };
 
         let custom_config =
-            DiskFileBlobStoreConfig::default().with_max_cached_entries(cache_size as u32);
+            DiskFileBlobStoreConfig::default().with_max_cached_entries(cache_size);
 
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), custom_config)?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
