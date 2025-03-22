@@ -126,7 +126,7 @@ where
                 finalized_block_hash: parent_hash,
             };
 
-            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
+            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v2(
                 engine_client,
                 fork_choice_state,
                 Some(self.payload_attributes.clone()),
@@ -143,7 +143,7 @@ where
 
                         // get the payload that was built
                         let _engine_payload =
-                            EngineApiClient::<Engine>::get_payload_v3(engine_client, payload_id)
+                            EngineApiClient::<Engine>::get_payload_v2(engine_client, payload_id)
                                 .await?;
                         Ok(())
                     } else {

@@ -38,7 +38,7 @@ async fn test_testsuite_op_assert_mine_block() -> Result<()> {
                     prev_randao: B256::random(),
                     suggested_fee_recipient: Address::random(),
                     withdrawals: None,
-                    parent_beacon_block_root: Some(B256::ZERO),
+                    parent_beacon_block_root: None,
                 },
                 transactions: None,
                 no_tx_pool: None,
