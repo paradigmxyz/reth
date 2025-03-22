@@ -31,6 +31,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
             0,
             vec![],
             Some(B256::ZERO),
+            // TODO: refactor once we have actions to generate payload attributes.
             PayloadAttributes {
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

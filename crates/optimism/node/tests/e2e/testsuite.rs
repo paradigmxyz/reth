@@ -29,6 +29,7 @@ async fn test_testsuite_op_assert_mine_block() -> Result<()> {
             0,
             vec![],
             Some(B256::ZERO),
+            // TODO: refactor once we have actions to generate payload attributes.
             OpPayloadAttributes {
                 payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
                     timestamp: std::time::SystemTime::now()

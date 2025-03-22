@@ -65,6 +65,7 @@ where
     /// Expected block hash (optional)
     pub expected_hash: Option<B256>,
     /// Block's payload attributes
+    // TODO: refactor once we have actions to generate payload attributes.
     pub payload_attributes: Engine::PayloadAttributes,
     /// Tracks engine type
     _phantom: PhantomData<Engine>,
