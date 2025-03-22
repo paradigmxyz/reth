@@ -27,7 +27,6 @@ use std::{
     ops::{Deref, RangeBounds, RangeInclusive},
     sync::Arc,
 };
-
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
 pub struct StaticFileJarProvider<'a, N> {

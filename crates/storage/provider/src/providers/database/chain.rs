@@ -2,6 +2,7 @@ use crate::{providers::NodeTypesForProvider, DatabaseProvider};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_types::FullNodePrimitives;
 
+use reth_primitives_traits::{FullBlockHeader, FullSignedTx};
 use reth_storage_api::{ChainStorageReader, ChainStorageWriter, EthStorage};
 
 /// Trait that provides access to implementations of [`ChainStorage`]
@@ -19,14 +20,15 @@ pub trait ChainStorage<Primitives: FullNodePrimitives>: Send + Sync {
         Types: NodeTypesForProvider<Primitives = Primitives>;
 }
 
-impl<N> ChainStorage<N>
-    for EthStorage<reth_ethereum_primitives::TransactionSigned, reth_primitives_traits::Header>
+impl<N, T, H> ChainStorage<N> for EthStorage<T, H>
 where
+    T: FullSignedTx,
+    H: FullBlockHeader,
     N: FullNodePrimitives<
-        Block = reth_ethereum_primitives::Block,
-        BlockHeader = reth_primitives_traits::Header,
-        BlockBody = reth_ethereum_primitives::BlockBody,
-        SignedTx = reth_ethereum_primitives::TransactionSigned,
+        Block = alloy_consensus::Block<T, H>,
+        BlockHeader = H,
+        BlockBody = alloy_consensus::BlockBody<T, H>,
+        SignedTx = T,
     >,
 {
     fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, N>

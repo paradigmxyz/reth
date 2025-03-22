@@ -46,12 +46,13 @@ use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives_traits::{
     Account, Block as _, BlockBody as _, Bytecode, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedBlock, SealedHeader, SignedTransaction, StaticFileSegment, StorageEntry,
+    SealedBlock, SealedHeader, SignedTransaction, StorageEntry,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, OmmersProvider,
     StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
