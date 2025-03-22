@@ -122,7 +122,7 @@ mod tests {
         let tx3_hash = B256::random(); // Non-EIP-4844 transaction
 
         // Creating a first block with EIP-4844 transactions
-        let block1: RecoveredBlock<Block<Signed<Tx>>> = RecoveredBlock::new_sealed(
+        let block1: RecoveredBlock<dyn Block<Signed<Tx>>> = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
                 alloy_consensus::BlockBody {
