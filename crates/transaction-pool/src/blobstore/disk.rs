@@ -196,10 +196,8 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
-        let versioned_mappings: Vec<(B256, B256)> = data.blobs
-            .iter()
-            .map(|blob| (blob.versioned_hash(), tx))
-            .collect();
+        let versioned_mappings: Vec<(B256, B256)> =
+            data.blobs.iter().map(|blob| (blob.versioned_hash(), tx)).collect();
 
         if !versioned_mappings.is_empty() {
             let mut map = self.versioned_hashes_to_txhash.lock();
@@ -223,10 +221,7 @@ impl DiskFileBlobStoreInner {
         let versioned_hash_mappings: Vec<(B256, B256)> = txs
             .iter()
             .flat_map(|(tx, data)| {
-                data.blobs
-                    .iter()
-                    .map(|blob| (blob.versioned_hash(), *tx))
-                    .collect::<Vec<_>>()
+                data.blobs.iter().map(|blob| (blob.versioned_hash(), *tx)).collect::<Vec<_>>()
             })
             .collect();
 
