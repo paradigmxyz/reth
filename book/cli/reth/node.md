@@ -457,6 +457,11 @@ TxPool:
           Max size of the blobpool in megabytes
 
           [default: 20]
+          
+      --txpool.blob-cache-size <BLOB_CACHE_SIZE>
+          Cache size for the blobpool
+
+          [default: 0]
 
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
