@@ -49,7 +49,7 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.blobpool-max-size", alias = "txpool.blobpool_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
     pub blobpool_max_size: usize,
 
-    /// Cache size for the blobpool
+    /// Max number of entries for the in memory cache of the blob store.
     #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size")]
     pub blob_cache_size: Option<u32>,
 
