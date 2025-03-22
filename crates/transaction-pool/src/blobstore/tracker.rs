@@ -90,8 +90,7 @@ pub enum BlobStoreUpdates {
 mod tests {
     use super::*;
     use alloy_consensus::{Header, Signed};
-    use alloy_primitives::PrimitiveSignature as Signature;
-    use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use reth_ethereum_primitives::Transaction;
     use reth_execution_types::Chain;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
     #[test]
@@ -123,7 +122,7 @@ mod tests {
         let tx3_hash = B256::random(); // Non-EIP-4844 transaction
 
         // Creating a first block with EIP-4844 transactions
-        let block1 = RecoveredBlock::new_sealed(
+        let block1: RecoveredBlock<Block<Signed<Tx>>> = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
                 alloy_consensus::BlockBody {
