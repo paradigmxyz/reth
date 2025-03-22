@@ -43,7 +43,7 @@ async fn test_testsuite_op_assert_mine_block() -> Result<()> {
                 transactions: None,
                 no_tx_pool: None,
                 eip_1559_params: None,
-                gas_limit: None,
+                gas_limit: Some(30_000_000),
             },
         ));
 
