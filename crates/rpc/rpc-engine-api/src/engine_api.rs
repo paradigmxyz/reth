@@ -26,6 +26,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
+use reth_rpc_server_types::result::internal_rpc_err;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -1145,7 +1146,7 @@ where
         _versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV2>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
-        unimplemented!("get_blobs_v2 is not yet implemented")
+        Err(internal_rpc_err("unimplemented"))
     }
 }
 

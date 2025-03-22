@@ -233,7 +233,7 @@ pub trait EngineApi<Engine: EngineTypes> {
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
 
-    /// Fetch blobs for the consensus layer from the in-memory blob cache.
+    /// Fetch blobs for the consensus layer from the blob store.
     #[method(name = "getBlobsV2")]
     async fn get_blobs_v2(
         &self,
