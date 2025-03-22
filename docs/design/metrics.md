@@ -64,7 +64,7 @@ How the metrics are exposed to the end-user is determined by the CLI.
 [^1]: The top-level namespace is added by the CLI using [`metrics_util::layers::PrefixLayer`][metrics_util.PrefixLayer].
 
 ### Example metrics
-- [Transcation Pool Metrics](../../crates/transaction-pool/src/metrics.rs)
+- [Transaction Pool Metrics](../../crates/transaction-pool/src/metrics.rs)
 - [Network Metrics](../../crates/net/network/src/metrics.rs)
 - [Header Downloader Metrics](../../crates/net/downloaders/src/metrics.rs)
 

@@ -1,3 +1,4 @@
+use crate::InvalidCrossTx;
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::Encodable2718;
 use op_revm::L1BlockInfo;
@@ -5,18 +6,22 @@ use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::supervisor::{
+    ExecutingDescriptor, InteropTxValidator, SupervisorClient,
+};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    EthPoolTransaction, EthTransactionValidator, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
+    error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
 };
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
+use tracing::trace;
 
 /// Tracks additional infos for the current block.
 #[derive(Debug, Default)]
@@ -40,6 +45,10 @@ pub struct OpTransactionValidator<Client, Tx> {
     /// derived from the tracked L1 block info that is extracted from the first transaction in the
     /// L2 block.
     require_l1_data_gas_fee: bool,
+    /// Client used to check transaction validity with op-supervisor
+    supervisor_client: Option<SupervisorClient>,
+    /// tracks activated forks relevant for transaction validation
+    fork_tracker: Arc<ForkTracker>,
 }
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx> {
@@ -108,7 +117,19 @@ where
         inner: EthTransactionValidator<Client, Tx>,
         block_info: OpL1BlockInfo,
     ) -> Self {
-        Self { inner, block_info: Arc::new(block_info), require_l1_data_gas_fee: true }
+        Self {
+            inner,
+            block_info: Arc::new(block_info),
+            require_l1_data_gas_fee: true,
+            supervisor_client: None,
+            fork_tracker: Arc::new(ForkTracker { interop: AtomicBool::from(false) }),
+        }
+    }
+
+    /// Set the supervisor client and safety level
+    pub fn with_supervisor(mut self, supervisor_client: SupervisorClient) -> Self {
+        self.supervisor_client = Some(supervisor_client);
+        self
     }
 
     /// Update the L1 block info for the given header and system transaction, if any.
@@ -125,6 +146,12 @@ where
         if let Some(Ok(cost_addition)) = tx.map(reth_optimism_evm::extract_l1_info_from_tx) {
             *self.block_info.l1_block_info.write() = cost_addition;
         }
+
+        if self.chain_spec().is_interop_active_at_timestamp(header.timestamp()) &&
+            !self.fork_tracker.interop.load(Ordering::Relaxed)
+        {
+            self.fork_tracker.interop.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Validates a single transaction.
@@ -133,7 +160,7 @@ where
     ///
     /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
     /// that the account has enough balance to cover the L1 gas cost.
-    pub fn validate_one(
+    pub async fn validate_one(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
@@ -142,6 +169,14 @@ where
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
+            )
+        }
+
+        // Interop cross tx validation
+        if let Some(Err(err)) = self.is_valid_cross_tx(&transaction).await {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::Other(Box::new(err)),
             )
         }
 
@@ -207,11 +242,61 @@ where
     /// Returns all outcomes for the given transactions in the same order.
     ///
     /// See also [`Self::validate_one`]
-    pub fn validate_all(
+    pub async fn validate_all(
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        futures_util::future::join_all(
+            transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)),
+        )
+        .await
+    }
+
+    /// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
+    /// against supervisor.
+    ///
+    /// If commitment present pre-interop tx rejected.
+    ///
+    /// Returns:
+    /// None - if tx is not cross chain,
+    /// Some(Ok(true)) - if tx is valid cross chain,
+    /// Some(Ok(false)) - if tx is cross chain but interop is not active,
+    /// Some(Err(e)) - if tx is not valid
+    pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<bool, InvalidCrossTx>> {
+        // We don't need to check for deposit transaction in here, because they won't come from
+        // txpool
+        let access_list = tx.access_list()?;
+        let inbox_entries =
+            SupervisorClient::parse_access_list(access_list).copied().collect::<Vec<_>>();
+        if inbox_entries.is_empty() {
+            return None;
+        }
+        let timestamp = self.block_info.timestamp.load(Ordering::Relaxed);
+        // Interop check
+        if self.fork_tracker.is_interop_activated() {
+            // No cross chain tx allowed before interop
+            return Some(Ok(false))
+        }
+        let client = self
+            .supervisor_client
+            .as_ref()
+            .expect("supervisor client should be always set after interop is active");
+        let safety_level = client.safety();
+        match client
+            .validate_messages(
+                inbox_entries.as_slice(),
+                safety_level,
+                ExecutingDescriptor::new(timestamp, Some(86400)),
+                Some(core::time::Duration::from_millis(100)),
+            )
+            .await
+        {
+            Ok(()) => Some(Ok(true)),
+            Err(err) => {
+                trace!(target: "txpool", hash=%tx.hash(), "Cross chain transaction invalid");
+                Some(Err(InvalidCrossTx::new(err)))
+            }
+        }
     }
 }
 
@@ -227,14 +312,14 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
+        self.validate_one(origin, transaction).await
     }
 
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions)
+        self.validate_all(transactions).await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
@@ -246,5 +331,19 @@ where
             new_tip_block.header(),
             new_tip_block.body().transactions().first(),
         );
+    }
+}
+
+/// Keeps track of whether certain forks are activated
+#[derive(Debug)]
+pub(crate) struct ForkTracker {
+    /// Tracks if interop is activated at the block's timestamp.
+    interop: AtomicBool,
+}
+
+impl ForkTracker {
+    /// Returns `true` if Interop fork is activated.
+    pub(crate) fn is_interop_activated(&self) -> bool {
+        self.interop.load(Ordering::Relaxed)
     }
 }

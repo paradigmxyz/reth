@@ -32,6 +32,11 @@ op-alloy-consensus.workspace = true
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-network = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
+alloy-rpc-client.workspace = true
+
+# kona
+kona-rpc = { workspace = true, features = ["client", "interop", "reqwest"] }
+kona-interop.workspace = true
 
 # codec
 bytes = { workspace = true, optional = true }
@@ -80,6 +85,8 @@ std = [
     "serde_json/std",
     "alloy-evm/std",
     "serde_with?/std",
+    "kona-interop/std",
+    "kona-rpc/std",
 ]
 alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth", "op-alloy-consensus/alloy-compat"]
 reth-codec = [
@@ -106,6 +113,8 @@ serde = [
     "op-revm/serde",
     "alloy-rpc-types-eth?/serde",
     "revm-context/serde",
+    "kona-interop/serde",
+    "kona-rpc/serde",
 ]
 serde-bincode-compat = [
     "serde",
@@ -127,6 +136,7 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "rand",
+    "kona-interop/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-serde?/arbitrary",
 ]

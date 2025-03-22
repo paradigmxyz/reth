@@ -22,6 +22,9 @@ pub use predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 pub mod transaction;
 pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
 
+pub mod supervisor;
+pub use supervisor::SupervisorClient;
+
 mod receipt;
 pub use receipt::{DepositReceipt, OpReceipt};
 

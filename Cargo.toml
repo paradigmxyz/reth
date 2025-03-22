@@ -500,6 +500,10 @@ op-alloy-consensus = { version = "0.11.2", default-features = false }
 op-alloy-flz = { version = "0.11.2", default-features = false }
 op-alloy-rpc-jsonrpsee = { version = "0.11.1", default-features = false }
 
+# kona
+kona-rpc = { git = "https://github.com/op-rs/kona", rev = "3293d288e235f13cb89285a42bb3170d292e4770", default-features = false }
+kona-interop = { git = "https://github.com/op-rs/kona", rev = "3293d288e235f13cb89285a42bb3170d292e4770", default-features = false }
+
 # misc
 aquamarine = "0.6"
 auto_impl = "1"
