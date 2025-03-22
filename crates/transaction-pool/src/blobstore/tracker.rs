@@ -129,22 +129,10 @@ mod tests {
                 SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
                 alloy_consensus::BlockBody {
                     transactions: vec![
-                        TransactionSigned::new(
-                            Transaction::Eip4844(Default::default()),
-                            Signature::test_signature(),
-                            tx1_hash,
-                        ),
-                        TransactionSigned::new(
-                            Transaction::Eip4844(Default::default()),
-                            Signature::test_signature(),
-                            tx2_hash,
-                        ),
+                        Signed::new_unhashed(Transaction::Eip4844(Default::default()), ..).into(),
+                        Signed::new_unhashed(Transaction::Eip4844(Default::default()), ..).into(),
                         // Another transaction that is not EIP-4844
-                        TransactionSigned::new(
-                            Transaction::Eip7702(Default::default()),
-                            Signature::test_signature(),
-                            B256::random(),
-                        ),
+                        Signed::new_unhashed(Transaction::Eip7702(Default::default()), ..).into(),
                     ],
                     ..Default::default()
                 },
@@ -159,16 +147,8 @@ mod tests {
                 SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
                 alloy_consensus::BlockBody {
                     transactions: vec![
-                        TransactionSigned::new(
-                            Transaction::Eip1559(Default::default()),
-                            Signature::test_signature(),
-                            tx3_hash,
-                        ),
-                        TransactionSigned::new(
-                            Transaction::Eip2930(Default::default()),
-                            Signature::test_signature(),
-                            tx2_hash,
-                        ),
+                        Signed::new_unhashed(Transaction::Eip1559(Default::default()), ..).into(),
+                        Signed::new_unhashed(Transaction::Eip2930(Default::default()), ..).into(),
                     ],
                     ..Default::default()
                 },
