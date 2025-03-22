@@ -80,4 +80,5 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-prune-types/serde",
     "reth-config/serde",
+    "reth-ethereum-primitives/serde",
 ]
