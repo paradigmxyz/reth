@@ -21,7 +21,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
                 .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
-                .cancun_activated()
+                .paris_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::single_node());
@@ -39,8 +39,8 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                     .as_secs(),
                 prev_randao: B256::random(),
                 suggested_fee_recipient: Address::random(),
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
+                withdrawals: None,
+                parent_beacon_block_root: None,
             },
         ));
 
