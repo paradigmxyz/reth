@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
-    BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844,
-    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
+    BlobTransactionSidecar, EthereumTxEnvelope, SignableTransaction, Signed, TxEip1559, TxEip2930,
+    TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
     TypedTransaction,
 };
 use alloy_eips::{
@@ -594,6 +594,19 @@ impl From<TransactionSigned> for TxEnvelope {
     }
 }
 
+impl From<TransactionSigned> for EthereumTxEnvelope<TxEip4844> {
+    fn from(value: TransactionSigned) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        match tx {
+            Transaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip4844(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+        }
+    }
+}
+
 impl From<TransactionSigned> for Signed<Transaction> {
     fn from(value: TransactionSigned) -> Self {
         let (tx, sig, hash) = value.into_parts();
@@ -1074,7 +1087,8 @@ pub(super) mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_consensus::{
-        constants::LEGACY_TX_TYPE_ID, Block, Transaction as _, TxEip1559, TxLegacy,
+        constants::LEGACY_TX_TYPE_ID, Block, EthereumTxEnvelope, Transaction as _, TxEip1559,
+        TxLegacy,
     };
     use alloy_eips::{
         eip2718::{Decodable2718, Encodable2718},
@@ -1085,9 +1099,37 @@ mod tests {
         U256,
     };
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+    use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
     use reth_codecs::Compact;
     use reth_primitives_traits::SignedTransaction;
     use std::str::FromStr;
+
+    proptest! {
+        #[test]
+        fn test_roundtrip_compact_encode_envelope(reth_tx in arb::<TransactionSigned>()) {
+            let mut expected_buf = Vec::<u8>::new();
+            let expected_len = reth_tx.to_compact(&mut expected_buf);
+
+            let mut actual_but  = Vec::<u8>::new();
+            let alloy_tx = EthereumTxEnvelope::<TxEip4844>::from(reth_tx);
+            let actual_len = alloy_tx.to_compact(&mut actual_but);
+
+            assert_eq!(actual_but, expected_buf);
+            assert_eq!(actual_len, expected_len);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_decode_envelope(reth_tx in arb::<TransactionSigned>()) {
+            let mut buf = Vec::<u8>::new();
+            let len = reth_tx.to_compact(&mut buf);
+
+            let (actual_tx, _) = EthereumTxEnvelope::<TxEip4844>::from_compact(&buf, len);
+            let expected_tx = EthereumTxEnvelope::<TxEip4844>::from(reth_tx);
+
+            assert_eq!(actual_tx, expected_tx);
+        }
+    }
 
     #[test]
     fn eip_2_reject_high_s_value() {
