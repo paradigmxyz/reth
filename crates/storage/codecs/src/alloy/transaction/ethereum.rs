@@ -14,7 +14,7 @@ use bytes::{Buf, BufMut};
 /// serialized separately.
 ///
 /// See [`ToTxCompact::to_tx_compact`].
-trait ToTxCompact {
+pub(super) trait ToTxCompact {
     /// Serializes inner transaction using [`Compact`] encoding. Writes the result into `buf`.
     ///
     /// The written bytes do not contain signature and transaction type. This information be needs
@@ -30,14 +30,20 @@ trait ToTxCompact {
 /// separately.
 ///
 /// See [`FromTxCompact::from_tx_compact`].
-trait FromTxCompact {
+pub(super) trait FromTxCompact {
+    type TxType;
+
     /// Deserializes inner transaction using [`Compact`] encoding. The concrete type is determined
     /// by `tx_type`. The `signature` is added to create typed and signed transaction.
     ///
     /// Returns a tuple of 2 elements. The first element is the deserialized value and the second
     /// is a byte slice created from `buf` with a starting position advanced by the exact amount
     /// of bytes consumed for this process.  
-    fn from_tx_compact(buf: &[u8], tx_type: TxType, signature: PrimitiveSignature) -> (Self, &[u8])
+    fn from_tx_compact(
+        buf: &[u8],
+        tx_type: Self::TxType,
+        signature: PrimitiveSignature,
+    ) -> (Self, &[u8])
     where
         Self: Sized;
 }
@@ -55,6 +61,8 @@ impl<Eip4844: Compact + Transaction> ToTxCompact for EthereumTxEnvelope<Eip4844>
 }
 
 impl<Eip4844: Compact + Transaction> FromTxCompact for EthereumTxEnvelope<Eip4844> {
+    type TxType = TxType;
+
     fn from_tx_compact(
         buf: &[u8],
         tx_type: TxType,
@@ -90,9 +98,39 @@ impl<Eip4844: Compact + Transaction> FromTxCompact for EthereumTxEnvelope<Eip484
     }
 }
 
-impl<Eip4844: Compact + RlpEcdsaEncodableTx + Transaction + Send + Sync> Compact
+pub(super) trait Envelope: FromTxCompact<TxType: Compact> {
+    fn signature(&self) -> &PrimitiveSignature;
+    fn tx_type(&self) -> Self::TxType;
+}
+
+impl<Eip4844: Compact + Transaction + RlpEcdsaEncodableTx> Envelope
     for EthereumTxEnvelope<Eip4844>
 {
+    fn signature(&self) -> &PrimitiveSignature {
+        Self::signature(self)
+    }
+
+    fn tx_type(&self) -> Self::TxType {
+        Self::tx_type(self)
+    }
+}
+
+pub(super) trait CompactEnvelope: Sized {
+    /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: BufMut + AsMut<[u8]>;
+
+    /// Takes a buffer which can be read from. Returns the object and `buf` with its internal cursor
+    /// advanced (eg.`.advance(len)`).
+    ///
+    /// `len` can either be the `buf` remaining length, or the length of the compacted type.
+    ///
+    /// It will panic, if `len` is smaller than `buf.len()`.
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]);
+}
+
+impl<T: Envelope + ToTxCompact + Transaction + Send + Sync> CompactEnvelope for T {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: BufMut + AsMut<[u8]>,
@@ -147,7 +185,7 @@ impl<Eip4844: Compact + RlpEcdsaEncodableTx + Transaction + Send + Sync> Compact
         let zstd_bit = flags >> 3;
 
         let (signature, buf) = PrimitiveSignature::from_compact(buf, sig_bit);
-        let (tx_type, buf) = TxType::from_compact(buf, tx_bits);
+        let (tx_type, buf) = T::TxType::from_compact(buf, tx_bits);
 
         let (transaction, buf) = if zstd_bit != 0 {
             #[cfg(feature = "std")]
@@ -175,5 +213,20 @@ impl<Eip4844: Compact + RlpEcdsaEncodableTx + Transaction + Send + Sync> Compact
         };
 
         (transaction, buf)
+    }
+}
+
+impl<Eip4844: Compact + RlpEcdsaEncodableTx + Transaction + Send + Sync> Compact
+    for EthereumTxEnvelope<Eip4844>
+{
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: BufMut + AsMut<[u8]>,
+    {
+        <Self as CompactEnvelope>::to_compact(self, buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        <Self as CompactEnvelope>::from_compact(buf, len)
     }
 }
