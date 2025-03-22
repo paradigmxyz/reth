@@ -89,12 +89,11 @@ pub enum BlobStoreUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, Signed};
     use alloy_primitives::PrimitiveSignature as Signature;
     use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use reth_execution_types::Chain;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
-
     #[test]
     fn test_finalized_tracker() {
         let mut tracker = BlobStoreCanonTracker::default();
