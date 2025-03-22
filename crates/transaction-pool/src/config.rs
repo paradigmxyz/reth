@@ -17,6 +17,9 @@ pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 10_000;
 /// The default maximum allowed size of the given subpool.
 pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
 
+/// The blob cache size to be set dynamically.
+pub const TXPOOL_BLOB_CACHE_SIZE_DEFAULT: u32 = 0;
+
 /// The default additional validation tasks size.
 pub const DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS: usize = 1;
 
@@ -42,6 +45,8 @@ pub struct PoolConfig {
     pub queued_limit: SubPoolLimit,
     /// Max number of transactions in the blob sub-pool
     pub blob_limit: SubPoolLimit,
+    /// Blob cache size
+    pub blob_cache_size: u32,
     /// Max number of executable transaction slots guaranteed per account
     pub max_account_slots: usize,
     /// Price bump (in %) for the transaction pool underpriced check.
@@ -81,6 +86,7 @@ impl Default for PoolConfig {
             basefee_limit: Default::default(),
             queued_limit: Default::default(),
             blob_limit: Default::default(),
+            blob_cache_size: TXPOOL_BLOB_CACHE_SIZE_DEFAULT,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
