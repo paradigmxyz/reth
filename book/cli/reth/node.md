@@ -458,6 +458,9 @@ TxPool:
 
           [default: 20]
 
+      --txpool.blob-cache-size <BLOB_CACHE_SIZE>
+          Max number of entries for the in memory cache of the blob store
+
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
 

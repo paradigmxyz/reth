@@ -49,6 +49,10 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.blobpool-max-size", alias = "txpool.blobpool_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
     pub blobpool_max_size: usize,
 
+    /// Max number of entries for the in memory cache of the blob store.
+    #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size")]
+    pub blob_cache_size: Option<u32>,
+
     /// Max number of executable transaction slots guaranteed per account
     #[arg(long = "txpool.max-account-slots", alias = "txpool.max_account_slots", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
     pub max_account_slots: usize,
@@ -119,6 +123,7 @@ impl Default for TxPoolArgs {
             queued_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
             blobpool_max_count: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
             blobpool_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+            blob_cache_size: None,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
@@ -163,6 +168,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 max_txs: self.blobpool_max_count,
                 max_size: self.blobpool_max_size.saturating_mul(1024 * 1024),
             },
+            blob_cache_size: self.blob_cache_size,
             max_account_slots: self.max_account_slots,
             price_bumps: PriceBumpConfig {
                 default_price_bump: self.price_bump,

@@ -340,19 +340,24 @@ where
         let data_dir = ctx.config().datadir();
         let pool_config = ctx.pool_config();
 
-        // get the current blob params
-        let current_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
-        let blob_params = ctx
-            .chain_spec()
-            .blob_params_at_timestamp(current_timestamp)
-            .unwrap_or(ctx.chain_spec().blob_params.cancun);
+        let blob_cache_size = if let Some(blob_cache_size) = pool_config.blob_cache_size {
+            blob_cache_size
+        } else {
+            // get the current blob params for the current timestamp
+            let current_timestamp =
+                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
+            let blob_params = ctx
+                .chain_spec()
+                .blob_params_at_timestamp(current_timestamp)
+                .unwrap_or(ctx.chain_spec().blob_params.cancun);
 
-        // Derive the blob cache size from the target blob count, to auto scale it by multiplying it
-        // with the slot count for 2 epochs: 384 for pectra
-        let cache_size = blob_params.target_blob_count * EPOCH_SLOTS * 2;
+            // Derive the blob cache size from the target blob count, to auto scale it by
+            // multiplying it with the slot count for 2 epochs: 384 for pectra
+            (blob_params.target_blob_count * EPOCH_SLOTS * 2) as u32
+        };
 
         let custom_config =
-            DiskFileBlobStoreConfig::default().with_max_cached_entries(cache_size as u32);
+            DiskFileBlobStoreConfig::default().with_max_cached_entries(blob_cache_size);
 
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), custom_config)?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
