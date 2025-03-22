@@ -12,7 +12,7 @@ use reth_transaction_pool::{
     validate::DEFAULT_MAX_TX_INPUT_BYTES,
     LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
     DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
-    REPLACE_BLOB_PRICE_BUMP, TXPOOL_BLOB_CACHE_SIZE_DEFAULT, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 use std::time::Duration;
@@ -50,8 +50,8 @@ pub struct TxPoolArgs {
     pub blobpool_max_size: usize,
 
     /// Cache size for the blobpool
-    #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size", default_value_t = TXPOOL_BLOB_CACHE_SIZE_DEFAULT)]
-    pub blob_cache_size: u32,
+    #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size")]
+    pub blob_cache_size: Option<u32>,
 
     /// Max number of executable transaction slots guaranteed per account
     #[arg(long = "txpool.max-account-slots", alias = "txpool.max_account_slots", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
@@ -123,7 +123,7 @@ impl Default for TxPoolArgs {
             queued_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
             blobpool_max_count: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
             blobpool_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
-            blob_cache_size: TXPOOL_BLOB_CACHE_SIZE_DEFAULT,
+            blob_cache_size: None,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,

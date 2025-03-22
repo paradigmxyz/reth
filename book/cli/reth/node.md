@@ -447,6 +447,9 @@ TxPool:
           Max size of the queued sub-pool in megabytes
 
           [default: 20]
+          
+      --txpool.blob-cache-size <BLOB_CACHE_SIZE>
+          Cache size for the blobpool
 
       --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
           Max number of transaction in the blobpool
@@ -462,7 +465,7 @@ TxPool:
           Cache size for the blobpool
 
           [default: 0]
-
+   
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
 

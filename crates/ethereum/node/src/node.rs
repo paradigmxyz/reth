@@ -349,13 +349,9 @@ where
 
         // Derive the blob cache size from the target blob count, to auto scale it by multiplying it
         // with the slot count for 2 epochs: 384 for pectra
-        let cache_size = if pool_config.blob_cache_size == 0 {
-            // Auto calculate based on blob params
-            (blob_params.target_blob_count * EPOCH_SLOTS * 2) as u32
-        } else {
-            // Use user-specified value
-            pool_config.blob_cache_size
-        };
+        let cache_size = pool_config
+            .blob_cache_size
+            .unwrap_or_else(|| (blob_params.target_blob_count * EPOCH_SLOTS * 2) as u32);
 
         let custom_config = DiskFileBlobStoreConfig::default().with_max_cached_entries(cache_size);
 
