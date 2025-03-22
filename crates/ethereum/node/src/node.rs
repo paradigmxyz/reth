@@ -2,7 +2,8 @@
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
-use reth_chainspec::ChainSpec;
+use alloy_eips::merge::EPOCH_SLOTS;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
@@ -36,12 +37,12 @@ use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
+    EthTransactionPool, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
-use std::sync::Arc;
+use std::{default::Default, sync::Arc, time::SystemTime};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -338,7 +339,22 @@ where
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
         let pool_config = ctx.pool_config();
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
+
+        // get the current blob params
+        let current_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs();
+        let blob_params = ctx
+            .chain_spec()
+            .blob_params_at_timestamp(current_timestamp)
+            .unwrap_or(ctx.chain_spec().blob_params.cancun);
+
+        // Derive the blob cache size from the target blob count, to auto scale it by multiplying it
+        // with the slot count for 2 epochs: 384 for pectra
+        let cache_size = blob_params.target_blob_count * EPOCH_SLOTS * 2;
+
+        let custom_config =
+            DiskFileBlobStoreConfig::default().with_max_cached_entries(cache_size as u32);
+
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), custom_config)?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
