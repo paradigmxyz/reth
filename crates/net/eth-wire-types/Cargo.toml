@@ -76,7 +76,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
-    "reth-primitives-traits/arbitrary",   
+    "reth-primitives-traits/arbitrary", 
 ]
 serde = [
     "dep:serde",
@@ -88,4 +88,5 @@ serde = [
     "rand/serde",
     "reth-primitives-traits/serde",
     "reth-ethereum-primitives/serde",
+    "alloy-hardforks/serde",
 ]
