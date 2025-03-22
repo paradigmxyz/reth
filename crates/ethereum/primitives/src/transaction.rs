@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
-    BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844,
-    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
+    BlobTransactionSidecar, EthereumTxEnvelope, SignableTransaction, Signed, TxEip1559, TxEip2930,
+    TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
     TypedTransaction,
 };
 use alloy_eips::{
@@ -25,7 +25,6 @@ use reth_primitives_traits::{
     InMemorySize, SignedTransaction,
 };
 use revm_context::TxEnv;
-use serde::{Deserialize, Serialize};
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -55,7 +54,8 @@ macro_rules! impl_from_signed {
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub enum Transaction {
@@ -327,13 +327,14 @@ impl RlpEcdsaEncodableTx for Transaction {
 }
 
 /// Signed Ethereum transaction.
-#[derive(Debug, Clone, Eq, Serialize, Deserialize, derive_more::AsRef, derive_more::Deref)]
+#[derive(Debug, Clone, Eq, derive_more::AsRef, derive_more::Deref)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[cfg_attr(feature = "test-utils", derive(derive_more::DerefMut))]
-#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct TransactionSigned {
     /// Transaction hash
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     hash: OnceLock<TxHash>,
     /// The transaction signature values
     signature: Signature,
@@ -582,6 +583,19 @@ impl From<TxEnvelope> for TransactionSigned {
 }
 
 impl From<TransactionSigned> for TxEnvelope {
+    fn from(value: TransactionSigned) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        match tx {
+            Transaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip4844(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+        }
+    }
+}
+
+impl From<TransactionSigned> for EthereumTxEnvelope<TxEip4844> {
     fn from(value: TransactionSigned) -> Self {
         let (tx, signature, hash) = value.into_parts();
         match tx {
@@ -940,7 +954,7 @@ impl From<PooledTransaction> for TransactionSigned {
 }
 
 /// Bincode-compatible transaction type serde implementations.
-#[cfg(feature = "serde-bincode-compat")]
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_consensus::{
@@ -949,10 +963,10 @@ pub(super) mod serde_bincode_compat {
     };
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
-    use serde::{Deserialize, Serialize};
 
     /// Bincode-compatible [`super::Transaction`] serde implementation.
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[expect(missing_docs)]
     pub enum Transaction<'a> {
         Legacy(TxLegacy<'a>),
@@ -987,7 +1001,8 @@ pub(super) mod serde_bincode_compat {
     }
 
     /// Bincode-compatible [`super::TransactionSigned`] serde implementation.
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct TransactionSigned<'a> {
         hash: TxHash,
         signature: Signature,
@@ -1031,11 +1046,10 @@ pub(super) mod serde_bincode_compat {
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_testing_utils::generators;
-        use serde::{Deserialize, Serialize};
 
         #[test]
         fn test_transaction_bincode_roundtrip() {
-            #[derive(Debug, Serialize, Deserialize)]
+            #[derive(Debug, serde::Serialize, serde::Deserialize)]
             struct Data<'a> {
                 transaction: serde_bincode_compat::Transaction<'a>,
             }
@@ -1052,7 +1066,7 @@ pub(super) mod serde_bincode_compat {
 
         #[test]
         fn test_transaction_signed_bincode_roundtrip() {
-            #[derive(Debug, Serialize, Deserialize)]
+            #[derive(Debug, serde::Serialize, serde::Deserialize)]
             struct Data<'a> {
                 transaction: serde_bincode_compat::TransactionSigned<'a>,
             }
@@ -1074,7 +1088,8 @@ pub(super) mod serde_bincode_compat {
 mod tests {
     use super::*;
     use alloy_consensus::{
-        constants::LEGACY_TX_TYPE_ID, Block, Transaction as _, TxEip1559, TxLegacy,
+        constants::LEGACY_TX_TYPE_ID, Block, EthereumTxEnvelope, Transaction as _, TxEip1559,
+        TxLegacy,
     };
     use alloy_eips::{
         eip2718::{Decodable2718, Encodable2718},
@@ -1085,9 +1100,37 @@ mod tests {
         U256,
     };
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+    use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
     use reth_codecs::Compact;
     use reth_primitives_traits::SignedTransaction;
     use std::str::FromStr;
+
+    proptest! {
+        #[test]
+        fn test_roundtrip_compact_encode_envelope(reth_tx in arb::<TransactionSigned>()) {
+            let mut expected_buf = Vec::<u8>::new();
+            let expected_len = reth_tx.to_compact(&mut expected_buf);
+
+            let mut actual_but  = Vec::<u8>::new();
+            let alloy_tx = EthereumTxEnvelope::<TxEip4844>::from(reth_tx);
+            let actual_len = alloy_tx.to_compact(&mut actual_but);
+
+            assert_eq!(actual_but, expected_buf);
+            assert_eq!(actual_len, expected_len);
+        }
+
+        #[test]
+        fn test_roundtrip_compact_decode_envelope(reth_tx in arb::<TransactionSigned>()) {
+            let mut buf = Vec::<u8>::new();
+            let len = reth_tx.to_compact(&mut buf);
+
+            let (actual_tx, _) = EthereumTxEnvelope::<TxEip4844>::from_compact(&buf, len);
+            let expected_tx = EthereumTxEnvelope::<TxEip4844>::from(reth_tx);
+
+            assert_eq!(actual_tx, expected_tx);
+        }
+    }
 
     #[test]
     fn eip_2_reject_high_s_value() {

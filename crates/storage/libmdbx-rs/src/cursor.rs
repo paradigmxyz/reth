@@ -100,7 +100,7 @@ where
                 assert_ne!(data_ptr, data_val.iov_base);
                 let key_out = {
                     // MDBX wrote in new key
-                    if key_ptr == key_val.iov_base {
+                    if ptr::eq(key_ptr, key_val.iov_base) {
                         None
                     } else {
                         Some(Key::decode_val::<K>(txn, key_val)?)

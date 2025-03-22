@@ -89,4 +89,5 @@ serde = [
     "rand/serde",
     "reth-primitives-traits/serde",
     "reth-ethereum-forks/serde",
+    "reth-ethereum-primitives/serde",
 ]
