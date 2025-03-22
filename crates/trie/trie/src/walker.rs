@@ -97,7 +97,6 @@ impl<C> TrieWalker<C> {
     }
 
     /// Returns the next unprocessed key in the trie.
-    #[instrument(level = "trace", skip(self), ret)]
     pub fn next_unprocessed_key(&self) -> Option<B256> {
         self.key()
             .and_then(|key| {
