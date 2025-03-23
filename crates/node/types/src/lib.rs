@@ -52,7 +52,7 @@ pub trait NodeTypesWithDB: NodeTypes {
 }
 
 /// An adapter type combining [`NodeTypes`] and db into [`NodeTypesWithDB`].
-#[derive(Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NodeTypesWithDBAdapter<Types, DB> {
     types: PhantomData<Types>,
     db: PhantomData<DB>,
@@ -62,18 +62,6 @@ impl<Types, DB> NodeTypesWithDBAdapter<Types, DB> {
     /// Create a new adapter with the configured types.
     pub fn new() -> Self {
         Self { types: Default::default(), db: Default::default() }
-    }
-}
-
-impl<Types, DB> Default for NodeTypesWithDBAdapter<Types, DB> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<Types, DB> Clone for NodeTypesWithDBAdapter<Types, DB> {
-    fn clone(&self) -> Self {
-        Self { types: self.types, db: self.db }
     }
 }
 
@@ -105,19 +93,13 @@ where
 }
 
 /// A [`NodeTypes`] type builder.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AnyNodeTypes<P = (), C = (), SC = (), S = ()>(
     PhantomData<P>,
     PhantomData<C>,
     PhantomData<SC>,
     PhantomData<S>,
 );
-
-impl<P, C, SC, S> Default for AnyNodeTypes<P, C, SC, S> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl<P, C, SC, S> AnyNodeTypes<P, C, SC, S> {
     /// Creates a new instance of [`AnyNodeTypes`].
@@ -160,18 +142,12 @@ where
 }
 
 /// A [`NodeTypesWithEngine`] type builder.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AnyNodeTypesWithEngine<P = (), E = (), C = (), SC = (), S = ()> {
     /// Embedding the basic node types.
     _base: AnyNodeTypes<P, C, SC, S>,
     /// Phantom data for the engine.
     _engine: PhantomData<E>,
-}
-
-impl<P, E, C, SC, S> Default for AnyNodeTypesWithEngine<P, E, C, SC, S> {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl<P, E, C, SC, S> AnyNodeTypesWithEngine<P, E, C, SC, S> {
