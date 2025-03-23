@@ -123,59 +123,57 @@ mod tests {
         let tx3_hash = B256::random(); // Non-EIP-4844 transaction
 
         // Creating a first block with EIP-4844 transactions
-        let block1: RecoveredBlock<Block<Signed<Transaction, Signature>>> =
-            RecoveredBlock::new_sealed(
-                SealedBlock::from_sealed_parts(
-                    SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
-                    alloy_consensus::BlockBody {
-                        transactions: vec![
-                            Signed::new_unhashed(
-                                Transaction::Eip4844(Default::default()),
-                                Signature::test_signature(),
-                            )
-                            .into(),
-                            Signed::new_unhashed(
-                                Transaction::Eip4844(Default::default()),
-                                Signature::test_signature(),
-                            )
-                            .into(),
-                            // Another transaction that is not EIP-4844
-                            Signed::new_unhashed(
-                                Transaction::Eip7702(Default::default()),
-                                Signature::test_signature(),
-                            )
-                            .into(),
-                        ],
-                        ..Default::default()
-                    },
-                ),
-                Default::default(),
-            );
+        let block1 = RecoveredBlock::new_sealed(
+            SealedBlock::from_sealed_parts(
+                SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
+                alloy_consensus::BlockBody {
+                    transactions: vec![
+                        Signed::new_unhashed(
+                            Transaction::Eip4844(Default::default()),
+                            Signature::test_signature(),
+                        )
+                        .into(),
+                        Signed::new_unhashed(
+                            Transaction::Eip4844(Default::default()),
+                            Signature::test_signature(),
+                        )
+                        .into(),
+                        // Another transaction that is not EIP-4844
+                        Signed::new_unhashed(
+                            Transaction::Eip7702(Default::default()),
+                            Signature::test_signature(),
+                        )
+                        .into(),
+                    ],
+                    ..Default::default()
+                },
+            ),
+            Default::default(),
+        );
 
         // Creating a second block with EIP-1559 and EIP-2930 transactions
         // Note: This block does not contain any EIP-4844 transactions
-        let block2: RecoveredBlock<Block<Signed<Transaction, Signature>>> =
-            RecoveredBlock::new_sealed(
-                SealedBlock::from_sealed_parts(
-                    SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
-                    alloy_consensus::BlockBody {
-                        transactions: vec![
-                            Signed::new_unhashed(
-                                Transaction::Eip1559(Default::default()),
-                                Signature::test_signature(),
-                            )
-                            .into(),
-                            Signed::new_unhashed(
-                                Transaction::Eip2930(Default::default()),
-                                Signature::test_signature(),
-                            )
-                            .into(),
-                        ],
-                        ..Default::default()
-                    },
-                ),
-                Default::default(),
-            );
+        let block2 = RecoveredBlock::new_sealed(
+            SealedBlock::from_sealed_parts(
+                SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
+                alloy_consensus::BlockBody {
+                    transactions: vec![
+                        Signed::new_unhashed(
+                            Transaction::Eip1559(Default::default()),
+                            Signature::test_signature(),
+                        )
+                        .into(),
+                        Signed::new_unhashed(
+                            Transaction::Eip2930(Default::default()),
+                            Signature::test_signature(),
+                        )
+                        .into(),
+                    ],
+                    ..Default::default()
+                },
+            ),
+            Default::default(),
+        );
 
         // Extract blocks from the chain
         let chain: Chain = Chain::new(vec![block1, block2], Default::default(), None);
