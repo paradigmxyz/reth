@@ -94,7 +94,7 @@ mod tests {
     use reth_ethereum_primitives::Transaction;
     use reth_execution_types::Chain;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
-    use revm_primitives::FixedBytes;
+
     #[test]
     fn test_finalized_tracker() {
         let mut tracker = BlobStoreCanonTracker::default();
@@ -120,10 +120,10 @@ mod tests {
         // Create sample transactions
         let tx1_hash = B256::random(); // EIP-4844 transaction
         let tx2_hash = B256::random(); // EIP-4844 transaction
-        let tx3_hash = B256::random(); // Non-EIP-4844 transaction
+        let _tx3_hash = B256::random(); // Non-EIP-4844 transaction
 
         // Creating a first block with EIP-4844 transactions
-        let block1 = RecoveredBlock::new_sealed(
+        let block1: RecoveredBlock<Block<Signed<Transaction>>> = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
                 alloy_consensus::BlockBody {
@@ -153,7 +153,7 @@ mod tests {
 
         // Creating a second block with EIP-1559 and EIP-2930 transactions
         // Note: This block does not contain any EIP-4844 transactions
-        let block2 = RecoveredBlock::new_sealed(
+        let block2: RecoveredBlock<Block<Signed<Transaction>>> = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
                 alloy_consensus::BlockBody {
