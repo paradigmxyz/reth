@@ -478,7 +478,7 @@ impl ChainSpec {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(&self)
+        DisplayHardforks::new(self.hardforks.forks_iter())
     }
 
     /// Get the fork id for the given hardfork.

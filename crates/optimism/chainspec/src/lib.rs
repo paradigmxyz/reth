@@ -30,8 +30,8 @@ pub use dev::OP_DEV;
 pub use op::OP_MAINNET;
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
-    EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
+    DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
@@ -227,7 +227,27 @@ impl EthChainSpec for OpChainSpec {
     }
 
     fn display_hardforks(&self) -> Box<dyn core::fmt::Display> {
-        Box::new(ChainSpec::display_hardforks(self))
+        let ethereum_forks = [
+            "Frontier",
+            "Homestead",
+            "Byzantium",
+            "Constantinople",
+            "Petersburg",
+            "Istanbul",
+            "Berlin",
+            "London",
+            "Paris",
+            "Shanghai",
+        ];
+
+        let mut filtered_forks = vec![];
+        for (fork, cond) in self.inner.hardforks.forks_iter() {
+            if ethereum_forks.contains(&fork.name()) {
+                filtered_forks.push((fork, cond.clone()));
+            }
+        }
+
+        Box::new(DisplayHardforks::new(filtered_forks))
     }
 
     fn genesis_header(&self) -> &Self::Header {
