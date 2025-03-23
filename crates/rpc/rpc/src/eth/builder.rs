@@ -169,6 +169,7 @@ where
             GasPriceOracle::new(provider.clone(), Default::default(), eth_cache.clone())
         });
         let fee_history_cache = FeeHistoryCache::new(fee_history_cache_config);
+        // XXX FIXME YSG
         let new_canonical_blocks = provider.canonical_state_stream();
         let fhc = fee_history_cache.clone();
         let cache = eth_cache.clone();

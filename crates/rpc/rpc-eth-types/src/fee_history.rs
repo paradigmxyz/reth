@@ -208,6 +208,7 @@ struct FeeHistoryCacheInner {
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
+/// XXX FIXME YSG
 pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
     fee_history_cache: FeeHistoryCache,
     mut events: St,

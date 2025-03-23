@@ -1,19 +1,19 @@
 //! `eth_` `Filter` RPC handler implementation
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::TxHash;
+use alloy_primitives::{BlockNumber, TxHash};
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
-use futures::future::TryFutureExt;
+use futures::{future::TryFutureExt, Stream};
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives_traits::RecoveredBlock;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{
-    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderError, ProviderReceipt,
+    BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, CanonStateNotification,
+    HeaderProvider, ProviderBlock, ProviderError, ProviderReceipt,
 };
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
@@ -27,7 +27,7 @@ use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt,
     future::Future,
     iter::StepBy,
@@ -39,6 +39,7 @@ use tokio::{
     sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
 };
+use tokio_stream::StreamExt;
 use tracing::{error, trace};
 
 impl<Eth> EngineEthFilter for EthFilter<Eth>
@@ -165,6 +166,55 @@ where
 
             is_valid
         })
+    }
+}
+
+impl<Eth> EthFilter<Eth>
+where
+    Eth: EthApiTypes + 'static,
+{
+    /// listener for reorged blocks updates relevant active filters.
+    /// In case of a chain reorg, previously emitted logs are emitted again but with the removed
+    /// field set to true.
+    pub async fn watch_reorgs<N, St>(&self, mut notifications: St)
+    where
+        N: NodePrimitives,
+        St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
+    {
+        trace!(target: "rpc::eth", "Serving eth_watchReorgsFilter");
+        while let Some(notification) = notifications.next().await {
+            if let CanonStateNotification::Reorg { old, .. } = notification {
+                self.update_reorg::<N>(old.blocks()).await;
+            }
+        }
+    }
+
+    /// Update a reorg block for all active filters.
+    async fn update_reorg<N>(&self, _old_blocks: &BTreeMap<BlockNumber, RecoveredBlock<N::Block>>)
+    where
+        N: NodePrimitives,
+    {
+    }
+}
+
+/// Create a background task and listener for reorged blocks updates relevant active filters.
+/// In case of a chain reorg, previously emitted logs are emitted again but with the removed
+/// field set to true.
+pub async fn eth_filter_watch_reorgs_task<Eth, N, St>(
+    _eth_filter: EthFilter<Eth>,
+    mut notifications: St,
+) where
+    Eth: EthApiTypes + 'static,
+    N: NodePrimitives,
+    St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
+{
+    trace!(target: "rpc::eth", "Serving eth_watchReorgsFilter");
+    while let Some(notification) = notifications.next().await {
+        if let CanonStateNotification::Reorg { old, .. } = notification {
+            //   self.update_reorg(old.blocks()).await;
+            //eth_filter.update_reorg(old.blocks()).await?;
+            println!("old {:?}", old);
+        }
     }
 }
 

@@ -807,7 +807,17 @@ where
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
+        let notifications = provider.canonical_state_stream();
         let eth = EthHandlers::bootstrap(config.eth, executor.clone(), eth_api);
+        // XXX FIXME YSG
+
+        let eth_filter = eth.filter.clone();
+        executor.spawn_critical(
+            "eth-filters-watch-reorgs",
+            Box::pin(async move {
+                eth_filter.watch_reorgs(notifications).await;
+            }),
+        );
 
         Self {
             provider,
