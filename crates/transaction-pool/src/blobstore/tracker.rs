@@ -126,9 +126,9 @@ mod tests {
             Transaction::Eip4844(Default::default()),
             Signature::test_signature(),
         ); // EIP-4844 transaction
-        let _tx3_hash = B256::random(); // Non-EIP-4844 transaction
-        let (_, _, tx1_hash) = tx1_signed.clone().into_parts();
-        let (_, _, tx2_hash) = tx2_signed.clone().into_parts();
+
+        let tx1_hash = *tx1_signed.hash();
+        let tx2_hash = *tx2_signed.hash();
         // Creating a first block with EIP-4844 transactions
         let block1 = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
