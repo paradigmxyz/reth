@@ -23,7 +23,7 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
-revm.workspace = true
+revm = { workspace = true, features = ["secp256r1"] }
 
 # alloy
 alloy-primitives.workspace = true
@@ -92,3 +92,5 @@ serde = [
     "reth-network/serde",
     "reth-network-api/serde",
 ]
+# See comments in `revm-precompile`
+secp256k1 = ["revm/secp256k1"]
