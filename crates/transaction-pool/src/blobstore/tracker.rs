@@ -89,7 +89,7 @@ pub enum BlobStoreUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Block, Header, Signed};
+    use alloy_consensus::{Header, Signed};
     use alloy_primitives::PrimitiveSignature as Signature;
     use reth_ethereum_primitives::Transaction;
     use reth_execution_types::Chain;
@@ -135,8 +135,8 @@ mod tests {
                 SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
                 alloy_consensus::BlockBody {
                     transactions: vec![
-                        tx1_signed.clone().into(),
-                        tx2_signed.clone().into(),
+                        tx1_signed.into(),
+                        tx2_signed.into(),
                         // Another transaction that is not EIP-4844
                         Signed::new_unhashed(
                             Transaction::Eip7702(Default::default()),
