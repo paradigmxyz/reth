@@ -118,26 +118,25 @@ mod tests {
     fn test_add_new_chain_blocks() {
         let mut tracker = BlobStoreCanonTracker::default();
         // Create sample transactions
-        let tx1_hash = B256::random(); // EIP-4844 transaction
-        let tx2_hash = B256::random(); // EIP-4844 transaction
+        let tx1_signed = Signed::new_unhashed(
+            Transaction::Eip4844(Default::default()),
+            Signature::test_signature(),
+        ); // EIP-4844 transaction
+        let tx2_signed = Signed::new_unhashed(
+            Transaction::Eip4844(Default::default()),
+            Signature::test_signature(),
+        ); // EIP-4844 transaction
         let _tx3_hash = B256::random(); // Non-EIP-4844 transaction
-
+        let (_, _, tx1_hash) = tx1_signed.clone().into_parts();
+        let (_, _, tx2_hash) = tx2_signed.clone().into_parts();
         // Creating a first block with EIP-4844 transactions
-        let block1: RecoveredBlock<Block<Signed<Transaction>>> = RecoveredBlock::new_sealed(
+        let block1 = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
                 alloy_consensus::BlockBody {
                     transactions: vec![
-                        Signed::new_unhashed(
-                            Transaction::Eip4844(Default::default()),
-                            Signature::test_signature(),
-                        )
-                        .into(),
-                        Signed::new_unhashed(
-                            Transaction::Eip4844(Default::default()),
-                            Signature::test_signature(),
-                        )
-                        .into(),
+                        tx1_signed.clone().into(),
+                        tx2_signed.clone().into(),
                         // Another transaction that is not EIP-4844
                         Signed::new_unhashed(
                             Transaction::Eip7702(Default::default()),
@@ -153,7 +152,7 @@ mod tests {
 
         // Creating a second block with EIP-1559 and EIP-2930 transactions
         // Note: This block does not contain any EIP-4844 transactions
-        let block2: RecoveredBlock<Block<Signed<Transaction>>> = RecoveredBlock::new_sealed(
+        let block2 = RecoveredBlock::new_sealed(
             SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
                 alloy_consensus::BlockBody {
