@@ -22,6 +22,7 @@ use alloy_chains::Chain;
 use alloy_consensus::{proofs::storage_root_unhashed, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
+use alloy_hardforks::Hardfork;
 use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
@@ -33,7 +34,7 @@ use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
     DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
 };
-use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
+use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks, OP_MAINNET_HARDFORKS};
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
@@ -228,22 +229,22 @@ impl EthChainSpec for OpChainSpec {
 
     fn display_hardforks(&self) -> Box<dyn core::fmt::Display> {
         let ethereum_forks = [
-            "Frontier",
-            "Homestead",
-            "Byzantium",
-            "Constantinople",
-            "Petersburg",
-            "Istanbul",
-            "Berlin",
-            "London",
-            "Paris",
-            "Shanghai",
+            alloy_hardforks::EthereumHardfork::Frontier.name(),
+            alloy_hardforks::EthereumHardfork::Homestead.name(),
+            alloy_hardforks::EthereumHardfork::Byzantium.name(),
+            alloy_hardforks::EthereumHardfork::Constantinople.name(),
+            alloy_hardforks::EthereumHardfork::Petersburg.name(),
+            alloy_hardforks::EthereumHardfork::Istanbul.name(),
+            alloy_hardforks::EthereumHardfork::Berlin.name(),
+            alloy_hardforks::EthereumHardfork::London.name(),
+            alloy_hardforks::EthereumHardfork::Paris.name(),
+            alloy_hardforks::EthereumHardfork::Shanghai.name(),
         ];
 
         let mut filtered_forks = vec![];
         for (fork, cond) in self.inner.hardforks.forks_iter() {
             if ethereum_forks.contains(&fork.name()) {
-                filtered_forks.push((fork, cond.clone()));
+                filtered_forks.push((fork, cond));
             }
         }
 
