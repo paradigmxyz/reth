@@ -127,6 +127,7 @@ serde = [
     "reth-network/serde",
     "reth-transaction-pool/serde",
     "reth-ethereum-primitives/serde",
+    "reth-network-api/serde",
 ]
 test-utils = [
     "dep:tempfile",
