@@ -117,6 +117,10 @@ mod tests {
     #[test]
     fn test_add_new_chain_blocks() {
         let mut tracker = BlobStoreCanonTracker::default();
+        // Create sample transactions
+        let tx1_hash = B256::random(); // EIP-4844 transaction
+        let tx2_hash = B256::random(); // EIP-4844 transaction
+        let tx3_hash = B256::random(); // Non-EIP-4844 transaction
 
         // Creating a first block with EIP-4844 transactions
         let block1: RecoveredBlock<Block<Signed<Transaction, Signature>>> =
