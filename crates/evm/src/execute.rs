@@ -17,8 +17,10 @@ use reth_primitives_traits::{
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::context::result::ExecutionResult;
-use revm_database::{states::bundle_state::BundleRetention, BundleState, State};
+use revm::{
+    context::result::ExecutionResult,
+    database::{states::bundle_state::BundleRetention, BundleState, State},
+};
 
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
@@ -368,7 +370,7 @@ where
 }
 
 /// A generic block executor provider that can create executors using a strategy factory.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct BasicBlockExecutorProvider<F> {
     strategy_factory: F,
 }
@@ -482,8 +484,10 @@ mod tests {
     use alloy_primitives::{address, map::HashMap, U256};
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
-    use revm::state::AccountInfo;
-    use revm_database::{CacheDB, EmptyDB};
+    use revm::{
+        database::{CacheDB, EmptyDB},
+        state::AccountInfo,
+    };
 
     #[derive(Clone, Default)]
     struct TestExecutorProvider;

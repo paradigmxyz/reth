@@ -150,7 +150,7 @@ mod tests {
     /// <https://github.com/paradigmxyz/reth/issues/12054>
     #[test]
     const fn issue_12054() {
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         struct ExEx<Node: FullNodeComponents> {
             ctx: ExExContext<Node>,
         }

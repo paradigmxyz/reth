@@ -4,8 +4,10 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie_common::{HashedPostState, KeyHasher};
-use revm::state::AccountInfo;
-use revm_database::{states::BundleState, BundleAccount};
+use revm::{
+    database::{states::BundleState, BundleAccount},
+    state::AccountInfo,
+};
 
 /// Type used to initialize revms bundle state.
 pub type BundleStateInit =
@@ -405,7 +407,7 @@ pub(super) mod serde_bincode_compat {
     use alloy_eips::eip7685::Requests;
     use alloy_primitives::BlockNumber;
     use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
-    use revm_database::BundleState;
+    use revm::database::BundleState;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -434,7 +436,7 @@ pub(super) mod serde_bincode_compat {
         bundle: Cow<'a, BundleState>,
         receipts: Vec<Vec<T::BincodeRepr<'a>>>,
         first_block: BlockNumber,
-        #[allow(clippy::owned_cow)]
+        #[expect(clippy::owned_cow)]
         requests: Cow<'a, Vec<Requests>>,
     }
 

@@ -93,7 +93,7 @@ pub trait BlockReader:
     fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>>;
 
     /// Returns the pending block and receipts if available.
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn pending_block_and_receipts(
         &self,
     ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>>;

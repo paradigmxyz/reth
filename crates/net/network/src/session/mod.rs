@@ -121,7 +121,7 @@ pub struct SessionManager<N: NetworkPrimitives> {
 
 impl<N: NetworkPrimitives> SessionManager<N> {
     /// Creates a new empty [`SessionManager`].
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         secret_key: SecretKey,
         config: SessionsConfig,
@@ -818,7 +818,7 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
 /// Starts the authentication process for a connection initiated by a remote peer.
 ///
 /// This will wait for the _incoming_ handshake request and answer it.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     disconnect_rx: oneshot::Receiver<()>,
@@ -851,7 +851,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 
 /// Starts the authentication process for a connection initiated by a remote peer.
 #[instrument(skip_all, fields(%remote_addr, peer_id), target = "net")]
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     disconnect_rx: oneshot::Receiver<()>,
@@ -902,7 +902,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
 }
 
 /// Authenticates a session
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn authenticate<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     disconnect_rx: oneshot::Receiver<()>,
@@ -987,7 +987,7 @@ async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
 ///
 /// If additional [`RlpxSubProtocolHandlers`] are provided, the hello message will be updated to
 /// also negotiate the additional protocols.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 async fn authenticate_stream<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
     stream: UnauthedP2PStream<ECIESStream<TcpStream>>,

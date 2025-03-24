@@ -478,7 +478,7 @@ pub enum StorageKind {
 }
 
 impl StorageKind {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn is_database(&self) -> bool {
         matches!(self, Self::Database(_))
     }

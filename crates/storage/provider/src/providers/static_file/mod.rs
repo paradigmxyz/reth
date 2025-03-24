@@ -412,7 +412,7 @@ mod tests {
         let file_set_count = 3; // Number of sets of files to create
         let initial_file_count = files_per_range * file_set_count;
 
-        #[allow(clippy::too_many_arguments)]
+        #[expect(clippy::too_many_arguments)]
         fn prune_and_validate(
             sf_rw: &StaticFileProvider<EthPrimitives>,
             static_dir: impl AsRef<Path>,

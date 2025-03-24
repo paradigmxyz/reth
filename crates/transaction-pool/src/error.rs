@@ -102,7 +102,7 @@ impl PoolError {
     /// erroneous transaction.
     #[inline]
     pub fn is_bad_transaction(&self) -> bool {
-        #[allow(clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match &self.kind {
             PoolErrorKind::AlreadyImported => {
                 // already imported but not bad
@@ -241,7 +241,7 @@ impl InvalidPoolTransactionError {
     /// context of the transaction pool and warrants peer penalization.
     ///
     /// See [`PoolError::is_bad_transaction`].
-    #[allow(clippy::match_same_arms)]
+    #[expect(clippy::match_same_arms)]
     #[inline]
     fn is_bad_transaction(&self) -> bool {
         match self {

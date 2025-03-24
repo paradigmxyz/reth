@@ -3,9 +3,9 @@ use crate::{
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
-    eip4844::BlobAndProofV1,
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip4895::Withdrawals,
-    eip7685::{Requests, RequestsOrHash},
+    eip7685::RequestsOrHash,
 };
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
@@ -26,6 +26,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
+use reth_rpc_server_types::result::internal_rpc_err;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -81,6 +82,7 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec
     validator: Validator,
     /// Start time of the latest payload request
     latest_new_payload_response: Mutex<Option<Instant>>,
+    accept_execution_requests_hash: bool,
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
@@ -93,7 +95,7 @@ where
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Create new instance of [`EngineApi`].
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
@@ -104,6 +106,7 @@ where
         client: ClientVersionV1,
         capabilities: EngineCapabilities,
         validator: Validator,
+        accept_execution_requests_hash: bool,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -117,6 +120,7 @@ where
             tx_pool,
             validator,
             latest_new_payload_response: Mutex::new(None),
+            accept_execution_requests_hash,
         });
         Self { inner }
     }
@@ -941,14 +945,20 @@ where
         payload: ExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
-        execution_requests: Requests,
+        requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
+
+        // Accept requests as a hash only if it is explicitly allowed
+        if requests.is_hash() && !self.inner.accept_execution_requests_hash {
+            return Err(EngineApiError::UnexpectedRequestsHash.into());
+        }
+
         let payload = ExecutionData {
             payload: payload.into(),
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
-                PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
+                PraguePayloadFields { requests },
             ),
         };
 
@@ -1130,6 +1140,14 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
         Ok(self.get_blobs_v1_metered(versioned_hashes)?)
     }
+
+    async fn get_blobs_v2(
+        &self,
+        _versioned_hashes: Vec<B256>,
+    ) -> RpcResult<Vec<Option<BlobAndProofV2>>> {
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
+        Err(internal_rpc_err("unimplemented"))
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
@@ -1202,6 +1220,7 @@ mod tests {
             client,
             EngineCapabilities::default(),
             EthereumEngineValidator::new(chain_spec.clone()),
+            false,
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)

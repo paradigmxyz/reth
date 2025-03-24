@@ -53,9 +53,14 @@ pub struct PendingPool<T: TransactionOrdering> {
 // === impl PendingPool ===
 
 impl<T: TransactionOrdering> PendingPool<T> {
-    /// Create a new pool instance.
+    /// Create a new pending pool instance.
     pub fn new(ordering: T) -> Self {
-        let (new_transaction_notifier, _) = broadcast::channel(200);
+        Self::with_buffer(ordering, 200)
+    }
+
+    /// Create a new pool instance with the given buffer capacity.
+    pub fn with_buffer(ordering: T, buffer_capacity: usize) -> Self {
+        let (new_transaction_notifier, _) = broadcast::channel(buffer_capacity);
         Self {
             ordering,
             submission_id: 0,

@@ -15,7 +15,8 @@ pub use validator::EthereumExecutionPayloadValidator;
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
-    is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig,
+    is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
+    PayloadConfig,
 };
 use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{BlockExecutionError, BlockValidationError};
@@ -95,6 +96,17 @@ where
             args,
             |attributes| self.pool.best_transactions_with_attributes(attributes),
         )
+    }
+
+    fn on_missing_payload(
+        &self,
+        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
+    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
+        if self.builder_config.await_payload_on_missing {
+            MissingPayloadBehaviour::AwaitInProgress
+        } else {
+            MissingPayloadBehaviour::RaceEmptyPayload
+        }
     }
 
     fn build_empty_payload(

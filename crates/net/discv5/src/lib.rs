@@ -225,7 +225,7 @@ impl Discv5 {
 
     /// Process an event from the underlying [`discv5::Discv5`] node.
     pub fn on_discv5_update(&self, update: discv5::Event) -> Option<DiscoveredPeer> {
-        #[allow(clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match update {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
@@ -772,8 +772,8 @@ mod test {
 
     // Copied from sigp/discv5 with slight modification (U256 type)
     // <https://github.com/sigp/discv5/blob/master/src/kbucket/key.rs#L89-L101>
-    #[allow(unreachable_pub)]
-    #[allow(unused)]
+    #[expect(unreachable_pub)]
+    #[expect(unused)]
     #[allow(clippy::assign_op_pattern)]
     mod sigp {
         use alloy_primitives::U256;

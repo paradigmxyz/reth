@@ -23,7 +23,6 @@ reth-trie-common.workspace = true
 reth-ethereum-primitives = { workspace = true, optional = true }
 
 revm.workspace = true
-revm-database.workspace = true
 op-revm = { workspace = true, optional = true }
 
 # alloy
@@ -59,7 +58,6 @@ std = [
     "reth-ethereum-forks/std",
     "reth-ethereum-primitives?/std",
     "alloy-evm/std",
-    "revm-database/std",
     "op-revm?/std",
     "reth-execution-errors/std",
     "reth-execution-types/std",
@@ -70,20 +68,12 @@ std = [
     "reth-trie-common/std",
     "scroll-alloy-evm?/std",
 ]
-metrics = [
-    "std",
-    "dep:metrics",
-    "dep:reth-metrics",
-]
+metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [
     "dep:parking_lot",
     "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
 ]
-op = [
-    "op-revm",
-    "alloy-evm/op",
-    "reth-primitives-traits/op",
-]
+op = ["op-revm", "alloy-evm/op", "reth-primitives-traits/op"]
 scroll-alloy-traits = ["dep:scroll-alloy-evm", "reth-primitives-traits/scroll-alloy-traits"]

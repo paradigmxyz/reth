@@ -46,7 +46,7 @@ impl RemoteExEx for ExExService {
 }
 
 // ANCHOR: snippet
-#[allow(dead_code)]
+#[expect(dead_code)]
 async fn remote_exex<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>>(
     mut ctx: ExExContext<Node>,
     notifications: Arc<broadcast::Sender<ExExNotification>>,

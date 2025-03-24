@@ -116,7 +116,7 @@ where
     }
 
     /// Creates a new, shareable instance using the default tokio task spawner.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         pool: Pool,
@@ -247,7 +247,7 @@ where
 }
 
 /// Container type `EthApi`
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// The transaction pool.
     pool: Pool,
@@ -292,7 +292,7 @@ where
     Provider: BlockReaderIdExt,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         pool: Pool,
