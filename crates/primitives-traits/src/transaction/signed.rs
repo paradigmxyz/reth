@@ -140,8 +140,7 @@ Send
 impl<T> SignedTransaction for EthereumTxEnvelope<T>
 where
     T: RlpEcdsaEncodableTx + SignableTransaction<Signature> + Unpin,
-    Self:
-        Clone + PartialEq + Eq + Decodable + Decodable2718 + MaybeSerde + InMemorySize
+    Self: Clone + PartialEq + Eq + Decodable + Decodable2718 + MaybeSerde + InMemorySize,
 {
     fn tx_hash(&self) -> &TxHash {
         match self {
