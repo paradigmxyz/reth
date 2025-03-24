@@ -213,7 +213,7 @@ where
 {
     fn create_factories(
         &self,
-        hashed_cursor_cache: Option<Arc<CachedHashedCursorFactoryCache>>,
+        hashed_cursor_cache: Option<CachedHashedCursorFactoryCache>,
     ) -> (
         InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
         CachedHashedCursorFactory<
@@ -389,7 +389,7 @@ pub struct StorageProofInput {
     /// The target slots for the proof calculation.
     target_slots: B256Set,
     /// Hashed cursor factory cache.
-    hashed_cursor_cache: Option<Arc<CachedHashedCursorFactoryCache>>,
+    hashed_cursor_cache: Option<CachedHashedCursorFactoryCache>,
     /// Whether or not to collect branch node masks
     with_branch_node_masks: bool,
 }
@@ -401,7 +401,7 @@ impl StorageProofInput {
         hashed_address: B256,
         prefix_set: PrefixSet,
         target_slots: B256Set,
-        hashed_cursor_cache: Option<Arc<CachedHashedCursorFactoryCache>>,
+        hashed_cursor_cache: Option<CachedHashedCursorFactoryCache>,
         with_branch_node_masks: bool,
     ) -> Self {
         Self {

@@ -23,12 +23,12 @@ type Map<V> = DashMap<B256, V, FbBuildHasher<32>>;
 #[derive(Debug, Clone)]
 pub struct CachedHashedCursorFactory<CF> {
     cursor_factory: CF,
-    cache: Arc<CachedHashedCursorFactoryCache>,
+    cache: CachedHashedCursorFactoryCache,
 }
 
 impl<CF> CachedHashedCursorFactory<CF> {
     /// Creates a new factory.
-    pub fn new(cursor_factory: CF, cache: Arc<CachedHashedCursorFactoryCache>) -> Self {
+    pub fn new(cursor_factory: CF, cache: CachedHashedCursorFactoryCache) -> Self {
         Self { cursor_factory, cache }
     }
 }

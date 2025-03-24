@@ -58,7 +58,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     /// Cached hashed cursor factory.
-    hashed_cursor_cache: Option<Arc<CachedHashedCursorFactoryCache>>,
+    hashed_cursor_cache: Option<CachedHashedCursorFactoryCache>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -95,7 +95,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         mut self,
         hashed_cursor_cache: CachedHashedCursorFactoryCache,
     ) -> Self {
-        self.hashed_cursor_cache = Some(Arc::new(hashed_cursor_cache));
+        self.hashed_cursor_cache = Some(hashed_cursor_cache);
         self
     }
 }
