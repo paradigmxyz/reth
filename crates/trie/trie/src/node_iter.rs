@@ -169,8 +169,8 @@ mod tests {
 
     use crate::{
         hashed_cursor::{
-            cached::CachedHashedCursorFactory, mock::MockHashedCursorFactory,
-            noop::NoopHashedAccountCursor, HashedCursorFactory, HashedPostStateAccountCursor,
+            mock::MockHashedCursorFactory, noop::NoopHashedAccountCursor, HashedCursorFactory,
+            HashedPostStateAccountCursor,
         },
         mock::{KeyVisit, KeyVisitType},
         trie_cursor::{
@@ -297,7 +297,7 @@ mod tests {
         let walker =
             TrieWalker::new(trie_cursor_factory.account_trie_cursor().unwrap(), prefix_set);
 
-        let hashed_cursor_factory = CachedHashedCursorFactory::new(MockHashedCursorFactory::new(
+        let hashed_cursor_factory = MockHashedCursorFactory::new(
             BTreeMap::from([
                 (account_1, empty_account),
                 (account_2, empty_account),
@@ -305,7 +305,7 @@ mod tests {
                 (account_4, empty_account),
             ]),
             B256Map::default(),
-        ));
+        );
 
         let mut iter =
             TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
@@ -331,8 +331,13 @@ mod tests {
             ]
         );
         pretty_assertions::assert_eq!(
-            *hashed_cursor_factory.inner().visited_account_keys(),
+            *hashed_cursor_factory.visited_account_keys(),
             vec![
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_1),
+                    visited_key: Some(account_1)
+                },
+                // Why do we seek account 1 one additional time?
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_1),
                     visited_key: Some(account_1)
