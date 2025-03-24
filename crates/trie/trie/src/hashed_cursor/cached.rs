@@ -304,6 +304,7 @@ where
             self.seek_cursor = true;
             result
         } else {
+            self.seek_cursor = false;
             let result = self.cursor.seek(key)?;
             self.cache_changes.cached_seeks.insert(key, result);
 
@@ -333,6 +334,7 @@ where
             result
         } else {
             if self.seek_cursor {
+                self.seek_cursor = false;
                 self.cursor.seek(last_key)?;
             }
             let result = self.cursor.next()?;
