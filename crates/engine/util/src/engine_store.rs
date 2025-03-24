@@ -51,13 +51,13 @@ impl EngineMessageStore {
 
     /// Stores the received [`BeaconEngineMessage`] to disk, appending the `received_at` time to the
     /// path.
-    pub fn on_message<Engine>(
+    pub fn on_message<T>(
         &self,
-        msg: &BeaconEngineMessage<Engine>,
+        msg: &BeaconEngineMessage<T>,
         received_at: SystemTime,
     ) -> eyre::Result<()>
     where
-        Engine: PayloadTypes,
+        T: PayloadTypes,
     {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
@@ -71,7 +71,7 @@ impl EngineMessageStore {
                 let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
                 fs::write(
                     self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::<Engine>::ForkchoiceUpdated {
+                    serde_json::to_vec(&StoredEngineApiMessage::<T>::ForkchoiceUpdated {
                         state: *state,
                         payload_attrs: payload_attrs.clone(),
                     })?,
@@ -81,7 +81,7 @@ impl EngineMessageStore {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::<Engine>::NewPayload {
+                    serde_json::to_vec(&StoredEngineApiMessage::<T>::NewPayload {
                         payload: payload.clone(),
                     })?,
                 )?;

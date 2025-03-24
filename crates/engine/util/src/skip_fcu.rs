@@ -32,10 +32,10 @@ impl<S> EngineSkipFcu<S> {
     }
 }
 
-impl<S, Engine> Stream for EngineSkipFcu<S>
+impl<S, T> Stream for EngineSkipFcu<S>
 where
-    S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: PayloadTypes,
+    S: Stream<Item = BeaconEngineMessage<T>>,
+    T: PayloadTypes,
 {
     type Item = S::Item;
 

@@ -28,10 +28,10 @@ impl<S> EngineSkipNewPayload<S> {
     }
 }
 
-impl<S, Engine> Stream for EngineSkipNewPayload<S>
+impl<S, T> Stream for EngineSkipNewPayload<S>
 where
-    S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: PayloadTypes,
+    S: Stream<Item = BeaconEngineMessage<T>>,
+    T: PayloadTypes,
 {
     type Item = S::Item;
 

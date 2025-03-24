@@ -27,9 +27,7 @@ pub mod reorg;
 use reorg::EngineReorg;
 
 /// The collection of stream extensions for engine API message stream.
-pub trait EngineMessageStreamExt<Engine: PayloadTypes>:
-    Stream<Item = BeaconEngineMessage<Engine>>
-{
+pub trait EngineMessageStreamExt<T: PayloadTypes>: Stream<Item = BeaconEngineMessage<T>> {
     /// Skips the specified number of [`BeaconEngineMessage::ForkchoiceUpdated`] messages from the
     /// engine message stream.
     fn skip_fcu(self, count: usize) -> EngineSkipFcu<Self>
@@ -109,7 +107,7 @@ pub trait EngineMessageStreamExt<Engine: PayloadTypes>:
         payload_validator: Validator,
         frequency: usize,
         depth: Option<usize>,
-    ) -> EngineReorg<Self, Engine, Provider, Evm, Validator>
+    ) -> EngineReorg<Self, T, Provider, Evm, Validator>
     where
         Self: Sized,
     {
@@ -132,7 +130,7 @@ pub trait EngineMessageStreamExt<Engine: PayloadTypes>:
         payload_validator: Validator,
         frequency: Option<usize>,
         depth: Option<usize>,
-    ) -> Either<EngineReorg<Self, Engine, Provider, Evm, Validator>, Self>
+    ) -> Either<EngineReorg<Self, T, Provider, Evm, Validator>, Self>
     where
         Self: Sized,
     {
