@@ -333,11 +333,6 @@ mod tests {
         pretty_assertions::assert_eq!(
             *hashed_cursor_factory.inner().visited_account_keys(),
             vec![
-                // Why do we seek account 1 one additional times?
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_1),
-                    visited_key: Some(account_1)
-                },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_1),
                     visited_key: Some(account_1)
