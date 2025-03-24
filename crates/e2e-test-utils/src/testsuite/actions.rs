@@ -224,22 +224,13 @@ where
 }
 
 /// Store payload attributes for the next block.
-#[derive(Debug)]
-pub struct GeneratePayloadAttributes {
-    /// Tracks engine type
-    _phantom: PhantomData<()>,
-}
+#[derive(Debug, Default)]
+pub struct GeneratePayloadAttributes {}
 
 impl GeneratePayloadAttributes {
     /// Create a new `GeneratePayloadAttributes` action
     pub fn new() -> Self {
-        Self { _phantom: Default::default() }
-    }
-}
-
-impl Default for GeneratePayloadAttributes {
-    fn default() -> Self {
-        Self::new()
+        Self {}
     }
 }
 
