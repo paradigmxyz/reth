@@ -19,7 +19,7 @@ mod iavl;
 mod tendermint;
 mod tm_secp256k1;
 
-// Optimism precompile provider
+// BSC precompile provider
 #[derive(Debug, Clone)]
 pub struct BscPrecompiles {
     /// Inner precompile provider is same as Ethereums.
@@ -32,7 +32,7 @@ impl BscPrecompiles {
         Self { inner: EthPrecompiles { precompiles } }
     }
 
-    /// Create a new precompile provider with the given optimismispec.
+    /// Create a new precompile provider with the given bsc spec.
     #[inline]
     pub fn new_with_spec(spec: BscSpecId) -> Self {
         match spec {
