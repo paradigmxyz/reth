@@ -2,16 +2,19 @@ use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 
-/// Implementation of hashed state cursor traits for the post state.
-mod post_state;
-pub use post_state::*;
-
-/// Implementation of noop hashed state cursor.
-pub mod noop;
+/// Implementation of hashed state cursor that caches the underlying accesses.
+pub mod cached;
 
 /// Mock trie cursor implementations.
 #[cfg(test)]
 pub mod mock;
+
+/// Implementation of noop hashed state cursor.
+pub mod noop;
+
+/// Implementation of hashed state cursor traits for the post state.
+mod post_state;
+pub use post_state::*;
 
 /// The factory trait for creating cursors over the hashed state.
 pub trait HashedCursorFactory {
