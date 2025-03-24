@@ -1752,6 +1752,7 @@ checksum = "47c79a94619fade3c0b887670333513a67ac28a6a7e653eb260bf0d4103db38d"
 dependencies = [
  "cc",
  "glob",
+ "serde",
  "threadpool",
  "zeroize",
 ]
@@ -3653,7 +3654,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "example-bsc-p2p"
+name = "example-bsc-sdk"
 version = "0.0.0"
 dependencies = [
  "alloy-primitives",
@@ -6732,6 +6733,7 @@ dependencies = [
  "ecdsa",
  "elliptic-curve",
  "primeorder",
+ "serdect",
  "sha2 0.10.8",
 ]
 
@@ -7228,6 +7230,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
 dependencies = [
  "elliptic-curve",
+ "serdect",
 ]
 
 [[package]]
