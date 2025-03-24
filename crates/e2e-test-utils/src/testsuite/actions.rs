@@ -225,6 +225,37 @@ where
         })
     }
 }
+
+/// Store payload attributes for the next block.
+#[derive(Debug, Default)]
+pub struct GeneratePayloadAttributes {}
+
+impl<Engine> Action<Engine> for GeneratePayloadAttributes
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let latest_block = env
+                .latest_block_info
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+            let block_number = latest_block.number;
+            let timestamp = env.latest_header_time + env.block_timestamp_increment;
+            let payload_attributes = alloy_rpc_types_engine::PayloadAttributes {
+                timestamp,
+                prev_randao: B256::random(),
+                suggested_fee_recipient: alloy_primitives::Address::random(),
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
+            };
+
+            env.payload_attributes.insert(latest_block.number + 1, payload_attributes);
+            debug!("Stored payload attributes for block {}", block_number + 1);
+            Ok(())
+        })
+    }
+}
 /// Action that produces a sequence of blocks using the available clients
 #[derive(Debug)]
 pub struct ProduceBlocks<Engine> {
@@ -254,7 +285,10 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // Create a sequence for producing a single block
-            let mut sequence = Sequence::new(vec![Box::new(PickNextBlockProducer::default())]);
+            let mut sequence = Sequence::new(vec![
+                Box::new(PickNextBlockProducer::default()),
+                Box::new(GeneratePayloadAttributes::default()),
+            ]);
             for _ in 0..self.num_blocks {
                 sequence.execute(env).await?;
             }
