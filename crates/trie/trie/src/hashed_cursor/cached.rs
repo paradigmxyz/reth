@@ -36,7 +36,7 @@ impl<CF> CachedHashedCursorFactory<CF> {
 #[derive(Clone, Debug, Default)]
 pub struct CachedHashedCursorFactoryCache {
     account_cache: Arc<CachedHashedCursorCache<Account>>,
-    storage_cache: Map<Arc<CachedHashedCursorCache<U256>>>,
+    storage_cache: Arc<Map<Arc<CachedHashedCursorCache<U256>>>>,
 }
 
 impl CachedHashedCursorFactoryCache {
