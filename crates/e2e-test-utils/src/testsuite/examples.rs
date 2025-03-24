@@ -5,7 +5,8 @@ use crate::testsuite::{
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
@@ -20,14 +21,28 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
                 .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
-                .cancun_activated()
+                .paris_activated()
                 .build(),
         ))
         .with_network(NetworkSetup::single_node());
 
-    let test = TestBuilder::new()
-        .with_setup(setup)
-        .with_action(AssertMineBlock::<EthEngineTypes>::new(0, vec![], Some(B256::ZERO)));
+    let test =
+        TestBuilder::new().with_setup(setup).with_action(AssertMineBlock::<EthEngineTypes>::new(
+            0,
+            vec![],
+            Some(B256::ZERO),
+            // TODO: refactor once we have actions to generate payload attributes.
+            PayloadAttributes {
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                prev_randao: B256::random(),
+                suggested_fee_recipient: Address::random(),
+                withdrawals: None,
+                parent_beacon_block_root: None,
+            },
+        ));
 
     test.run::<EthereumNode>().await?;
 
