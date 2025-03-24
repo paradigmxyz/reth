@@ -11,7 +11,7 @@ use alloy_consensus::{
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
@@ -29,8 +29,8 @@ Send
 + PartialEq
 + Eq
 + Hash
-+ alloy_rlp::Encodable
-+ alloy_rlp::Decodable
++ Encodable
++ Decodable
 + Encodable2718
 + Decodable2718
 + alloy_consensus::Transaction
