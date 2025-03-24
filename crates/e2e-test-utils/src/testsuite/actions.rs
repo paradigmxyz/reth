@@ -227,13 +227,6 @@ where
 #[derive(Debug, Default)]
 pub struct GeneratePayloadAttributes {}
 
-impl GeneratePayloadAttributes {
-    /// Create a new `GeneratePayloadAttributes` action
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
 impl<Engine> Action<Engine> for GeneratePayloadAttributes
 where
     Engine: EngineTypes,
