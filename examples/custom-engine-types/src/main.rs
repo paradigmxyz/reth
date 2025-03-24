@@ -210,7 +210,7 @@ impl PayloadValidator for CustomEngineValidator {
 
 impl<T> EngineValidator<T> for CustomEngineValidator
 where
-    T: EngineTypes<PayloadAttributes = CustomPayloadAttributes, ExecutionData = ExecutionData>,
+    T: PayloadTypes<PayloadAttributes = CustomPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_version_specific_fields(
         &self,

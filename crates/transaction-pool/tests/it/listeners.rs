@@ -89,3 +89,20 @@ async fn txpool_listener_new_propagate_only() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn txpool_listener_blob_sidecar() {
+    let txpool =
+        TestPoolBuilder::default().with_validator(MockTransactionValidator::no_propagate_local());
+    let mut mock_tx_factory = MockTransactionFactory::default();
+    let blob_transaction = mock_tx_factory.create_eip4844();
+    let expected = *blob_transaction.hash();
+    let mut listener_blob = txpool.blob_transaction_sidecars_listener();
+    let result = txpool
+        .add_transaction(TransactionOrigin::Local, blob_transaction.transaction.clone())
+        .await;
+    assert!(result.is_ok());
+
+    let inserted = listener_blob.recv().await.unwrap();
+    assert_eq!(*inserted.tx_hash, expected);
+}

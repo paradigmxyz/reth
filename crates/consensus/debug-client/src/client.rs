@@ -1,8 +1,8 @@
 use alloy_consensus::Sealable;
 use alloy_primitives::B256;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, EngineApiMessageVersion, EngineTypes,
-    ExecutionPayload, NodePrimitives,
+    BeaconConsensusEngineHandle, BuiltPayload, EngineApiMessageVersion, ExecutionPayload,
+    NodePrimitives, PayloadTypes,
 };
 use reth_primitives_traits::{Block, SealedBlock};
 use reth_tracing::tracing::warn;
@@ -60,14 +60,14 @@ pub trait BlockProvider: Send + Sync + 'static {
 /// Debug consensus client that sends FCUs and new payloads using recent blocks from an external
 /// provider like Etherscan or an RPC endpoint.
 #[derive(Debug)]
-pub struct DebugConsensusClient<P: BlockProvider, T: EngineTypes> {
+pub struct DebugConsensusClient<P: BlockProvider, T: PayloadTypes> {
     /// Handle to execution client.
     engine_handle: BeaconConsensusEngineHandle<T>,
     /// Provider to get consensus blocks from.
     block_provider: P,
 }
 
-impl<P: BlockProvider, T: EngineTypes> DebugConsensusClient<P, T> {
+impl<P: BlockProvider, T: PayloadTypes> DebugConsensusClient<P, T> {
     /// Create a new debug consensus client with the given handle to execution
     /// client and block provider.
     pub const fn new(engine_handle: BeaconConsensusEngineHandle<T>, block_provider: P) -> Self {
@@ -78,7 +78,7 @@ impl<P: BlockProvider, T: EngineTypes> DebugConsensusClient<P, T> {
 impl<P, T> DebugConsensusClient<P, T>
 where
     P: BlockProvider + Clone,
-    T: EngineTypes<BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = P::Block>>>,
+    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = P::Block>>>,
 {
     /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
     /// blocks.
