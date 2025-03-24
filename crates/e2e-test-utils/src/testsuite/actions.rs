@@ -255,10 +255,10 @@ where
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
             let block_number = latest_block.number;
             let timestamp = env.latest_header_time + env.block_timestamp_increment;
-            let payload_attributes = PayloadAttributes {
+            let payload_attributes = alloy_rpc_types_engine::PayloadAttributes {
                 timestamp,
                 prev_randao: B256::random(),
-                suggested_fee_recipient: Address::random(),
+                suggested_fee_recipient: alloy_primitives::Address::random(),
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
             };
