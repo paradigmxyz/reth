@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy_primitives::{map::FbBuildHasher, B256, U256};
-use dashmap::DashMap;
+use dashmap::{DashMap, Entry};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use tracing::debug;
@@ -173,20 +173,24 @@ where
     /// will be cached as well if it differs from the seeked key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, C::Value)>, DatabaseError> {
         self.cache.seeks_total.fetch_add(1, Ordering::Relaxed);
-        let result = if let Some(result) = self.cache.cached_seeks.get(&key) {
-            self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
-            self.seek_cursor = true;
-            *result
-        } else {
-            self.seek_cursor = false;
-            let result = self.cursor.seek(key)?;
-            self.cache.cached_seeks.insert(key, result);
-
-            let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
-            if let Some(actual_seek) = actual_seek {
-                self.cache.cached_seeks.insert(actual_seek, result);
+        let result = match self.cache.cached_seeks.entry(key) {
+            Entry::Occupied(entry) => {
+                self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
+                self.seek_cursor = true;
+                *entry.get()
             }
-            result
+            Entry::Vacant(entry) => {
+                self.seek_cursor = false;
+                let result = self.cursor.seek(key)?;
+                entry.insert(result);
+
+                let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
+                if let Some(actual_seek) = actual_seek {
+                    self.cache.cached_seeks.insert(actual_seek, result);
+                }
+
+                result
+            }
         };
 
         self.last_key = result.as_ref().map(|(k, _)| *k);
@@ -204,21 +208,24 @@ where
         let Some(last_key) = self.last_key else { return Ok(None) };
 
         self.cache.nexts_total.fetch_add(1, Ordering::Relaxed);
-        let result = if let Some(result) = self.cache.cached_nexts.get(&last_key) {
-            self.cache.nexts_hit.fetch_add(1, Ordering::Relaxed);
-            self.seek_cursor = true;
-            *result
-        } else {
-            if self.seek_cursor {
-                self.seek_cursor = false;
-                self.cursor.seek(last_key)?;
+        let result = match self.cache.cached_nexts.entry(last_key) {
+            Entry::Occupied(entry) => {
+                self.cache.nexts_hit.fetch_add(1, Ordering::Relaxed);
+                self.seek_cursor = true;
+                *entry.get()
             }
-            let result = self.cursor.next()?;
-            self.cache.cached_nexts.insert(last_key, result);
-            if let Some((key, value)) = result.as_ref() {
-                self.cache.cached_seeks.insert(*key, Some((*key, *value)));
+            Entry::Vacant(entry) => {
+                if self.seek_cursor {
+                    self.seek_cursor = false;
+                    self.cursor.seek(last_key)?;
+                }
+                let result = self.cursor.next()?;
+                entry.insert(result);
+                if let Some((key, value)) = result.as_ref() {
+                    self.cache.cached_seeks.insert(*key, Some((*key, *value)));
+                }
+                result
             }
-            result
         };
 
         self.last_key = result.as_ref().map(|(k, _)| *k);
