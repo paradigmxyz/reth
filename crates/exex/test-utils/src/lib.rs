@@ -125,14 +125,14 @@ impl NodeTypes for TestNode {
 }
 
 impl NodeTypesWithEngine for TestNode {
-    type Engine = EthEngineTypes;
+    type Payload = EthEngineTypes;
 }
 
 impl<N> Node<N> for TestNode
 where
     N: FullNodeTypes<
         Types: NodeTypesWithEngine<
-            Engine = EthEngineTypes,
+            Payload = EthEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
             Storage = EthStorage,

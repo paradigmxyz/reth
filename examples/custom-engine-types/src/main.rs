@@ -262,7 +262,7 @@ impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
-            Engine = CustomEngineTypes,
+            Payload = CustomEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
         >,
@@ -289,7 +289,7 @@ impl NodeTypes for MyCustomNode {
 
 /// Configure the node types with the custom engine types
 impl NodeTypesWithEngine for MyCustomNode {
-    type Engine = CustomEngineTypes;
+    type Payload = CustomEngineTypes;
 }
 
 /// Custom addons configuring RPC types
@@ -302,7 +302,7 @@ impl<N> Node<N> for MyCustomNode
 where
     N: FullNodeTypes<
         Types: NodeTypesWithEngine<
-            Engine = CustomEngineTypes,
+            Payload = CustomEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
             Storage = EthStorage,
@@ -345,7 +345,7 @@ impl<Node, Pool> PayloadBuilderBuilder<Node, Pool> for CustomPayloadBuilderBuild
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<
-            Engine = CustomEngineTypes,
+            Payload = CustomEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
         >,

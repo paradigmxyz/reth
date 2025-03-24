@@ -44,7 +44,7 @@ pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
     N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider + NodeTypesWithEngine,
@@ -54,7 +54,7 @@ where
     >,
     N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        <<N as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadAttributes,
     >,
 {
     let tasks = TaskManager::current();
@@ -108,7 +108,7 @@ pub async fn setup_engine<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
     TaskManager,
@@ -117,7 +117,7 @@ pub async fn setup_engine<N>(
 where
     N: NodeBuilderHelper,
     LocalPayloadAttributesBuilder<N::ChainSpec>:
-        PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
+        PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -208,7 +208,7 @@ where
     Self: Default
         + NodeTypesForProvider
         + NodeTypesWithEngine<
-            Engine: PayloadTypes<
+            Payload: PayloadTypes<
                 PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
             >,
         > + Node<
@@ -234,7 +234,7 @@ where
             ChainSpec: From<ChainSpec> + Clone,
         >,
     LocalPayloadAttributesBuilder<Self::ChainSpec>:
-        PayloadAttributesBuilder<<Self::Engine as PayloadTypes>::PayloadAttributes>,
+        PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes>,
 {
 }
 
@@ -243,7 +243,7 @@ where
     Self: Default
         + NodeTypesForProvider
         + NodeTypesWithEngine<
-            Engine: PayloadTypes<
+            Payload: PayloadTypes<
                 PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
             >,
         > + Node<
@@ -269,6 +269,6 @@ where
             ChainSpec: From<ChainSpec> + Clone,
         >,
     LocalPayloadAttributesBuilder<Self::ChainSpec>:
-        PayloadAttributesBuilder<<Self::Engine as PayloadTypes>::PayloadAttributes>,
+        PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes>,
 {
 }

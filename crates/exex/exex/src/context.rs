@@ -105,7 +105,7 @@ where
     /// Returns the handle to the payload builder service.
     pub fn payload_builder_handle(
         &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload> {
         self.components.payload_builder_handle()
     }
 
