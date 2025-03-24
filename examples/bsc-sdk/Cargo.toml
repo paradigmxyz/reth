@@ -1,5 +1,5 @@
 [package]
-name = "example-bsc-p2p"
+name = "example-bsc-sdk"
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -72,12 +72,17 @@ p256 = { version = "0.13.2", optional = true, default-features = false, features
 reth-node-ethereum.workspace = true
 
 [features]
-default = ["c-kzg", "secp256k1", "blst"]
+default = ["c-kzg", "secp256k1", "blst", "secp256r1"]
 c-kzg = ["dep:c-kzg"]
+kzg-rs = ["dep:kzg-rs"]
+secp256k1 = ["dep:secp256k1"]
 secp256r1 = ["dep:p256"]
 serde = [
     "dep:serde",
     "alloy-primitives/serde",
+    "blst/serde",
+    "c-kzg/serde",
+    "p256/serde",
     "reth-eth-wire/serde",
     "reth-eth-wire-types/serde",
     "reth-ethereum-forks/serde",
@@ -88,5 +93,4 @@ serde = [
     "reth-network/serde",
     "reth-network-api/serde",
 ]
-# See comments in `revm-precompile`
-secp256k1 = ["revm/secp256k1"]
+

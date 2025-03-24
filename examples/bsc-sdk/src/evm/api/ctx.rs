@@ -6,7 +6,7 @@ use revm::{
 
 use crate::evm::{spec::BscSpecId, transaction::BscTransaction};
 
-/// Type alias for the default context type of the OpEvm.
+/// Type alias for the default context type of the BscEvm.
 pub type BscContext<DB> =
     Context<BlockEnv, BscTransaction<TxEnv>, CfgEnv<BscSpecId>, DB, Journal<DB>>;
 
