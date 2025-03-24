@@ -247,6 +247,7 @@ where
         let mut storages: B256Map<_> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+
         let mut account_node_iter = TrieNodeIter::new(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
@@ -271,8 +272,9 @@ where
                             hashed_cursor_cache.extend(cache);
                             storage_multiproof
                         }
-                        // Since we do not store all intermediate nodes in the database, there might
-                        // be a possibility of re-adding a non-modified leaf to the hash builder.
+                        // Since we do not store all intermediate nodes in the database, there
+                        // might be a possibility of re-adding a
+                        // non-modified leaf to the hash builder.
                         None => {
                             tracker.inc_missed_leaves();
                             StorageProof::new_hashed(
@@ -316,6 +318,8 @@ where
         }
         let _ = hash_builder.root();
 
+        drop(account_node_iter);
+
         let stats = tracker.finish();
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
@@ -350,6 +354,11 @@ where
 
         hashed_cursor_cache
             .extend(hashed_cursor_factory.take_cache_changes(hashed_cursor_cache_changes_rx));
+        debug!(
+            target: "trie::parallel_proof",
+            size = hashed_cursor_cache.len(),
+            "Extended hashed cursor cache"
+        );
 
         Ok((
             MultiProof {

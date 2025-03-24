@@ -56,6 +56,11 @@ pub struct CachedHashedCursorFactoryCache {
 }
 
 impl CachedHashedCursorFactoryCache {
+    pub fn len(&self) -> usize {
+        self.account_cache.len() +
+            self.storage_cache.values().map(|cache| cache.len()).sum::<usize>()
+    }
+
     pub fn extend(&mut self, other: Self) {
         self.account_cache.extend(other.account_cache);
         for (hashed_address, cache) in other.storage_cache {
@@ -84,6 +89,10 @@ pub struct CachedHashedCursorCache<T> {
 }
 
 impl<T> CachedHashedCursorCache<T> {
+    fn len(&self) -> usize {
+        self.cached_seeks.len() + self.cached_nexts.len() + self.is_storage_empty.is_some() as usize
+    }
+
     fn extend(&mut self, other: Self) {
         self.cached_seeks.extend(other.cached_seeks);
         self.cached_nexts.extend(other.cached_nexts);
