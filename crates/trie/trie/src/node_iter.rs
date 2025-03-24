@@ -169,8 +169,8 @@ mod tests {
 
     use crate::{
         hashed_cursor::{
-            mock::MockHashedCursorFactory, noop::NoopHashedAccountCursor, HashedCursorFactory,
-            HashedPostStateAccountCursor,
+            cached::CachedHashedCursorFactory, mock::MockHashedCursorFactory,
+            noop::NoopHashedAccountCursor, HashedCursorFactory, HashedPostStateAccountCursor,
         },
         mock::{KeyVisit, KeyVisitType},
         trie_cursor::{
@@ -322,7 +322,7 @@ mod tests {
         let walker =
             TrieWalker::new(trie_cursor_factory.account_trie_cursor().unwrap(), prefix_set);
 
-        let hashed_cursor_factory = MockHashedCursorFactory::new(
+        let hashed_cursor_factory = CachedHashedCursorFactory::new(MockHashedCursorFactory::new(
             BTreeMap::from([
                 (account_1, empty_account),
                 (account_2, empty_account),
@@ -331,7 +331,7 @@ mod tests {
                 (account_5, empty_account),
             ]),
             B256Map::default(),
-        );
+        ));
 
         let mut iter =
             TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
@@ -361,7 +361,7 @@ mod tests {
             ]
         );
         pretty_assertions::assert_eq!(
-            *hashed_cursor_factory.visited_account_keys(),
+            *hashed_cursor_factory.inner().visited_account_keys(),
             vec![
                 // Why do we always seek this key first?
                 KeyVisit {
@@ -373,24 +373,9 @@ mod tests {
                     visit_type: KeyVisitType::SeekNonExact(account_3),
                     visited_key: Some(account_3)
                 },
-                // Why do we seek the modified account two more times?
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
                 // Collect the siblings of the modified account
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                // We seek the account 5 because its hash is not in the branch node, but we already
-                // walked it before, so there should be no need for it.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_5),
-                    visited_key: Some(account_5)
-                },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
             ],
         );
