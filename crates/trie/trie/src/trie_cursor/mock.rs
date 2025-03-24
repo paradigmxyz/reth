@@ -123,11 +123,9 @@ impl TrieCursor for MockTrieCursor {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        // Find the first key that has a prefix of the given key.
-        let entry = self
-            .trie_nodes
-            .iter()
-            .find_map(|(k, v)| k.starts_with(&key).then(|| (k.clone(), v.clone())));
+        // Find the first key that is greater than or equal to the given key.
+        let entry =
+            self.trie_nodes.iter().find_map(|(k, v)| (k >= &key).then(|| (k.clone(), v.clone())));
         if let Some((key, _)) = &entry {
             self.current_key = Some(key.clone());
         }
