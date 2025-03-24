@@ -254,21 +254,17 @@ mod tests {
         //     ├── 0 -> Branch (`child_branch_node`)
         //     │      ├── 1 -> Leaf (account_1, marked as changed)
         //     │      └── 2 -> Leaf (account_2)
-        //     ├── 1 -> Branch (`child_branch_node`)
-        //     │      ├── 1 -> Leaf (account_3)
-        //     │      └── 2 -> Leaf (account_4)
+        //     ├── 1 -> Leaf (`account_3`)
 
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
         let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000002");
-        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000011");
-        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000012");
+        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000010");
         let empty_account = Account::default();
 
         let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
             (Nibbles::unpack(account_1), empty_account),
             (Nibbles::unpack(account_2), empty_account),
             (Nibbles::unpack(account_3), empty_account),
-            (Nibbles::unpack(account_4), empty_account),
         ]);
 
         let empty_leaf_rlp = RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
@@ -285,15 +281,12 @@ mod tests {
             Nibbles::from_nibbles([0; 62]),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
-                // Tree mask has no bits set, because both child branch nodes have empty tree and
+                // Tree mask has no bits set, because the child branch node has empty tree and
                 // hash masks.
                 TrieMask::new(0b00),
-                // Hash mask bits are set, because both child nodes are branches.
-                TrieMask::new(0b11),
-                vec![
-                    child_branch_node_rlp.as_hash().unwrap(),
-                    child_branch_node_rlp.as_hash().unwrap(),
-                ],
+                // Only one hash mask bit is set, because only one child node is a branch node.
+                TrieMask::new(0b01),
+                vec![child_branch_node_rlp.as_hash().unwrap()],
                 None,
             ),
         );
@@ -310,7 +303,6 @@ mod tests {
                 (account_1, BTreeMap::default()),
                 (account_2, BTreeMap::default()),
                 (account_3, BTreeMap::default()),
-                (account_4, BTreeMap::default()),
             ]),
         );
 
@@ -327,13 +319,11 @@ mod tests {
                 (account_1, empty_account),
                 (account_2, empty_account),
                 (account_3, empty_account),
-                (account_4, empty_account),
             ]),
             B256Map::from_iter([
                 (account_1, BTreeMap::default()),
                 (account_2, BTreeMap::default()),
                 (account_3, BTreeMap::default()),
-                (account_4, BTreeMap::default()),
             ]),
         );
 
@@ -343,6 +333,7 @@ mod tests {
         // Walk the iterator until it's exhausted.
         while iter.try_next().unwrap().is_some() {}
 
+        // Why do we not visit the target leaf node here?
         pretty_assertions::assert_eq!(
             *trie_cursor_factory.visited_account_keys(),
             vec![
@@ -377,10 +368,11 @@ mod tests {
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(b256!(
-                        "0x0000000000000000000000000000000000000000000000000000000000000020"
+                        "0x0000000000000000000000000000000000000000000000000000000000000010"
                     )),
-                    visited_key: None
+                    visited_key: Some(account_3)
                 },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
             ],
         );
     }
