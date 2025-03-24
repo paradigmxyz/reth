@@ -33,7 +33,7 @@ use std::{
     future::Future,
     iter::StepBy,
     ops::RangeInclusive,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
 use tokio::{
@@ -54,7 +54,9 @@ where
         limits: QueryLimits,
     ) -> impl Future<Output = RpcResult<Vec<Log>>> + Send {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        self.inner.logs_for_filter(filter, limits).map_err(|e| e.into())
+        self.inner
+            .logs_for_filter(filter, limits, Arc::new(RwLock::new(HashMap::new())))
+            .map_err(|e| e.into())
     }
 }
 
@@ -221,6 +223,7 @@ where
                             for block_number in from..=to {
                                 if let Some(block) = old_blocks.get(&block_number) {
                                     let block_hash = block.hash();
+                                    // lazy calculate Vec<Log>
                                     active_filter.reorg_logs.write().entry(block_hash).or_default();
                                 }
                             }
@@ -256,11 +259,11 @@ where
 
         // start_block is the block from which we should start fetching changes, the next block from
         // the last time changes were polled, in other words the best block at last poll + 1
-        let (start_block, kind) = {
+        let (start_block, kind, reorg_logs) = {
             let mut filters = self.inner.active_filters.inner.lock().await;
-            let filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
+            let active_filter = filters.get_mut(&id).ok_or(EthFilterError::FilterNotFound(id))?;
 
-            if filter.block > best_number {
+            if active_filter.block > best_number {
                 // no new blocks since the last poll
                 return Ok(FilterChanges::Empty)
             }
@@ -269,10 +272,18 @@ where
             // we fetch all changes from [filter.block..best_block], so we advance the filter's
             // block to `best_block +1`, the next from which we should start fetching changes again
             let mut block = best_number + 1;
-            std::mem::swap(&mut filter.block, &mut block);
-            filter.last_poll_timestamp = Instant::now();
+            std::mem::swap(&mut active_filter.block, &mut block);
+            active_filter.last_poll_timestamp = Instant::now();
 
-            (block, filter.kind.clone())
+            // calc active_filter reorg_logs
+            if let FilterKind::Log(filter) = &active_filter.kind {
+                if !active_filter.reorg_calc.load(std::sync::atomic::Ordering::Relaxed) {
+                    let filter = *filter.clone();
+                    self.calc_reorg_logs(active_filter, &filter).await?;
+                }
+            }
+
+            (block, active_filter.kind.clone(), active_filter.reorg_logs.clone())
         };
 
         match kind {
@@ -315,6 +326,7 @@ where
                         to_block_number,
                         info,
                         self.inner.query_limits,
+                        reorg_logs,
                     )
                     .await?;
                 Ok(FilterChanges::Logs(logs))
@@ -330,6 +342,7 @@ where
     pub async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>, EthFilterError> {
         let filter = {
             let filters = self.inner.active_filters.inner.lock().await;
+            // XXX calc reorg logs
             if let FilterKind::Log(ref filter) =
                 filters.get(&id).ok_or_else(|| EthFilterError::FilterNotFound(id.clone()))?.kind
             {
@@ -339,8 +352,39 @@ where
                 return Err(EthFilterError::FilterNotFound(id))
             }
         };
+        // XXX FIXME YSG
 
-        self.inner.logs_for_filter(filter, self.inner.query_limits).await
+        self.inner
+            .logs_for_filter(filter, self.inner.query_limits, Arc::new(RwLock::new(HashMap::new())))
+            .await
+    }
+
+    /// calc active filter reorg logs
+    async fn calc_reorg_logs<T>(
+        &self,
+        active_filter: &mut ActiveFilter<T>,
+        filter: &Filter,
+    ) -> Result<(), EthFilterError> {
+        // XXX FIXME YSG use all block, number
+        let ids: Vec<u64> = vec![];
+        let info = self.provider().chain_info()?;
+        for block_number in ids {
+            // XXX FIXME YSG, Arc::new(RwLock::new(HashMap::new())) use lazy
+            let _logs = self
+                .inner
+                .get_logs_in_block_range(
+                    filter,
+                    block_number,
+                    block_number,
+                    info,
+                    QueryLimits::no_limits(),
+                    Arc::new(RwLock::new(HashMap::new())),
+                )
+                .await?;
+        }
+        active_filter.reorg_calc.store(true, std::sync::atomic::Ordering::Relaxed);
+        // active_filter.reorg_logs.write().entry(block_number)
+        Ok(())
     }
 }
 
@@ -430,7 +474,10 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        Ok(self.inner.logs_for_filter(filter, self.inner.query_limits).await?)
+        Ok(self
+            .inner
+            .logs_for_filter(filter, self.inner.query_limits, Arc::new(RwLock::new(HashMap::new())))
+            .await?)
     }
 }
 
@@ -483,6 +530,7 @@ where
         &self,
         filter: Filter,
         limits: QueryLimits,
+        reorg_logs: Arc<RwLock<HashMap<BlockHash, Vec<Log>>>>,
     ) -> Result<Vec<Log>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
@@ -542,6 +590,7 @@ where
                     to_block_number,
                     info,
                     limits,
+                    reorg_logs,
                 )
                 .await
             }
@@ -563,16 +612,22 @@ where
                 last_poll_timestamp: Instant::now(),
                 kind,
                 reorg_logs: Arc::new(RwLock::new(HashMap::new())),
+                // reorg_numbers: HashMap::new(),
+                reorg_calc: AtomicBool::new(false),
             },
         );
         Ok(id)
     }
 
+    /// if [`from_block`, `to_block`] = [1 .. 5], but only [3..5] reorg,
+    /// it means [1,2] we need calc, [3..5] we can match from reorg logs
+    /// if reorg logs is empty, we calculate Vec<Log>
     /// Returns all logs in the given _inclusive_ range that match the filter
     ///
     /// Returns an error if:
     ///  - underlying database error
     ///  - amount of matches exceeds configured limit
+    ///  - reorg logs
     async fn get_logs_in_block_range(
         &self,
         filter: &Filter,
@@ -580,6 +635,7 @@ where
         to_block: u64,
         chain_info: ChainInfo,
         limits: QueryLimits,
+        _reorg_logs: Arc<RwLock<HashMap<BlockHash, Vec<Log>>>>,
     ) -> Result<Vec<Log>, EthFilterError> {
         trace!(target: "rpc::eth::filter", from=from_block, to=to_block, ?filter, "finding logs in range");
 
@@ -707,7 +763,13 @@ struct ActiveFilter<T> {
     /// What kind of filter it is.
     kind: FilterKind<T>,
     /// Reorg logs that are relevant to this filter
+    /// FIXME XXX YSG, remove Arc
     reorg_logs: Arc<RwLock<HashMap<BlockHash, Vec<Log>>>>,
+    // Reorg block number
+    //reorg_numbers: HashMap<BlockNumber, BlockHash>,
+    /// Reorg calculated
+    #[allow(dead_code)]
+    reorg_calc: AtomicBool,
 }
 
 /// A receiver for pending transactions that returns all new transactions since the last poll.
