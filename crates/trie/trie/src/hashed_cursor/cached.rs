@@ -69,7 +69,21 @@ impl CachedHashedCursorFactoryCache {
             storage_seeks_total,
             storage_nexts_hit,
             storage_nexts_total,
-            "CachedHashedCursorFactoryCache stats"
+            "CachedHashedCursorFactoryCache raw stats"
+        );
+
+        let account_seeks_hitrate = account_seeks_hit as f64 / account_seeks_total as f64;
+        let account_nexts_hitrate = account_nexts_hit as f64 / account_nexts_total as f64;
+        let storage_seeks_hitrate = storage_seeks_hit as f64 / storage_seeks_total as f64;
+        let storage_nexts_hitrate = storage_nexts_hit as f64 / storage_nexts_total as f64;
+
+        debug!(
+            target: "trie::hashed_cursor::cached",
+            account_seeks_hitrate,
+            account_nexts_hitrate,
+            storage_seeks_hitrate,
+            storage_nexts_hitrate,
+            "CachedHashedCursorFactoryCache hitrates"
         );
     }
 }
