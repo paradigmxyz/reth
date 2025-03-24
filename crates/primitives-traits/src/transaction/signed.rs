@@ -5,12 +5,15 @@ use crate::{
     InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat,
 };
 use alloc::{fmt, vec::Vec};
+#[allow(unused_imports)]
 use alloy_consensus::{
-    transaction::{PooledTransaction, Recovered},
-    SignableTransaction,
+    transaction::{PooledTransaction, Recovered, RlpEcdsaEncodableTx},
+    EthereumTxEnvelope, SignableTransaction,
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
+#[allow(unused_imports)]
+use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
@@ -136,17 +139,63 @@ pub trait SignedTransaction:
     }
 }
 
+impl<T> SignedTransaction for EthereumTxEnvelope<T>
+where
+    T: RlpEcdsaEncodableTx + SignableTransaction<Signature> + Unpin,
+    Self: Clone + PartialEq + Eq + Decodable + Decodable2718 + MaybeSerde + InMemorySize,
+{
+    fn tx_hash(&self) -> &TxHash {
+        match self {
+            Self::Legacy(tx) => tx.hash(),
+            Self::Eip2930(tx) => tx.hash(),
+            Self::Eip1559(tx) => tx.hash(),
+            Self::Eip4844(tx) => tx.hash(),
+            Self::Eip7702(tx) => tx.hash(),
+        }
+    }
+
+    fn signature(&self) -> &Signature {
+        match self {
+            Self::Legacy(tx) => tx.signature(),
+            Self::Eip2930(tx) => tx.signature(),
+            Self::Eip1559(tx) => tx.signature(),
+            Self::Eip4844(tx) => tx.signature(),
+            Self::Eip7702(tx) => tx.signature(),
+        }
+    }
+
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
+        let signature_hash = self.signature_hash();
+        recover_signer(self.signature(), signature_hash)
+    }
+
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
+        match self {
+            Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
+            Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
+            Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
+            Self::Eip4844(tx) => tx.tx().encode_for_signing(buf),
+            Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
+        }
+        let signature_hash = keccak256(buf);
+        recover_signer_unchecked(self.signature(), signature_hash)
+    }
+}
+
 #[cfg(feature = "op")]
 mod op {
-    use crate::{
-        crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-        transaction::signed::{keccak256, Address, RecoveryError, Signature, TxHash, B256},
-        SignedTransaction,
+    use super::*;
+    use crate::transaction::signed::{
+        recover_signer, recover_signer_unchecked, RecoveryError, SignedTransaction,
     };
     use alloc::vec::Vec;
-    use alloy_consensus::SignableTransaction;
+    use alloy_primitives::{keccak256, Address, TxHash};
+    use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 
-    impl SignedTransaction for op_alloy_consensus::OpPooledTransaction {
+    impl SignedTransaction for OpPooledTransaction {
         fn tx_hash(&self) -> &TxHash {
             match self {
                 Self::Legacy(tx) => tx.hash(),
@@ -185,7 +234,7 @@ mod op {
         }
     }
 
-    impl SignedTransaction for op_alloy_consensus::OpTxEnvelope {
+    impl SignedTransaction for OpTxEnvelope {
         fn tx_hash(&self) -> &TxHash {
             match self {
                 Self::Legacy(tx) => tx.hash(),
@@ -195,7 +244,6 @@ mod op {
                 Self::Deposit(tx) => Box::leak(Box::new(tx.hash())),
             }
         }
-
 
         fn signature(&self) -> &Signature {
             match self {
@@ -216,11 +264,11 @@ mod op {
                 Self::Eip7702(tx) => tx.tx().encode_for_signing(&mut buf),
                 Self::Deposit(_) => return Err(RecoveryError),
             }
-            
+
             let signature_hash = keccak256(&buf);
             recover_signer(self.signature(), signature_hash)
         }
-        
+
         fn recover_signer_unchecked_with_buf(
             &self,
             buf: &mut Vec<u8>,
