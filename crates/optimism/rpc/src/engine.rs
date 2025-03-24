@@ -9,7 +9,9 @@ use alloy_rpc_types_engine::{
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
-use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayloadV4};
+use op_alloy_rpc_types_engine::{
+    OpExecutionData, OpExecutionPayloadV4, ProtocolVersion, SuperchainSignal,
+};
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, EngineValidator};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
@@ -34,6 +36,7 @@ pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
     "engine_newPayloadV4",
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByRangeV1",
+    "engine_signalSuperchainV1",
 ];
 
 /// Extension trait that gives access to Optimism engine API RPC methods.
@@ -194,6 +197,12 @@ pub trait OpEngineApi<Engine: EngineTypes> {
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
+    /// Signals superchain information to the Engine.
+    /// Returns the latest supported OP-Stack protocol version of the execution engine.
+    /// See also <https://specs.optimism.io/protocol/exec-engine.html#engine_signalsuperchainv1>
+    #[method(name = "engine_signalSuperchainV1")]
+    async fn signal_superchain_v1(&self, _signal: SuperchainSignal) -> RpcResult<ProtocolVersion>;
+
     /// Returns the execution client version information.
     ///
     /// Note:
@@ -335,6 +344,11 @@ where
 
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
         Ok(self.inner.capabilities().list())
+    }
+
+    async fn signal_superchain_v1(&self, _signal: SuperchainSignal) -> RpcResult<ProtocolVersion> {
+        trace!(target: "rpc::engine", "Serving signal_superchain_v1");
+        unimplemented!("signal superchain v1 is not supported yet")
     }
 }
 

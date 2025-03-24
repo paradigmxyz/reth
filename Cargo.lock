@@ -407,7 +407,7 @@ dependencies = [
  "alloy-op-hardforks",
  "alloy-primitives",
  "auto_impl",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-revm",
  "revm",
 ]
@@ -5788,6 +5788,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "op-alloy-consensus"
+version = "0.11.2"
+source = "git+https://github.com/lean-apple/op-alloy?branch=add-superchain#33c056f860cc01bf7534d2c232b349328873ab09"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde",
+ "derive_more 2.0.1",
+ "serde",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "op-alloy-flz"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5804,7 +5819,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-signer",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-rpc-types",
 ]
 
@@ -5831,7 +5846,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-serde",
  "derive_more 1.0.0",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "serde_json",
 ]
@@ -5839,8 +5854,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types-engine"
 version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b59251cd112cb10792a041ea68d9423391e0e9e3576605ee52800890fdaa483c"
+source = "git+https://github.com/lean-apple/op-alloy?branch=add-superchain#33c056f860cc01bf7534d2c232b349328873ab09"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -5848,9 +5862,9 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-serde",
  "arbitrary",
- "derive_more 1.0.0",
+ "derive_more 2.0.1",
  "ethereum_ssz",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (git+https://github.com/lean-apple/op-alloy?branch=add-superchain)",
  "serde",
  "snap",
  "thiserror 2.0.12",
@@ -6943,7 +6957,7 @@ dependencies = [
  "eyre",
  "futures",
  "humantime",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "reqwest",
  "reth-cli-runner",
  "reth-cli-util",
@@ -7131,7 +7145,7 @@ dependencies = [
  "arbitrary",
  "bytes",
  "modular-bitfield",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-codecs-derive",
@@ -8665,7 +8679,7 @@ dependencies = [
  "alloy-primitives",
  "derive_more 2.0.1",
  "once_cell",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-rpc-types",
  "reth-chainspec",
  "reth-ethereum-forks",
@@ -8689,7 +8703,7 @@ dependencies = [
  "derive_more 2.0.1",
  "eyre",
  "futures-util",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "proptest",
  "reth-chainspec",
  "reth-cli",
@@ -8734,7 +8748,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-trie",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
@@ -8767,7 +8781,7 @@ dependencies = [
  "alloy-op-evm",
  "alloy-primitives",
  "derive_more 2.0.1",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-revm",
  "reth-chainspec",
  "reth-consensus",
@@ -8814,7 +8828,7 @@ dependencies = [
  "clap",
  "eyre",
  "futures",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-rpc-types-engine",
  "op-revm",
  "reth-chainspec",
@@ -8869,7 +8883,7 @@ dependencies = [
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "derive_more 2.0.1",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-rpc-types-engine",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -8912,7 +8926,7 @@ dependencies = [
  "bytes",
  "derive_more 2.0.1",
  "modular-bitfield",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-revm",
  "proptest",
  "proptest-arbitrary-interop",
@@ -8943,7 +8957,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-network",
  "op-alloy-rpc-jsonrpsee",
  "op-alloy-rpc-types",
@@ -9011,7 +9025,7 @@ dependencies = [
  "derive_more 2.0.1",
  "futures-util",
  "metrics",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "op-alloy-flz",
  "op-revm",
  "parking_lot",
@@ -9139,7 +9153,7 @@ dependencies = [
  "k256",
  "modular-bitfield",
  "once_cell",
- "op-alloy-consensus",
+ "op-alloy-consensus 0.11.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
