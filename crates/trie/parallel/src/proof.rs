@@ -272,15 +272,7 @@ where
                             tracker.inc_missed_leaves();
                             StorageProof::new_hashed(
                                 trie_cursor_factory.clone(),
-                                hashed_cursor_factory
-                                    .hashed_storage_cursor(hashed_address)
-                                    .map_err(|e| {
-                                        ParallelStateRootError::StorageRoot(
-                                            StorageRootError::Database(DatabaseError::Other(
-                                                e.to_string(),
-                                            )),
-                                        )
-                                    })?,
+                                hashed_cursor_factory.clone(),
                                 hashed_address,
                             )
                             .with_prefix_set_mut(Default::default())

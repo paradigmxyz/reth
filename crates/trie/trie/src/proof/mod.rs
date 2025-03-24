@@ -9,7 +9,7 @@ use crate::{
 use alloy_primitives::{
     keccak256,
     map::{B256Map, B256Set, HashMap, HashSet},
-    Address, B256, U256,
+    Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
@@ -140,7 +140,7 @@ where
                         .unwrap_or_default();
                     let storage_multiproof = StorageProof::new_hashed(
                         self.trie_cursor_factory.clone(),
-                        self.hashed_cursor_factory.hashed_storage_cursor(hashed_address)?,
+                        self.hashed_cursor_factory.clone(),
                         hashed_address,
                     )
                     .with_prefix_set_mut(storage_prefix_set)
@@ -189,7 +189,8 @@ where
 pub struct StorageProof<T, H> {
     /// The factory for traversing trie nodes.
     trie_cursor_factory: T,
-    hashed_cursor: H,
+    /// The factory for hashed cursors.
+    hashed_cursor_factory: H,
     /// The hashed address of an account.
     hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
@@ -208,7 +209,7 @@ impl<T, H> StorageProof<T, H> {
     pub fn new_hashed(t: T, h: H, hashed_address: B256) -> Self {
         Self {
             trie_cursor_factory: t,
-            hashed_cursor: h,
+            hashed_cursor_factory: h,
             hashed_address,
             prefix_set: PrefixSetMut::default(),
             collect_branch_node_masks: false,
@@ -219,18 +220,18 @@ impl<T, H> StorageProof<T, H> {
     pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageProof<TF, H> {
         StorageProof {
             trie_cursor_factory,
-            hashed_cursor: self.hashed_cursor,
+            hashed_cursor_factory: self.hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
         }
     }
 
-    /// Set the hashed cursor.
-    pub fn with_hashed_cursor<HF>(self, hashed_cursor: HF) -> StorageProof<T, HF> {
+    /// Set the hashed cursor factory.
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StorageProof<T, HF> {
         StorageProof {
             trie_cursor_factory: self.trie_cursor_factory,
-            hashed_cursor,
+            hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
@@ -253,7 +254,7 @@ impl<T, H> StorageProof<T, H> {
 impl<T, H> StorageProof<T, H>
 where
     T: TrieCursorFactory,
-    H: HashedStorageCursor<Value = U256>,
+    H: HashedCursorFactory,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn storage_proof(
@@ -269,8 +270,11 @@ where
         mut self,
         targets: B256Set,
     ) -> Result<StorageMultiProof, StateProofError> {
+        let mut hashed_storage_cursor =
+            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
+
         // short circuit on empty storage
-        if self.hashed_cursor.is_storage_empty()? {
+        if hashed_storage_cursor.is_storage_empty()? {
             return Ok(StorageMultiProof::empty())
         }
 
@@ -284,7 +288,7 @@ where
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
-        let mut storage_node_iter = TrieNodeIter::new(walker, self.hashed_cursor);
+        let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {

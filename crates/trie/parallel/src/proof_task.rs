@@ -19,7 +19,7 @@ use reth_provider::{
 use reth_trie::{
     hashed_cursor::{
         cached::{CachedHashedCursorFactory, CachedHashedCursorFactoryCache},
-        HashedCursorFactory, HashedPostStateCursorFactory,
+        HashedPostStateCursorFactory,
     },
     prefix_set::TriePrefixSetsMut,
     proof::{ProofBlindedProviderFactory, StorageProof},
@@ -252,32 +252,17 @@ where
         let (trie_cursor_factory, hashed_cursor_factory) =
             self.create_factories(input.hashed_cursor_cache);
 
-        let hashed_cursor = match hashed_cursor_factory
-            .hashed_storage_cursor(input.hashed_address)
-            .map_err(|e| ParallelStateRootError::Other(e.to_string()))
-        {
-            Ok(hashed_cursor) => hashed_cursor,
-            Err(err) => {
-                if let Err(err) = result_sender.send(Err(err)) {
-                    tracing::error!(
-                        target: "trie::proof_task",
-                        hashed_address = ?input.hashed_address,
-                        ?err,
-                        "Failed to send proof result"
-                    );
-                }
-                return;
-            }
-        };
-
         let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
-        let result =
-            StorageProof::new_hashed(trie_cursor_factory, hashed_cursor, input.hashed_address)
-                .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().cloned()))
-                .with_branch_node_masks(input.with_branch_node_masks)
-                .storage_multiproof(input.target_slots)
-                .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+        let result = StorageProof::new_hashed(
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            input.hashed_address,
+        )
+        .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().cloned()))
+        .with_branch_node_masks(input.with_branch_node_masks)
+        .storage_multiproof(input.target_slots)
+        .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
         debug!(
             target: "trie::proof_task",
