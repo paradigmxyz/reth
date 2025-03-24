@@ -9,7 +9,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use futures::Stream;
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
+use reth_engine_primitives::BeaconEngineMessage;
+use reth_payload_primitives::PayloadTypes;
 use std::path::PathBuf;
 use tokio_util::either::Either;
 
@@ -26,9 +27,7 @@ pub mod reorg;
 use reorg::EngineReorg;
 
 /// The collection of stream extensions for engine API message stream.
-pub trait EngineMessageStreamExt<Engine: EngineTypes>:
-    Stream<Item = BeaconEngineMessage<Engine>>
-{
+pub trait EngineMessageStreamExt<T: PayloadTypes>: Stream<Item = BeaconEngineMessage<T>> {
     /// Skips the specified number of [`BeaconEngineMessage::ForkchoiceUpdated`] messages from the
     /// engine message stream.
     fn skip_fcu(self, count: usize) -> EngineSkipFcu<Self>
@@ -108,7 +107,7 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
         payload_validator: Validator,
         frequency: usize,
         depth: Option<usize>,
-    ) -> EngineReorg<Self, Engine, Provider, Evm, Validator>
+    ) -> EngineReorg<Self, T, Provider, Evm, Validator>
     where
         Self: Sized,
     {
@@ -131,7 +130,7 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
         payload_validator: Validator,
         frequency: Option<usize>,
         depth: Option<usize>,
-    ) -> Either<EngineReorg<Self, Engine, Provider, Evm, Validator>, Self>
+    ) -> Either<EngineReorg<Self, T, Provider, Evm, Validator>, Self>
     where
         Self: Sized,
     {
@@ -150,9 +149,9 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     }
 }
 
-impl<Engine, T> EngineMessageStreamExt<Engine> for T
+impl<T, S> EngineMessageStreamExt<T> for S
 where
-    Engine: EngineTypes,
-    T: Stream<Item = BeaconEngineMessage<Engine>>,
+    T: PayloadTypes,
+    S: Stream<Item = BeaconEngineMessage<T>>,
 {
 }

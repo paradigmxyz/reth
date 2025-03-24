@@ -22,7 +22,7 @@ use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes, EngineVal
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload,
-    PayloadBuilderAttributes, PayloadOrAttributes,
+    PayloadBuilderAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
@@ -55,19 +55,19 @@ const MAX_BLOB_LIMIT: usize = 128;
 /// Implementing support for an engine API jsonrpsee RPC handler is done by defining the engine API
 /// server trait and implementing it on a type that can wrap this [`EngineApi`] type.
 /// See also [`EngineApiServer`] implementation for this type which is the L1 implementation.
-pub struct EngineApi<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
-    inner: Arc<EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>>,
+pub struct EngineApi<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec> {
+    inner: Arc<EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>>,
 }
 
-struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
+struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec> {
     /// The provider to interact with the chain.
     provider: Provider,
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
-    beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
+    beacon_consensus: BeaconConsensusEngineHandle<PayloadT>,
     /// The type that can communicate with the payload service to retrieve payloads.
-    payload_store: PayloadStore<EngineT>,
+    payload_store: PayloadStore<PayloadT>,
     /// For spawning and executing async tasks
     task_spawner: Box<dyn TaskSpawner>,
     /// The latency and response type metrics for engine api calls
@@ -865,10 +865,10 @@ where
     }
 }
 
-impl<Provider, EngineT, Pool, Validator, ChainSpec>
-    EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>
+impl<Provider, PayloadT, Pool, Validator, ChainSpec>
+    EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
-    EngineT: EngineTypes,
+    PayloadT: PayloadTypes,
 {
     /// Tracks the elapsed time between the new payload response and the received forkchoice update
     /// request.
@@ -1161,10 +1161,10 @@ where
     }
 }
 
-impl<Provider, EngineT, Pool, Validator, ChainSpec> std::fmt::Debug
-    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+impl<Provider, PayloadT, Pool, Validator, ChainSpec> std::fmt::Debug
+    for EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
-    EngineT: EngineTypes,
+    PayloadT: PayloadTypes,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApi").finish_non_exhaustive()
