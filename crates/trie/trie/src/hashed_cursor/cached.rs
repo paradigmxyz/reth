@@ -144,7 +144,7 @@ pub struct CachedHashedCursor<C, T: Clone> {
     cache: Arc<CachedHashedCursorCache<T>>,
     /// Last visited key.
     last_key: Option<B256>,
-    seek_cursor: bool,
+    seek_before_next: bool,
 }
 
 impl<C, T> CachedHashedCursor<C, T>
@@ -153,7 +153,7 @@ where
     C: HashedCursor<Value = T>,
 {
     fn new(cursor: C, cache: Arc<CachedHashedCursorCache<T>>) -> Self {
-        Self { cursor, cache, last_key: None, seek_cursor: false }
+        Self { cursor, cache, last_key: None, seek_before_next: false }
     }
 }
 
@@ -176,11 +176,12 @@ where
         let result = match self.cache.cached_seeks.entry(key) {
             Entry::Occupied(entry) => {
                 self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
-                self.seek_cursor = true;
+                self.seek_before_next = true;
                 *entry.get()
             }
             Entry::Vacant(entry) => {
-                self.seek_cursor = false;
+                self.seek_before_next = false;
+
                 let result = self.cursor.seek(key)?;
                 entry.insert(result);
 
@@ -211,14 +212,15 @@ where
         let result = match self.cache.cached_nexts.entry(last_key) {
             Entry::Occupied(entry) => {
                 self.cache.nexts_hit.fetch_add(1, Ordering::Relaxed);
-                self.seek_cursor = true;
+                self.seek_before_next = true;
                 *entry.get()
             }
             Entry::Vacant(entry) => {
-                if self.seek_cursor {
-                    self.seek_cursor = false;
+                if self.seek_before_next {
+                    self.seek_before_next = false;
                     self.cursor.seek(last_key)?;
                 }
+
                 let result = self.cursor.next()?;
                 entry.insert(result);
                 if let Some((key, value)) = result.as_ref() {
