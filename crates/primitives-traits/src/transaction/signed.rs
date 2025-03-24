@@ -136,85 +136,105 @@ pub trait SignedTransaction:
     }
 }
 
-impl SignedTransaction for PooledTransaction {
-    fn tx_hash(&self) -> &TxHash {
-        match self {
-            Self::Legacy(tx) => tx.hash(),
-            Self::Eip2930(tx) => tx.hash(),
-            Self::Eip1559(tx) => tx.hash(),
-            Self::Eip7702(tx) => tx.hash(),
-            Self::Eip4844(tx) => tx.hash(),
-        }
-    }
-
-    fn signature(&self) -> &Signature {
-        match self {
-            Self::Legacy(tx) => tx.signature(),
-            Self::Eip2930(tx) => tx.signature(),
-            Self::Eip1559(tx) => tx.signature(),
-            Self::Eip7702(tx) => tx.signature(),
-            Self::Eip4844(tx) => tx.signature(),
-        }
-    }
-
-    fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        let signature_hash = self.signature_hash();
-        recover_signer(self.signature(), signature_hash)
-    }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        match self {
-            Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip4844(tx) => tx.tx().encode_for_signing(buf),
-        }
-        let signature_hash = keccak256(buf);
-        recover_signer_unchecked(self.signature(), signature_hash)
-    }
-}
-
 #[cfg(feature = "op")]
-impl SignedTransaction for op_alloy_consensus::OpPooledTransaction {
-    fn tx_hash(&self) -> &TxHash {
-        match self {
-            Self::Legacy(tx) => tx.hash(),
-            Self::Eip2930(tx) => tx.hash(),
-            Self::Eip1559(tx) => tx.hash(),
-            Self::Eip7702(tx) => tx.hash(),
+mod op {
+    use crate::{
+        crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+        transaction::signed::{keccak256, Address, RecoveryError, Signature, TxHash, B256},
+        SignedTransaction,
+    };
+    use alloc::vec::Vec;
+    use alloy_consensus::SignableTransaction;
+
+    impl SignedTransaction for op_alloy_consensus::OpPooledTransaction {
+        fn tx_hash(&self) -> &TxHash {
+            match self {
+                Self::Legacy(tx) => tx.hash(),
+                Self::Eip2930(tx) => tx.hash(),
+                Self::Eip1559(tx) => tx.hash(),
+                Self::Eip7702(tx) => tx.hash(),
+            }
+        }
+
+        fn signature(&self) -> &Signature {
+            match self {
+                Self::Legacy(tx) => tx.signature(),
+                Self::Eip2930(tx) => tx.signature(),
+                Self::Eip1559(tx) => tx.signature(),
+                Self::Eip7702(tx) => tx.signature(),
+            }
+        }
+
+        fn recover_signer(&self) -> Result<Address, RecoveryError> {
+            let signature_hash = self.signature_hash();
+            recover_signer(self.signature(), signature_hash)
+        }
+
+        fn recover_signer_unchecked_with_buf(
+            &self,
+            buf: &mut Vec<u8>,
+        ) -> Result<Address, RecoveryError> {
+            match self {
+                Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
+                Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
+                Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
+                Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
+            }
+            let signature_hash = keccak256(buf);
+            recover_signer_unchecked(self.signature(), signature_hash)
         }
     }
 
-    fn signature(&self) -> &Signature {
-        match self {
-            Self::Legacy(tx) => tx.signature(),
-            Self::Eip2930(tx) => tx.signature(),
-            Self::Eip1559(tx) => tx.signature(),
-            Self::Eip7702(tx) => tx.signature(),
+    impl SignedTransaction for op_alloy_consensus::OpTxEnvelope {
+        fn tx_hash(&self) -> &TxHash {
+            match self {
+                Self::Legacy(tx) => tx.hash(),
+                Self::Eip2930(tx) => tx.hash(),
+                Self::Eip1559(tx) => tx.hash(),
+                Self::Eip7702(tx) => tx.hash(),
+                Self::Deposit(tx) => Box::leak(Box::new(tx.hash())),
+            }
         }
-    }
 
-    fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        let signature_hash = self.signature_hash();
-        recover_signer(self.signature(), signature_hash)
-    }
 
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        match self {
-            Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
+        fn signature(&self) -> &Signature {
+            match self {
+                Self::Legacy(tx) => tx.signature(),
+                Self::Eip2930(tx) => tx.signature(),
+                Self::Eip1559(tx) => tx.signature(),
+                Self::Eip7702(tx) => tx.signature(),
+                Self::Deposit(_) => unimplemented!("This is not implemented yet"),
+            }
         }
-        let signature_hash = keccak256(buf);
-        recover_signer_unchecked(self.signature(), signature_hash)
+
+        fn recover_signer(&self) -> Result<Address, RecoveryError> {
+            let mut buf = Vec::new();
+            match self {
+                Self::Legacy(tx) => tx.tx().encode_for_signing(&mut buf),
+                Self::Eip2930(tx) => tx.tx().encode_for_signing(&mut buf),
+                Self::Eip1559(tx) => tx.tx().encode_for_signing(&mut buf),
+                Self::Eip7702(tx) => tx.tx().encode_for_signing(&mut buf),
+                Self::Deposit(_) => return Err(RecoveryError),
+            }
+            
+            let signature_hash = keccak256(&buf);
+            recover_signer(self.signature(), signature_hash)
+        }
+        
+        fn recover_signer_unchecked_with_buf(
+            &self,
+            buf: &mut Vec<u8>,
+        ) -> Result<Address, RecoveryError> {
+            match self {
+                Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
+                Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
+                Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
+                Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
+                Self::Deposit(_) => return Err(RecoveryError),
+            }
+            let signature_hash = keccak256(buf);
+            recover_signer_unchecked(self.signature(), signature_hash)
+        }
     }
 }
 
