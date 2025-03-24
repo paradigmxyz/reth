@@ -251,17 +251,17 @@ mod tests {
 
         // Extension (Key = 0000000000000000000000000000000000000000000000000000000000000)
         // └── Branch (`branch_node`)
-        //     ├── 1 -> Branch (`child_branch_node`)
+        //     ├── 0 -> Branch (`child_branch_node`)
         //     │      ├── 1 -> Leaf (account_1, marked as changed)
         //     │      └── 2 -> Leaf (account_2)
-        //     ├── 2 -> Branch (`child_branch_node`)
+        //     ├── 1 -> Branch (`child_branch_node`)
         //     │      ├── 1 -> Leaf (account_3)
         //     │      └── 2 -> Leaf (account_4)
 
-        let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000011");
-        let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000012");
-        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000021");
-        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000022");
+        let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+        let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000002");
+        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000011");
+        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000012");
         let empty_account = Account::default();
 
         let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
@@ -284,12 +284,12 @@ mod tests {
         let branch_node = (
             Nibbles::from_nibbles([0; 62]),
             BranchNodeCompact::new(
-                TrieMask::new(0b110),
-                // Tree mask has no bits set, because the child branch node has empty tree and hash
-                // masks.
-                TrieMask::new(0b000),
-                // Only the child branch nodes hash mask bits are set.
-                TrieMask::new(0b110),
+                TrieMask::new(0b11),
+                // Tree mask has no bits set, because both child branch nodes have empty tree and
+                // hash masks.
+                TrieMask::new(0b00),
+                // Hash mask bits are set, because both child nodes are branches.
+                TrieMask::new(0b11),
                 vec![
                     child_branch_node_rlp.as_hash().unwrap(),
                     child_branch_node_rlp.as_hash().unwrap(),
@@ -304,8 +304,15 @@ mod tests {
             mock_trie_nodes,
         );
 
-        let trie_cursor_factory =
-            MockTrieCursorFactory::new(mock_trie_nodes.into_iter().collect(), B256Map::default());
+        let trie_cursor_factory = MockTrieCursorFactory::new(
+            mock_trie_nodes.into_iter().collect(),
+            B256Map::from_iter([
+                (account_1, BTreeMap::default()),
+                (account_2, BTreeMap::default()),
+                (account_3, BTreeMap::default()),
+                (account_4, BTreeMap::default()),
+            ]),
+        );
 
         // Mark the account 1 as changed.
         let mut prefix_set = PrefixSetMut::default();
@@ -322,7 +329,12 @@ mod tests {
                 (account_3, empty_account),
                 (account_4, empty_account),
             ]),
-            B256Map::default(),
+            B256Map::from_iter([
+                (account_1, BTreeMap::default()),
+                (account_2, BTreeMap::default()),
+                (account_3, BTreeMap::default()),
+                (account_4, BTreeMap::default()),
+            ]),
         );
 
         let mut iter =
@@ -359,13 +371,13 @@ mod tests {
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(b256!(
-                        "0x0000000000000000000000000000000000000000000000000000000000000010"
+                        "0x0000000000000000000000000000000000000000000000000000000000000000"
                     )),
                     visited_key: None
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(b256!(
-                        "0x0000000000000000000000000000000000000000000000000000000000000030"
+                        "0x0000000000000000000000000000000000000000000000000000000000000020"
                     )),
                     visited_key: None
                 },
