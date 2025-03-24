@@ -303,8 +303,6 @@ where
         }
         let _ = hash_builder.root();
 
-        drop(account_node_iter);
-
         let stats = tracker.finish();
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
