@@ -18,19 +18,19 @@ use tracing::*;
 /// A message from the engine API that has been stored to disk.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum StoredEngineApiMessage<EngineT: PayloadTypes> {
+pub enum StoredEngineApiMessage<T: PayloadTypes> {
     /// The on-disk representation of an `engine_forkchoiceUpdated` method call.
     ForkchoiceUpdated {
         /// The [`ForkchoiceState`] sent in the persisted call.
         state: ForkchoiceState,
         /// The payload attributes sent in the persisted call, if any.
-        payload_attrs: Option<EngineT::PayloadAttributes>,
+        payload_attrs: Option<T::PayloadAttributes>,
     },
     /// The on-disk representation of an `engine_newPayload` method call.
     NewPayload {
         /// The [`PayloadTypes::ExecutionData`] sent in the persisted call.
         #[serde(flatten)]
-        payload: EngineT::ExecutionData,
+        payload: T::ExecutionData,
     },
 }
 
@@ -132,10 +132,10 @@ impl<S> EngineStoreStream<S> {
     }
 }
 
-impl<S, Engine> Stream for EngineStoreStream<S>
+impl<S, T> Stream for EngineStoreStream<S>
 where
-    S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: PayloadTypes,
+    S: Stream<Item = BeaconEngineMessage<T>>,
+    T: PayloadTypes,
 {
     type Item = S::Item;
 

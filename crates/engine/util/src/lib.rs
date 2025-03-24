@@ -149,9 +149,9 @@ pub trait EngineMessageStreamExt<T: PayloadTypes>: Stream<Item = BeaconEngineMes
     }
 }
 
-impl<Engine, T> EngineMessageStreamExt<Engine> for T
+impl<T, S> EngineMessageStreamExt<T> for S
 where
-    Engine: PayloadTypes,
-    T: Stream<Item = BeaconEngineMessage<Engine>>,
+    T: PayloadTypes,
+    S: Stream<Item = BeaconEngineMessage<T>>,
 {
 }
