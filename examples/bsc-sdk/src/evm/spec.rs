@@ -1,6 +1,5 @@
-use std::str::FromStr;
-
 use revm::primitives::hardfork::SpecId;
+use std::str::FromStr;
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]

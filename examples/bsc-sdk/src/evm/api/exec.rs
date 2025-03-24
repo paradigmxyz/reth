@@ -12,7 +12,7 @@ use revm::{
     DatabaseCommit, ExecuteCommitEvm, ExecuteEvm,
 };
 
-// Type alias for Optimism context
+// Type alias for BSC context
 pub trait BscContextTr:
     ContextTr<Journal: JournalTr<FinalOutput = JournalOutput>, Tx: BscTxTr, Cfg: Cfg<Spec = BscSpecId>>
 {
@@ -27,7 +27,7 @@ impl<T> BscContextTr for T where
 {
 }
 
-/// Type alias for the error type of the OpEvm.
+/// Type alias for the error type of the BscEvm.
 type BscError<CTX> = EVMError<<<CTX as ContextTr>::Db as Database>::Error>;
 
 impl<CTX, INSP, PRECOMPILE> ExecuteEvm
