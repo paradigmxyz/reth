@@ -1,12 +1,12 @@
 //! Actions that can be performed in tests.
 
 use crate::testsuite::Environment;
-use alloy_primitives::{Address, Bytes, B256};
-use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes, PayloadStatusEnum};
+use alloy_primitives::{Bytes, B256};
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatusEnum};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
 use futures_util::future::BoxFuture;
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::{future::Future, marker::PhantomData};
 use tracing::debug;
@@ -54,28 +54,47 @@ where
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.
 #[derive(Debug)]
-pub struct AssertMineBlock<Engine> {
+pub struct AssertMineBlock<Engine>
+where
+    Engine: PayloadTypes,
+{
     /// The node index to mine
     pub node_idx: usize,
     /// Transactions to include in the block
     pub transactions: Vec<Bytes>,
     /// Expected block hash (optional)
     pub expected_hash: Option<B256>,
+    /// Block's payload attributes
+    // TODO: refactor once we have actions to generate payload attributes.
+    pub payload_attributes: Engine::PayloadAttributes,
     /// Tracks engine type
     _phantom: PhantomData<Engine>,
 }
 
-impl<Engine> AssertMineBlock<Engine> {
+impl<Engine> AssertMineBlock<Engine>
+where
+    Engine: PayloadTypes,
+{
     /// Create a new `AssertMineBlock` action
-    pub fn new(node_idx: usize, transactions: Vec<Bytes>, expected_hash: Option<B256>) -> Self {
-        Self { node_idx, transactions, expected_hash, _phantom: Default::default() }
+    pub fn new(
+        node_idx: usize,
+        transactions: Vec<Bytes>,
+        expected_hash: Option<B256>,
+        payload_attributes: Engine::PayloadAttributes,
+    ) -> Self {
+        Self {
+            node_idx,
+            transactions,
+            expected_hash,
+            payload_attributes,
+            _phantom: Default::default(),
+        }
     }
 }
 
 impl<Engine> Action<Engine> for AssertMineBlock<Engine>
 where
     Engine: EngineTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -108,26 +127,10 @@ where
                 finalized_block_hash: parent_hash,
             };
 
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-
-            // create payload attributes for the new block
-            let payload_attributes = PayloadAttributes {
-                timestamp,
-                prev_randao: B256::random(),
-                suggested_fee_recipient: Address::random(),
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
-            };
-
-            let engine_payload_attributes: Engine::PayloadAttributes = payload_attributes.into();
-
-            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
+            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v2(
                 engine_client,
                 fork_choice_state,
-                Some(engine_payload_attributes),
+                Some(self.payload_attributes.clone()),
             )
             .await?;
 
@@ -141,7 +144,7 @@ where
 
                         // get the payload that was built
                         let _engine_payload =
-                            EngineApiClient::<Engine>::get_payload_v3(engine_client, payload_id)
+                            EngineApiClient::<Engine>::get_payload_v2(engine_client, payload_id)
                                 .await?;
                         Ok(())
                     } else {
@@ -247,7 +250,6 @@ impl<Engine> Default for ProduceBlocks<Engine> {
 impl<Engine> Action<Engine> for ProduceBlocks<Engine>
 where
     Engine: EngineTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
