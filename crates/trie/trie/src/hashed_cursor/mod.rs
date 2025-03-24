@@ -2,7 +2,7 @@ use alloy_primitives::{B256, U256};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 
-/// Implementation of hashed state cursor that caches the underlying accesses.
+/// Implementation of hashed state cursor that caches the underlying cursor.
 pub mod cached;
 
 /// Mock trie cursor implementations.

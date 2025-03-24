@@ -60,6 +60,8 @@ pub struct CachedHashedCursor<C, T> {
     /// The key is the previous key before calling [`Self::next`], and the value is the result of
     /// the call.
     cached_nexts: B256Map<Option<(B256, T)>>,
+    /// The cache of [`Self::is_storage_empty`] call.
+    is_storage_empty: Option<bool>,
 }
 
 impl<C, T> CachedHashedCursor<C, T>
@@ -72,6 +74,7 @@ where
             current_key: B256::ZERO,
             cached_seeks: Default::default(),
             cached_nexts: Default::default(),
+            is_storage_empty: None,
         }
     }
 }
@@ -138,6 +141,12 @@ where
     C: HashedStorageCursor<Value = T>,
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        self.cursor.is_storage_empty()
+        if let Some(is_storage_empty) = self.is_storage_empty {
+            return Ok(is_storage_empty)
+        }
+
+        let is_storage_empty = self.cursor.is_storage_empty()?;
+        self.is_storage_empty = Some(is_storage_empty);
+        Ok(is_storage_empty)
     }
 }
