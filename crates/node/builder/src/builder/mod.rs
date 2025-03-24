@@ -49,7 +49,7 @@ pub use states::*;
 pub type RethFullAdapter<DB, Types> =
     FullNodeTypesAdapter<Types, DB, BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>>;
 
-#[allow(clippy::doc_markdown)]
+#[expect(clippy::doc_markdown)]
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Declaratively construct a node.
 ///

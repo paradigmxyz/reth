@@ -156,6 +156,7 @@ mod tests {
             client,
             EngineCapabilities::default(),
             ScrollEngineValidator::new(SCROLL_MAINNET.clone()),
+            false,
         );
         let module = AuthRpcModule::new(engine_api);
         module.start_server(config).await.unwrap()

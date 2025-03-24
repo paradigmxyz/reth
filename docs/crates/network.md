@@ -457,7 +457,7 @@ pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
     client: Arc<C>,
     /// Used for reporting peers.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,

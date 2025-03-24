@@ -70,7 +70,7 @@ mod metrics;
 mod payload_processor;
 mod persistence_state;
 // TODO(alexey): compare trie updates in `insert_block_inner`
-#[allow(unused)]
+#[expect(unused)]
 mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
@@ -828,10 +828,11 @@ where
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
-    /// [`EngineTypes::ExecutionData`]. The Execution layer executes the transactions and validates
-    /// the state in the block header, then passes validation data back to Consensus layer, that
-    /// adds the block to the head of its own blockchain and attests to it. The block is then
-    /// broadcast over the consensus p2p network in the form of a "Beacon block".
+    /// [`PayloadTypes::ExecutionData`](reth_payload_primitives::PayloadTypes::ExecutionData). The
+    /// Execution layer executes the transactions and validates the state in the block header,
+    /// then passes validation data back to Consensus layer, that adds the block to the head of
+    /// its own blockchain and attests to it. The block is then broadcast over the consensus p2p
+    /// network in the form of a "Beacon block".
     ///
     /// These responses should adhere to the [Engine API Spec for
     /// `engine_newPayload`](https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification).
@@ -2436,7 +2437,7 @@ where
             handle.cache_metrics(),
         );
 
-        trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
+        debug!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
         let execution_start = Instant::now();
@@ -2447,7 +2448,7 @@ where
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
-        trace!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
+        debug!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
 
         // after executing the block we can stop executing transactions
         handle.stop_prewarming_execution();
@@ -2469,7 +2470,7 @@ where
             return Err(err.into())
         }
 
-        trace!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
+        debug!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
 
         let root_time = Instant::now();
 
@@ -3130,7 +3131,7 @@ mod tests {
         }
 
         /// Signals to the channel task that a value should be released
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         fn release(&self) {
             let _ = self.release.send(());
         }

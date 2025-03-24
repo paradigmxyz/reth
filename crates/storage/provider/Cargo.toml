@@ -87,26 +87,6 @@ eyre.workspace = true
 alloy-consensus.workspace = true
 
 [features]
-serde = [
-    "dashmap/serde",
-    "notify/serde",
-    "parking_lot/serde",
-    "rand/serde",
-    "alloy-primitives/serde",
-    "alloy-consensus/serde",
-    "alloy-eips/serde",
-    "alloy-rpc-types-engine/serde",
-    "reth-codecs/serde",
-    "reth-primitives-traits/serde",
-    "reth-execution-types/serde",
-    "reth-trie-db/serde",
-    "reth-trie/serde",
-    "reth-stages-types/serde",
-    "reth-prune-types/serde",
-    "revm-database/serde",
-    "revm-database-interface/serde",
-    "revm-state?/serde",
-]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",

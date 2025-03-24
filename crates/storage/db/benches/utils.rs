@@ -47,7 +47,7 @@ where
 }
 
 /// Sets up a clear database at `bench_db_path`.
-#[allow(clippy::ptr_arg)]
+#[expect(clippy::ptr_arg)]
 #[allow(dead_code)]
 pub(crate) fn set_up_db<T>(
     bench_db_path: &Path,

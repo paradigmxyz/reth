@@ -109,13 +109,15 @@ where
         }
 
         let (tx, rx) = mpsc::channel();
-        let proof_provider_factory = ProofBlindedProviderFactory::new(
-            self.trie_cursor_factory,
-            self.hashed_cursor_factory,
-            Arc::new(self.prefix_sets),
+        let blinded_provider_factory = WitnessBlindedProviderFactory::new(
+            ProofBlindedProviderFactory::new(
+                self.trie_cursor_factory,
+                self.hashed_cursor_factory,
+                Arc::new(self.prefix_sets),
+            ),
+            tx,
         );
-        let mut sparse_trie =
-            SparseStateTrie::new(WitnessBlindedProviderFactory::new(proof_provider_factory, tx));
+        let mut sparse_trie = SparseStateTrie::new(blinded_provider_factory);
         sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.
@@ -196,7 +198,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct WitnessBlindedProviderFactory<F> {
     /// Blinded node provider factory.
     provider_factory: F,
@@ -245,7 +247,7 @@ impl<P> WitnessBlindedProvider<P> {
 }
 
 impl<P: BlindedProvider> BlindedProvider for WitnessBlindedProvider<P> {
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let maybe_node = self.provider.blinded_node(path)?;
         if let Some(node) = &maybe_node {
             self.tx

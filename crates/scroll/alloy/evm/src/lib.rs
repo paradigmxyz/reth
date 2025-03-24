@@ -25,28 +25,31 @@ use core::{
 use revm::{
     context::{result::HaltReason, BlockEnv, TxEnv},
     context_interface::result::{EVMError, ResultAndState},
+    handler::PrecompileProvider,
     inspector::NoOpInspector,
-    interpreter::interpreter::EthInterpreter,
+    interpreter::{interpreter::EthInterpreter, InterpreterResult},
     Context, ExecuteEvm, InspectEvm, Inspector,
 };
 use revm_scroll::{
     builder::{DefaultScrollContext, ScrollBuilder, ScrollContext},
     instructions::ScrollInstructions,
+    precompile::ScrollPrecompileProvider,
     ScrollSpecId, ScrollTransaction,
 };
 
 /// Scroll EVM implementation.
 #[allow(missing_debug_implementations)]
-pub struct ScrollEvm<DB: Database, I> {
+pub struct ScrollEvm<DB: Database, I, P = ScrollPrecompileProvider> {
     inner: revm_scroll::ScrollEvm<
         ScrollContext<DB>,
         I,
         ScrollInstructions<EthInterpreter, ScrollContext<DB>>,
+        P,
     >,
     inspect: bool,
 }
 
-impl<DB: Database, I> ScrollEvm<DB, I> {
+impl<DB: Database, I, P> ScrollEvm<DB, I, P> {
     /// Provides a reference to the EVM context.
     pub const fn ctx(&self) -> &ScrollContext<DB> {
         &self.inner.0.data.ctx
@@ -58,7 +61,7 @@ impl<DB: Database, I> ScrollEvm<DB, I> {
     }
 }
 
-impl<DB: Database, I> Deref for ScrollEvm<DB, I> {
+impl<DB: Database, I, P> Deref for ScrollEvm<DB, I, P> {
     type Target = ScrollContext<DB>;
 
     #[inline]
@@ -67,17 +70,18 @@ impl<DB: Database, I> Deref for ScrollEvm<DB, I> {
     }
 }
 
-impl<DB: Database, I> DerefMut for ScrollEvm<DB, I> {
+impl<DB: Database, I, P> DerefMut for ScrollEvm<DB, I, P> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.ctx_mut()
     }
 }
 
-impl<DB, I> Evm for ScrollEvm<DB, I>
+impl<DB, I, P> Evm for ScrollEvm<DB, I, P>
 where
     DB: Database,
     I: Inspector<ScrollContext<DB>>,
+    P: PrecompileProvider<ScrollContext<DB>, Output = InterpreterResult>,
 {
     type DB = DB;
     type Tx = ScrollTransactionIntoTxEnv<TxEnv>;
@@ -169,6 +173,10 @@ where
         let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.data.ctx;
 
         (journaled_state.database, EvmEnv { block_env, cfg_env })
+    }
+
+    fn set_inspector_enabled(&mut self, enabled: bool) {
+        self.inspect = enabled;
     }
 }
 

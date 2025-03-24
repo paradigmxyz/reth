@@ -164,7 +164,7 @@ pub use crate::{
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
         blob_tx_priority, fee_delta, state::SubPool, AllTransactionsEvents, FullTransactionEvent,
-        TransactionEvent, TransactionEvents,
+        NewTransactionEvent, TransactionEvent, TransactionEvents, TransactionListenerKind,
     },
     traits::*,
     validate::{

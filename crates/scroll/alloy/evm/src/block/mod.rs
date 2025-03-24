@@ -104,7 +104,7 @@ where
         {
             if let Err(err) = apply_curie_hard_fork(self.evm.db_mut()) {
                 return Err(BlockExecutionError::msg(format!(
-                    "error occured at Curie fork: {err:?}"
+                    "error occurred at Curie fork: {err:?}"
                 )));
             };
         }

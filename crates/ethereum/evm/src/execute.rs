@@ -27,7 +27,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{constants::ETH_TO_WEI, Header, TxLegacy};
     use alloy_eips::{
-        eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
+        eip2935::{HISTORY_SERVE_WINDOW, HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip4895::Withdrawal,
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
@@ -45,7 +45,7 @@ mod tests {
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use revm::{
         database::{CacheDB, EmptyDB, TransitionState},
-        primitives::{address, BLOCKHASH_SERVE_WINDOW},
+        primitives::address,
         state::{AccountInfo, Bytecode, EvmState},
         Database,
     };
@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn eip_2935_fork_activation_within_window_bounds() {
-        let fork_activation_block = (BLOCKHASH_SERVE_WINDOW - 10) as u64;
+        let fork_activation_block = (HISTORY_SERVE_WINDOW - 10) as u64;
         let db = create_database_with_block_hashes(fork_activation_block);
 
         let chain_spec = Arc::new(
@@ -514,7 +514,7 @@ mod tests {
     // <https://github.com/ethereum/EIPs/pull/9144>
     #[test]
     fn eip_2935_fork_activation_outside_window_bounds() {
-        let fork_activation_block = (BLOCKHASH_SERVE_WINDOW + 256) as u64;
+        let fork_activation_block = (HISTORY_SERVE_WINDOW + 256) as u64;
         let db = create_database_with_block_hashes(fork_activation_block);
 
         let chain_spec = Arc::new(

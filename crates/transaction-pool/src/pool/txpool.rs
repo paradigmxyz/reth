@@ -11,7 +11,7 @@ use crate::{
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
         pending::PendingPool,
         state::{SubPool, TxState},
-        update::{Destination, PoolUpdate},
+        update::{Destination, PoolUpdate, UpdateOutcome},
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
@@ -124,7 +124,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn new(ordering: T, config: PoolConfig) -> Self {
         Self {
             sender_info: Default::default(),
-            pending_pool: PendingPool::new(ordering),
+            pending_pool: PendingPool::with_buffer(
+                ordering,
+                config.max_new_pending_txs_notifications,
+            ),
             queued_pool: Default::default(),
             basefee_pool: Default::default(),
             blob_pool: Default::default(),
@@ -1133,7 +1136,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Returns an iterator over all _unique_ hashes in the pool
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn hashes_iter(&self) -> impl Iterator<Item = TxHash> + '_ {
         self.by_hash.keys().copied()
     }
@@ -1403,7 +1406,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// Returns a mutable iterator over all transactions for the given sender, starting with the
     /// lowest nonce
     #[cfg(test)]
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn txs_iter_mut(
         &mut self,
         sender: SenderId,
@@ -1871,7 +1874,7 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     /// Attempted to replace existing transaction, but was underpriced
     Underpriced {
         transaction: Arc<ValidPoolTransaction<T>>,
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         existing: TxHash,
     },
     /// Attempted to insert a blob transaction with a nonce gap
@@ -1936,21 +1939,6 @@ pub(crate) struct PoolInternalTransaction<T: PoolTransaction> {
 impl<T: PoolTransaction> PoolInternalTransaction<T> {
     fn next_cumulative_cost(&self) -> U256 {
         self.cumulative_cost + self.transaction.cost()
-    }
-}
-
-/// Tracks the result after updating the pool
-#[derive(Debug)]
-pub(crate) struct UpdateOutcome<T: PoolTransaction> {
-    /// transactions promoted to the pending pool
-    pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
-    /// transaction that failed and were discarded
-    pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
-}
-
-impl<T: PoolTransaction> Default for UpdateOutcome<T> {
-    fn default() -> Self {
-        Self { promoted: vec![], discarded: vec![] }
     }
 }
 

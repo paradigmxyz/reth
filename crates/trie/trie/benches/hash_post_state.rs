@@ -11,7 +11,7 @@ pub fn hash_post_state(c: &mut Criterion) {
 
     for size in [100, 1_000, 3_000, 5_000, 10_000] {
         // Too slow.
-        #[allow(unexpected_cfgs)]
+        #[expect(unexpected_cfgs)]
         if cfg!(codspeed) && size > 1_000 {
             continue;
         }

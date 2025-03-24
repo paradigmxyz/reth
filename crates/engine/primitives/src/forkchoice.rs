@@ -45,13 +45,13 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns whether the latest received FCU is valid: [`ForkchoiceStatus::Valid`]
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn is_latest_valid(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_valid())
     }
 
     /// Returns whether the latest received FCU is syncing: [`ForkchoiceStatus::Syncing`]
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn is_latest_syncing(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_syncing())
     }

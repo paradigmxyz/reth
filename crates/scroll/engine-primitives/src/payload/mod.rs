@@ -33,26 +33,17 @@ pub struct ScrollEngineTypes<T: PayloadTypes = ScrollPayloadTypes> {
     _marker: PhantomData<T>,
 }
 
-impl<T: PayloadTypes> PayloadTypes for ScrollEngineTypes<T> {
+impl<
+        T: PayloadTypes<
+            ExecutionData = ExecutionData,
+            BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = ScrollBlock>>,
+        >,
+    > PayloadTypes for ScrollEngineTypes<T>
+{
+    type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
-}
-
-impl<T> EngineTypes for ScrollEngineTypes<T>
-where
-    T: PayloadTypes,
-    T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = ScrollBlock>>
-        + TryInto<ExecutionPayloadV1>
-        + TryInto<ExecutionPayloadEnvelopeV2>
-        + TryInto<ExecutionPayloadEnvelopeV3>
-        + TryInto<ExecutionPayloadEnvelopeV4>,
-{
-    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
-    type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
-    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
@@ -65,15 +56,41 @@ where
     }
 }
 
+impl<T> EngineTypes for ScrollEngineTypes<T>
+where
+    T: PayloadTypes<ExecutionData = ExecutionData>,
+    T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = ScrollBlock>>
+        + TryInto<ExecutionPayloadV1>
+        + TryInto<ExecutionPayloadEnvelopeV2>
+        + TryInto<ExecutionPayloadEnvelopeV3>
+        + TryInto<ExecutionPayloadEnvelopeV4>,
+{
+    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
+    type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
+}
+
 /// A default payload type for [`ScrollEngineTypes`]
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct ScrollPayloadTypes;
 
 impl PayloadTypes for ScrollPayloadTypes {
+    type ExecutionData = ExecutionData;
     type BuiltPayload = ScrollBuiltPayload;
     type PayloadAttributes = ScrollPayloadAttributes;
     type PayloadBuilderAttributes = ScrollPayloadBuilderAttributes;
+
+    fn block_to_payload(
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> Self::ExecutionData {
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        ExecutionData { payload, sidecar }
+    }
 }
 
 /// Tries to create a new unsealed block from the given payload, sidecar and chain specification.

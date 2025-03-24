@@ -17,7 +17,7 @@ Options:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, holesky, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
           [default: mainnet]
 
@@ -458,6 +458,9 @@ TxPool:
 
           [default: 20]
 
+      --txpool.blob-cache-size <BLOB_CACHE_SIZE>
+          Max number of entries for the in memory cache of the blob store
+
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
 
@@ -725,6 +728,9 @@ Engine:
 
       --engine.state-root-task-compare-updates
           Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
+
+      --engine.accept-execution-requests-hash
+          Enables accepting requests hash instead of an array of requests in `engine_newPayloadV4`
 
 Ress:
       --ress.enable
