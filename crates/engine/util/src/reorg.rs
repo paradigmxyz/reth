@@ -6,15 +6,15 @@ use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, ExecutionPayload as _,
-    OnForkChoiceUpdated, PayloadValidator,
+    BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload as _, OnForkChoiceUpdated,
+    PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
 };
-use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
+use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
@@ -30,7 +30,7 @@ use tokio::sync::oneshot;
 use tracing::*;
 
 #[derive(Debug)]
-enum EngineReorgState<Engine: EngineTypes> {
+enum EngineReorgState<Engine: PayloadTypes> {
     Forward,
     Reorg { queue: VecDeque<BeaconEngineMessage<Engine>> },
 }
@@ -45,7 +45,7 @@ type ReorgResponseFut = Pin<Box<dyn Future<Output = EngineReorgResponse> + Send 
 /// Engine API stream wrapper that simulates reorgs with specified frequency.
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Validator> {
+pub struct EngineReorg<S, Engine: PayloadTypes, Provider, Evm, Validator> {
     /// Underlying stream
     #[pin]
     stream: S,
@@ -70,7 +70,7 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Validator> {
     reorg_responses: FuturesUnordered<ReorgResponseFut>,
 }
 
-impl<S, Engine: EngineTypes, Provider, Evm, Validator>
+impl<S, Engine: PayloadTypes, Provider, Evm, Validator>
     EngineReorg<S, Engine, Provider, Evm, Validator>
 {
     /// Creates new [`EngineReorg`] stream wrapper.
@@ -101,7 +101,7 @@ impl<S, Engine, Provider, Evm, Validator> Stream
     for EngineReorg<S, Engine, Provider, Evm, Validator>
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: EngineTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
+    Engine: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
         + ChainSpecProvider,

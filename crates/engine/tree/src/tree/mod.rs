@@ -26,14 +26,14 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
-    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
-    EngineValidator, ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
+    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineValidator,
+    ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
+use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
     Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -562,7 +562,7 @@ pub enum TreeAction {
 pub struct EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
-    T: EngineTypes,
+    T: PayloadTypes,
 {
     provider: P,
     executor_provider: E,
@@ -608,7 +608,7 @@ where
     payload_processor: PayloadProcessor<N, C>,
 }
 
-impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
+impl<N, P: Debug, E: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
     for EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
@@ -650,7 +650,7 @@ where
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
     C: ConfigureEvm<Primitives = N> + 'static,
-    T: EngineTypes,
+    T: PayloadTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
     /// Creates a new [`EngineApiTreeHandler`].

@@ -9,7 +9,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use futures::Stream;
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
+use reth_engine_primitives::BeaconEngineMessage;
+use reth_payload_primitives::PayloadTypes;
 use std::path::PathBuf;
 use tokio_util::either::Either;
 
@@ -26,7 +27,7 @@ pub mod reorg;
 use reorg::EngineReorg;
 
 /// The collection of stream extensions for engine API message stream.
-pub trait EngineMessageStreamExt<Engine: EngineTypes>:
+pub trait EngineMessageStreamExt<Engine: PayloadTypes>:
     Stream<Item = BeaconEngineMessage<Engine>>
 {
     /// Skips the specified number of [`BeaconEngineMessage::ForkchoiceUpdated`] messages from the
@@ -152,7 +153,7 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
 
 impl<Engine, T> EngineMessageStreamExt<Engine> for T
 where
-    Engine: EngineTypes,
+    Engine: PayloadTypes,
     T: Stream<Item = BeaconEngineMessage<Engine>>,
 {
 }

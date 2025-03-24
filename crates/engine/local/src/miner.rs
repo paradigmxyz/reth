@@ -5,7 +5,7 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
+use reth_engine_primitives::BeaconEngineMessage;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
@@ -74,7 +74,7 @@ impl Future for MiningMode {
 
 /// Local miner advancing the chain/
 #[derive(Debug)]
-pub struct LocalMiner<EngineT: EngineTypes, B> {
+pub struct LocalMiner<EngineT: PayloadTypes, B> {
     /// The payload attribute builder for the engine
     payload_attributes_builder: B,
     /// Sender for events to engine.
@@ -91,7 +91,7 @@ pub struct LocalMiner<EngineT: EngineTypes, B> {
 
 impl<EngineT, B> LocalMiner<EngineT, B>
 where
-    EngineT: EngineTypes,
+    EngineT: PayloadTypes,
     B: PayloadAttributesBuilder<<EngineT as PayloadTypes>::PayloadAttributes>,
 {
     /// Spawns a new [`LocalMiner`] with the given parameters.

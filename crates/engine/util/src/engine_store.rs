@@ -2,8 +2,9 @@
 
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::{Stream, StreamExt};
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes, ExecutionPayload};
+use reth_engine_primitives::{BeaconEngineMessage, ExecutionPayload};
 use reth_fs_util as fs;
+use reth_payload_primitives::PayloadTypes;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -17,7 +18,7 @@ use tracing::*;
 /// A message from the engine API that has been stored to disk.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum StoredEngineApiMessage<EngineT: EngineTypes> {
+pub enum StoredEngineApiMessage<EngineT: PayloadTypes> {
     /// The on-disk representation of an `engine_forkchoiceUpdated` method call.
     ForkchoiceUpdated {
         /// The [`ForkchoiceState`] sent in the persisted call.
@@ -56,7 +57,7 @@ impl EngineMessageStore {
         received_at: SystemTime,
     ) -> eyre::Result<()>
     where
-        Engine: EngineTypes,
+        Engine: PayloadTypes,
     {
         fs::create_dir_all(&self.path)?; // ensure that store path had been created
         let timestamp = received_at.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
@@ -134,7 +135,7 @@ impl<S> EngineStoreStream<S> {
 impl<S, Engine> Stream for EngineStoreStream<S>
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: EngineTypes,
+    Engine: PayloadTypes,
 {
     type Item = S::Item;
 
