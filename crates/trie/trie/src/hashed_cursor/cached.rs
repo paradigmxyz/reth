@@ -243,6 +243,7 @@ struct CachedHashedCursor<'a, C, T: Clone> {
     cursor: C,
     /// Last visited key.
     last_key: Option<B256>,
+    seek_cursor: bool,
     cache: Option<&'a CachedHashedCursorCache<T>>,
     cache_changes: CachedHashedCursorCache<T>,
     cache_changes_tx: mpsc::Sender<CachedHashedCursorCacheChange>,
@@ -258,7 +259,37 @@ where
         cache: Option<&'a CachedHashedCursorCache<T>>,
         cache_changes_tx: mpsc::Sender<CachedHashedCursorCacheChange>,
     ) -> Self {
-        Self { cursor, last_key: None, cache, cache_changes: Default::default(), cache_changes_tx }
+        Self {
+            cursor,
+            last_key: None,
+            seek_cursor: false,
+            cache,
+            cache_changes: Default::default(),
+            cache_changes_tx,
+        }
+    }
+
+    fn get_cached_seek(&self, key: B256) -> Option<Option<(B256, C::Value)>> {
+        self.cache
+            .as_ref()
+            .and_then(|cache| cache.cached_seeks.get(&key))
+            .or_else(|| self.cache_changes.cached_seeks.get(&key))
+            .copied()
+    }
+
+    fn get_cached_next(&self, key: B256) -> Option<Option<(B256, C::Value)>> {
+        self.cache
+            .as_ref()
+            .and_then(|cache| cache.cached_nexts.get(&key))
+            .or_else(|| self.cache_changes.cached_nexts.get(&key))
+            .copied()
+    }
+
+    fn get_cached_is_storage_empty(&self) -> Option<bool> {
+        self.cache
+            .as_ref()
+            .and_then(|cache| cache.is_storage_empty)
+            .or(self.cache_changes.is_storage_empty)
     }
 
     /// Seeks to the given key.
@@ -269,12 +300,9 @@ where
     /// The result of the seek will be cached, and the key that the underlying cursor seeked to
     /// will be cached as well if it differs from the seeked key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, C::Value)>, DatabaseError> {
-        let result = if let Some(result) =
-            self.cache.as_ref().and_then(|cache| cache.cached_seeks.get(&key))
-        {
-            *result
-        } else if let Some(result) = self.cache_changes.cached_seeks.get(&key) {
-            *result
+        let result = if let Some(result) = self.get_cached_seek(key) {
+            self.seek_cursor = true;
+            result
         } else {
             let result = self.cursor.seek(key)?;
             self.cache_changes.cached_seeks.insert(key, result);
@@ -300,14 +328,13 @@ where
     fn next(&mut self) -> Result<Option<(B256, C::Value)>, DatabaseError> {
         let Some(last_key) = self.last_key else { return Ok(None) };
 
-        let result = if let Some(result) =
-            self.cache.as_ref().and_then(|cache| cache.cached_nexts.get(&last_key))
-        {
-            *result
-        } else if let Some(result) = self.cache_changes.cached_nexts.get(&last_key) {
-            *result
+        let result = if let Some(result) = self.get_cached_next(last_key) {
+            self.seek_cursor = true;
+            result
         } else {
-            self.cursor.seek(last_key)?;
+            if self.seek_cursor {
+                self.cursor.seek(last_key)?;
+            }
             let result = self.cursor.next()?;
             self.cache_changes.cached_nexts.insert(last_key, result);
             if let Some((key, value)) = result.as_ref() {
@@ -327,12 +354,8 @@ where
     C: HashedStorageCursor<Value = T>,
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        if let Some(is_storage_empty) = self.cache.as_ref().and_then(|cache| cache.is_storage_empty)
-        {
-            return Ok(is_storage_empty)
-        }
-        if let Some(is_storage_empty) = self.cache_changes.is_storage_empty {
-            return Ok(is_storage_empty)
+        if let Some(is_storage_empty) = self.get_cached_is_storage_empty() {
+            return Ok(is_storage_empty);
         }
 
         let is_storage_empty = self.cursor.is_storage_empty()?;
