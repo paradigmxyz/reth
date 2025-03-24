@@ -2,5 +2,5 @@ mod api;
 mod config;
 mod handler;
 mod precompiles;
-mod spec;
+pub mod spec;
 mod transaction;

@@ -8,16 +8,16 @@ use revm::{
     Context, Database,
 };
 
-/// Trait that allows for optimism OpEvm to be built.
+/// Trait that allows for bsc BscEvm to be built.
 pub trait BscBuilder: Sized {
     /// Type of the context.
     type Context;
 
-    /// Build the op.
+    /// Build the bsc.
     fn build_bsc(self)
         -> BscEvm<Self::Context, (), EthInstructions<EthInterpreter, Self::Context>>;
 
-    /// Build the op with an inspector.
+    /// Build the bsc with an inspector.
     fn build_bsc_with_inspector<INSP>(
         self,
         inspector: INSP,

@@ -6,9 +6,11 @@ use revm::{
     context_interface::ContextTr,
     handler::{EthPrecompiles, PrecompileProvider},
     interpreter::InterpreterResult,
-    precompile::{bls12_381, kzg_point_evaluation, secp256r1, Precompiles},
+    precompile::{bls12_381, kzg_point_evaluation, Precompiles},
     primitives::{Address, Bytes},
 };
+#[cfg(feature = "secp256r1")]
+use revm::precompile::secp256r1;
 use std::boxed::Box;
 
 mod bls;
@@ -17,9 +19,10 @@ mod double_sign;
 mod error;
 mod iavl;
 mod tendermint;
+#[cfg(feature = "secp256k1")]
 mod tm_secp256k1;
 
-// Optimism precompile provider
+// BSC precompile provider
 #[derive(Debug, Clone)]
 pub struct BscPrecompiles {
     /// Inner precompile provider is same as Ethereums.
@@ -32,7 +35,7 @@ impl BscPrecompiles {
         Self { inner: EthPrecompiles { precompiles } }
     }
 
-    /// Create a new precompile provider with the given optimismispec.
+    /// Create a new precompile provider with the given bsc spec.
     #[inline]
     pub fn new_with_spec(spec: BscSpecId) -> Self {
         match spec {
@@ -167,8 +170,12 @@ pub fn hertz() -> &'static Precompiles {
 pub fn feynman() -> &'static Precompiles {
     static INSTANCE: OnceBox<Precompiles> = OnceBox::new();
     INSTANCE.get_or_init(|| {
-        let mut precompiles = hertz().clone();
-        precompiles.extend([double_sign::DOUBLE_SIGN_EVIDENCE_VALIDATION, tm_secp256k1::TM_SECP256K1_SIGNATURE_RECOVER]);
+            let mut precompiles = hertz().clone();
+            precompiles.extend([double_sign::DOUBLE_SIGN_EVIDENCE_VALIDATION]);
+
+          
+            #[cfg(feature = "secp256k1")]
+            precompiles.extend([tm_secp256k1::TM_SECP256K1_SIGNATURE_RECOVER]);
 
         Box::new(precompiles)
     })

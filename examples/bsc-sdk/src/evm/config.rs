@@ -1,5 +1,4 @@
-use super::spec::BscSpecId;
-use crate::chainspec::BscHardfork;
+use crate::{chainspec::hardforks::BscHardfork, evm::spec::BscSpecId};
 use alloy_primitives::BlockNumber;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_forks::EthereumHardfork;
