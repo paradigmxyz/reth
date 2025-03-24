@@ -28,7 +28,7 @@ pub enum StoredEngineApiMessage<EngineT: PayloadTypes> {
     },
     /// The on-disk representation of an `engine_newPayload` method call.
     NewPayload {
-        /// The [`PayloadTypes::ExecutionData`](reth_payload_primitives::PayloadTypes::ExecutionData) sent in the persisted call.
+        /// The [`PayloadTypes::ExecutionData`] sent in the persisted call.
         #[serde(flatten)]
         payload: EngineT::ExecutionData,
     },
