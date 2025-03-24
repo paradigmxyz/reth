@@ -7,6 +7,7 @@ use parking_lot::{Mutex, RwLock};
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
+use crate::TransactionPool;
 
 /// How many [`BlobTransactionSidecar`] to cache in memory.
 pub const DEFAULT_MAX_CACHED_BLOBS: u32 = 100;
@@ -196,16 +197,8 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
-        // WIP : Need to have a method to get the version hash to insert into the versioned_hashes_to_txhash
-        let versioned_mappings: Vec<(B256, B256)> =
-            data.blobs.iter().map(|blob| (blob.versioned_hash(), tx)).collect();
-
-        if !versioned_mappings.is_empty() {
-            let mut map = self.versioned_hashes_to_txhash.lock();
-            for (versioned_hash, tx_hash) in versioned_mappings {
-                map.insert(versioned_hash, tx_hash);
-            }
-        }
+        let mut map = self.versioned_hashes_to_txhash.lock();
+        map.insert(tx, data.versioned_hashes());
 
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
         data.rlp_encode_fields(&mut buf);
@@ -219,19 +212,9 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blobs are in the blob cache and written to the disk.
     fn insert_many(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
-        // WIP : Need to have a method to get the version hash to insert into the versioned_hashes_to_txhash
-        let versioned_hash_mappings: Vec<(B256, B256)> = txs
-            .iter()
-            .flat_map(|(tx, data)| {
-                data.blobs.iter().map(|blob| (blob.versioned_hash(), *tx)).collect::<Vec<_>>()
-            })
-            .collect();
-
-        if !versioned_hash_mappings.is_empty() {
-            let mut versioned_map = self.versioned_hashes_to_txhash.lock();
-            for (versioned_hash, tx) in versioned_hash_mappings {
-                versioned_map.insert(versioned_hash, tx);
-            }
+        let mut map = self.versioned_hashes_to_txhash.lock();
+        for (tx, data) in &txs {
+            map.insert(*tx, data.versioned_hashes());
         }
 
         let raw = txs
