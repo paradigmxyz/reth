@@ -241,11 +241,8 @@ where
 #[derive(Debug)]
 struct CachedHashedCursor<'a, C, T: Clone> {
     cursor: C,
-    /// The current key.
-    ///
-    /// Set to `B256::ZERO` if the cursor has just been created, is empty, has been seeked to a
-    /// non-existent key, or has been advanced beyond the last key.
-    current_key: B256,
+    /// Last visited key.
+    last_key: Option<B256>,
     cache: Option<&'a CachedHashedCursorCache<T>>,
     cache_changes: CachedHashedCursorCache<T>,
     cache_changes_tx: mpsc::Sender<CachedHashedCursorCacheChange>,
@@ -261,13 +258,7 @@ where
         cache: Option<&'a CachedHashedCursorCache<T>>,
         cache_changes_tx: mpsc::Sender<CachedHashedCursorCacheChange>,
     ) -> Self {
-        Self {
-            cursor,
-            current_key: B256::ZERO,
-            cache,
-            cache_changes: Default::default(),
-            cache_changes_tx,
-        }
+        Self { cursor, last_key: None, cache, cache_changes: Default::default(), cache_changes_tx }
     }
 
     /// Seeks to the given key.
@@ -278,22 +269,24 @@ where
     /// The result of the seek will be cached, and the key that the underlying cursor seeked to
     /// will be cached as well if it differs from the seeked key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, C::Value)>, DatabaseError> {
-        if let Some(result) = self.cache.as_ref().and_then(|cache| cache.cached_seeks.get(&key)) {
-            return Ok(*result)
-        }
-        if let Some(result) = self.cache_changes.cached_seeks.get(&key) {
-            return Ok(*result)
-        }
+        let result = if let Some(result) =
+            self.cache.as_ref().and_then(|cache| cache.cached_seeks.get(&key))
+        {
+            *result
+        } else if let Some(result) = self.cache_changes.cached_seeks.get(&key) {
+            *result
+        } else {
+            let result = self.cursor.seek(key)?;
+            self.cache_changes.cached_seeks.insert(key, result);
 
-        let result = self.cursor.seek(key)?;
-        self.cache_changes.cached_seeks.insert(key, result);
+            let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
+            if let Some(actual_seek) = actual_seek {
+                self.cache_changes.cached_seeks.insert(actual_seek, result);
+            }
+            result
+        };
 
-        let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
-        if let Some(actual_seek) = actual_seek {
-            self.cache_changes.cached_seeks.insert(actual_seek, result);
-        }
-
-        self.current_key = result.as_ref().map(|(k, _)| *k).unwrap_or(B256::ZERO);
+        self.last_key = result.as_ref().map(|(k, _)| *k);
         Ok(result)
     }
 
@@ -305,23 +298,25 @@ where
     /// The result of the advance will be cached in both the cache of [`Self::seek`] calls and the
     /// cache of [`Self::next`] calls.
     fn next(&mut self) -> Result<Option<(B256, C::Value)>, DatabaseError> {
-        if let Some(result) =
-            self.cache.as_ref().and_then(|cache| cache.cached_nexts.get(&self.current_key))
+        let Some(last_key) = self.last_key else { return Ok(None) };
+
+        let result = if let Some(result) =
+            self.cache.as_ref().and_then(|cache| cache.cached_nexts.get(&last_key))
         {
-            return Ok(*result)
-        }
-        if let Some(result) = self.cache_changes.cached_nexts.get(&self.current_key) {
-            return Ok(*result)
-        }
+            *result
+        } else if let Some(result) = self.cache_changes.cached_nexts.get(&last_key) {
+            *result
+        } else {
+            self.cursor.seek(last_key)?;
+            let result = self.cursor.next()?;
+            self.cache_changes.cached_nexts.insert(last_key, result);
+            if let Some((key, value)) = result.as_ref() {
+                self.cache_changes.cached_seeks.insert(*key, Some((*key, *value)));
+            }
+            result
+        };
 
-        let result = self.cursor.next()?;
-        self.cache_changes.cached_nexts.insert(self.current_key, result);
-
-        if let Some((key, value)) = result.as_ref() {
-            self.cache_changes.cached_seeks.insert(*key, Some((*key, *value)));
-        }
-
-        self.current_key = result.as_ref().map(|(k, _)| *k).unwrap_or(B256::ZERO);
+        self.last_key = result.as_ref().map(|(k, _)| *k);
         Ok(result)
     }
 }
