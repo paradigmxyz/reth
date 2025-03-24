@@ -1,72 +1,35 @@
-use std::{fmt::Debug, sync::mpsc};
+use std::{fmt::Debug, sync::Arc};
 
-use alloy_primitives::{map::B256Map, B256, U256};
+use alloy_primitives::{map::FbBuildHasher, B256, U256};
+use dashmap::DashMap;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
+
+type Map<V> = DashMap<B256, V, FbBuildHasher<32>>;
 
 /// The hashed cursor factory that creates cursors that cache the visited keys.
 ///
 /// CAUTION: If the underlying cursor factory changes, the cache will NOT be invalidated, and the
 /// old values will be returned.
 #[derive(Debug, Clone)]
-pub struct CachedHashedCursorFactory<'a, CF> {
+pub struct CachedHashedCursorFactory<CF> {
     cursor_factory: CF,
-    cache: Option<&'a CachedHashedCursorFactoryCache>,
-    cache_changes_tx: mpsc::Sender<CachedHashedCursorCacheChange>,
+    cache: Option<Arc<CachedHashedCursorFactoryCache>>,
 }
 
-impl<'a, CF> CachedHashedCursorFactory<'a, CF> {
+impl<CF> CachedHashedCursorFactory<CF> {
     /// Creates a new factory.
-    pub fn new(
-        cursor_factory: CF,
-        cache: Option<&'a CachedHashedCursorFactoryCache>,
-    ) -> (Self, mpsc::Receiver<CachedHashedCursorCacheChange>) {
-        let (cache_changes_tx, cache_changes_rx) = mpsc::channel();
-        (Self { cursor_factory, cache, cache_changes_tx }, cache_changes_rx)
-    }
-
-    pub fn take_cache_changes(
-        self,
-        cache_changes_rx: mpsc::Receiver<CachedHashedCursorCacheChange>,
-    ) -> CachedHashedCursorFactoryCache {
-        drop(self.cache_changes_tx);
-        cache_changes_rx.iter().fold(
-            CachedHashedCursorFactoryCache::default(),
-            |mut acc, change| {
-                match change {
-                    CachedHashedCursorCacheChange::Account(cache) => {
-                        acc.account_cache.extend(cache)
-                    }
-                    CachedHashedCursorCacheChange::Storage(hashed_address, cache) => {
-                        acc.storage_cache.entry(hashed_address).or_default().extend(cache);
-                    }
-                }
-                acc
-            },
-        )
+    pub fn new(cursor_factory: CF, cache: Option<Arc<CachedHashedCursorFactoryCache>>) -> Self {
+        Self { cursor_factory, cache }
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct CachedHashedCursorFactoryCache {
-    account_cache: CachedHashedCursorCache<Account>,
-    storage_cache: B256Map<CachedHashedCursorCache<U256>>,
-}
-
-impl CachedHashedCursorFactoryCache {
-    pub fn len(&self) -> usize {
-        self.account_cache.len() +
-            self.storage_cache.values().map(|cache| cache.len()).sum::<usize>()
-    }
-
-    pub fn extend(&mut self, other: Self) {
-        self.account_cache.extend(other.account_cache);
-        for (hashed_address, cache) in other.storage_cache {
-            self.storage_cache.entry(hashed_address).or_default().extend(cache);
-        }
-    }
+    account_cache: Arc<CachedHashedCursorCache<Account>>,
+    storage_cache: Map<Arc<CachedHashedCursorCache<U256>>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -78,219 +41,79 @@ pub struct CachedHashedCursorCache<T> {
     /// This map is also populated:
     /// - During the [`Self::seek`] calls using the key that the cursor actually seeked to.
     /// - During the [`Self::next`] calls using the key that the cursor actually advanced to.
-    cached_seeks: B256Map<Option<(B256, T)>>,
+    cached_seeks: Map<Option<(B256, T)>>,
     /// The cache of [`Self::next`] calls.
     ///
     /// The key is the previous key before calling [`Self::next`], and the value is the result of
     /// the call.
-    cached_nexts: B256Map<Option<(B256, T)>>,
-    /// The cache of [`Self::is_storage_empty`] call.
-    is_storage_empty: Option<bool>,
+    cached_nexts: Map<Option<(B256, T)>>,
 }
 
-impl<T> CachedHashedCursorCache<T> {
-    fn len(&self) -> usize {
-        self.cached_seeks.len() + self.cached_nexts.len() + self.is_storage_empty.is_some() as usize
-    }
-
-    fn extend(&mut self, other: Self) {
-        self.cached_seeks.extend(other.cached_seeks);
-        self.cached_nexts.extend(other.cached_nexts);
-        if let Some(other) = other.is_storage_empty {
-            self.is_storage_empty = Some(other);
-        }
-    }
-}
-
+#[derive(Debug)]
 pub enum CachedHashedCursorCacheChange {
     Account(CachedHashedCursorCache<Account>),
     Storage(B256, CachedHashedCursorCache<U256>),
 }
 
-impl<'a, CF: HashedCursorFactory> HashedCursorFactory for CachedHashedCursorFactory<'a, CF> {
-    type AccountCursor = CachedHashedAccountCursor<'a, CF::AccountCursor>;
-    type StorageCursor = CachedHashedStorageCursor<'a, CF::StorageCursor>;
+impl<CF: HashedCursorFactory> HashedCursorFactory for CachedHashedCursorFactory<CF> {
+    type AccountCursor = CachedHashedCursor<CF::AccountCursor, Account>;
+    type StorageCursor = CachedHashedCursor<CF::StorageCursor, U256>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
-        Ok(CachedHashedAccountCursor::new(CachedHashedCursor::new(
+        Ok(CachedHashedCursor::new(
             self.cursor_factory.hashed_account_cursor()?,
-            self.cache.as_ref().map(|cache| &cache.account_cache),
-            self.cache_changes_tx.clone(),
-        )))
+            self.cache.as_ref().map(|cache| cache.account_cache.clone()),
+        ))
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, DatabaseError> {
-        Ok(CachedHashedStorageCursor::new(
-            hashed_address,
-            CachedHashedCursor::new(
-                self.cursor_factory.hashed_storage_cursor(hashed_address)?,
-                self.cache.as_ref().and_then(|cache| cache.storage_cache.get(&hashed_address)),
-                self.cache_changes_tx.clone(),
-            ),
+        Ok(CachedHashedCursor::new(
+            self.cursor_factory.hashed_storage_cursor(hashed_address)?,
+            self.cache
+                .as_ref()
+                .and_then(|cache| cache.storage_cache.get(&hashed_address))
+                .map(|v| v.clone()),
         ))
-    }
-}
-
-#[derive(Debug)]
-pub struct CachedHashedAccountCursor<'a, C>
-where
-    C: HashedCursor<Value = Account>,
-{
-    inner: CachedHashedCursor<'a, C, Account>,
-}
-
-impl<'a, C> CachedHashedAccountCursor<'a, C>
-where
-    C: HashedCursor<Value = Account>,
-{
-    fn new(inner: CachedHashedCursor<'a, C, Account>) -> Self {
-        Self { inner }
-    }
-}
-
-impl<'a, C> HashedCursor for CachedHashedAccountCursor<'a, C>
-where
-    C: HashedCursor<Value = Account>,
-{
-    type Value = Account;
-
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.inner.seek(key)
-    }
-
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.inner.next()
-    }
-}
-
-impl<'a, C> Drop for CachedHashedAccountCursor<'a, C>
-where
-    C: HashedCursor<Value = Account>,
-{
-    fn drop(&mut self) {
-        self.inner
-            .cache_changes_tx
-            .send(CachedHashedCursorCacheChange::Account(std::mem::take(
-                &mut self.inner.cache_changes,
-            )))
-            .unwrap();
-    }
-}
-
-#[derive(Debug)]
-pub struct CachedHashedStorageCursor<'a, C>
-where
-    C: HashedStorageCursor<Value = U256>,
-{
-    hashed_address: B256,
-    inner: CachedHashedCursor<'a, C, U256>,
-}
-
-impl<'a, C> CachedHashedStorageCursor<'a, C>
-where
-    C: HashedStorageCursor<Value = U256>,
-{
-    fn new(hashed_address: B256, inner: CachedHashedCursor<'a, C, U256>) -> Self {
-        Self { hashed_address, inner }
-    }
-}
-
-impl<'a, C> HashedCursor for CachedHashedStorageCursor<'a, C>
-where
-    C: HashedStorageCursor<Value = U256>,
-{
-    type Value = U256;
-
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.inner.seek(key)
-    }
-
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.inner.next()
-    }
-}
-
-impl<'a, C> HashedStorageCursor for CachedHashedStorageCursor<'a, C>
-where
-    C: HashedStorageCursor<Value = U256>,
-{
-    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        self.inner.is_storage_empty()
-    }
-}
-
-impl<'a, C> Drop for CachedHashedStorageCursor<'a, C>
-where
-    C: HashedStorageCursor<Value = U256>,
-{
-    fn drop(&mut self) {
-        self.inner
-            .cache_changes_tx
-            .send(CachedHashedCursorCacheChange::Storage(
-                self.hashed_address,
-                std::mem::take(&mut self.inner.cache_changes),
-            ))
-            .unwrap();
     }
 }
 
 /// The hashed cursor that caches the visited keys.
 #[derive(Debug)]
-struct CachedHashedCursor<'a, C, T: Clone> {
+pub struct CachedHashedCursor<C, T: Clone> {
     cursor: C,
     /// Last visited key.
     last_key: Option<B256>,
     seek_cursor: bool,
-    cache: Option<&'a CachedHashedCursorCache<T>>,
-    cache_changes: CachedHashedCursorCache<T>,
-    cache_changes_tx: mpsc::Sender<CachedHashedCursorCacheChange>,
+    cache: Option<Arc<CachedHashedCursorCache<T>>>,
 }
 
-impl<'a, C, T> CachedHashedCursor<'a, C, T>
+impl<C, T> CachedHashedCursor<C, T>
 where
     T: Debug + Clone + Copy + Default,
     C: HashedCursor<Value = T>,
 {
-    fn new(
-        cursor: C,
-        cache: Option<&'a CachedHashedCursorCache<T>>,
-        cache_changes_tx: mpsc::Sender<CachedHashedCursorCacheChange>,
-    ) -> Self {
-        Self {
-            cursor,
-            last_key: None,
-            seek_cursor: false,
-            cache,
-            cache_changes: Default::default(),
-            cache_changes_tx,
-        }
+    fn new(cursor: C, cache: Option<Arc<CachedHashedCursorCache<T>>>) -> Self {
+        Self { cursor, last_key: None, seek_cursor: false, cache }
     }
 
     fn get_cached_seek(&self, key: B256) -> Option<Option<(B256, C::Value)>> {
-        self.cache
-            .as_ref()
-            .and_then(|cache| cache.cached_seeks.get(&key))
-            .or_else(|| self.cache_changes.cached_seeks.get(&key))
-            .copied()
+        self.cache.as_ref().and_then(|cache| cache.cached_seeks.get(&key)).map(|v| *v)
     }
 
     fn get_cached_next(&self, key: B256) -> Option<Option<(B256, C::Value)>> {
-        self.cache
-            .as_ref()
-            .and_then(|cache| cache.cached_nexts.get(&key))
-            .or_else(|| self.cache_changes.cached_nexts.get(&key))
-            .copied()
+        self.cache.as_ref().and_then(|cache| cache.cached_nexts.get(&key)).map(|v| *v)
     }
+}
 
-    fn get_cached_is_storage_empty(&self) -> Option<bool> {
-        self.cache
-            .as_ref()
-            .and_then(|cache| cache.is_storage_empty)
-            .or(self.cache_changes.is_storage_empty)
-    }
+impl<C, T> HashedCursor for CachedHashedCursor<C, T>
+where
+    T: Debug + Clone + Copy + Default,
+    C: HashedCursor<Value = T>,
+{
+    type Value = T;
 
     /// Seeks to the given key.
     ///
@@ -306,11 +129,13 @@ where
         } else {
             self.seek_cursor = false;
             let result = self.cursor.seek(key)?;
-            self.cache_changes.cached_seeks.insert(key, result);
+            if let Some(cache) = self.cache.as_ref() {
+                cache.cached_seeks.insert(key, result);
 
-            let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
-            if let Some(actual_seek) = actual_seek {
-                self.cache_changes.cached_seeks.insert(actual_seek, result);
+                let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
+                if let Some(actual_seek) = actual_seek {
+                    cache.cached_seeks.insert(actual_seek, result);
+                }
             }
             result
         };
@@ -338,9 +163,11 @@ where
                 self.cursor.seek(last_key)?;
             }
             let result = self.cursor.next()?;
-            self.cache_changes.cached_nexts.insert(last_key, result);
-            if let Some((key, value)) = result.as_ref() {
-                self.cache_changes.cached_seeks.insert(*key, Some((*key, *value)));
+            if let Some(cache) = self.cache.as_ref() {
+                cache.cached_nexts.insert(last_key, result);
+                if let Some((key, value)) = result.as_ref() {
+                    cache.cached_seeks.insert(*key, Some((*key, *value)));
+                }
             }
             result
         };
@@ -350,18 +177,12 @@ where
     }
 }
 
-impl<'a, C, T> CachedHashedCursor<'a, C, T>
+impl<C, T> HashedStorageCursor for CachedHashedCursor<C, T>
 where
     T: Debug + Clone + Copy + Default,
     C: HashedStorageCursor<Value = T>,
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
-        if let Some(is_storage_empty) = self.get_cached_is_storage_empty() {
-            return Ok(is_storage_empty);
-        }
-
-        let is_storage_empty = self.cursor.is_storage_empty()?;
-        self.cache_changes.is_storage_empty = Some(is_storage_empty);
-        Ok(is_storage_empty)
+        self.cursor.is_storage_empty()
     }
 }

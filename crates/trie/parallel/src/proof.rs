@@ -111,8 +111,7 @@ where
         hashed_address: B256,
         prefix_set: PrefixSet,
         target_slots: B256Set,
-    ) -> Receiver<Result<(StorageMultiProof, CachedHashedCursorFactoryCache), ParallelStateRootError>>
-    {
+    ) -> Receiver<Result<StorageMultiProof, ParallelStateRootError>> {
         let input = StorageProofInput::new(
             hashed_address,
             prefix_set,
@@ -132,7 +131,7 @@ where
         self,
         hashed_address: B256,
         target_slots: B256Set,
-    ) -> Result<(StorageMultiProof, CachedHashedCursorFactoryCache), ParallelStateRootError> {
+    ) -> Result<StorageMultiProof, ParallelStateRootError> {
         let total_targets = target_slots.len();
         let prefix_set = PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack));
         let prefix_set = prefix_set.freeze();
@@ -165,7 +164,7 @@ where
     pub fn multiproof(
         self,
         targets: MultiProofTargets,
-    ) -> Result<(MultiProof, CachedHashedCursorFactoryCache), ParallelStateRootError> {
+    ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
         // Extend prefix sets with targets
@@ -219,15 +218,13 @@ where
             DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
             &self.nodes_sorted,
         );
-        let (hashed_cursor_factory, hashed_cursor_cache_changes_rx) =
-            CachedHashedCursorFactory::new(
-                HashedPostStateCursorFactory::new(
-                    DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                    &self.state_sorted,
-                ),
-                self.hashed_cursor_cache.as_ref().map(Arc::as_ref),
-            );
-        let mut hashed_cursor_cache = CachedHashedCursorFactoryCache::default();
+        let hashed_cursor_factory = CachedHashedCursorFactory::new(
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                &self.state_sorted,
+            ),
+            self.hashed_cursor_cache,
+        );
 
         // Create the walker.
         let walker = TrieWalker::new(
@@ -261,17 +258,13 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let storage_multiproof = match storage_proofs.remove(&hashed_address) {
-                        Some(rx) => {
-                            let (storage_multiproof, cache) = rx.recv().map_err(|_| {
-                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                    DatabaseError::Other(format!(
-                                        "channel closed for {hashed_address}"
-                                    )),
-                                ))
-                            })??;
-                            hashed_cursor_cache.extend(cache);
-                            storage_multiproof
-                        }
+                        Some(rx) => rx.recv().map_err(|_| {
+                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                                DatabaseError::Other(format!(
+                                    "channel closed for {hashed_address}"
+                                )),
+                            ))
+                        })??,
                         // Since we do not store all intermediate nodes in the database, there
                         // might be a possibility of re-adding a
                         // non-modified leaf to the hash builder.
@@ -352,23 +345,7 @@ where
             "Calculated proof"
         );
 
-        hashed_cursor_cache
-            .extend(hashed_cursor_factory.take_cache_changes(hashed_cursor_cache_changes_rx));
-        debug!(
-            target: "trie::parallel_proof",
-            size = hashed_cursor_cache.len(),
-            "Extended hashed cursor cache"
-        );
-
-        Ok((
-            MultiProof {
-                account_subtree,
-                branch_node_hash_masks,
-                branch_node_tree_masks,
-                storages,
-            },
-            hashed_cursor_cache,
-        ))
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }
 }
 
@@ -462,7 +439,7 @@ mod tests {
         // after we compute the state root
         let join_handle = rt.spawn_blocking(move || proof_task.run());
 
-        let (parallel_result, _) = ParallelProof::new(
+        let parallel_result = ParallelProof::new(
             consistent_view,
             Default::default(),
             Default::default(),

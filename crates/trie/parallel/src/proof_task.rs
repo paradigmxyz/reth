@@ -18,10 +18,7 @@ use reth_provider::{
 };
 use reth_trie::{
     hashed_cursor::{
-        cached::{
-            CachedHashedCursorCacheChange, CachedHashedCursorFactory,
-            CachedHashedCursorFactoryCache,
-        },
+        cached::{CachedHashedCursorFactory, CachedHashedCursorFactoryCache},
         HashedCursorFactory, HashedPostStateCursorFactory,
     },
     prefix_set::TriePrefixSetsMut,
@@ -37,7 +34,7 @@ use std::{
     collections::VecDeque,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc::{self, channel, Receiver, SendError, Sender},
+        mpsc::{channel, Receiver, SendError, Sender},
         Arc,
     },
     time::Instant,
@@ -45,8 +42,7 @@ use std::{
 use tokio::runtime::Handle;
 use tracing::debug;
 
-type StorageProofResult =
-    Result<(StorageMultiProof, CachedHashedCursorFactoryCache), ParallelStateRootError>;
+type StorageProofResult = Result<StorageMultiProof, ParallelStateRootError>;
 type BlindedNodeResult = Result<Option<RevealedNode>, SparseTrieError>;
 
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
@@ -215,18 +211,14 @@ impl<Tx> ProofTaskTx<Tx>
 where
     Tx: DbTx,
 {
-    fn create_factories<'a>(
+    fn create_factories(
         &self,
-        hashed_cursor_cache: Option<&'a CachedHashedCursorFactoryCache>,
+        hashed_cursor_cache: Option<Arc<CachedHashedCursorFactoryCache>>,
     ) -> (
         InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
-        (
-            CachedHashedCursorFactory<
-                'a,
-                HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
-            >,
-            mpsc::Receiver<CachedHashedCursorCacheChange>,
-        ),
+        CachedHashedCursorFactory<
+            HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
+        >,
     ) {
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(&self.tx),
@@ -257,8 +249,8 @@ where
             "Starting storage proof task calculation"
         );
 
-        let (trie_cursor_factory, (hashed_cursor_factory, hashed_cursor_cache_changes_rx)) =
-            self.create_factories(input.hashed_cursor_cache.as_ref().map(Arc::as_ref));
+        let (trie_cursor_factory, hashed_cursor_factory) =
+            self.create_factories(input.hashed_cursor_cache);
 
         let hashed_cursor = match hashed_cursor_factory
             .hashed_storage_cursor(input.hashed_address)
@@ -297,9 +289,7 @@ where
         );
 
         // send the result back
-        if let Err(error) = result_sender.send(result.map(|result| {
-            (result, hashed_cursor_factory.take_cache_changes(hashed_cursor_cache_changes_rx))
-        })) {
+        if let Err(error) = result_sender.send(result) {
             debug!(
                 target: "trie::proof_task",
                 hashed_address = ?input.hashed_address,
@@ -326,8 +316,7 @@ where
             "Starting blinded account node retrieval"
         );
 
-        let (trie_cursor_factory, (hashed_cursor_factory, _hashed_cursor_cache_changes_rx)) =
-            self.create_factories(None);
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories(None);
 
         let blinded_provider_factory = ProofBlindedProviderFactory::new(
             trie_cursor_factory,
@@ -372,8 +361,7 @@ where
             "Starting blinded storage node retrieval"
         );
 
-        let (trie_cursor_factory, (hashed_cursor_factory, _hashed_cursor_cache_changes_rx)) =
-            self.create_factories(None);
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories(None);
 
         let blinded_provider_factory = ProofBlindedProviderFactory::new(
             trie_cursor_factory,

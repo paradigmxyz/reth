@@ -127,8 +127,6 @@ pub(super) struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
-    /// Hashed cursor factory cache update.
-    hashed_cursor_cache_update: CachedHashedCursorFactoryCache,
     /// The time taken to calculate the proof.
     elapsed: Duration,
 }
@@ -383,7 +381,7 @@ where
             );
 
             match result {
-                Ok((proof, hashed_cursor_cache_update)) => {
+                Ok(proof) => {
                     let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
                             sequence_number: proof_sequence_number,
@@ -391,7 +389,6 @@ where
                                 state: hashed_state_update,
                                 multiproof: proof,
                             },
-                            hashed_cursor_cache_update,
                             elapsed,
                         }),
                     ));
@@ -860,9 +857,6 @@ where
                         {
                             let _ = self.to_sparse_trie.send(combined_update);
                         }
-
-                        self.hashed_cursor_cache
-                            .extend(proof_calculated.hashed_cursor_cache_update);
 
                         if self.is_done(
                             proofs_processed,
