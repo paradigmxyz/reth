@@ -229,31 +229,21 @@ mod tests {
 
     #[test]
     fn test_trie_node_iter() {
-        fn empty_leaf_rlp_for_key(key: Nibbles) -> RlpNode {
-            RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
-                key,
-                alloy_rlp::encode(TrieAccount::default()),
-            )))
-        }
-
         reth_tracing::init_test_tracing();
 
-        // Extension (Key = 0x0000000000000000000000000000000000000000000000000000000000000)
-        // └── Branch (`branch_node_0`)
-        //     ├── 0 -> Branch (`branch_node_1`)
-        //     │      ├── 0 -> Leaf (`account_1`, Key = 0x0)
-        //     │      └── 1 -> Leaf (`account_2`, Key = 0x0)
-        //     ├── 1 -> Branch (`branch_node_2`)
-        //     │      ├── 0 -> Branch (`branch_node_3`)
-        //     │      │      ├── 0 -> Leaf (`account_3`, marked as changed)
-        //     │      │      └── 1 -> Leaf (`account_4`)
-        //     │      └── 1 -> Leaf (`account_5`, Key = 0x0)
+        // Extension (Key = 0000000000000000000000000000000000000000000000000000000000000)
+        // └── Branch (`branch_node`)
+        //     ├── 0 -> Branch (`child_branch_node`)
+        //     │      ├── 0 -> Leaf (account_1, marked as changed)
+        //     │      └── 1 -> Leaf (account_2)
+        //     ├── 1 -> Branch (`child_branch_node`)
+        //     │      ├── 0 -> Leaf (account_5)
+        //     │      └── 1 -> Leaf (account_6)
 
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
-        let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000010");
-        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
-        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000101");
-        let account_5 = b256!("0x0000000000000000000000000000000000000000000000000000000000000110");
+        let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000010");
+        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000011");
         let empty_account = Account::default();
 
         let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
@@ -261,51 +251,36 @@ mod tests {
             (Nibbles::unpack(account_2), empty_account),
             (Nibbles::unpack(account_3), empty_account),
             (Nibbles::unpack(account_4), empty_account),
-            (Nibbles::unpack(account_5), empty_account),
         ]);
 
-        let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![
-                empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
-                empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
-            ],
+        let empty_leaf_rlp = RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
+            Nibbles::default(),
+            alloy_rlp::encode(TrieAccount::default()),
+        )));
+
+        let child_branch_node_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+            vec![empty_leaf_rlp.clone(), empty_leaf_rlp],
             TrieMask::new(0b11),
         )));
 
-        let branch_node_3_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![
-                empty_leaf_rlp_for_key(Nibbles::default()),
-                empty_leaf_rlp_for_key(Nibbles::default()),
-            ],
-            TrieMask::new(0b11),
-        )));
-
-        let branch_node_2 = (
-            Nibbles::from_nibbles([vec![0; 61], vec![1]].concat()),
+        let branch_node = (
+            Nibbles::from_nibbles([0; 62]),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
+                // Tree mask has no bits set, because both child branch nodes have empty tree and
+                // hash masks.
                 TrieMask::new(0b00),
-                TrieMask::new(0b01),
-                vec![branch_node_3_rlp.as_hash().unwrap()],
-                None,
-            ),
-        );
-        let branch_node_2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![branch_node_3_rlp, empty_leaf_rlp_for_key(Nibbles::from_nibbles([0]))],
-            TrieMask::new(0b11),
-        )));
-        let branch_node_0 = (
-            Nibbles::from_nibbles([0; 61]),
-            BranchNodeCompact::new(
+                // Hash mask bits are set, because both child nodes are branches.
                 TrieMask::new(0b11),
-                TrieMask::new(0b10),
-                TrieMask::new(0b11),
-                vec![branch_node_1_rlp.as_hash().unwrap(), branch_node_2_rlp.as_hash().unwrap()],
+                vec![
+                    child_branch_node_rlp.as_hash().unwrap(),
+                    child_branch_node_rlp.as_hash().unwrap(),
+                ],
                 None,
             ),
         );
 
-        let mock_trie_nodes = vec![branch_node_0.clone(), branch_node_2.clone()];
+        let mock_trie_nodes = vec![branch_node.clone()];
         pretty_assertions::assert_eq!(
             hash_builder_branch_nodes.into_iter().sorted().collect::<Vec<_>>(),
             mock_trie_nodes,
@@ -314,9 +289,9 @@ mod tests {
         let trie_cursor_factory =
             MockTrieCursorFactory::new(mock_trie_nodes.into_iter().collect(), B256Map::default());
 
-        // Mark the account 3 as changed.
+        // Mark the account 1 as changed.
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::unpack(account_3));
+        prefix_set.insert(Nibbles::unpack(account_1));
         let prefix_set = prefix_set.freeze();
 
         let walker =
@@ -328,7 +303,6 @@ mod tests {
                 (account_2, empty_account),
                 (account_3, empty_account),
                 (account_4, empty_account),
-                (account_5, empty_account),
             ]),
             B256Map::default(),
         ));
@@ -348,11 +322,7 @@ mod tests {
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x0])),
-                    visited_key: Some(branch_node_0.0)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0.clone()),
-                    visited_key: Some(branch_node_2.0)
+                    visited_key: Some(branch_node.0)
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
@@ -363,20 +333,23 @@ mod tests {
         pretty_assertions::assert_eq!(
             *hashed_cursor_factory.inner().visited_account_keys(),
             vec![
-                // Why do we always seek this key first?
+                // Why do we seek account 1 one additional times?
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_1),
                     visited_key: Some(account_1)
                 },
-                // Seek to the modified account.
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
+                    visit_type: KeyVisitType::SeekNonExact(account_1),
+                    visited_key: Some(account_1)
                 },
-                // Collect the siblings of the modified account
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_2) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_3) },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(b256!(
+                        "0x0000000000000000000000000000000000000000000000000000000000000020"
+                    )),
+                    visited_key: None
+                },
             ],
         );
     }
