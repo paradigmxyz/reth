@@ -17,7 +17,7 @@ use reth_provider::{
     ProviderResult, StateCommitmentProvider,
 };
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{cached::CachedHashedCursorFactory, HashedPostStateCursorFactory},
     prefix_set::TriePrefixSetsMut,
     proof::{ProofBlindedProviderFactory, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
@@ -212,17 +212,20 @@ where
         &self,
     ) -> (
         InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
-        HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
+        CachedHashedCursorFactory<
+            HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
+        >,
     ) {
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(&self.tx),
             &self.task_ctx.nodes_sorted,
         );
 
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(&self.tx),
-            &self.task_ctx.state_sorted,
-        );
+        let hashed_cursor_factory =
+            CachedHashedCursorFactory::new(HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(&self.tx),
+                &self.task_ctx.state_sorted,
+            ));
 
         (trie_cursor_factory, hashed_cursor_factory)
     }

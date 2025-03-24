@@ -18,7 +18,9 @@ use reth_provider::{
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    hashed_cursor::{
+        cached::CachedHashedCursorFactory, HashedCursorFactory, HashedPostStateCursorFactory,
+    },
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
     proof::StorageProof,
@@ -203,10 +205,11 @@ where
             DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
             &self.nodes_sorted,
         );
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-            &self.state_sorted,
-        );
+        let hashed_cursor_factory =
+            CachedHashedCursorFactory::new(HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                &self.state_sorted,
+            ));
 
         // Create the walker.
         let walker = TrieWalker::new(
