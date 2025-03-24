@@ -7,20 +7,18 @@ use reth_storage_errors::db::DatabaseError;
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
 /// The hashed cursor factory that creates cursors that cache the visited keys.
+///
+/// CAUTION: If the underlying cursor factory changes, the cache will NOT be invalidated, and the
+/// old values will be returned.
 #[derive(Clone, Debug)]
 pub struct CachedHashedCursorFactory<CF> {
     cursor_factory: CF,
 }
 
 impl<CF> CachedHashedCursorFactory<CF> {
-    /// Create a new factory.
+    /// Creates a new factory.
     pub const fn new(cursor_factory: CF) -> Self {
         Self { cursor_factory }
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn inner(&self) -> &CF {
-        &self.cursor_factory
     }
 }
 
@@ -47,7 +45,7 @@ pub struct CachedHashedCursor<C, T> {
     /// The current key.
     ///
     /// Set to `B256::ZERO` if the cursor has just been created, is empty, has been seeked to a
-    /// non- existent key, or has been advanced beyond the last key.
+    /// non-existent key, or has been advanced beyond the last key.
     current_key: B256,
     /// The cache of [`Self::seek`] calls.
     ///
