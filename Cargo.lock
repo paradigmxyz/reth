@@ -7978,6 +7978,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
+ "scroll-alloy-evm",
 ]
 
 [[package]]
@@ -9695,6 +9696,269 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-scroll-chainspec"
+version = "1.3.4"
+dependencies = [
+ "alloy-chains",
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-serde",
+ "derive_more 2.0.1",
+ "once_cell",
+ "reth-chainspec",
+ "reth-ethereum-forks",
+ "reth-network-peers",
+ "reth-primitives-traits",
+ "reth-scroll-forks",
+ "reth-trie-common",
+ "scroll-alloy-hardforks",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "reth-scroll-cli"
+version = "1.3.4"
+dependencies = [
+ "clap",
+ "eyre",
+ "proptest",
+ "reth-cli",
+ "reth-cli-commands",
+ "reth-cli-runner",
+ "reth-consensus",
+ "reth-db",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-metrics",
+ "reth-scroll-chainspec",
+ "reth-scroll-evm",
+ "reth-scroll-node",
+ "reth-scroll-primitives",
+ "reth-tracing",
+ "scroll-alloy-consensus",
+ "tracing",
+]
+
+[[package]]
+name = "reth-scroll-consensus"
+version = "1.3.4"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-consensus-common",
+ "reth-ethereum-consensus",
+ "reth-execution-types",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-scroll-primitives",
+ "scroll-alloy-hardforks",
+ "thiserror 2.0.12",
+ "tracing",
+]
+
+[[package]]
+name = "reth-scroll-engine-primitives"
+version = "1.3.4"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "arbitrary",
+ "eyre",
+ "rand 0.8.5",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-engine-primitives",
+ "reth-payload-builder",
+ "reth-payload-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-scroll-chainspec",
+ "reth-scroll-primitives",
+ "scroll-alloy-hardforks",
+ "scroll-alloy-rpc-types-engine",
+ "serde",
+ "sha2 0.10.8",
+]
+
+[[package]]
+name = "reth-scroll-evm"
+version = "1.3.4"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-primitives",
+ "derive_more 2.0.1",
+ "eyre",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-execution-types",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-scroll-chainspec",
+ "reth-scroll-forks",
+ "reth-scroll-primitives",
+ "revm",
+ "revm-primitives",
+ "revm-scroll",
+ "scroll-alloy-consensus",
+ "scroll-alloy-evm",
+ "scroll-alloy-hardforks",
+ "thiserror 2.0.12",
+ "tracing",
+]
+
+[[package]]
+name = "reth-scroll-forks"
+version = "1.3.4"
+dependencies = [
+ "alloy-chains",
+ "alloy-primitives",
+ "auto_impl",
+ "once_cell",
+ "reth-ethereum-forks",
+ "scroll-alloy-hardforks",
+ "serde",
+]
+
+[[package]]
+name = "reth-scroll-node"
+version = "1.3.4"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "eyre",
+ "reth-basic-payload-builder",
+ "reth-chainspec",
+ "reth-eth-wire-types",
+ "reth-evm",
+ "reth-network",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-node-types",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-rpc-eth-types",
+ "reth-scroll-chainspec",
+ "reth-scroll-consensus",
+ "reth-scroll-engine-primitives",
+ "reth-scroll-evm",
+ "reth-scroll-payload",
+ "reth-scroll-primitives",
+ "reth-scroll-rpc",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "reth-trie-db",
+ "revm",
+ "scroll-alloy-consensus",
+ "scroll-alloy-evm",
+ "scroll-alloy-hardforks",
+ "scroll-alloy-rpc-types-engine",
+ "thiserror 2.0.12",
+ "tokio",
+]
+
+[[package]]
+name = "reth-scroll-payload"
+version = "1.3.4"
+dependencies = [
+ "futures-util",
+ "reth-basic-payload-builder",
+ "reth-payload-builder",
+ "reth-payload-primitives",
+ "reth-payload-util",
+ "reth-primitives-traits",
+ "reth-scroll-engine-primitives",
+ "reth-transaction-pool",
+]
+
+[[package]]
+name = "reth-scroll-primitives"
+version = "1.3.4"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "arbitrary",
+ "bytes",
+ "derive_more 2.0.1",
+ "modular-bitfield",
+ "once_cell",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
+ "reth-codecs",
+ "reth-primitives-traits",
+ "reth-zstd-compressors",
+ "revm-context",
+ "revm-scroll",
+ "rstest",
+ "scroll-alloy-consensus",
+ "scroll-alloy-evm",
+ "secp256k1",
+ "serde",
+]
+
+[[package]]
+name = "reth-scroll-rpc"
+version = "1.3.4"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "jsonrpsee-types",
+ "parking_lot",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-network-api",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-rpc",
+ "reth-rpc-eth-api",
+ "reth-rpc-eth-types",
+ "reth-scroll-chainspec",
+ "reth-scroll-primitives",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "revm",
+ "scroll-alloy-consensus",
+ "scroll-alloy-evm",
+ "scroll-alloy-hardforks",
+ "scroll-alloy-network",
+ "scroll-alloy-rpc-types",
+ "thiserror 2.0.12",
+ "tokio",
+]
+
+[[package]]
+name = "reth-scroll-trie"
+version = "1.3.4"
+dependencies = [
+ "alloy-primitives",
+ "alloy-trie",
+ "poseidon-bn254",
+ "reth-trie",
+ "tracing",
+]
+
+[[package]]
 name = "reth-stages"
 version = "1.3.4"
 dependencies = [
@@ -10325,7 +10589,7 @@ dependencies = [
 [[package]]
 name = "revm-scroll"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/scroll-revm#1122e3a6ff1a49e96f4c5469082c398dc059d08d"
+source = "git+https://github.com/scroll-tech/scroll-revm?branch=chore%2Fupstream-merge-20.0.0-alpha.7#738d60f8a31a61894b8a9e057e66cefd58de2a3c"
 dependencies = [
  "auto_impl",
  "enumn",
@@ -10761,7 +11025,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scroll-alloy-consensus"
-version = "1.3.1"
+version = "1.3.4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10784,7 +11048,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-evm"
-version = "1.3.1"
+version = "1.3.4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10801,7 +11065,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-hardforks"
-version = "1.3.1"
+version = "1.3.4"
 dependencies = [
  "alloy-hardforks",
  "auto_impl",
@@ -10810,7 +11074,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-network"
-version = "1.3.1"
+version = "1.3.4"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -10823,7 +11087,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-provider"
-version = "1.3.1"
+version = "1.3.4"
 dependencies = [
  "alloy-primitives",
  "alloy-provider",
@@ -10860,7 +11124,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-rpc-types"
-version = "1.3.1"
+version = "1.3.4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -10878,7 +11142,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-alloy-rpc-types-engine"
-version = "1.3.1"
+version = "1.3.4"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -10889,7 +11153,7 @@ dependencies = [
 
 [[package]]
 name = "scroll-reth"
-version = "1.3.1"
+version = "1.3.4"
 dependencies = [
  "clap",
  "reth-cli-util",

@@ -52,7 +52,7 @@ impl<T: Transaction> IntoTxEnv<Self> for ScrollTransactionIntoTxEnv<T> {
 }
 
 impl<T: Transaction> Transaction for ScrollTransactionIntoTxEnv<T> {
-    type AccessList = T::AccessList;
+    type AccessListItem = T::AccessListItem;
     type Authorization = T::Authorization;
 
     fn tx_type(&self) -> u8 {
@@ -91,7 +91,9 @@ impl<T: Transaction> Transaction for ScrollTransactionIntoTxEnv<T> {
         self.0.gas_price()
     }
 
-    fn access_list(&self) -> Option<&Self::AccessList> {
+    fn access_list(
+        &self,
+    ) -> Option<impl Iterator<Item = &<ScrollTransaction<T> as Transaction>::AccessListItem>> {
         self.0.access_list()
     }
 
