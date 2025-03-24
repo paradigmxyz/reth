@@ -15,8 +15,8 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-execution-types.workspace = true
-reth-primitives = { workspace = true, features = ["reth-codec", "secp256k1"] }
-reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
+reth-ethereum-primitives = { workspace = true, features = ["reth-codec"] }
+reth-primitives-traits = { workspace = true, features = ["reth-codec", "secp256k1"] }
 reth-fs-util.workspace = true
 reth-errors.workspace = true
 reth-storage-errors.workspace = true
@@ -33,7 +33,7 @@ reth-codecs.workspace = true
 reth-evm.workspace = true
 reth-chain-state.workspace = true
 reth-node-types.workspace = true
-
+reth-static-file-types.workspace = true
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
