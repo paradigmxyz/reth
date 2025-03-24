@@ -813,9 +813,9 @@ where
 
         let eth_filter = eth.filter.clone();
         executor.spawn_critical(
-            "eth-filters-watch-reorgs",
+            "eth-filters-watch-reorg",
             Box::pin(async move {
-                eth_filter.watch_reorgs(notifications).await;
+                eth_filter.watch_reorg(notifications).await;
             }),
         );
 

@@ -1,7 +1,7 @@
 //! `eth_` `Filter` RPC handler implementation
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockNumber, TxHash};
+use alloy_primitives::{BlockHash, BlockNumber, TxHash};
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
@@ -9,6 +9,7 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use futures::{future::TryFutureExt, Stream};
 use jsonrpsee::{core::RpcResult, server::IdProvider};
+use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_provider::{
@@ -169,6 +170,8 @@ where
     }
 }
 
+// XXX FIXME YSG
+
 impl<Eth> EthFilter<Eth>
 where
     Eth: EthApiTypes + 'static,
@@ -176,7 +179,7 @@ where
     /// listener for reorged blocks updates relevant active filters.
     /// In case of a chain reorg, previously emitted logs are emitted again but with the removed
     /// field set to true.
-    pub async fn watch_reorgs<N, St>(&self, mut notifications: St)
+    pub async fn watch_reorg<N, St>(&self, mut notifications: St)
     where
         N: NodePrimitives,
         St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
@@ -190,30 +193,41 @@ where
     }
 
     /// Update a reorg block for all active filters.
-    async fn update_reorg<N>(&self, _old_blocks: &BTreeMap<BlockNumber, RecoveredBlock<N::Block>>)
+    async fn update_reorg<N>(&self, old_blocks: &BTreeMap<BlockNumber, RecoveredBlock<N::Block>>)
     where
         N: NodePrimitives,
     {
-    }
-}
+        let reorg_blocks: HashMap<_, _> =
+            old_blocks.iter().map(|(_, v)| (v.hash(), v.clone_block())).collect();
+        let mut active_filters = self.active_filters().inner.lock().await;
+        for active_filter in active_filters.values_mut() {
+            if let FilterKind::Log(filter) = &active_filter.kind {
+                match filter.block_option {
+                    FilterBlockOption::AtBlockHash(block_hash) => {
+                        if reorg_blocks.contains_key(&block_hash) {
+                            // lazy calculate Vec<Log>
+                            active_filter.reorg_logs.write().entry(block_hash).or_default();
+                        };
+                    }
 
-/// Create a background task and listener for reorged blocks updates relevant active filters.
-/// In case of a chain reorg, previously emitted logs are emitted again but with the removed
-/// field set to true.
-pub async fn eth_filter_watch_reorgs_task<Eth, N, St>(
-    _eth_filter: EthFilter<Eth>,
-    mut notifications: St,
-) where
-    Eth: EthApiTypes + 'static,
-    N: NodePrimitives,
-    St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
-{
-    trace!(target: "rpc::eth", "Serving eth_watchReorgsFilter");
-    while let Some(notification) = notifications.next().await {
-        if let CanonStateNotification::Reorg { old, .. } = notification {
-            //   self.update_reorg(old.blocks()).await;
-            //eth_filter.update_reorg(old.blocks()).await?;
-            println!("old {:?}", old);
+                    FilterBlockOption::Range { from_block, to_block } => {
+                        if let (Some(from), Some(to)) = (
+                            from_block.and_then(|from| from.as_number()),
+                            to_block.and_then(|to| to.as_number()),
+                        ) {
+                            if from > to {
+                                continue
+                            }
+                            for block_number in from..=to {
+                                if let Some(block) = old_blocks.get(&block_number) {
+                                    let block_hash = block.hash();
+                                    active_filter.reorg_logs.write().entry(block_hash).or_default();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -548,6 +562,7 @@ where
                 block: last_poll_block_number,
                 last_poll_timestamp: Instant::now(),
                 kind,
+                reorg_logs: Arc::new(RwLock::new(HashMap::new())),
             },
         );
         Ok(id)
@@ -691,6 +706,8 @@ struct ActiveFilter<T> {
     last_poll_timestamp: Instant,
     /// What kind of filter it is.
     kind: FilterKind<T>,
+    /// Reorg logs that are relevant to this filter
+    reorg_logs: Arc<RwLock<HashMap<BlockHash, Vec<Log>>>>,
 }
 
 /// A receiver for pending transactions that returns all new transactions since the last poll.
