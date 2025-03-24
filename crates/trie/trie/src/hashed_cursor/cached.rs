@@ -172,7 +172,9 @@ where
     /// The result of the seek will be cached, and the key that the underlying cursor seeked to
     /// will be cached as well if it differs from the seeked key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, C::Value)>, DatabaseError> {
+        self.cache.seeks_total.fetch_add(1, Ordering::Relaxed);
         let result = if let Some(result) = self.cache.cached_seeks.get(&key) {
+            self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
             self.seek_cursor = true;
             *result
         } else {
@@ -201,7 +203,9 @@ where
     fn next(&mut self) -> Result<Option<(B256, C::Value)>, DatabaseError> {
         let Some(last_key) = self.last_key else { return Ok(None) };
 
+        self.cache.nexts_total.fetch_add(1, Ordering::Relaxed);
         let result = if let Some(result) = self.cache.cached_nexts.get(&last_key) {
+            self.cache.nexts_hit.fetch_add(1, Ordering::Relaxed);
             self.seek_cursor = true;
             *result
         } else {
