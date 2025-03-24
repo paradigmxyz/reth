@@ -13,8 +13,9 @@ use reth_provider::{
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
-    HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
+    hashed_cursor::cached::CachedHashedCursorFactoryCache, prefix_set::TriePrefixSetsMut,
+    updates::TrieUpdatesSorted, HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof,
+    MultiProofTargets, TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
@@ -126,6 +127,8 @@ pub(super) struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
+    /// Hashed cursor factory cache update.
+    hashed_cursor_cache_update: CachedHashedCursorFactoryCache,
     /// The time taken to calculate the proof.
     elapsed: Duration,
 }
@@ -246,6 +249,7 @@ struct MultiproofInput<Factory> {
     source: Option<StateChangeSource>,
     hashed_state_update: HashedPostState,
     proof_targets: MultiProofTargets,
+    hashed_cursor_cache: CachedHashedCursorFactoryCache,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<MultiProofMessage>,
 }
@@ -337,6 +341,7 @@ where
             source,
             hashed_state_update,
             proof_targets,
+            hashed_cursor_cache,
             proof_sequence_number,
             state_root_message_sender,
         }: MultiproofInput<Factory>,
@@ -364,6 +369,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
+            .with_hashed_cursor_cache(hashed_cursor_cache)
             .multiproof(proof_targets);
             let elapsed = start.elapsed();
             trace!(
@@ -377,7 +383,7 @@ where
             );
 
             match result {
-                Ok(proof) => {
+                Ok((proof, hashed_cursor_cache_update)) => {
                     let _ = state_root_message_sender.send(MultiProofMessage::ProofCalculated(
                         Box::new(ProofCalculated {
                             sequence_number: proof_sequence_number,
@@ -385,6 +391,7 @@ where
                                 state: hashed_state_update,
                                 multiproof: proof,
                             },
+                            hashed_cursor_cache_update,
                             elapsed,
                         }),
                     ));
@@ -464,6 +471,8 @@ pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
     to_sparse_trie: Sender<SparseTrieUpdate>,
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
+    /// Hashed cursor factory cache.
+    hashed_cursor_cache: CachedHashedCursorFactoryCache,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
@@ -493,6 +502,7 @@ where
             tx,
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
+            hashed_cursor_cache: Default::default(),
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 executor,
@@ -527,6 +537,7 @@ where
                 config: self.config.clone(),
                 source: None,
                 hashed_state_update: Default::default(),
+                hashed_cursor_cache: self.hashed_cursor_cache.clone(),
                 proof_targets: proof_targets_chunk,
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
@@ -644,6 +655,7 @@ where
                 source: Some(source),
                 hashed_state_update: chunk,
                 proof_targets,
+                hashed_cursor_cache: self.hashed_cursor_cache.clone(),
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
             });
@@ -848,6 +860,9 @@ where
                         {
                             let _ = self.to_sparse_trie.send(combined_update);
                         }
+
+                        self.hashed_cursor_cache
+                            .extend(proof_calculated.hashed_cursor_cache_update);
 
                         if self.is_done(
                             proofs_processed,

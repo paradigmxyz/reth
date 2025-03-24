@@ -3,7 +3,7 @@ use alloy_primitives::{keccak256, map::HashMap, Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
@@ -123,10 +123,13 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         Self::from_tx(tx, address)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                &state_sorted,
-            ))
+            .with_hashed_cursor(
+                HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(tx),
+                    &state_sorted,
+                )
+                .hashed_storage_cursor(hashed_address)?,
+            )
             .with_prefix_set_mut(prefix_set)
             .storage_proof(slot)
     }
@@ -145,10 +148,13 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
         Self::from_tx(tx, address)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                &state_sorted,
-            ))
+            .with_hashed_cursor(
+                HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(tx),
+                    &state_sorted,
+                )
+                .hashed_storage_cursor(hashed_address)?,
+            )
             .with_prefix_set_mut(prefix_set)
             .storage_multiproof(targets)
     }

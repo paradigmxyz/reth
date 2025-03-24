@@ -149,7 +149,9 @@ where
             self.prefix_sets.storage_prefix_sets.get(&self.account).cloned().unwrap_or_default();
         let mut proof = StorageProof::new_hashed(
             self.trie_cursor_factory.clone(),
-            self.hashed_cursor_factory.clone(),
+            self.hashed_cursor_factory
+                .hashed_storage_cursor(self.account)
+                .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?,
             self.account,
         )
         .with_prefix_set_mut(storage_prefix_set)
