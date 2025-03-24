@@ -21,21 +21,21 @@ impl<T> FullSignedTx for T where T: SignedTransaction + MaybeCompact + MaybeSerd
 /// A signed transaction.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait SignedTransaction:
-Send
-+ Sync
-+ Unpin
-+ Clone
-+ fmt::Debug
-+ PartialEq
-+ Eq
-+ Hash
-+ Encodable
-+ Decodable
-+ Encodable2718
-+ Decodable2718
-+ alloy_consensus::Transaction
-+ MaybeSerde
-+ InMemorySize
+    Send
+    + Sync
+    + Unpin
+    + Clone
+    + fmt::Debug
+    + PartialEq
+    + Eq
+    + Hash
+    + Encodable
+    + Decodable
+    + Encodable2718
+    + Decodable2718
+    + alloy_consensus::Transaction
+    + MaybeSerde
+    + InMemorySize
 {
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;
