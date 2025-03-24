@@ -223,7 +223,7 @@ where
                 DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
                 &self.state_sorted,
             ),
-            self.hashed_cursor_cache,
+            self.hashed_cursor_cache.unwrap_or_default(),
         );
 
         // Create the walker.

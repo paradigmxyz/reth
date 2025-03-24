@@ -1,9 +1,16 @@
-use std::{fmt::Debug, sync::Arc};
+use std::{
+    fmt::Debug,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use alloy_primitives::{map::FbBuildHasher, B256, U256};
 use dashmap::DashMap;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
+use tracing::debug;
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
@@ -16,12 +23,12 @@ type Map<V> = DashMap<B256, V, FbBuildHasher<32>>;
 #[derive(Debug, Clone)]
 pub struct CachedHashedCursorFactory<CF> {
     cursor_factory: CF,
-    cache: Option<Arc<CachedHashedCursorFactoryCache>>,
+    cache: Arc<CachedHashedCursorFactoryCache>,
 }
 
 impl<CF> CachedHashedCursorFactory<CF> {
     /// Creates a new factory.
-    pub fn new(cursor_factory: CF, cache: Option<Arc<CachedHashedCursorFactoryCache>>) -> Self {
+    pub fn new(cursor_factory: CF, cache: Arc<CachedHashedCursorFactoryCache>) -> Self {
         Self { cursor_factory, cache }
     }
 }
@@ -32,7 +39,42 @@ pub struct CachedHashedCursorFactoryCache {
     storage_cache: Map<Arc<CachedHashedCursorCache<U256>>>,
 }
 
-#[derive(Clone, Debug, Default)]
+impl CachedHashedCursorFactoryCache {
+    pub fn log_stats(&self) {
+        let account_seeks_hit = self.account_cache.seeks_hit.load(Ordering::Relaxed);
+        let account_seeks_total = self.account_cache.seeks_total.load(Ordering::Relaxed);
+        let account_nexts_hit = self.account_cache.nexts_hit.load(Ordering::Relaxed);
+        let account_nexts_total = self.account_cache.nexts_total.load(Ordering::Relaxed);
+        let (storage_seeks_hit, storage_seeks_total, storage_nexts_hit, storage_nexts_total) =
+            self.storage_cache.iter().fold(
+                (0, 0, 0, 0),
+                |(acc_seeks_hit, acc_seeks_total, acc_nexts_hit, acc_nexts_total), entry| {
+                    let cache = entry.value();
+                    (
+                        acc_seeks_hit + cache.seeks_hit.load(Ordering::Relaxed),
+                        acc_seeks_total + cache.seeks_total.load(Ordering::Relaxed),
+                        acc_nexts_hit + cache.nexts_hit.load(Ordering::Relaxed),
+                        acc_nexts_total + cache.nexts_total.load(Ordering::Relaxed),
+                    )
+                },
+            );
+
+        debug!(
+            target: "trie::hashed_cursor::cached",
+            account_seeks_hit,
+            account_seeks_total,
+            account_nexts_hit,
+            account_nexts_total,
+            storage_seeks_hit,
+            storage_seeks_total,
+            storage_nexts_hit,
+            storage_nexts_total,
+            "CachedHashedCursorFactoryCache stats"
+        );
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct CachedHashedCursorCache<T> {
     /// The cache of [`Self::seek`] calls.
     ///
@@ -42,11 +84,15 @@ pub struct CachedHashedCursorCache<T> {
     /// - During the [`Self::seek`] calls using the key that the cursor actually seeked to.
     /// - During the [`Self::next`] calls using the key that the cursor actually advanced to.
     cached_seeks: Map<Option<(B256, T)>>,
+    seeks_hit: AtomicUsize,
+    seeks_total: AtomicUsize,
     /// The cache of [`Self::next`] calls.
     ///
     /// The key is the previous key before calling [`Self::next`], and the value is the result of
     /// the call.
     cached_nexts: Map<Option<(B256, T)>>,
+    nexts_hit: AtomicUsize,
+    nexts_total: AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -62,7 +108,7 @@ impl<CF: HashedCursorFactory> HashedCursorFactory for CachedHashedCursorFactory<
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
         Ok(CachedHashedCursor::new(
             self.cursor_factory.hashed_account_cursor()?,
-            self.cache.as_ref().map(|cache| cache.account_cache.clone()),
+            self.cache.account_cache.clone(),
         ))
     }
 
@@ -72,10 +118,7 @@ impl<CF: HashedCursorFactory> HashedCursorFactory for CachedHashedCursorFactory<
     ) -> Result<Self::StorageCursor, DatabaseError> {
         Ok(CachedHashedCursor::new(
             self.cursor_factory.hashed_storage_cursor(hashed_address)?,
-            self.cache
-                .as_ref()
-                .and_then(|cache| cache.storage_cache.get(&hashed_address))
-                .map(|v| v.clone()),
+            self.cache.storage_cache.entry(hashed_address).or_default().clone(),
         ))
     }
 }
@@ -84,10 +127,10 @@ impl<CF: HashedCursorFactory> HashedCursorFactory for CachedHashedCursorFactory<
 #[derive(Debug)]
 pub struct CachedHashedCursor<C, T: Clone> {
     cursor: C,
+    cache: Arc<CachedHashedCursorCache<T>>,
     /// Last visited key.
     last_key: Option<B256>,
     seek_cursor: bool,
-    cache: Option<Arc<CachedHashedCursorCache<T>>>,
 }
 
 impl<C, T> CachedHashedCursor<C, T>
@@ -95,16 +138,8 @@ where
     T: Debug + Clone + Copy + Default,
     C: HashedCursor<Value = T>,
 {
-    fn new(cursor: C, cache: Option<Arc<CachedHashedCursorCache<T>>>) -> Self {
-        Self { cursor, last_key: None, seek_cursor: false, cache }
-    }
-
-    fn get_cached_seek(&self, key: B256) -> Option<Option<(B256, C::Value)>> {
-        self.cache.as_ref().and_then(|cache| cache.cached_seeks.get(&key)).map(|v| *v)
-    }
-
-    fn get_cached_next(&self, key: B256) -> Option<Option<(B256, C::Value)>> {
-        self.cache.as_ref().and_then(|cache| cache.cached_nexts.get(&key)).map(|v| *v)
+    fn new(cursor: C, cache: Arc<CachedHashedCursorCache<T>>) -> Self {
+        Self { cursor, cache, last_key: None, seek_cursor: false }
     }
 }
 
@@ -123,19 +158,17 @@ where
     /// The result of the seek will be cached, and the key that the underlying cursor seeked to
     /// will be cached as well if it differs from the seeked key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, C::Value)>, DatabaseError> {
-        let result = if let Some(result) = self.get_cached_seek(key) {
+        let result = if let Some(result) = self.cache.cached_seeks.get(&key) {
             self.seek_cursor = true;
-            result
+            *result
         } else {
             self.seek_cursor = false;
             let result = self.cursor.seek(key)?;
-            if let Some(cache) = self.cache.as_ref() {
-                cache.cached_seeks.insert(key, result);
+            self.cache.cached_seeks.insert(key, result);
 
-                let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
-                if let Some(actual_seek) = actual_seek {
-                    cache.cached_seeks.insert(actual_seek, result);
-                }
+            let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
+            if let Some(actual_seek) = actual_seek {
+                self.cache.cached_seeks.insert(actual_seek, result);
             }
             result
         };
@@ -154,20 +187,18 @@ where
     fn next(&mut self) -> Result<Option<(B256, C::Value)>, DatabaseError> {
         let Some(last_key) = self.last_key else { return Ok(None) };
 
-        let result = if let Some(result) = self.get_cached_next(last_key) {
+        let result = if let Some(result) = self.cache.cached_nexts.get(&last_key) {
             self.seek_cursor = true;
-            result
+            *result
         } else {
             if self.seek_cursor {
                 self.seek_cursor = false;
                 self.cursor.seek(last_key)?;
             }
             let result = self.cursor.next()?;
-            if let Some(cache) = self.cache.as_ref() {
-                cache.cached_nexts.insert(last_key, result);
-                if let Some((key, value)) = result.as_ref() {
-                    cache.cached_seeks.insert(*key, Some((*key, *value)));
-                }
+            self.cache.cached_nexts.insert(last_key, result);
+            if let Some((key, value)) = result.as_ref() {
+                self.cache.cached_seeks.insert(*key, Some((*key, *value)));
             }
             result
         };

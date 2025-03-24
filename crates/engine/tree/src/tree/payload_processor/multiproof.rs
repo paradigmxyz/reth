@@ -905,6 +905,8 @@ where
         if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
         }
+
+        self.hashed_cursor_cache.log_stats();
     }
 }
 

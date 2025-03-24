@@ -230,7 +230,7 @@ where
                 DatabaseHashedCursorFactory::new(&self.tx),
                 &self.task_ctx.state_sorted,
             ),
-            hashed_cursor_cache,
+            hashed_cursor_cache.unwrap_or_default(),
         );
 
         (trie_cursor_factory, hashed_cursor_factory)
