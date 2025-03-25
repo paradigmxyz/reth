@@ -256,7 +256,7 @@ impl<Engine> Action<Engine> for GenerateNextPayload
 where
     Engine: EngineTypes + PayloadTypes<PayloadAttributes = PayloadAttributes>,
     reth_node_ethereum::engine::EthPayloadAttributes:
-        From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV2>,
+        From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -299,7 +299,7 @@ where
             sleep(Duration::from_secs(1)).await;
 
             let built_payload: PayloadAttributes =
-                EngineApiClient::<Engine>::get_payload_v2(&env.node_clients[0].engine, payload_id)
+                EngineApiClient::<Engine>::get_payload_v3(&env.node_clients[0].engine, payload_id)
                     .await?
                     .into();
             env.payload_id_history.insert(latest_block.number + 1, payload_id);
