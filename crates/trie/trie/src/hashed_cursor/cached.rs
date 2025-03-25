@@ -80,7 +80,8 @@ impl CachedHashedCursorFactoryCache {
         //         },
         //     );
 
-        let account_seeks_size = self.account_cache.cached_seeks_exact.entry_count();
+        let account_seeks_exact_size = self.account_cache.cached_seeks_exact.entry_count();
+        let account_seeks_inexact_size = self.account_cache.cached_seeks_inexact.entry_count();
         let account_nexts_size = self.account_cache.cached_nexts.entry_count();
 
         debug!(
@@ -93,7 +94,8 @@ impl CachedHashedCursorFactoryCache {
             // storage_seeks_total,
             // storage_nexts_hit,
             // storage_nexts_total,
-            account_seeks_size,
+            account_seeks_exact_size,
+            account_seeks_inexact_size,
             account_nexts_size,
             "CachedHashedCursorFactoryCache raw stats"
         );
