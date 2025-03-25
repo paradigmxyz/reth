@@ -1,4 +1,4 @@
-use crate::{chainspec::hardforks::BscHardfork, evm::spec::BscSpecId};
+use crate::{evm::spec::BscSpecId, hardforks::bsc::BscHardfork};
 use alloy_primitives::BlockNumber;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_forks::EthereumHardfork;
@@ -110,8 +110,9 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: BlockNumber) -> BscSpecId {
 }
 #[cfg(test)]
 mod tests {
+    use crate::chainspec::bsc::bsc_chain_spec;
+
     use super::*;
-    use crate::chainspec::bsc_chain_spec;
 
     #[test]
     fn test_revm_spec_by_timestamp_after_shanghai() {

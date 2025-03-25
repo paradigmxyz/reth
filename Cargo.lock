@@ -3508,6 +3508,10 @@ dependencies = [
 name = "example-bsc-sdk"
 version = "0.0.0"
 dependencies = [
+ "alloy-chains",
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
