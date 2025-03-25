@@ -21,6 +21,7 @@ echo "Building images"
 wait
 
 # Run docker save in parallel, wait and exit on error
+echo "Saving images"
 saving_pids=( )
 docker save hive/hiveproxy:latest -o ../hive_assets/hiveproxy.tar & saving_pids+=( $! )
 docker save hive/simulators/devp2p:latest -o ../hive_assets/devp2p.tar & saving_pids+=( $! )
