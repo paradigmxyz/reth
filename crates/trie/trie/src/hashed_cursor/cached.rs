@@ -64,7 +64,6 @@ impl CachedHashedCursorFactoryCache {
 
         let hashed_post_state_accounts =
             hashed_post_state.accounts.iter().collect::<BTreeMap<_, _>>();
-        let mut hashed_post_state_accounts = hashed_post_state_accounts.into_iter();
         for entry in self
             .account_cache
             .cached_seeks_inexact
@@ -76,7 +75,7 @@ impl CachedHashedCursorFactoryCache {
             // Find first hashed post state account that is greater than or equal to the address
             // that was sought.
             let hashed_post_state_account =
-                hashed_post_state_accounts.find_map(|(&post_state_address, account)| {
+                hashed_post_state_accounts.iter().find_map(|(&&post_state_address, account)| {
                     account.and_then(|account| {
                         (post_state_address >= seek_address)
                             .then_some((post_state_address, account))
