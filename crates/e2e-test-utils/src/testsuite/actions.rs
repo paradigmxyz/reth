@@ -157,26 +157,17 @@ where
     }
 }
 /// Pick the next block producer based on the latest block information.
-#[derive(Debug)]
-pub struct PickNextBlockProducer<Engine> {
-    /// Tracks engine type
-    _phantom: PhantomData<Engine>,
-}
+#[derive(Debug, Default)]
+pub struct PickNextBlockProducer {}
 
-impl<Engine> Default for PickNextBlockProducer<Engine> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<Engine> PickNextBlockProducer<Engine> {
+impl PickNextBlockProducer {
     /// Create a new `PickNextBlockProducer` action
     pub fn new() -> Self {
-        Self { _phantom: Default::default() }
+        Self {}
     }
 }
 
-impl<Engine> Action<Engine> for PickNextBlockProducer<Engine>
+impl<Engine> Action<Engine> for PickNextBlockProducer
 where
     Engine: EngineTypes,
 {

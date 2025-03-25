@@ -32,14 +32,14 @@ impl NodeTypes for CustomNode {
 }
 
 impl NodeTypesWithEngine for CustomNode {
-    type Engine = CustomEngineTypes;
+    type Payload = CustomEngineTypes;
 }
 
 impl<N> Node<N> for CustomNode
 where
     N: FullNodeTypes<
         Types: NodeTypesWithEngine<
-            Engine = CustomEngineTypes,
+            Payload = CustomEngineTypes,
             ChainSpec = CustomChainSpec,
             Primitives = CustomNodePrimitives,
             Storage = OpStorage,

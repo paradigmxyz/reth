@@ -76,7 +76,7 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
-        <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        <<Types as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadAttributes,
     >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;

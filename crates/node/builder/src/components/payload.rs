@@ -19,7 +19,7 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> impl Future<
-        Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>>,
+        Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload>>,
     > + Send;
 }
 
@@ -30,7 +30,7 @@ where
     F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
     Fut: Future<
             Output = eyre::Result<
-                PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
+                PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload>,
             >,
         > + Send,
 {
@@ -39,7 +39,7 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> impl Future<
-        Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>>,
+        Output = eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload>>,
     > {
         self(ctx, pool)
     }
@@ -81,7 +81,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload>> {
         let payload_builder = self.0.build_payload_builder(ctx, pool).await?;
 
         let conf = ctx.config().builder.clone();
