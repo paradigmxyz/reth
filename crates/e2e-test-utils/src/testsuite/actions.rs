@@ -278,13 +278,12 @@ where
                 .payload_attributes
                 .get(&latest_block.number)
                 .cloned()
-                .map(Into::into)
                 .ok_or_else(|| eyre::eyre!("No payload attributes found for latest block"))?;
 
             let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
                 &env.node_clients[0].engine,
                 fork_choice_state,
-                Some(payload_attributes.clone().into()),
+                Some(payload_attributes.clone()),
             )
             .await?;
 
@@ -304,7 +303,7 @@ where
                     .await?
                     .into();
             env.payload_id_history.insert(latest_block.number + 1, payload_id);
-            env.latest_payload_built = Some(built_payload.clone());
+            env.latest_payload_built = Some(built_payload);
 
             Ok(())
         })
