@@ -49,10 +49,10 @@ impl Default for CachedHashedCursorFactoryCache {
 impl CachedHashedCursorFactoryCache {
     pub fn apply_hashed_post_state(&self, hashed_post_state: &HashedPostState) {
         self.account_cache.cached_nexts.invalidate_all();
-        self.account_cache.cached_seeks.invalidate_all();
+        self.account_cache.cached_seeks_inexact.invalidate_all();
         for (address, account) in &hashed_post_state.accounts {
             self.account_cache
-                .cached_seeks
+                .cached_seeks_exact
                 .insert(*address, account.map(|account| (*address, account)));
         }
     }
@@ -80,7 +80,7 @@ impl CachedHashedCursorFactoryCache {
         //         },
         //     );
 
-        let account_seeks_size = self.account_cache.cached_seeks.entry_count();
+        let account_seeks_size = self.account_cache.cached_seeks_exact.entry_count();
         let account_nexts_size = self.account_cache.cached_nexts.entry_count();
 
         debug!(
@@ -116,14 +116,18 @@ impl CachedHashedCursorFactoryCache {
 
 #[derive(Debug)]
 pub struct CachedHashedCursorCache<T> {
-    /// The cache of [`Self::seek`] calls.
+    /// The cache of [`Self::seek`] calls that resulted in exact matches.
     ///
     /// The key is the seeked key, and the value is the result of the seek.
     ///
     /// This map is also populated:
     /// - During the [`Self::seek`] calls using the key that the cursor actually seeked to.
     /// - During the [`Self::next`] calls using the key that the cursor actually advanced to.
-    cached_seeks: Cache<Option<(B256, T)>>,
+    cached_seeks_exact: Cache<Option<(B256, T)>>,
+    /// The cache of [`Self::seek`] calls that resulted in inexact matches.
+    ///
+    /// The key is the seeked key, and the value is the result of the seek.
+    cached_seeks_inexact: Cache<Option<(B256, T)>>,
     seeks_hit: AtomicUsize,
     seeks_total: AtomicUsize,
     /// The cache of [`Self::next`] calls.
@@ -138,7 +142,10 @@ pub struct CachedHashedCursorCache<T> {
 impl<T: Clone + Send + Sync + 'static> Default for CachedHashedCursorCache<T> {
     fn default() -> Self {
         Self {
-            cached_seeks: CacheBuilder::new(10_000).build_with_hasher(FbBuildHasher::default()),
+            cached_seeks_exact: CacheBuilder::new(10_000)
+                .build_with_hasher(FbBuildHasher::default()),
+            cached_seeks_inexact: CacheBuilder::new(10_000)
+                .build_with_hasher(FbBuildHasher::default()),
             cached_nexts: CacheBuilder::new(10_000).build_with_hasher(FbBuildHasher::default()),
             seeks_hit: AtomicUsize::new(0),
             seeks_total: AtomicUsize::new(0),
@@ -223,7 +230,7 @@ where
     /// will be cached as well if it differs from the seeked key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, C::Value)>, DatabaseError> {
         self.cache.seeks_total.fetch_add(1, Ordering::Relaxed);
-        let result = if let Some(result) = self.cache.cached_seeks.get(&key) {
+        let result = if let Some(result) = self.cache.cached_seeks_exact.get(&key) {
             self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
             self.seek_before_next = true;
             result
@@ -231,11 +238,15 @@ where
             self.seek_before_next = false;
 
             let result = self.cursor.seek(key)?;
-            self.cache.cached_seeks.insert(key, result);
+            if result.filter(|(k, _)| k == &key).is_some() {
+                self.cache.cached_seeks_exact.insert(key, result);
+            } else {
+                self.cache.cached_seeks_inexact.insert(key, result);
+            }
 
             let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
             if let Some(actual_seek) = actual_seek {
-                self.cache.cached_seeks.insert(actual_seek, result);
+                self.cache.cached_seeks_exact.insert(actual_seek, result);
             }
 
             result
@@ -269,7 +280,7 @@ where
             let result = self.cursor.next()?;
             self.cache.cached_nexts.insert(last_key, result);
             if let Some((key, value)) = result.as_ref() {
-                self.cache.cached_seeks.insert(*key, Some((*key, *value)));
+                self.cache.cached_seeks_exact.insert(*key, Some((*key, *value)));
             }
             result
         };
