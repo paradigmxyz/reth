@@ -4,7 +4,6 @@ use alloy_consensus::{
 use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
-    BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
@@ -13,27 +12,31 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use core::fmt;
 use jsonrpsee::core::RpcResult;
+use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::BlockExecutionOutput;
-use reth_metrics::{metrics, metrics::Gauge, Metrics};
+use reth_metrics::{Metrics, metrics, metrics::Gauge};
 use reth_node_api::NewPayloadError;
 use reth_primitives_traits::{
-    constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
-    SealedBlock, SealedHeaderFor,
+    BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeaderFor,
+    constants::GAS_LIMIT_BOUND_DIVISOR,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
-use reth_rpc_api::BlockSubmissionValidationApiServer;
-use reth_rpc_server_types::result::internal_rpc_err;
+use reth_rpc_api::{
+    BlockSubmissionValidationApiServer, BuilderBlockValidationRequestV3,
+    BuilderBlockValidationRequestV4, TransactionFilter,
+};
+use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 use tracing::warn;
 
 /// The type that implements the `validation` rpc namespace trait
@@ -56,9 +59,9 @@ where
         task_spawner: Box<dyn TaskSpawner>,
         payload_validator: Arc<
             dyn PayloadValidator<
-                Block = <E::Primitives as NodePrimitives>::Block,
-                ExecutionData = ExecutionData,
-            >,
+                    Block = <E::Primitives as NodePrimitives>::Block,
+                    ExecutionData = ExecutionData,
+                >,
         >,
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
@@ -82,11 +85,7 @@ where
     /// Returns the cached reads for the given head hash.
     async fn cached_reads(&self, head: B256) -> CachedReads {
         let cache = self.inner.cached_state.read().await;
-        if cache.0 == head {
-            cache.1.clone()
-        } else {
-            Default::default()
-        }
+        if cache.0 == head { cache.1.clone() } else { Default::default() }
     }
 
     /// Updates the cached state for the given head hash.
@@ -114,6 +113,7 @@ where
         block: RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         message: BidTrace,
         registered_gas_limit: u64,
+        transaction_filter: TransactionFilter,
     ) -> Result<(), ValidationApiError> {
         self.validate_message_against_header(block.sealed_header(), &message)?;
 
@@ -121,20 +121,20 @@ where
         self.consensus.validate_header(block.sealed_header())?;
         self.consensus.validate_block_pre_execution(block.sealed_block())?;
 
-        if !self.disallow.is_empty() {
+        if !self.disallow.is_empty() && transaction_filter != TransactionFilter::None {
             if self.disallow.contains(&block.beneficiary()) {
-                return Err(ValidationApiError::Blacklist(block.beneficiary()))
+                return Err(ValidationApiError::Blacklist(block.beneficiary()));
             }
             if self.disallow.contains(&message.proposer_fee_recipient) {
-                return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
+                return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient));
             }
             for (sender, tx) in block.senders_iter().zip(block.body().transactions()) {
                 if self.disallow.contains(sender) {
-                    return Err(ValidationApiError::Blacklist(*sender))
+                    return Err(ValidationApiError::Blacklist(*sender));
                 }
                 if let Some(to) = tx.to() {
                     if self.disallow.contains(&to) {
-                        return Err(ValidationApiError::Blacklist(to))
+                        return Err(ValidationApiError::Blacklist(to));
                     }
                 }
             }
@@ -152,10 +152,10 @@ where
                 .sealed_header_by_hash(block.parent_hash())?
                 .ok_or_else(|| ValidationApiError::MissingParentBlock)?;
 
-            if latest_header.number().saturating_sub(parent_header.number()) >
-                self.validation_window
+            if latest_header.number().saturating_sub(parent_header.number())
+                > self.validation_window
             {
-                return Err(ValidationApiError::BlockTooOld)
+                return Err(ValidationApiError::BlockTooOld);
             }
             parent_header
         };
@@ -185,7 +185,7 @@ where
         self.update_cached_reads(parent_header_hash, request_cache).await;
 
         if let Some(account) = accessed_blacklisted {
-            return Err(ValidationApiError::Blacklist(account))
+            return Err(ValidationApiError::Blacklist(account));
         }
 
         self.consensus.validate_block_post_execution(&block, &output)?;
@@ -199,7 +199,7 @@ where
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.header().state_root() }.into(),
             )
-            .into())
+            .into());
         }
 
         Ok(())
@@ -230,7 +230,7 @@ where
             return Err(ValidationApiError::GasUsedMismatch(GotExpected {
                 got: message.gas_used,
                 expected: header.gas_used(),
-            }))
+            }));
         } else {
             Ok(())
         }
@@ -258,7 +258,7 @@ where
             return Err(ValidationApiError::GasLimitMismatch(GotExpected {
                 got: header.gas_limit(),
                 expected: best_gas_limit,
-            }))
+            }));
         }
 
         Ok(())
@@ -295,8 +295,8 @@ where
             }
         }
 
-        if balance_after >= balance_before + message.value {
-            return Ok(())
+        if balance_after >= balance_before.saturating_add(message.value) {
+            return Ok(());
         }
 
         let (receipt, tx) = output
@@ -306,24 +306,24 @@ where
             .ok_or(ValidationApiError::ProposerPayment)?;
 
         if !receipt.status() {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if tx.to() != Some(message.proposer_fee_recipient) {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if tx.value() != message.value {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if !tx.input().is_empty() {
-            return Err(ValidationApiError::ProposerPayment)
+            return Err(ValidationApiError::ProposerPayment);
         }
 
         if let Some(block_base_fee) = block.header().base_fee_per_gas() {
             if tx.effective_tip_per_gas(block_base_fee).unwrap_or_default() != 0 {
-                return Err(ValidationApiError::ProposerPayment)
+                return Err(ValidationApiError::ProposerPayment);
             }
         }
 
@@ -335,10 +335,10 @@ where
         &self,
         mut blobs_bundle: BlobsBundleV1,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        if blobs_bundle.commitments.len() != blobs_bundle.proofs.len() ||
-            blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
+        if blobs_bundle.commitments.len() != blobs_bundle.proofs.len()
+            || blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
         {
-            return Err(ValidationApiError::InvalidBlobsBundle)
+            return Err(ValidationApiError::InvalidBlobsBundle);
         }
 
         let versioned_hashes = blobs_bundle
@@ -371,6 +371,7 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
+            request.transaction_filter,
         )
         .await
     }
@@ -399,9 +400,40 @@ where
             block,
             request.request.message,
             request.registered_gas_limit,
+            request.transaction_filter,
         )
         .await
     }
+
+    // /// Core logic for validating the builder submission v5
+    // async fn validate_builder_submission_v5(
+    //     &self,
+    //     request: BuilderBlockValidationRequestV5,
+    // ) -> Result<(), ValidationApiError> {
+    //     let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+    //         payload: ExecutionPayload::V3(request.request.execution_payload),
+    //         sidecar: ExecutionPayloadSidecar::v4(
+    //             CancunPayloadFields {
+    //                 parent_beacon_block_root: request.parent_beacon_block_root,
+    //                 versioned_hashes: self
+    //                     .validate_blobs_bundle_v2(request.request.blobs_bundle)?,
+    //             },
+    //             PraguePayloadFields {
+    //                 requests: RequestsOrHash::Requests(
+    //                     request.request.execution_requests.to_requests(),
+    //                 ),
+    //             },
+    //         ),
+    //     })?;
+
+    //     self.validate_message_against_block(
+    //         block,
+    //         request.request.message,
+    //         request.registered_gas_limit,
+    //         request.transaction_filter,
+    //     )
+    //     .await
+    // }
 }
 
 #[async_trait]
@@ -475,9 +507,9 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     /// Execution payload validator.
     payload_validator: Arc<
         dyn PayloadValidator<
-            Block = <E::Primitives as NodePrimitives>::Block,
-            ExecutionData = ExecutionData,
-        >,
+                Block = <E::Primitives as NodePrimitives>::Block,
+                ExecutionData = ExecutionData,
+            >,
     >,
     /// Block executor factory.
     executor_provider: E,
@@ -558,6 +590,38 @@ pub enum ValidationApiError {
     Execution(#[from] BlockExecutionError),
     #[error(transparent)]
     Payload(#[from] NewPayloadError),
+}
+
+impl From<ValidationApiError> for ErrorObject<'static> {
+    fn from(error: ValidationApiError) -> Self {
+        match error {
+            ValidationApiError::GasLimitMismatch(_)
+            | ValidationApiError::GasUsedMismatch(_)
+            | ValidationApiError::ParentHashMismatch(_)
+            | ValidationApiError::BlockHashMismatch(_)
+            | ValidationApiError::Blacklist(_)
+            | ValidationApiError::ProposerPayment
+            | ValidationApiError::InvalidBlobsBundle
+            | ValidationApiError::InvalidTransactionSignature
+            | ValidationApiError::Blob(_) => invalid_params_rpc_err(error.to_string()),
+
+            ValidationApiError::MissingLatestBlock
+            | ValidationApiError::MissingParentBlock
+            | ValidationApiError::BlockTooOld
+            | ValidationApiError::Consensus(_)
+            | ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
+            ValidationApiError::Execution(err) => match err {
+                error @ BlockExecutionError::Validation(_) => {
+                    invalid_params_rpc_err(error.to_string())
+                }
+                error @ BlockExecutionError::Internal(_) => internal_rpc_err(error.to_string()),
+            },
+            ValidationApiError::Payload(err) => match err {
+                error @ NewPayloadError::Eth(_) => invalid_params_rpc_err(error.to_string()),
+                error @ NewPayloadError::Other(_) => internal_rpc_err(error.to_string()),
+            },
+        }
+    }
 }
 
 /// Metrics for the validation endpoint.

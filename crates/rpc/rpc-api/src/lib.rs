@@ -79,7 +79,10 @@ pub mod clients {
         rpc::RpcApiServer,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,
-        validation::BlockSubmissionValidationApiClient,
+        validation::{
+            BlockSubmissionValidationApiClient, BuilderBlockValidationRequestV3,
+            BuilderBlockValidationRequestV4, TransactionFilter,
+        },
         web3::Web3ApiClient,
     };
     pub use reth_rpc_eth_api::{

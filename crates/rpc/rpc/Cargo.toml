@@ -65,6 +65,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
 jsonrpsee.workspace = true
+jsonrpsee-types.workspace = true
 http.workspace = true
 http-body.workspace = true
 hyper.workspace = true
