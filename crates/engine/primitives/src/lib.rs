@@ -46,7 +46,7 @@ pub use config::*;
 ///
 /// This includes the execution payload types and payload attributes that are used to trigger a
 /// payload job. Hence this trait is also [`PayloadTypes`].
-pub trait EngineTypes:
+pub trait PayloadTypes:
     PayloadTypes<
         BuiltPayload: TryInto<Self::ExecutionPayloadEnvelopeV1>
                           + TryInto<Self::ExecutionPayloadEnvelopeV2>
