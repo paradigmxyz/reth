@@ -236,12 +236,12 @@ pub struct CachedHashedCursorCache<T> {
 impl<T: Clone + Send + Sync + 'static> Default for CachedHashedCursorCache<T> {
     fn default() -> Self {
         Self {
-            cached_seeks_exact: CacheBuilder::new(1_000_000)
+            cached_seeks_exact: CacheBuilder::new(100_000)
                 .build_with_hasher(FbBuildHasher::default()),
             cached_seeks_inexact: Arc::new(RwLock::new(
-                CacheBuilder::new(1_000_000).build_with_hasher(FbBuildHasher::default()),
+                CacheBuilder::new(100_000).build_with_hasher(FbBuildHasher::default()),
             )),
-            cached_nexts: CacheBuilder::new(1_000_000).build_with_hasher(FbBuildHasher::default()),
+            cached_nexts: CacheBuilder::new(100_000).build_with_hasher(FbBuildHasher::default()),
             seeks_hit: AtomicUsize::new(0),
             seeks_total: AtomicUsize::new(0),
             nexts_hit: AtomicUsize::new(0),
