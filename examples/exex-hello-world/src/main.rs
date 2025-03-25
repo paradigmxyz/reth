@@ -21,7 +21,7 @@ async fn my_exex<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimi
     mut ctx: ExExContext<Node>,
 ) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.try_next().await? {
-        match &notification {
+        match notification {
             ExExNotification::ChainCommitted { new } => {
                 info!(committed_chain = ?new.range(), "Received commit");
             }
@@ -33,9 +33,13 @@ async fn my_exex<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimi
             }
         };
 
-        if let Some(committed_chain) = notification.committed_chain() {
-            ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))?;
-        }
+        notification
+            .committed_chain()
+            .map(|committed_chain| {
+                ctx.events
+                    .send(ExExEvent::FinishedHeight(committed_chain.tip().num_hash()))
+            })
+            .transpose()?;
     }
 
     Ok(())
@@ -52,3 +56,4 @@ fn main() -> eyre::Result<()> {
         handle.wait_for_node_exit().await
     })
 }
+
