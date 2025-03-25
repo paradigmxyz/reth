@@ -80,6 +80,9 @@ impl CachedHashedCursorFactoryCache {
         //         },
         //     );
 
+        let account_seeks_size = self.account_cache.cached_seeks.entry_count();
+        let account_nexts_size = self.account_cache.cached_nexts.entry_count();
+
         debug!(
             target: "trie::hashed_cursor::cached",
             account_seeks_hit,
@@ -90,6 +93,8 @@ impl CachedHashedCursorFactoryCache {
             // storage_seeks_total,
             // storage_nexts_hit,
             // storage_nexts_total,
+            account_seeks_size,
+            account_nexts_size,
             "CachedHashedCursorFactoryCache raw stats"
         );
 
