@@ -7,14 +7,14 @@ use std::{
 };
 
 use alloy_primitives::{map::FbBuildHasher, B256, U256};
-use dashmap::{DashMap, Entry};
+use mini_moka::sync::CacheBuilder;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use tracing::debug;
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
-type Map<V> = DashMap<B256, V, FbBuildHasher<32>>;
+pub type Cache<V> = mini_moka::sync::Cache<B256, V, FbBuildHasher<32>>;
 
 /// The hashed cursor factory that creates cursors that cache the visited keys.
 ///
@@ -33,10 +33,16 @@ impl<CF> CachedHashedCursorFactory<CF> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct CachedHashedCursorFactoryCache {
     account_cache: Arc<CachedHashedCursorCache<Account>>,
-    storage_cache: Arc<Map<Arc<CachedHashedCursorCache<U256>>>>,
+    // storage_cache: Arc<Map<Arc<CachedHashedCursorCache<U256>>>>,
+}
+
+impl Default for CachedHashedCursorFactoryCache {
+    fn default() -> Self {
+        Self { account_cache: Arc::new(CachedHashedCursorCache::default()) }
+    }
 }
 
 impl CachedHashedCursorFactoryCache {
@@ -45,19 +51,19 @@ impl CachedHashedCursorFactoryCache {
         let account_seeks_total = self.account_cache.seeks_total.load(Ordering::Relaxed);
         let account_nexts_hit = self.account_cache.nexts_hit.load(Ordering::Relaxed);
         let account_nexts_total = self.account_cache.nexts_total.load(Ordering::Relaxed);
-        let (storage_seeks_hit, storage_seeks_total, storage_nexts_hit, storage_nexts_total) =
-            self.storage_cache.iter().fold(
-                (0, 0, 0, 0),
-                |(acc_seeks_hit, acc_seeks_total, acc_nexts_hit, acc_nexts_total), entry| {
-                    let cache = entry.value();
-                    (
-                        acc_seeks_hit + cache.seeks_hit.load(Ordering::Relaxed),
-                        acc_seeks_total + cache.seeks_total.load(Ordering::Relaxed),
-                        acc_nexts_hit + cache.nexts_hit.load(Ordering::Relaxed),
-                        acc_nexts_total + cache.nexts_total.load(Ordering::Relaxed),
-                    )
-                },
-            );
+        // let (storage_seeks_hit, storage_seeks_total, storage_nexts_hit, storage_nexts_total) =
+        //     self.storage_cache.iter().fold(
+        //         (0, 0, 0, 0),
+        //         |(acc_seeks_hit, acc_seeks_total, acc_nexts_hit, acc_nexts_total), entry| {
+        //             let cache = entry.value();
+        //             (
+        //                 acc_seeks_hit + cache.seeks_hit.load(Ordering::Relaxed),
+        //                 acc_seeks_total + cache.seeks_total.load(Ordering::Relaxed),
+        //                 acc_nexts_hit + cache.nexts_hit.load(Ordering::Relaxed),
+        //                 acc_nexts_total + cache.nexts_total.load(Ordering::Relaxed),
+        //             )
+        //         },
+        //     );
 
         debug!(
             target: "trie::hashed_cursor::cached",
@@ -65,30 +71,30 @@ impl CachedHashedCursorFactoryCache {
             account_seeks_total,
             account_nexts_hit,
             account_nexts_total,
-            storage_seeks_hit,
-            storage_seeks_total,
-            storage_nexts_hit,
-            storage_nexts_total,
+            // storage_seeks_hit,
+            // storage_seeks_total,
+            // storage_nexts_hit,
+            // storage_nexts_total,
             "CachedHashedCursorFactoryCache raw stats"
         );
 
         let account_seeks_hitrate = account_seeks_hit as f64 / account_seeks_total as f64;
         let account_nexts_hitrate = account_nexts_hit as f64 / account_nexts_total as f64;
-        let storage_seeks_hitrate = storage_seeks_hit as f64 / storage_seeks_total as f64;
-        let storage_nexts_hitrate = storage_nexts_hit as f64 / storage_nexts_total as f64;
+        // let storage_seeks_hitrate = storage_seeks_hit as f64 / storage_seeks_total as f64;
+        // let storage_nexts_hitrate = storage_nexts_hit as f64 / storage_nexts_total as f64;
 
         debug!(
             target: "trie::hashed_cursor::cached",
             account_seeks_hitrate,
             account_nexts_hitrate,
-            storage_seeks_hitrate,
-            storage_nexts_hitrate,
+            // storage_seeks_hitrate,
+            // storage_nexts_hitrate,
             "CachedHashedCursorFactoryCache hitrates"
         );
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CachedHashedCursorCache<T> {
     /// The cache of [`Self::seek`] calls.
     ///
@@ -97,16 +103,29 @@ pub struct CachedHashedCursorCache<T> {
     /// This map is also populated:
     /// - During the [`Self::seek`] calls using the key that the cursor actually seeked to.
     /// - During the [`Self::next`] calls using the key that the cursor actually advanced to.
-    cached_seeks: Map<Option<(B256, T)>>,
+    cached_seeks: Cache<Option<(B256, T)>>,
     seeks_hit: AtomicUsize,
     seeks_total: AtomicUsize,
     /// The cache of [`Self::next`] calls.
     ///
     /// The key is the previous key before calling [`Self::next`], and the value is the result of
     /// the call.
-    cached_nexts: Map<Option<(B256, T)>>,
+    cached_nexts: Cache<Option<(B256, T)>>,
     nexts_hit: AtomicUsize,
     nexts_total: AtomicUsize,
+}
+
+impl<T: Clone + Send + Sync + 'static> Default for CachedHashedCursorCache<T> {
+    fn default() -> Self {
+        Self {
+            cached_seeks: CacheBuilder::new(10_000).build_with_hasher(FbBuildHasher::default()),
+            cached_nexts: CacheBuilder::new(10_000).build_with_hasher(FbBuildHasher::default()),
+            seeks_hit: AtomicUsize::new(0),
+            seeks_total: AtomicUsize::new(0),
+            nexts_hit: AtomicUsize::new(0),
+            nexts_total: AtomicUsize::new(0),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -161,7 +180,7 @@ where
 
 impl<C, T> HashedCursor for CachedHashedCursor<C, T>
 where
-    T: Debug + Clone + Copy + Default,
+    T: Debug + Clone + Copy + Default + Send + Sync + 'static,
     C: HashedCursor<Value = T>,
 {
     type Value = T;
@@ -175,25 +194,22 @@ where
     /// will be cached as well if it differs from the seeked key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, C::Value)>, DatabaseError> {
         self.cache.seeks_total.fetch_add(1, Ordering::Relaxed);
-        let result = match self.cache.cached_seeks.entry(key) {
-            Entry::Occupied(entry) => {
-                self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
-                self.seek_before_next = true;
-                *entry.get()
+        let result = if let Some(result) = self.cache.cached_seeks.get(&key) {
+            self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
+            self.seek_before_next = true;
+            result
+        } else {
+            self.seek_before_next = false;
+
+            let result = self.cursor.seek(key)?;
+            self.cache.cached_seeks.insert(key, result);
+
+            let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
+            if let Some(actual_seek) = actual_seek {
+                self.cache.cached_seeks.insert(actual_seek, result);
             }
-            Entry::Vacant(entry) => {
-                self.seek_before_next = false;
 
-                let result = self.cursor.seek(key)?;
-                entry.insert(result);
-
-                let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
-                if let Some(actual_seek) = actual_seek {
-                    self.cache.cached_seeks.insert(actual_seek, result);
-                }
-
-                result
-            }
+            result
         };
 
         self.last_key = result.as_ref().map(|(k, _)| *k);
@@ -211,25 +227,22 @@ where
         let Some(last_key) = self.last_key else { return Ok(None) };
 
         self.cache.nexts_total.fetch_add(1, Ordering::Relaxed);
-        let result = match self.cache.cached_nexts.entry(last_key) {
-            Entry::Occupied(entry) => {
-                self.cache.nexts_hit.fetch_add(1, Ordering::Relaxed);
-                self.seek_before_next = true;
-                *entry.get()
+        let result = if let Some(result) = self.cache.cached_nexts.get(&last_key) {
+            self.cache.nexts_hit.fetch_add(1, Ordering::Relaxed);
+            self.seek_before_next = true;
+            result
+        } else {
+            if self.seek_before_next {
+                self.seek_before_next = false;
+                self.cursor.seek(last_key)?;
             }
-            Entry::Vacant(entry) => {
-                if self.seek_before_next {
-                    self.seek_before_next = false;
-                    self.cursor.seek(last_key)?;
-                }
 
-                let result = self.cursor.next()?;
-                entry.insert(result);
-                if let Some((key, value)) = result.as_ref() {
-                    self.cache.cached_seeks.insert(*key, Some((*key, *value)));
-                }
-                result
+            let result = self.cursor.next()?;
+            self.cache.cached_nexts.insert(last_key, result);
+            if let Some((key, value)) = result.as_ref() {
+                self.cache.cached_seeks.insert(*key, Some((*key, *value)));
             }
+            result
         };
 
         self.last_key = result.as_ref().map(|(k, _)| *k);
@@ -239,7 +252,7 @@ where
 
 impl<C, T> HashedStorageCursor for CachedHashedCursor<C, T>
 where
-    T: Debug + Clone + Copy + Default,
+    T: Debug + Clone + Copy + Default + Send + Sync + 'static,
     C: HashedStorageCursor<Value = T>,
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {

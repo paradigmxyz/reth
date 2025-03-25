@@ -116,7 +116,6 @@ where
             hashed_address,
             prefix_set,
             target_slots,
-            self.hashed_cursor_cache.clone(),
             self.collect_branch_node_masks,
         );
 

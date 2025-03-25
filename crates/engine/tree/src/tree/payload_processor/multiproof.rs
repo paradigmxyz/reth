@@ -489,6 +489,7 @@ where
         executor: WorkloadExecutor,
         proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
         to_sparse_trie: Sender<SparseTrieUpdate>,
+        hashed_cursor_cache: CachedHashedCursorFactoryCache,
     ) -> Self {
         let (tx, rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
@@ -499,7 +500,7 @@ where
             tx,
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
-            hashed_cursor_cache: Default::default(),
+            hashed_cursor_cache,
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 executor,
@@ -534,8 +535,8 @@ where
                 config: self.config.clone(),
                 source: None,
                 hashed_state_update: Default::default(),
-                hashed_cursor_cache: self.hashed_cursor_cache.clone(),
                 proof_targets: proof_targets_chunk,
+                hashed_cursor_cache: self.hashed_cursor_cache.clone(),
                 proof_sequence_number: self.proof_sequencer.next_sequence(),
                 state_root_message_sender: self.tx.clone(),
             });
@@ -990,7 +991,7 @@ mod tests {
         );
         let channel = channel();
 
-        MultiProofTask::new(config, executor, proof_task.handle(), channel.0)
+        MultiProofTask::new(config, executor, proof_task.handle(), channel.0, Default::default())
     }
 
     #[test]

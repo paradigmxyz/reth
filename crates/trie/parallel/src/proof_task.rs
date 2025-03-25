@@ -17,10 +17,7 @@ use reth_provider::{
     ProviderResult, StateCommitmentProvider,
 };
 use reth_trie::{
-    hashed_cursor::{
-        cached::{CachedHashedCursorFactory, CachedHashedCursorFactoryCache},
-        HashedPostStateCursorFactory,
-    },
+    hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
     proof::{ProofBlindedProviderFactory, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
@@ -213,24 +210,18 @@ where
 {
     fn create_factories(
         &self,
-        hashed_cursor_cache: Option<CachedHashedCursorFactoryCache>,
     ) -> (
         InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
-        CachedHashedCursorFactory<
-            HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
-        >,
+        HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
     ) {
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(&self.tx),
             &self.task_ctx.nodes_sorted,
         );
 
-        let hashed_cursor_factory = CachedHashedCursorFactory::new(
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(&self.tx),
-                &self.task_ctx.state_sorted,
-            ),
-            hashed_cursor_cache.unwrap_or_default(),
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(&self.tx),
+            &self.task_ctx.state_sorted,
         );
 
         (trie_cursor_factory, hashed_cursor_factory)
@@ -249,8 +240,7 @@ where
             "Starting storage proof task calculation"
         );
 
-        let (trie_cursor_factory, hashed_cursor_factory) =
-            self.create_factories(input.hashed_cursor_cache);
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
         let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
@@ -301,7 +291,7 @@ where
             "Starting blinded account node retrieval"
         );
 
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories(None);
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
         let blinded_provider_factory = ProofBlindedProviderFactory::new(
             trie_cursor_factory,
@@ -346,7 +336,7 @@ where
             "Starting blinded storage node retrieval"
         );
 
-        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories(None);
+        let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
         let blinded_provider_factory = ProofBlindedProviderFactory::new(
             trie_cursor_factory,
@@ -388,8 +378,6 @@ pub struct StorageProofInput {
     prefix_set: PrefixSet,
     /// The target slots for the proof calculation.
     target_slots: B256Set,
-    /// Hashed cursor factory cache.
-    hashed_cursor_cache: Option<CachedHashedCursorFactoryCache>,
     /// Whether or not to collect branch node masks
     with_branch_node_masks: bool,
 }
@@ -401,16 +389,9 @@ impl StorageProofInput {
         hashed_address: B256,
         prefix_set: PrefixSet,
         target_slots: B256Set,
-        hashed_cursor_cache: Option<CachedHashedCursorFactoryCache>,
         with_branch_node_masks: bool,
     ) -> Self {
-        Self {
-            hashed_address,
-            prefix_set,
-            target_slots,
-            hashed_cursor_cache,
-            with_branch_node_masks,
-        }
+        Self { hashed_address, prefix_set, target_slots, with_branch_node_masks }
     }
 }
 

@@ -23,7 +23,7 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::TrieInput;
+use reth_trie::{hashed_cursor::cached::CachedHashedCursorFactoryCache, TrieInput};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
@@ -57,6 +57,8 @@ pub struct PayloadProcessor<N, Evm> {
     use_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
+    /// Cache for hashed cursors.
+    hashed_cursor_cache: CachedHashedCursorFactoryCache,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -70,6 +72,7 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             cross_block_cache_size: config.cross_block_cache_size(),
             use_transaction_prewarming: config.use_caching_and_prewarming(),
             evm_config,
+            hashed_cursor_cache: Default::default(),
             _marker: Default::default(),
         }
     }
@@ -152,6 +155,7 @@ where
             self.executor.clone(),
             proof_task.handle(),
             to_sparse_trie,
+            self.hashed_cursor_cache.clone(),
         );
 
         // wire the multiproof task to the prewarm task
