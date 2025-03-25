@@ -12,7 +12,7 @@ pub const TX_SLOT_BYTE_SIZE: usize = 32 * 1024;
 pub const DEFAULT_MAX_TX_INPUT_BYTES: usize = 4 * TX_SLOT_BYTE_SIZE; // 128KB
 
 /// Maximum bytecode to permit for a contract.
-pub const MAX_CODE_BYTE_SIZE: usize = 24576;
+pub const MAX_CODE_BYTE_SIZE: usize = revm_primitives::eip170::MAX_CODE_SIZE;
 
 /// Maximum initcode to permit in a creation transaction and create instructions.
-pub const MAX_INIT_CODE_BYTE_SIZE: usize = 2 * MAX_CODE_BYTE_SIZE;
+pub const MAX_INIT_CODE_BYTE_SIZE: usize = revm_primitives::MAX_INITCODE_SIZE;
