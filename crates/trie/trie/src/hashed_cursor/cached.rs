@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    time::Instant,
 };
 
 use alloy_primitives::{map::FbBuildHasher, B256, U256};
@@ -56,9 +57,10 @@ impl CachedHashedCursorFactoryCache {
                 .insert(*address, account.map(|account| (*address, account)));
         }
 
-        let mut updated = 0;
-        let mut deleted = 0;
-        let mut invalidated = 0;
+        let start = Instant::now();
+        let mut cache_updates = Vec::new();
+        let mut cache_deletions = Vec::new();
+        let mut cache_invalidations = Vec::new();
 
         let hashed_post_state_accounts =
             hashed_post_state.accounts.iter().collect::<BTreeMap<_, _>>();
@@ -85,53 +87,51 @@ impl CachedHashedCursorFactoryCache {
                 (None, Some(_)) => {
                     // Previously the seek didn't return anything, but now there's a hashed post
                     // state account that matches the key.
-                    self.account_cache
-                        .cached_seeks_inexact
-                        .insert(seek_address, hashed_post_state_account);
-                    updated += 1;
+                    cache_updates.push((seek_address, hashed_post_state_account));
                 }
                 (Some((old_address, _)), Some((new_address, _))) if old_address > &new_address => {
                     // Previously the seek returned an address that is greater than the address in
                     // the hashed post state that matches the key.
-                    self.account_cache
-                        .cached_seeks_inexact
-                        .insert(seek_address, hashed_post_state_account);
-                    updated += 1;
+                    cache_updates.push((seek_address, hashed_post_state_account));
                 }
                 (Some((old_address, _)), Some((new_address, _))) if old_address == &new_address => {
                     // Previously the seek returned an address that equals to the address in
                     // the hashed post state that matches the key.
-                    self.account_cache
-                        .cached_seeks_inexact
-                        .insert(seek_address, hashed_post_state_account);
-                    updated += 1;
+                    cache_updates.push((seek_address, hashed_post_state_account));
                 }
                 (Some((old_address, _)), Some(_))
                     if hashed_post_state.accounts.get(old_address) == Some(&None) =>
                 {
                     // Previously the seek returned an address for the account that is now deleted,
                     // but there's a new account available that matches the key.
-                    self.account_cache
-                        .cached_seeks_inexact
-                        .insert(seek_address, hashed_post_state_account);
-                    updated += 1;
+                    cache_updates.push((seek_address, hashed_post_state_account));
                 }
                 (Some((old_address, _)), None)
                     if hashed_post_state.accounts.get(old_address) == Some(&None) =>
                 {
                     // Previously the seek returned an address for the account that is now deleted.
-                    self.account_cache.cached_seeks_inexact.invalidate(&seek_address);
-                    deleted += 1;
+                    cache_deletions.push(seek_address);
                 }
                 _ => {
-                    self.account_cache.cached_seeks_inexact.invalidate(&seek_address);
-                    invalidated += 1;
+                    cache_invalidations.push(seek_address);
                 }
             }
         }
 
+        let updated = cache_updates.len();
+        let deleted = cache_deletions.len();
+        let invalidated = cache_invalidations.len();
+
+        for (address, account) in cache_updates {
+            self.account_cache.cached_seeks_inexact.insert(address, account);
+        }
+        for address in cache_deletions.into_iter().chain(cache_invalidations) {
+            self.account_cache.cached_seeks_inexact.invalidate(&address);
+        }
+
         debug!(
             target: "trie::hashed_cursor::cached",
+            elapsed = ?start.elapsed(),
             updated,
             deleted,
             invalidated,
