@@ -10,9 +10,9 @@ pub struct KeyVisit<T> {
 /// The type of key visit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyVisitType<T> {
-    /// Sought exact key.
+    /// Seeked exact key.
     SeekExact(T),
-    /// Sought non-exact key, returning the next key if no exact match found.
+    /// Seeked non-exact key, returning the next key if no exact match found.
     SeekNonExact(T),
     /// Next key.
     Next,

@@ -1,5 +1,4 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
     fmt::Debug,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -49,89 +48,13 @@ impl Default for CachedHashedCursorFactoryCache {
 
 impl CachedHashedCursorFactoryCache {
     pub fn apply_hashed_post_state(&self, hashed_post_state: &HashedPostState) {
+        self.account_cache.cached_nexts.invalidate_all();
+        self.account_cache.cached_seeks_inexact.invalidate_all();
         for (address, account) in &hashed_post_state.accounts {
             self.account_cache
                 .cached_seeks_exact
                 .insert(*address, account.map(|account| (*address, account)));
         }
-
-        let mut updated = 0;
-        let mut deleted = 0;
-        let mut invalidated = 0;
-
-        let hashed_post_state_accounts =
-            hashed_post_state.accounts.iter().collect::<BTreeMap<_, _>>();
-        for entry in &self.account_cache.cached_seeks_inexact {
-            let (&seek_address, value) = entry.pair();
-
-            // Find first hashed post state account that is greater than or equal to the address
-            // that was sought.
-            let hashed_post_state_account =
-                hashed_post_state_accounts.iter().find_map(|(&&post_state_address, account)| {
-                    account.and_then(|account| {
-                        (post_state_address >= seek_address)
-                            .then_some((post_state_address, account))
-                    })
-                });
-
-            match (value, hashed_post_state_account) {
-                (None, Some(_)) => {
-                    // Previously the seek didn't return anything, but now there's a hashed post
-                    // state account that matches the key.
-                    self.account_cache
-                        .cached_seeks_inexact
-                        .insert(seek_address, hashed_post_state_account);
-                    updated += 1;
-                }
-                (Some((old_address, _)), Some((new_address, _))) if old_address > &new_address => {
-                    // Previously the seek returned an address that is greater than the address in
-                    // the hashed post state that matches the key.
-                    self.account_cache
-                        .cached_seeks_inexact
-                        .insert(seek_address, hashed_post_state_account);
-                    updated += 1;
-                }
-                (Some((old_address, _)), Some((new_address, _))) if old_address == &new_address => {
-                    // Previously the seek returned an address that equals to the address in
-                    // the hashed post state that matches the key.
-                    self.account_cache
-                        .cached_seeks_inexact
-                        .insert(seek_address, hashed_post_state_account);
-                    updated += 1;
-                }
-                (Some((old_address, _)), Some(_))
-                    if hashed_post_state_accounts.get(&old_address) == Some(&&None) =>
-                {
-                    // Previously the seek returned an address for the account that is now deleted,
-                    // but there's a new account available that matches the key.
-                    self.account_cache
-                        .cached_seeks_inexact
-                        .insert(seek_address, hashed_post_state_account);
-                    updated += 1;
-                }
-                (Some((old_address, _)), None)
-                    if hashed_post_state_accounts.get(&old_address) == Some(&&None) =>
-                {
-                    // Previously the seek returned an address for the account that is now deleted.
-                    self.account_cache.cached_seeks_inexact.invalidate(&seek_address);
-                    deleted += 1;
-                }
-                _ => {
-                    self.account_cache.cached_seeks_inexact.invalidate(&seek_address);
-                    invalidated += 1;
-                }
-            }
-        }
-
-        debug!(
-            target: "trie::hashed_cursor::cached",
-            updated,
-            deleted,
-            invalidated,
-            "Updated cached account inexact seeks"
-        );
-
-        self.account_cache.cached_nexts.invalidate_all();
     }
 
     pub fn reset_metrics(&self) {
@@ -200,15 +123,15 @@ impl CachedHashedCursorFactoryCache {
 pub struct CachedHashedCursorCache<T> {
     /// The cache of [`Self::seek`] calls that resulted in exact matches.
     ///
-    /// The key is the sought key, and the value is the result of the seek.
+    /// The key is the seeked key, and the value is the result of the seek.
     ///
     /// This map is also populated:
-    /// - During the [`Self::seek`] calls using the key that the cursor actually sought to.
+    /// - During the [`Self::seek`] calls using the key that the cursor actually seeked to.
     /// - During the [`Self::next`] calls using the key that the cursor actually advanced to.
     cached_seeks_exact: Cache<Option<(B256, T)>>,
     /// The cache of [`Self::seek`] calls that resulted in inexact matches.
     ///
-    /// The key is the sought key, and the value is the result of the seek.
+    /// The key is the seeked key, and the value is the result of the seek.
     cached_seeks_inexact: Cache<Option<(B256, T)>>,
     seeks_hit: AtomicUsize,
     seeks_total: AtomicUsize,
@@ -306,10 +229,10 @@ where
     /// Seeks to the given key.
     ///
     /// If the key is already cached, the value will be returned from the cache.
-    /// Otherwise, the underlying cursor will be sought to the given key.
+    /// Otherwise, the underlying cursor will be seeked to the given key.
     ///
-    /// The result of the seek will be cached, and the key that the underlying cursor sought to
-    /// will be cached as well if it differs from the sought key.
+    /// The result of the seek will be cached, and the key that the underlying cursor seeked to
+    /// will be cached as well if it differs from the seeked key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, C::Value)>, DatabaseError> {
         self.cache.seeks_total.fetch_add(1, Ordering::Relaxed);
         let result = if let Some(result) = self
