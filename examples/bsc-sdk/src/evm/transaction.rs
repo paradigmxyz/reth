@@ -1,4 +1,5 @@
 use auto_impl::auto_impl;
+use reth_evm::IntoTxEnv;
 use revm::{
     context::TxEnv,
     context_interface::transaction::Transaction,
@@ -106,6 +107,12 @@ impl<T: Transaction> Transaction for BscTransaction<T> {
 impl<T: Transaction> BscTxTr for BscTransaction<T> {
     fn is_system_transaction(&self) -> bool {
         self.is_system_transaction.unwrap_or(false)
+    }
+}
+
+impl<T: revm::context::Transaction> IntoTxEnv<Self> for BscTransaction<T> {
+    fn into_tx_env(self) -> Self {
+        self
     }
 }
 
