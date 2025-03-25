@@ -14,6 +14,9 @@ reth-engine-primitives.workspace = true
 reth-ethereum-forks = { workspace = true, features = ["serde"] }
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
+reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
+reth-revm.workspace = true
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
@@ -25,6 +28,10 @@ reth-tracing.workspace = true
 revm = { workspace = true, features = ["secp256r1"] }
 
 # alloy
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true
+alloy-chains.workspace = true
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, features = ["engine"] }
