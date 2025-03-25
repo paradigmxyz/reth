@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy_primitives::{map::FbBuildHasher, B256, U256};
-use mini_moka::sync::CacheBuilder;
+use mini_moka::sync::{CacheBuilder, ConcurrentCacheExt};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostState;
@@ -80,6 +80,9 @@ impl CachedHashedCursorFactoryCache {
         //         },
         //     );
 
+        self.account_cache.cached_seeks_exact.sync();
+        self.account_cache.cached_seeks_inexact.sync();
+        self.account_cache.cached_nexts.sync();
         let account_seeks_exact_size = self.account_cache.cached_seeks_exact.entry_count();
         let account_seeks_inexact_size = self.account_cache.cached_seeks_inexact.entry_count();
         let account_nexts_size = self.account_cache.cached_nexts.entry_count();
