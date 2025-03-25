@@ -54,7 +54,9 @@ use reth_transaction_pool::{
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
 use std::sync::Arc;
-
+use std::time::{SystemTime, Duration};
+use primitive_types::{H256, U256};
+use reth_primitives::Address;
 /// Storage implementation for Optimism.
 pub type OpStorage = EthStorage<OpTransactionSigned>;
 
@@ -843,4 +845,151 @@ impl NetworkPrimitives for OpNetworkPrimitives {
     type BroadcastedTransaction = OpTransactionSigned;
     type PooledTransaction = OpPooledTransaction;
     type Receipt = OpReceipt;
+}
+
+
+#[derive(Debug, Clone)]
+pub struct InteropValidityInfo {
+    pub is_valid: bool,
+    pub checked_at: SystemTime,
+}
+
+pub trait MaybeInteropTransaction {
+    type InteropValidity;
+
+    /// Set interop validity info 
+    fn set_interop_validity(&mut self, validity: Self::InteropValidity);
+
+    /// Retrieve the stored interop validity info.
+    fn interop_validity(&self) -> Option<&Self::InteropValidity>;
+}
+
+ impl MaybeInteropTransaction for OpPooledTransaction {
+    type InteropValidity = InteropValidityInfo;
+
+    fn set_interop_validity(&mut self, validity: Self::InteropValidity) {
+        self.interop_validity = Some(Box::new(validity));
+    }
+
+    fn interop_validity(&self) -> Option<&Self::InteropValidity> {
+        self.interop_validity.as_deref()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TransactionConditional {
+    pub condition: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AccessListItem {
+    pub address: Address,
+    pub storage_keys: Vec<H256>,
+}
+
+#[derive(Debug)]
+pub enum InteropValidationError {
+    SupervisorError(String),
+    Timeout,
+    Unknown(String),
+}
+
+pub struct OpPooledTransaction {
+    pub hash: H256,                          
+    pub interop_validity: Option<Box<InteropValidityInfo>>, 
+    pub is_cross_chain: bool,                
+    pub received_at: SystemTime,            
+}
+
+
+impl MaybeInteropTransaction for OpPooledTransaction {
+    type InteropValidity = InteropValidityInfo;
+
+    fn set_interop_validity(&mut self, validity: Self::InteropValidity) {
+        self.interop_validity = Some(Box::new(validity));
+    }
+
+    fn interop_validity(&self) -> Option<&Self::InteropValidity> {
+        self.interop_validity.as_deref()
+    }
+}
+
+impl OpPooledTransaction {
+    pub fn is_cross_chain(&self) -> bool {
+        self.is_cross_chain
+    }
+}
+
+pub struct TxPool {
+    transactions: Vec<OpPooledTransaction>,
+}
+
+impl TxPool {
+    pub fn new() -> Self {
+        Self { transactions: Vec::new() }
+    }
+
+    pub fn insert(&mut self, tx: OpPooledTransaction) {
+        self.transactions.push(tx);
+    }
+
+    pub fn all_transactions_mut(&mut self) -> &mut Vec<OpPooledTransaction> {
+        &mut self.transactions
+    }
+
+    pub async fn validate_interop_tx(&self, _tx: &OpPooledTransaction) -> Result<bool, InteropValidationError> {
+        // TODO: Implement actual supervisor validation logic here.
+        Ok(true)
+    }
+
+    pub async fn process_new_transaction(&mut self, mut tx: OpPooledTransaction) -> Result<(), InteropValidationError> {
+        if tx.is_cross_chain() {
+            let is_valid = self.validate_interop_tx(&tx).await?;
+            let validity_info = InteropValidityInfo {
+                is_valid,
+                checked_at: SystemTime::now(),
+            };
+            tx.set_interop_validity(validity_info);
+        }
+        self.insert(tx);
+        Ok(())
+    }
+
+    pub async fn revalidate_interop_transactions(&mut self) {
+        for tx in self.all_transactions_mut().iter_mut() {
+            if tx.is_cross_chain() {
+                if let Some(validity) = tx.interop_validity() {
+                    if validity.checked_at.elapsed().unwrap_or(Duration::ZERO) > Duration::from_secs(60) {
+                        match self.validate_interop_tx(tx).await {
+                            Ok(is_valid) => {
+                                let new_validity = InteropValidityInfo {
+                                    is_valid,
+                                    checked_at: SystemTime::now(),
+                                };
+                                tx.set_interop_validity(new_validity);
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub struct BlockBuilder;
+
+impl BlockBuilder {
+    pub fn build_block(&self, txs: Vec<OpPooledTransaction>) -> Vec<OpPooledTransaction> {
+        txs.into_iter()
+            .filter(|tx| {
+                if tx.is_cross_chain() {
+                    if let Some(validity) = tx.interop_validity() {
+                        return validity.is_valid;
+                    }
+                    return false; // exclude if validity isn't set
+                }
+                true
+            })
+            .collect()
+    }
 }
