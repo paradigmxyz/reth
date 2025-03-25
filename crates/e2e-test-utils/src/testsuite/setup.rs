@@ -119,7 +119,7 @@ impl<I> Setup<I> {
     where
         N: NodeBuilderHelper,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+            <<N as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadAttributes,
         >,
     {
         let chain_spec =
@@ -140,7 +140,7 @@ impl<I> Setup<I> {
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
             };
-            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes::from(
+            <<N as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadBuilderAttributes::from(
                 EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
             )
         };

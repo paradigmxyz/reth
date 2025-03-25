@@ -114,7 +114,7 @@ impl<I: 'static> TestBuilder<I> {
     where
         N: NodeBuilderHelper,
         LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+            <<N as NodeTypesWithEngine>::Payload as PayloadTypes>::PayloadAttributes,
         >,
     {
         let mut setup = self.setup.take();

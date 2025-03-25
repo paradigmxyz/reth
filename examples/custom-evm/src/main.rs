@@ -112,7 +112,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
         + Unpin
         + 'static,
-    Types::Engine: PayloadTypes<
+    Types::Payload: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = PayloadAttributes,
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,

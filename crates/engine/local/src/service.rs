@@ -54,9 +54,9 @@ where
     /// Processes requests.
     ///
     /// This type is responsible for processing incoming requests.
-    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine, N::Primitives>, N::Primitives>,
+    handler: EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,
     /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
-    incoming_requests: EngineMessageStream<N::Engine>,
+    incoming_requests: EngineMessageStream<N::Payload>,
 }
 
 impl<N> LocalEngineService<N>
@@ -71,20 +71,20 @@ where
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
-        payload_builder: PayloadBuilderHandle<N::Engine>,
+        payload_builder: PayloadBuilderHandle<N::Payload>,
         payload_validator: V,
         tree_config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N::Primitives>>,
         sync_metrics_tx: MetricEventsSender,
-        to_engine: UnboundedSender<BeaconEngineMessage<N::Engine>>,
-        from_engine: EngineMessageStream<N::Engine>,
+        to_engine: UnboundedSender<BeaconEngineMessage<N::Payload>>,
+        from_engine: EngineMessageStream<N::Payload>,
         mode: MiningMode,
         payload_attributes_builder: B,
         evm_config: C,
     ) -> Self
     where
-        B: PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
-        V: EngineValidator<N::Engine, Block = BlockTy<N>>,
+        B: PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
+        V: EngineValidator<N::Payload, Block = BlockTy<N>>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let chain_spec = provider.chain_spec();
