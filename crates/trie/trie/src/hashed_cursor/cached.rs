@@ -46,6 +46,10 @@ impl Default for CachedHashedCursorFactoryCache {
 }
 
 impl CachedHashedCursorFactoryCache {
+    pub fn reset_metrics(&self) {
+        self.account_cache.reset_metrics();
+    }
+
     pub fn log_stats(&self) {
         let account_seeks_hit = self.account_cache.seeks_hit.load(Ordering::Relaxed);
         let account_seeks_total = self.account_cache.seeks_total.load(Ordering::Relaxed);
@@ -125,6 +129,15 @@ impl<T: Clone + Send + Sync + 'static> Default for CachedHashedCursorCache<T> {
             nexts_hit: AtomicUsize::new(0),
             nexts_total: AtomicUsize::new(0),
         }
+    }
+}
+
+impl<T> CachedHashedCursorCache<T> {
+    pub fn reset_metrics(&self) {
+        self.seeks_hit.store(0, Ordering::Relaxed);
+        self.seeks_total.store(0, Ordering::Relaxed);
+        self.nexts_hit.store(0, Ordering::Relaxed);
+        self.nexts_total.store(0, Ordering::Relaxed);
     }
 }
 

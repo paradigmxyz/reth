@@ -150,6 +150,7 @@ where
             max_concurrency,
         );
 
+        self.hashed_cursor_cache.reset_metrics();
         let multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
