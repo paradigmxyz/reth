@@ -1,113 +1,271 @@
 //! EVM config for bsc.
-use std::{convert::Infallible, sync::Arc};
-
 use crate::{
     chainspec::BscChainSpec,
     evm::{
-        api::{ctx::BscContext, BscEvmInner},
+        api::{
+            builder::BscBuilder,
+            ctx::{BscContext, DefaultBsc},
+            BscEvm,
+        },
         spec::BscSpecId,
         transaction::BscTransaction,
     },
 };
-use alloy_primitives::{Address, Bytes, U256};
-use reth_ethereum_forks::EthereumHardfork;
+use alloy_primitives::Bytes;
+use std::sync::Arc;
+
 use reth_evm::{
-    block::BlockExecutorFactory, eth::EthBlockExecutionCtx, ConfigureEvm, EthEvmFactory,
-    EvmFactory, NextBlockEnvAttributes,
+    block::{BlockExecutorFactory, BlockExecutorFor},
+    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory},
+    EvmEnv, EvmFactory, InspectorFor,
 };
-use reth_primitives::{transaction::FillTxEnv, Head, Header, Receipt, TransactionSigned};
-use reth_revm::{Context, Database};
-use revm::{context::TxEnv, context_interface::cfg::AnalysisKind, Inspector};
+use reth_evm_ethereum::{EthBlockAssembler, RethReceiptBuilder};
+use reth_primitives::{Receipt, TransactionSigned};
+use reth_revm::{Context, Database, State};
+use revm::{
+    context::{
+        result::{EVMError, HaltReason},
+        TxEnv,
+    },
+    inspector::NoOpInspector,
+    Inspector,
+};
 
 mod config;
 
-// /// Factory producing [`EthEvm`].
-// #[derive(Debug, Default, Clone, Copy)]
-// #[non_exhaustive]
-// pub struct BscEvmFactory;
+/// Factory producing [`EthEvm`].
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct BscEvmFactory;
 
-// impl EvmFactory for BscEvmFactory {
-//     type Evm<DB: Database, I: Inspector<BscContext<DB>>> = BscEvm<DB, I>;
-//     type Context<DB: Database> = BscContext<DB>;
+impl EvmFactory for BscEvmFactory {
+    type Evm<DB: Database<Error: Send + Sync + 'static>, I: Inspector<BscContext<DB>>> =
+        BscEvm<DB, I>;
+    type Tx = BscTransaction<TxEnv>;
+    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
+    type Context<DB: Database<Error: Send + Sync + 'static>> = BscContext<DB>;
+    type Spec = BscSpecId;
 
-//     type Tx = BscTransaction<TxEnv>;
-//     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
-//     type HaltReason = HaltReason;
-//     type Spec = SpecId;
+    fn create_evm<DB: Database<Error: Send + Sync + 'static>>(
+        &self,
+        db: DB,
+        input: EvmEnv<BscSpecId>,
+    ) -> Self::Evm<DB, NoOpInspector> {
+        BscEvm {
+            inner: Context::bsc()
+                .with_block(input.block_env)
+                .with_cfg(input.cfg_env)
+                .with_db(db)
+                .build_bsc_with_inspector(NoOpInspector {}),
+            inspect: false,
+        }
+    }
 
-//     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-//         EthEvm {
-//             inner: Context::mainnet()
-//                 .with_block(input.block_env)
-//                 .with_cfg(input.cfg_env)
-//                 .with_db(db)
-//                 .build_mainnet_with_inspector(NoOpInspector {}),
-//             inspect: false,
-//         }
+    fn create_evm_with_inspector<
+        DB: Database<Error: Send + Sync + 'static>,
+        I: Inspector<Self::Context<DB>>,
+    >(
+        &self,
+        db: DB,
+        input: EvmEnv<BscSpecId>,
+        inspector: I,
+    ) -> Self::Evm<DB, I> {
+        BscEvm {
+            inner: Context::bsc()
+                .with_block(input.block_env)
+                .with_cfg(input.cfg_env)
+                .with_db(db)
+                .build_bsc_with_inspector(inspector),
+            inspect: true,
+        }
+    }
+}
+
+/// Ethereum-related EVM configuration.
+#[derive(Debug, Clone)]
+pub struct BscEvmConfig {
+    /// Inner [`EthBlockExecutorFactory`].
+    pub executor_factory:
+        EthBlockExecutorFactory<RethReceiptBuilder, Arc<BscChainSpec>, BscEvmFactory>,
+    /// Ethereum block assembler.
+    pub block_assembler: EthBlockAssembler<BscChainSpec>,
+}
+
+impl BscEvmConfig {
+    /// Creates a new Ethereum EVM configuration with the given chain spec.
+    pub fn new(chain_spec: Arc<BscChainSpec>) -> Self {
+        Self::bsc(chain_spec)
+    }
+
+    /// Creates a new Ethereum EVM configuration.
+    pub fn bsc(chain_spec: Arc<BscChainSpec>) -> Self {
+        Self::new_with_evm_factory(chain_spec, BscEvmFactory::default())
+    }
+}
+
+impl BscEvmConfig {
+    /// Creates a new Ethereum EVM configuration with the given chain spec and EVM factory.
+    pub fn new_with_evm_factory(chain_spec: Arc<BscChainSpec>, evm_factory: BscEvmFactory) -> Self {
+        Self {
+            block_assembler: EthBlockAssembler::new(chain_spec.clone()),
+            executor_factory: EthBlockExecutorFactory::new(
+                RethReceiptBuilder::default(),
+                chain_spec,
+                evm_factory,
+            ),
+        }
+    }
+
+    /// Returns the chain spec associated with this configuration.
+    pub const fn chain_spec(&self) -> &Arc<BscChainSpec> {
+        self.executor_factory.spec()
+    }
+
+    /// Sets the extra data for the block assembler.
+    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
+        self.block_assembler.extra_data = extra_data;
+        self
+    }
+}
+
+impl BlockExecutorFactory for BscEvmConfig {
+    type EvmFactory = BscEvmFactory;
+    type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
+
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        self.executor_factory.evm_factory()
+    }
+
+    fn create_executor<'a, DB, I>(
+        &'a self,
+        evm: BscEvm<&'a mut State<DB>, I>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> impl BlockExecutorFor<'a, Self, DB, I>
+    where
+        DB: Database + 'a,
+        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+    {
+        EthBlockExecutor::new(evm, ctx, self.chain_spec(), self.executor_factory.receipt_builder())
+    }
+}
+
+// impl<ChainSpec, N, R> ConfigureEvm for OpEvmConfig<ChainSpec, N, R>
+// where
+//     ChainSpec: EthChainSpec + OpHardforks,
+//     N: NodePrimitives<
+//         Receipt = R::Receipt,
+//         SignedTx = R::Transaction,
+//         BlockHeader = Header,
+//         BlockBody = alloy_consensus::BlockBody<R::Transaction>,
+//         Block = alloy_consensus::Block<R::Transaction>,
+//     >,
+//     OpTransaction<TxEnv>: FromRecoveredTx<N::SignedTx>,
+//     R: OpReceiptBuilder<Receipt: DepositReceipt, Transaction: SignedTransaction>,
+//     Self: Send + Sync + Unpin + Clone + 'static,
+// {
+//     type Primitives = N;
+//     type Error = EIP1559ParamError;
+//     type NextBlockEnvCtx = OpNextBlockEnvAttributes;
+//     type BlockExecutorFactory = OpBlockExecutorFactory<R, Arc<ChainSpec>>;
+//     type BlockAssembler = OpBlockAssembler<ChainSpec>;
+
+//     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+//         &self.executor_factory
 //     }
 
-//     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
+//     fn block_assembler(&self) -> &Self::BlockAssembler {
+//         &self.block_assembler
+//     }
+
+//     fn evm_env(&self, header: &Header) -> EvmEnv<OpSpecId> {
+//         let spec = config::revm_spec(self.chain_spec(), header);
+
+//         let cfg_env =
+// CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+
+//         let block_env = BlockEnv {
+//             number: header.number(),
+//             beneficiary: header.beneficiary(),
+//             timestamp: header.timestamp(),
+//             difficulty: if spec.into_eth_spec() >= SpecId::MERGE {
+//                 U256::ZERO
+//             } else {
+//                 header.difficulty()
+//             },
+//             prevrandao: if spec.into_eth_spec() >= SpecId::MERGE {
+//                 header.mix_hash()
+//             } else {
+//                 None
+//             },
+//             gas_limit: header.gas_limit(),
+//             basefee: header.base_fee_per_gas().unwrap_or_default(),
+//             // EIP-4844 excess blob gas of this block, introduced in Cancun
+//             blob_excess_gas_and_price: header.excess_blob_gas().map(|excess_blob_gas| {
+//                 BlobExcessGasAndPrice::new(excess_blob_gas, spec.into_eth_spec() >=
+// SpecId::PRAGUE)             }),
+//         };
+
+//         EvmEnv { cfg_env, block_env }
+//     }
+
+//     fn next_evm_env(
 //         &self,
-//         db: DB,
-//         input: EvmEnv,
-//         inspector: I,
-//     ) -> Self::Evm<DB, I> {
-//         EthEvm {
-//             inner: Context::mainnet()
-//                 .with_block(input.block_env)
-//                 .with_cfg(input.cfg_env)
-//                 .with_db(db)
-//                 .build_mainnet_with_inspector(inspector),
-//             inspect: true,
+//         parent: &Header,
+//         attributes: &Self::NextBlockEnvCtx,
+//     ) -> Result<EvmEnv<OpSpecId>, Self::Error> {
+//         // ensure we're not missing any timestamp based hardforks
+//         let spec_id = revm_spec_by_timestamp_after_bedrock(self.chain_spec(),
+// attributes.timestamp);
+
+//         // configure evm env based on parent block
+//         let cfg_env =
+//             CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
+
+//         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+//         // cancun now, we need to set the excess blob gas to the default value(0)
+//         let blob_excess_gas_and_price = parent
+//             .maybe_next_block_excess_blob_gas(
+//                 self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
+//             )
+//             .or_else(|| (spec_id.into_eth_spec().is_enabled_in(SpecId::CANCUN)).then_some(0))
+//             .map(|gas| BlobExcessGasAndPrice::new(gas, false));
+
+//         let block_env = BlockEnv {
+//             number: parent.number() + 1,
+//             beneficiary: attributes.suggested_fee_recipient,
+//             timestamp: attributes.timestamp,
+//             difficulty: U256::ZERO,
+//             prevrandao: Some(attributes.prev_randao),
+//             gas_limit: attributes.gas_limit,
+//             // calculate basefee based on parent block's gas usage
+//             basefee: next_block_base_fee(self.chain_spec(), parent, attributes.timestamp)?,
+//             // calculate excess gas based on parent block's blob gas usage
+//             blob_excess_gas_and_price,
+//         };
+
+//         Ok(EvmEnv { cfg_env, block_env })
+//     }
+
+//     fn context_for_block(&self, block: &'_ SealedBlock<N::Block>) -> OpBlockExecutionCtx {
+//         OpBlockExecutionCtx {
+//             parent_hash: block.header().parent_hash(),
+//             parent_beacon_block_root: block.header().parent_beacon_block_root(),
+//             extra_data: block.header().extra_data().clone(),
 //         }
 //     }
-// }
 
-// /// Bsc-related EVM configuration.
-// #[derive(Debug, Clone)]
-// #[non_exhaustive]
-// pub struct BscEvmConfig {
-//     chain_spec: Arc<BscChainSpec>,
-// }
-
-// impl BscEvmConfig {
-//     /// Creates a new Ethereum EVM configuration with the given chain spec.
-//     pub const fn new(chain_spec: Arc<BscChainSpec>) -> Self {
-//         Self { chain_spec }
-//     }
-
-//     /// Returns the chain spec associated with this configuration.
-//     pub fn chain_spec(&self) -> &BscChainSpec {
-//         &self.chain_spec
-//     }
-// }
-
-// impl BlockExecutorFactory for BscEvmConfig {
-//     type EvmFactory = EthEvmFactory;
-//     type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
-//     type Transaction = TransactionSigned;
-//     type Receipt = Receipt;
-
-//     fn evm_factory(&self) -> &Self::EvmFactory {
-//         self.inner.evm_factory()
-//     }
-
-//     fn create_executor<'a, DB, I>(
-//         &'a self,
-//         evm: EthEvm<&'a mut State<DB>, I>,
-//         ctx: EthBlockExecutionCtx<'a>,
-//     ) -> impl BlockExecutorFor<'a, Self, DB, I>
-//     where
-//         DB: Database + 'a,
-//         I: InspectorFor<Self, &'a mut State<DB>> + 'a,
-//     {
-//         CustomBlockExecutor {
-//             inner: EthBlockExecutor::new(
-//                 evm,
-//                 ctx,
-//                 self.inner.chain_spec(),
-//                 self.inner.executor_factory.receipt_builder(),
-//             ),
+//     fn context_for_next_block(
+//         &self,
+//         parent: &SealedHeader<N::BlockHeader>,
+//         attributes: Self::NextBlockEnvCtx,
+//     ) -> OpBlockExecutionCtx {
+//         OpBlockExecutionCtx {
+//             parent_hash: parent.hash(),
+//             parent_beacon_block_root: attributes.parent_beacon_block_root,
+//             extra_data: attributes.extra_data,
 //         }
 //     }
 // }
@@ -184,7 +342,7 @@ mod config;
 //         let mut gas_limit = U256::from(parent.gas_limit);
 
 //         // If we are on the London fork boundary, we need to multiply the parent's gas limit by
-// the         // elasticity multiplier to get the new gas limit.
+//         // the elasticity multiplier to get the new gas limit.
 //         if self.chain_spec.fork(EthereumHardfork::London).transitions_at_block(parent.number + 1)
 // {             let elasticity_multiplier = self
 //                 .chain_spec

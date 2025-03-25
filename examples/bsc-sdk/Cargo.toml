@@ -15,6 +15,7 @@ reth-ethereum-forks = { workspace = true, features = ["serde"] }
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
 reth-revm.workspace = true
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true

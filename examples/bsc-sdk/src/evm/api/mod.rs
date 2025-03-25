@@ -21,7 +21,7 @@ use revm::{
 };
 use std::ops::{Deref, DerefMut};
 
-mod builder;
+pub mod builder;
 pub mod ctx;
 mod exec;
 
@@ -119,8 +119,8 @@ where
 /// [`OpEvm`](op_revm::OpEvm) type.
 #[allow(missing_debug_implementations)] // missing revm::OpContext Debug impl
 pub struct BscEvm<DB: Database, I, P = BscPrecompiles> {
-    inner: BscEvmInner<BscContext<DB>, I, EthInstructions<EthInterpreter, BscContext<DB>>, P>,
-    inspect: bool,
+    pub inner: BscEvmInner<BscContext<DB>, I, EthInstructions<EthInterpreter, BscContext<DB>>, P>,
+    pub inspect: bool,
 }
 
 impl<DB: Database, I, P> BscEvm<DB, I, P> {
