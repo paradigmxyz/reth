@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt::Debug,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -8,8 +8,11 @@ use std::{
     time::Instant,
 };
 
-use alloy_primitives::{map::FbBuildHasher, B256, U256};
-use mini_moka::sync::{CacheBuilder, ConcurrentCacheExt};
+use alloy_primitives::{
+    map::{B256Map, B256Set, FbBuildHasher},
+    B256, U256,
+};
+use dashmap::DashMap;
 use parking_lot::RwLock;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
@@ -18,7 +21,7 @@ use tracing::debug;
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
-pub type Cache<V> = mini_moka::sync::Cache<B256, V, FbBuildHasher<32>>;
+type Map<V> = DashMap<B256, V, FbBuildHasher<32>>;
 
 /// The hashed cursor factory that creates cursors that cache the visited keys.
 ///
@@ -51,23 +54,39 @@ impl Default for CachedHashedCursorFactoryCache {
 
 impl CachedHashedCursorFactoryCache {
     pub fn apply_hashed_post_state(&self, hashed_post_state: HashedPostState) {
-        let cached_seeks_exact = self.account_cache.cached_seeks_exact.clone();
+        let mut cached_seeks_exact = self.account_cache.cached_seeks_exact.clone();
         let cached_seeks_inexact = self.account_cache.cached_seeks_inexact.clone();
         let cached_nexts = self.account_cache.cached_nexts.clone();
 
+        let seeks_exact_limit = self.account_cache.seeks_exact_limit;
+        let seeks_inexact_limit = self.account_cache.seeks_inexact_limit;
+
         std::thread::spawn(move || {
             // TODO: acquire a lock outside of the thread
-            let cached_seeks_inexact_write = cached_seeks_inexact.write();
-            for (address, account) in &hashed_post_state.accounts {
-                cached_seeks_exact.insert(*address, account.map(|account| (*address, account)));
-            }
-            cached_nexts.invalidate_all();
+            let mut cached_seeks_inexact_write = cached_seeks_inexact.write();
+
+            let mut size = cached_seeks_exact.len();
+            cached_seeks_exact.retain(|address, _| {
+                if size > seeks_exact_limit && !hashed_post_state.accounts.contains_key(address) {
+                    size -= 1;
+                    return false;
+                }
+
+                true
+            });
+            cached_seeks_exact.extend(
+                hashed_post_state.accounts.iter().map(|(address, account)| {
+                    (*address, account.map(|account| (*address, account)))
+                }),
+            );
+            // TODO: do not invalidate all next calls
+            cached_nexts.clear();
 
             let start = Instant::now();
             let mut noops = 0;
-            let mut cache_updates = Vec::new();
-            let mut cache_deletions = Vec::new();
-            let mut cache_invalidations = Vec::new();
+            let mut cache_updates = B256Map::default();
+            let mut cache_deletions = B256Set::default();
+            let mut cache_invalidations = B256Set::default();
 
             let hashed_post_state_accounts =
                 hashed_post_state.accounts.iter().collect::<BTreeMap<_, _>>();
@@ -91,7 +110,7 @@ impl CachedHashedCursorFactoryCache {
                             // First matching address from the hashed post state is less or equal to
                             // previously sought address. This means that the hashed post state
                             // account should be returned for this seek.
-                            cache_updates.push((seek_address, hashed_post_state_account));
+                            cache_updates.insert(seek_address, hashed_post_state_account);
                         } else {
                             // Nothing to do here. The most relevant address is already cached.
                             noops += 1;
@@ -100,17 +119,17 @@ impl CachedHashedCursorFactoryCache {
                     (None, Some(_)) => {
                         // Previously sought address wasn't found, but now there's a hashed post
                         // state address that matches the key.
-                        cache_updates.push((seek_address, hashed_post_state_account));
+                        cache_updates.insert(seek_address, hashed_post_state_account);
                     }
                     (Some((old_address, _)), None) => {
                         if hashed_post_state.accounts.get(old_address) == Some(&None) {
                             // Previously sought address is now deleted. We don't know if there's an
                             // address in the underlying cursor that will match the key, so we
                             // delete the cached entry.
-                            cache_deletions.push(seek_address);
+                            cache_deletions.insert(seek_address);
                         } else {
                             // TODO: Unsure what to do here yet.
-                            cache_invalidations.push(seek_address);
+                            cache_invalidations.insert(seek_address);
                         }
                     }
                     (None, None) => {
@@ -126,12 +145,24 @@ impl CachedHashedCursorFactoryCache {
             let deleted = cache_deletions.len();
             let invalidated = cache_invalidations.len();
 
-            for (address, account) in cache_updates {
-                cached_seeks_inexact_write.insert(address, account);
-            }
-            for address in cache_deletions.into_iter().chain(cache_invalidations) {
-                cached_seeks_inexact_write.invalidate(&address);
-            }
+            let mut size = cached_seeks_inexact_write.len();
+            cached_seeks_inexact_write.retain(|address, _| {
+                if size > seeks_inexact_limit && !cache_updates.contains_key(address) {
+                    size -= 1;
+                    return false;
+                }
+
+                true
+            });
+
+            cached_seeks_inexact_write.extend(cache_updates);
+            cached_seeks_inexact_write.retain(|address, _| {
+                !cache_deletions.contains(address) && !cache_invalidations.contains(address)
+            });
+
+            let seeks_exact_size = cached_seeks_exact.len();
+            let seeks_inexact_size = cached_seeks_inexact_write.len();
+            let nexts_size = cached_nexts.len();
 
             debug!(
                 target: "trie::hashed_cursor::cached",
@@ -140,6 +171,9 @@ impl CachedHashedCursorFactoryCache {
                 updated,
                 deleted,
                 invalidated,
+                seeks_exact_size,
+                seeks_inexact_size,
+                nexts_size,
                 "Updated cached account inexact seeks"
             );
         });
@@ -168,13 +202,9 @@ impl CachedHashedCursorFactoryCache {
         //         },
         //     );
 
-        self.account_cache.cached_seeks_exact.sync();
-        self.account_cache.cached_seeks_inexact.read().sync();
-        self.account_cache.cached_nexts.sync();
-        let account_seeks_exact_size = self.account_cache.cached_seeks_exact.entry_count();
-        let account_seeks_inexact_size =
-            self.account_cache.cached_seeks_inexact.read().entry_count();
-        let account_nexts_size = self.account_cache.cached_nexts.entry_count();
+        let account_seeks_exact_size = self.account_cache.cached_seeks_exact.len();
+        let account_seeks_inexact_size = self.account_cache.cached_seeks_inexact.read().len();
+        let account_nexts_size = self.account_cache.cached_nexts.len();
 
         debug!(
             target: "trie::hashed_cursor::cached",
@@ -217,31 +247,38 @@ pub struct CachedHashedCursorCache<T> {
     /// This map is also populated:
     /// - During the [`Self::seek`] calls using the key that the cursor actually sought to.
     /// - During the [`Self::next`] calls using the key that the cursor actually advanced to.
-    cached_seeks_exact: Cache<Option<(B256, T)>>,
+    cached_seeks_exact: Map<Option<(B256, T)>>,
     /// The cache of [`Self::seek`] calls that resulted in inexact matches.
     ///
     /// The key is the sought key, and the value is the result of the seek.
-    cached_seeks_inexact: Arc<RwLock<Cache<Option<(B256, T)>>>>,
-    seeks_hit: AtomicUsize,
-    seeks_total: AtomicUsize,
+    cached_seeks_inexact: Arc<RwLock<Map<Option<(B256, T)>>>>,
     /// The cache of [`Self::next`] calls.
     ///
     /// The key is the previous key before calling [`Self::next`], and the value is the result of
     /// the call.
-    cached_nexts: Cache<Option<(B256, T)>>,
+    cached_nexts: Map<Option<(B256, T)>>,
+
+    seeks_exact_limit: usize,
+    seeks_inexact_limit: usize,
+    nexts_limit: usize,
+
+    seeks_hit: AtomicUsize,
+    seeks_total: AtomicUsize,
     nexts_hit: AtomicUsize,
     nexts_total: AtomicUsize,
 }
 
-impl<T: Clone + Send + Sync + 'static> Default for CachedHashedCursorCache<T> {
+impl<T> Default for CachedHashedCursorCache<T> {
     fn default() -> Self {
         Self {
-            cached_seeks_exact: CacheBuilder::new(100_000)
-                .build_with_hasher(FbBuildHasher::default()),
-            cached_seeks_inexact: Arc::new(RwLock::new(
-                CacheBuilder::new(100_000).build_with_hasher(FbBuildHasher::default()),
-            )),
-            cached_nexts: CacheBuilder::new(100_000).build_with_hasher(FbBuildHasher::default()),
+            cached_seeks_exact: Default::default(),
+            cached_seeks_inexact: Default::default(),
+            cached_nexts: Default::default(),
+
+            seeks_exact_limit: 100_000,
+            seeks_inexact_limit: 100_000,
+            nexts_limit: 100_000,
+
             seeks_hit: AtomicUsize::new(0),
             seeks_total: AtomicUsize::new(0),
             nexts_hit: AtomicUsize::new(0),
@@ -329,7 +366,8 @@ where
             .cache
             .cached_seeks_exact
             .get(&key)
-            .or_else(|| self.cache.cached_seeks_inexact.read().get(&key))
+            .map(|v| *v)
+            .or_else(|| self.cache.cached_seeks_inexact.read().get(&key).map(|v| *v))
         {
             self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
             self.seek_before_next = true;
@@ -366,7 +404,7 @@ where
         let result = if let Some(result) = self.cache.cached_nexts.get(&last_key) {
             self.cache.nexts_hit.fetch_add(1, Ordering::Relaxed);
             self.seek_before_next = true;
-            result
+            *result
         } else {
             if self.seek_before_next {
                 self.seek_before_next = false;

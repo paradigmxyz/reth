@@ -34,8 +34,8 @@ tracing.workspace = true
 
 # misc
 auto_impl.workspace = true
+dashmap.workspace = true
 itertools.workspace = true
-mini-moka.workspace = true
 parking_lot.workspace = true
 
 # `metrics` feature
