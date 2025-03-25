@@ -55,7 +55,7 @@ use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
 use std::sync::Arc;
 use std::time::{SystemTime, Duration};
-use primitive_types::{H256, U256};
+use primitive_types::H256;
 use reth_primitives::Address;
 /// Storage implementation for Optimism.
 pub type OpStorage = EthStorage<OpTransactionSigned>;
