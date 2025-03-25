@@ -23,7 +23,9 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::{hashed_cursor::cached::CachedHashedCursorFactoryCache, TrieInput};
+use reth_trie::{
+    hashed_cursor::cached::CachedHashedCursorFactoryCache, HashedPostState, TrieInput,
+};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
@@ -75,6 +77,10 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             hashed_cursor_cache: Default::default(),
             _marker: Default::default(),
         }
+    }
+
+    pub fn apply_hashed_post_state_to_cursor_cache(&self, hashed_post_state: &HashedPostState) {
+        self.hashed_cursor_cache.apply_hashed_post_state(hashed_post_state);
     }
 }
 

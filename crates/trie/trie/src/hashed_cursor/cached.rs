@@ -10,6 +10,7 @@ use alloy_primitives::{map::FbBuildHasher, B256, U256};
 use mini_moka::sync::CacheBuilder;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::HashedPostState;
 use tracing::debug;
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
@@ -46,6 +47,16 @@ impl Default for CachedHashedCursorFactoryCache {
 }
 
 impl CachedHashedCursorFactoryCache {
+    pub fn apply_hashed_post_state(&self, hashed_post_state: &HashedPostState) {
+        self.account_cache.cached_nexts.invalidate_all();
+        self.account_cache.cached_seeks.invalidate_all();
+        for (address, account) in &hashed_post_state.accounts {
+            self.account_cache
+                .cached_seeks
+                .insert(*address, account.map(|account| (*address, account)));
+        }
+    }
+
     pub fn reset_metrics(&self) {
         self.account_cache.reset_metrics();
     }
