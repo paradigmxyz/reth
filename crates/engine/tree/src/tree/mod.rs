@@ -2462,9 +2462,6 @@ where
         }
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
-        let start = Instant::now();
-        self.payload_processor.update_hashed_cursor_cache(hashed_state.clone());
-        debug!(target: "engine::tree", elapsed = ?start.elapsed(), "Updated hashed cursor cache");
 
         if let Err(err) = self
             .payload_validator
@@ -2527,6 +2524,10 @@ where
                 }
             }
         }
+
+        let start = Instant::now();
+        self.payload_processor.update_hashed_cursor_cache(hashed_state.clone());
+        debug!(target: "engine::tree", elapsed = ?start.elapsed(), "Updated hashed cursor cache");
 
         let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
             maybe_state_root
