@@ -8,7 +8,6 @@ use std::{
 };
 
 use alloy_primitives::{map::FbBuildHasher, B256, U256};
-use itertools::Itertools;
 use mini_moka::sync::{CacheBuilder, ConcurrentCacheExt};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
@@ -62,19 +61,13 @@ impl CachedHashedCursorFactoryCache {
 
         let hashed_post_state_accounts =
             hashed_post_state.accounts.iter().collect::<BTreeMap<_, _>>();
-        let mut hashed_post_state_accounts = hashed_post_state_accounts.into_iter();
-        for entry in self
-            .account_cache
-            .cached_seeks_inexact
-            .iter()
-            .sorted_unstable_by_key(|entry| *entry.key())
-        {
+        for entry in &self.account_cache.cached_seeks_inexact {
             let (&seek_address, value) = entry.pair();
 
             // Find first hashed post state account that is greater than or equal to the address
             // that was sought.
             let hashed_post_state_account =
-                hashed_post_state_accounts.find_map(|(&post_state_address, account)| {
+                hashed_post_state_accounts.iter().find_map(|(&&post_state_address, account)| {
                     account.and_then(|account| {
                         (post_state_address >= seek_address)
                             .then_some((post_state_address, account))
@@ -107,7 +100,7 @@ impl CachedHashedCursorFactoryCache {
                     updated += 1;
                 }
                 (Some((old_address, _)), Some(_))
-                    if hashed_post_state.accounts.get(old_address) == Some(&None) =>
+                    if hashed_post_state_accounts.get(&old_address) == Some(&&None) =>
                 {
                     // Previously the seek returned an address for the account that is now deleted,
                     // but there's a new account available that matches the key.
@@ -117,7 +110,7 @@ impl CachedHashedCursorFactoryCache {
                     updated += 1;
                 }
                 (Some((old_address, _)), None)
-                    if hashed_post_state.accounts.get(old_address) == Some(&None) =>
+                    if hashed_post_state_accounts.get(&old_address) == Some(&&None) =>
                 {
                     // Previously the seek returned an address for the account that is now deleted.
                     self.account_cache.cached_seeks_inexact.invalidate(&seek_address);
