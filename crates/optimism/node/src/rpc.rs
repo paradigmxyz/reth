@@ -26,14 +26,14 @@ where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec: EthereumHardforks,
-            Engine: EngineTypes<ExecutionData = OpExecutionData>,
+            Payload: EngineTypes<ExecutionData = OpExecutionData>,
         >,
     >,
     EV: EngineValidatorBuilder<N>,
 {
     type EngineApi = OpEngineApi<
         N::Provider,
-        <N::Types as NodeTypesWithEngine>::Engine,
+        <N::Types as NodeTypesWithEngine>::Payload,
         N::Pool,
         EV::Validator,
         <N::Types as NodeTypes>::ChainSpec,
@@ -59,6 +59,7 @@ where
             client,
             EngineCapabilities::new(OP_ENGINE_CAPABILITIES.iter().copied()),
             engine_validator,
+            ctx.config.engine.accept_execution_requests_hash,
         );
 
         Ok(OpEngineApi::new(inner))

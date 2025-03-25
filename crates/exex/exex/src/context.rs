@@ -105,7 +105,7 @@ where
     /// Returns the handle to the payload builder service.
     pub fn payload_builder_handle(
         &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload> {
         self.components.payload_builder_handle()
     }
 
@@ -150,7 +150,7 @@ mod tests {
     /// <https://github.com/paradigmxyz/reth/issues/12054>
     #[test]
     const fn issue_12054() {
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         struct ExEx<Node: FullNodeComponents> {
             ctx: ExExContext<Node>,
         }

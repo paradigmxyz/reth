@@ -40,10 +40,10 @@ pub type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<
 type EngineServiceType<N, Client> = ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<
-            EngineApiRequest<<N as NodeTypesWithEngine>::Engine, <N as NodeTypes>::Primitives>,
+            EngineApiRequest<<N as NodeTypesWithEngine>::Payload, <N as NodeTypes>::Primitives>,
             <N as NodeTypes>::Primitives,
         >,
-        EngineMessageStream<<N as NodeTypesWithEngine>::Engine>,
+        EngineMessageStream<<N as NodeTypesWithEngine>::Payload>,
         BasicBlockDownloader<Client, BlockTy<N>>,
     >,
     PipelineSync<N>,
@@ -51,7 +51,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 // TODO(mattsse): remove hidde once fixed : <https://github.com/rust-lang/rust/issues/135363>
 //  otherwise rustdoc fails to resolve the alias
 #[doc(hidden)]
@@ -72,19 +72,19 @@ where
     E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     /// Constructor for `EngineService`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new<V, C>(
         consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: E,
         chain_spec: Arc<N::ChainSpec>,
         client: Client,
-        incoming_requests: EngineMessageStream<N::Engine>,
+        incoming_requests: EngineMessageStream<N::Payload>,
         pipeline: Pipeline<N>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
-        payload_builder: PayloadBuilderHandle<N::Engine>,
+        payload_builder: PayloadBuilderHandle<N::Payload>,
         payload_validator: V,
         tree_config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N::Primitives>>,
@@ -92,7 +92,7 @@ where
         evm_config: C,
     ) -> Self
     where
-        V: EngineValidator<N::Engine, Block = BlockTy<N>>,
+        V: EngineValidator<N::Payload, Block = BlockTy<N>>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let engine_kind =

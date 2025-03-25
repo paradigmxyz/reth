@@ -113,35 +113,35 @@ jobs:
 
           # consume-engine
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/prague.*blockchain_test_engine.*
+            limit: .*tests/prague.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/cancun.*blockchain_test_engine.*
+            limit: .*tests/cancun.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/shanghai.*blockchain_test_engine.*
+            limit: .*tests/shanghai.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/berlin.*blockchain_test_engine.*
+            limit: .*tests/berlin.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/istanbul.*blockchain_test_engine.*
+            limit: .*tests/istanbul.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/homestead.*blockchain_test_engine.*
+            limit: .*tests/homestead.*
           - sim: ethereum/eest/consume-engine
-            limit: .*tests/frontier.*blockchain_test_engine.*
+            limit: .*tests/frontier.*
 
           # consume-rlp
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/prague.*blockchain_test(?!_engine).*
+            limit: .*tests/prague.*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/cancun.*blockchain_test(?!_engine).*
+            limit: .*tests/cancun.*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/shanghai.*blockchain_test(?!_engine).*
+            limit: .*tests/shanghai.*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/berlin.*blockchain_test(?!_engine).*
+            limit: .*tests/berlin.*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/istanbul.*blockchain_test(?!_engine).*
+            limit: .*tests/istanbul.*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/homestead.*blockchain_test(?!_engine).*
+            limit: .*tests/homestead.*
           - sim: ethereum/eest/consume-rlp
-            limit: .*tests/frontier.*blockchain_test(?!_engine).*
+            limit: .*tests/frontier.*
     needs:
       - prepare-reth
       - prepare-hive

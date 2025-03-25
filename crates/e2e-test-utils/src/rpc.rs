@@ -11,7 +11,7 @@ use reth_rpc_eth_api::{
     EthApiTypes,
 };
 
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct RpcTestContext<Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub inner: RpcRegistry<Node, EthApi>,
 }

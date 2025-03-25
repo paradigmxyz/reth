@@ -76,7 +76,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     /// the engine.
     fn payload_builder_handle(
         &self,
-    ) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine>;
+    ) -> &PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Payload>;
 }
 
 /// All the components of the node.
@@ -95,7 +95,7 @@ pub struct Components<Node: FullNodeTypes, N: NetworkPrimitives, Pool, EVM, Exec
     /// The network implementation of the node.
     pub network: NetworkHandle<N>,
     /// The handle to the payload builder service.
-    pub payload_builder_handle: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
+    pub payload_builder_handle: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload>,
 }
 
 impl<Node, Pool, EVM, Executor, Cons, N> NodeComponents<Node>
@@ -143,7 +143,7 @@ where
 
     fn payload_builder_handle(
         &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload> {
         &self.payload_builder_handle
     }
 }

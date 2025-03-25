@@ -157,7 +157,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
 /// The cursor to iterate over storage trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct InMemoryStorageTrieCursor<'a, C> {
     /// The hashed address of the account that trie belongs to.
     hashed_address: B256,

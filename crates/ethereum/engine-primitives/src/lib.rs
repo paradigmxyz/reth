@@ -30,15 +30,34 @@ pub struct EthEngineTypes<T: PayloadTypes = EthPayloadTypes> {
     _marker: core::marker::PhantomData<T>,
 }
 
-impl<T: PayloadTypes> PayloadTypes for EthEngineTypes<T> {
+impl<
+        T: PayloadTypes<
+            ExecutionData = ExecutionData,
+            BuiltPayload: BuiltPayload<
+                Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>,
+            >,
+        >,
+    > PayloadTypes for EthEngineTypes<T>
+{
+    type ExecutionData = T::ExecutionData;
     type BuiltPayload = T::BuiltPayload;
     type PayloadAttributes = T::PayloadAttributes;
     type PayloadBuilderAttributes = T::PayloadBuilderAttributes;
+
+    fn block_to_payload(
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> Self::ExecutionData {
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        ExecutionData { payload, sidecar }
+    }
 }
 
 impl<T> EngineTypes for EthEngineTypes<T>
 where
-    T: PayloadTypes,
+    T: PayloadTypes<ExecutionData = ExecutionData>,
     T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = reth_ethereum_primitives::Block>>
         + TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
@@ -49,17 +68,6 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
-    type ExecutionData = ExecutionData;
-
-    fn block_to_payload(
-        block: SealedBlock<
-            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
-        >,
-    ) -> ExecutionData {
-        let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
-    }
 }
 
 /// A default payload type for [`EthEngineTypes`]
@@ -71,4 +79,15 @@ impl PayloadTypes for EthPayloadTypes {
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
     type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
+    type ExecutionData = ExecutionData;
+
+    fn block_to_payload(
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> Self::ExecutionData {
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        ExecutionData { payload, sidecar }
+    }
 }

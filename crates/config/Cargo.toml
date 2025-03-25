@@ -12,19 +12,31 @@ workspace = true
 
 [dependencies]
 # reth
-reth-network-types = { workspace = true, features = ["serde"] }
-reth-prune-types = { workspace = true, features = ["serde"] }
-reth-stages-types = { workspace = true, features = ["serde"] }
+reth-network-types.workspace = true
+reth-prune-types.workspace = true
+reth-stages-types.workspace = true
 
 # serde
-serde.workspace = true
-humantime-serde.workspace = true
+serde = { workspace = true, optional = true }
+humantime-serde = { workspace = true, optional = true }
 
 # toml
-toml.workspace = true
-eyre.workspace = true
+toml = { workspace = true, optional = true }
+eyre = { workspace = true, optional = true }
+
+[features]
+serde = [
+    "dep:serde",
+    "dep:toml",
+    "dep:eyre",
+    "dep:humantime-serde",
+    "reth-network-types/serde",
+    "reth-prune-types/serde",
+    "reth-stages-types/serde",
+    "alloy-primitives/serde",
+]
 
 [dev-dependencies]
 tempfile.workspace = true
 reth-network-peers.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["getrandom"] }

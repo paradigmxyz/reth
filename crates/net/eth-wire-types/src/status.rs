@@ -1,11 +1,11 @@
 use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
+use alloy_hardforks::{EthereumHardfork, ForkId, Head};
 use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_ethereum_forks::{EthereumHardfork, ForkId, Head};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.
@@ -306,11 +306,11 @@ mod tests {
     use crate::{EthVersion, Status, StatusEth69};
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
+    use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
     use alloy_primitives::{hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
-    use reth_ethereum_forks::{EthereumHardfork, ForkHash, ForkId, Head};
     use std::str::FromStr;
 
     #[test]

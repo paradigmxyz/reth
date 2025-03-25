@@ -57,7 +57,7 @@ pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     client: C,
     /// Used for reporting peers.
     // TODO use to report spammers
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
     incoming_requests: ReceiverStream<IncomingEthRequest<N>>,

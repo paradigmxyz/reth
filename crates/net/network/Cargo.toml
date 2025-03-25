@@ -22,6 +22,7 @@ reth-network-p2p.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
+reth-engine-primitives.workspace = true
 reth-ethereum-forks.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
@@ -104,7 +105,6 @@ pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 
 [features]
-default = ["serde"]
 geth-tests = []
 serde = [
     "dep:serde",
@@ -124,7 +124,10 @@ serde = [
     "url/serde",
     "reth-primitives-traits/serde",
     "reth-ethereum-forks/serde",
-    "reth-provider/serde",
+    "reth-network/serde",
+    "reth-transaction-pool/serde",
+    "reth-ethereum-primitives/serde",
+    "reth-network-api/serde",
 ]
 test-utils = [
     "dep:tempfile",

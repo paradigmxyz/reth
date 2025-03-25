@@ -153,17 +153,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 pub struct CustomEngineTypes;
 
 impl PayloadTypes for CustomEngineTypes {
+    type ExecutionData = ExecutionData;
     type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
-}
-
-impl EngineTypes for CustomEngineTypes {
-    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
-    type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
-    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
@@ -174,6 +167,13 @@ impl EngineTypes for CustomEngineTypes {
             ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
         ExecutionData { payload, sidecar }
     }
+}
+
+impl EngineTypes for CustomEngineTypes {
+    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
+    type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
 }
 
 /// Custom engine validator
@@ -210,7 +210,7 @@ impl PayloadValidator for CustomEngineValidator {
 
 impl<T> EngineValidator<T> for CustomEngineValidator
 where
-    T: EngineTypes<PayloadAttributes = CustomPayloadAttributes, ExecutionData = ExecutionData>,
+    T: PayloadTypes<PayloadAttributes = CustomPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_version_specific_fields(
         &self,
@@ -262,7 +262,7 @@ impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
-            Engine = CustomEngineTypes,
+            Payload = CustomEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
         >,
@@ -289,7 +289,7 @@ impl NodeTypes for MyCustomNode {
 
 /// Configure the node types with the custom engine types
 impl NodeTypesWithEngine for MyCustomNode {
-    type Engine = CustomEngineTypes;
+    type Payload = CustomEngineTypes;
 }
 
 /// Custom addons configuring RPC types
@@ -302,7 +302,7 @@ impl<N> Node<N> for MyCustomNode
 where
     N: FullNodeTypes<
         Types: NodeTypesWithEngine<
-            Engine = CustomEngineTypes,
+            Payload = CustomEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
             Storage = EthStorage,
@@ -345,7 +345,7 @@ impl<Node, Pool> PayloadBuilderBuilder<Node, Pool> for CustomPayloadBuilderBuild
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<
-            Engine = CustomEngineTypes,
+            Payload = CustomEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
         >,

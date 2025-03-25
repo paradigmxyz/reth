@@ -37,7 +37,7 @@ impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypesWithEngine<
-            Engine = EthEngineTypes,
+            Payload = EthEngineTypes,
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
         >,
@@ -50,7 +50,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload>> {
         tracing::info!("Spawning a custom payload builder");
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
