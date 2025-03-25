@@ -160,6 +160,7 @@ where
             to_sparse_trie,
             self.hashed_cursor_cache.clone(),
         );
+        let hashed_post_state_tx = multi_proof_task.hashed_post_state_sender();
 
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
@@ -198,7 +199,12 @@ where
             }
         });
 
-        PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }
+        PayloadHandle {
+            to_multi_proof,
+            prewarm_handle,
+            state_root: Some(state_root_rx),
+            hashed_post_state_tx: Some(hashed_post_state_tx),
+        }
     }
 
     /// Spawn cache prewarming exclusively.
@@ -219,7 +225,12 @@ where
             + 'static,
     {
         let prewarm_handle = self.spawn_caching_with(header, transactions, provider_builder, None);
-        PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None }
+        PayloadHandle {
+            to_multi_proof: None,
+            prewarm_handle,
+            state_root: None,
+            hashed_post_state_tx: None,
+        }
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
@@ -292,6 +303,8 @@ pub struct PayloadHandle {
     prewarm_handle: CacheTaskHandle,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// Sender for the final hashed post state
+    hashed_post_state_tx: Option<Sender<HashedPostState>>,
 }
 
 impl PayloadHandle {
@@ -343,6 +356,12 @@ impl PayloadHandle {
     /// If the [`BundleState`] is provided it will update the shared cache.
     pub(super) fn terminate_caching(&mut self, block_output: Option<BundleState>) {
         self.prewarm_handle.terminate_caching(block_output)
+    }
+
+    pub(super) fn send_hashed_post_state(&self, hashed_post_state: HashedPostState) {
+        if let Some(tx) = &self.hashed_post_state_tx {
+            let _ = tx.send(hashed_post_state);
+        }
     }
 }
 

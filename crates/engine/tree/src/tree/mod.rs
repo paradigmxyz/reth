@@ -2462,6 +2462,7 @@ where
         }
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
+        handle.send_hashed_post_state(hashed_state);
 
         if let Err(err) = self
             .payload_validator

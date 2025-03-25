@@ -470,8 +470,10 @@ pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
     fetched_proof_targets: MultiProofTargets,
     /// Hashed cursor factory cache.
     hashed_cursor_cache: CachedHashedCursorFactoryCache,
-    /// Accumulated hashed post state.
-    hashed_post_state: HashedPostState,
+    /// Hashed post state sender.
+    hashed_post_state_tx: Sender<HashedPostState>,
+    /// Hashed post state receiver.
+    hashed_post_state_rx: Receiver<HashedPostState>,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
@@ -494,6 +496,7 @@ where
         hashed_cursor_cache: CachedHashedCursorFactoryCache,
     ) -> Self {
         let (tx, rx) = channel();
+        let (hashed_post_state_tx, hashed_post_state_rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
 
         Self {
@@ -503,7 +506,8 @@ where
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             hashed_cursor_cache,
-            hashed_post_state: Default::default(),
+            hashed_post_state_tx,
+            hashed_post_state_rx,
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 executor,
@@ -517,6 +521,11 @@ where
     /// Returns a [`Sender`] that can be used to send arbitrary [`MultiProofMessage`]s to this task.
     pub(super) fn state_root_message_sender(&self) -> Sender<MultiProofMessage> {
         self.tx.clone()
+    }
+
+    /// Returns a [`Sender`] that can be used to send the final hashed post state to this task.
+    pub(super) fn hashed_post_state_sender(&self) -> Sender<HashedPostState> {
+        self.hashed_post_state_tx.clone()
     }
 
     /// Handles request for proof prefetch.
@@ -628,7 +637,6 @@ where
     /// Returns a number of proofs that were spawned.
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
-        self.hashed_post_state.extend_ref(&hashed_state_update);
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) =
@@ -911,10 +919,12 @@ where
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
         }
 
-        drop(self.tx);
-        self.hashed_cursor_cache.apply_hashed_post_state(&self.hashed_post_state);
+        let Self { hashed_cursor_cache, hashed_post_state_rx, .. } = self;
+        if let Ok(hashed_post_state) = hashed_post_state_rx.recv() {
+            hashed_cursor_cache.apply_hashed_post_state(&hashed_post_state);
+        }
 
-        self.hashed_cursor_cache.log_stats();
+        hashed_cursor_cache.log_stats();
     }
 }
 
