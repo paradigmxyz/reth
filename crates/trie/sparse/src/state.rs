@@ -41,7 +41,6 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     metrics: SparseStateTrieMetrics,
 }
 
-#[cfg(test)]
 impl Default for SparseStateTrie {
     fn default() -> Self {
         Self {
