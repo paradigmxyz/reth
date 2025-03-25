@@ -9,12 +9,13 @@ use eyre::Result;
 use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{NodeTypesWithEngine, PayloadTypes};
+use reth_payload_builder::PayloadId;
 use reth_rpc_layer::AuthClientService;
 use setup::Setup;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
-use alloy_rpc_types_engine::PayloadAttributes;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 
 #[cfg(test)]
 mod examples;
@@ -53,6 +54,14 @@ pub struct Environment<I> {
     pub latest_header_time: u64,
     /// Defines the increment for block timestamps (default: 2 seconds)
     pub block_timestamp_increment: u64,
+    /// Stores payload IDs returned by block producers, indexed by block number
+    pub payload_id_history: HashMap<u64, PayloadId>,
+    /// Stores the next expected payload ID
+    pub next_payload_id: Option<PayloadId>,
+    /// Stores the latest fork choice state
+    pub latest_fork_choice_state: ForkchoiceState,
+    /// Stores the most recent built execution payload
+    pub latest_payload_built: Option<PayloadAttributes>,
 }
 
 impl<I> Default for Environment<I> {
@@ -65,6 +74,10 @@ impl<I> Default for Environment<I> {
             payload_attributes: Default::default(),
             latest_header_time: 0,
             block_timestamp_increment: 2,
+            payload_id_history: HashMap::new(),
+            next_payload_id: None,
+            latest_fork_choice_state: ForkchoiceState::default(),
+            latest_payload_built: None,
         }
     }
 }
