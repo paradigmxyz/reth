@@ -282,6 +282,7 @@ where
         storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     ) -> Self {
         let max_concurrent = executor.rayon_pool().current_num_threads();
+        let max_concurrent = 1;
         Self {
             pending: VecDeque::with_capacity(max_concurrent),
             max_concurrent,

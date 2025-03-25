@@ -2,7 +2,7 @@ use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
 use alloy_primitives::B256;
 
 /// Cursor for iterating over a subtrie.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CursorSubNode {
     /// The key of the current node.
     pub key: Nibbles,
@@ -20,18 +20,18 @@ impl Default for CursorSubNode {
     }
 }
 
-impl std::fmt::Debug for CursorSubNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CursorSubNode")
-            .field("key", &self.key)
-            .field("nibble", &self.nibble)
-            .field("state_flag", &self.state_flag())
-            .field("tree_flag", &self.tree_flag())
-            .field("hash_flag", &self.hash_flag())
-            .field("hash", &self.hash())
-            .finish()
-    }
-}
+// impl std::fmt::Debug for CursorSubNode {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("CursorSubNode")
+//             .field("key", &self.key)
+//             .field("nibble", &self.nibble)
+//             .field("state_flag", &self.state_flag())
+//             .field("tree_flag", &self.tree_flag())
+//             .field("hash_flag", &self.hash_flag())
+//             .field("hash", &self.hash())
+//             .finish()
+//     }
+// }
 
 /// Implements conversion from `StoredSubNode` to `CursorSubNode`.
 impl From<StoredSubNode> for CursorSubNode {

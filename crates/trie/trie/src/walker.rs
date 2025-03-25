@@ -91,6 +91,11 @@ impl<C> TrieWalker<C> {
         self.stack.last().and_then(|n| n.hash())
     }
 
+    /// Returns the full subnode in the trie if any
+    pub fn subnode(&self) -> Option<&CursorSubNode> {
+        self.stack.last()
+    }
+
     /// Indicates whether the children of the current node are present in the trie.
     pub fn children_are_in_trie(&self) -> bool {
         self.stack.last().is_some_and(|n| n.tree_flag())
@@ -190,7 +195,15 @@ impl<C: TrieCursor> TrieWalker<C> {
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let key = self.key().expect("key must exist").clone();
+        let key_clone = key.clone();
         let entry = if exact { self.cursor.seek_exact(key)? } else { self.cursor.seek(key)? };
+        tracing::trace!(
+            target: "trie::walker_metrics",
+            ?key_clone,
+            ?entry,
+            exact,
+            "Seeked the trie table",
+        );
 
         if let Some((_, node)) = &entry {
             assert!(!node.state_mask.is_empty());

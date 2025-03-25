@@ -174,8 +174,10 @@ where
         let storage_root_targets_len = storage_root_targets.len();
 
         debug!(
-            target: "trie::parallel_proof",
+            target: "trie::parallel_proof_metrics",
             total_targets = storage_root_targets_len,
+            ?targets,
+            ?prefix_sets,
             "Starting parallel proof generation"
         );
 
@@ -192,10 +194,11 @@ where
         {
             let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
             let receiver = self.spawn_storage_proof(hashed_address, prefix_set, target_slots);
+            let result = receiver.recv();
 
             // store the receiver for that result with the hashed address so we can await this in
             // place when we iterate over the trie
-            storage_proofs.insert(hashed_address, receiver);
+            storage_proofs.insert(hashed_address, result);
         }
 
         let provider_ro = self.view.provider_ro()?;
@@ -235,11 +238,12 @@ where
         {
             match account_node {
                 TrieElement::Branch(node) => {
+                    tracing::debug!(target: "trie::parallel_proof_metrics", ?node, "Adding branch node");
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let storage_multiproof = match storage_proofs.remove(&hashed_address) {
-                        Some(rx) => rx.recv().map_err(|_| {
+                        Some(rx) => rx.map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
                                 DatabaseError::Other(format!(
                                     "channel closed for {hashed_address}"
@@ -304,15 +308,32 @@ where
             (HashMap::default(), HashMap::default())
         };
 
+        let account_nodes = account_subtree.len();
+        let storage_nodes = storages.values().map(|proof| proof.subtree.len()).sum::<usize>();
+        let combined_nodes = account_nodes + storage_nodes;
+
         debug!(
-            target: "trie::parallel_proof",
+            target: "trie::parallel_proof_metrics",
             total_targets = storage_root_targets_len,
             duration = ?stats.duration(),
             branches_added = stats.branches_added(),
             leaves_added = stats.leaves_added(),
             missed_leaves = stats.missed_leaves(),
             precomputed_storage_roots = stats.precomputed_storage_roots(),
+            account_nodes,
+            storage_nodes,
+            combined_nodes,
             "Calculated proof"
+        );
+
+        debug!(
+            target: "trie::parallel_proof_metrics",
+            total_targets = storage_root_targets_len,
+            ?account_subtree,
+            ?branch_node_hash_masks,
+            ?branch_node_tree_masks,
+            ?storages,
+            "MultiProof generated"
         );
 
         Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
