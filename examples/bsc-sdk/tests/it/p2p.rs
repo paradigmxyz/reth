@@ -1,5 +1,5 @@
 use example_bsc_sdk::{
-    chainspec::{bsc_chain_spec, head},
+    chainspec::bsc::{bsc_chain_spec, head},
     node::network::{boot_nodes, handshake::BscHandshake},
 };
 use reth_chainspec::NamedChain;

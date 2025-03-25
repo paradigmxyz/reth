@@ -1,4 +1,7 @@
+use alloy_rpc_types::AccessList;
 use auto_impl::auto_impl;
+use reth_evm::{FromRecoveredTx, IntoTxEnv, TransactionEnv};
+use reth_primitives::TransactionSigned;
 use revm::{
     context::TxEnv,
     context_interface::transaction::Transaction,
@@ -106,6 +109,36 @@ impl<T: Transaction> Transaction for BscTransaction<T> {
 impl<T: Transaction> BscTxTr for BscTransaction<T> {
     fn is_system_transaction(&self) -> bool {
         self.is_system_transaction.unwrap_or(false)
+    }
+}
+
+impl<T: revm::context::Transaction> IntoTxEnv<Self> for BscTransaction<T> {
+    fn into_tx_env(self) -> Self {
+        self
+    }
+}
+
+impl FromRecoveredTx<TransactionSigned> for BscTransaction<TxEnv> {
+    fn from_recovered_tx(tx: &TransactionSigned, sender: Address) -> Self {
+        Self::new(TxEnv::from_recovered_tx(tx, sender))
+    }
+}
+
+impl<T: TransactionEnv> TransactionEnv for BscTransaction<T> {
+    fn set_gas_limit(&mut self, gas_limit: u64) {
+        self.base.set_gas_limit(gas_limit);
+    }
+
+    fn nonce(&self) -> u64 {
+        TransactionEnv::nonce(&self.base)
+    }
+
+    fn set_nonce(&mut self, nonce: u64) {
+        self.base.set_nonce(nonce);
+    }
+
+    fn set_access_list(&mut self, access_list: AccessList) {
+        self.base.set_access_list(access_list);
     }
 }
 

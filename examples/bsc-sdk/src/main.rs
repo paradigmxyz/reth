@@ -10,7 +10,7 @@
 //!
 //! Credits to: <https://merkle.io/blog/modifying-reth-to-build-the-fastest-transaction-network-on-bsc-and-polygon>
 
-use chainspec::{bsc_chain_spec, head};
+use crate::chainspec::bsc::{bsc_chain_spec, head};
 use node::network::{boot_nodes, handshake::BscHandshake};
 use reth_discv4::Discv4ConfigBuilder;
 use reth_network::{
@@ -32,6 +32,8 @@ use tokio_stream::StreamExt;
 use tracing::info;
 
 mod chainspec;
+mod evm;
+mod hardforks;
 mod node;
 
 #[tokio::main]

@@ -1,4 +1,4 @@
-use super::BscEvm;
+use super::BscEvmInner;
 use crate::evm::{spec::BscSpecId, transaction::BscTxTr};
 use revm::{
     context::{Cfg, JournalOutput},
@@ -15,13 +15,13 @@ pub trait BscBuilder: Sized {
 
     /// Build the bsc.
     fn build_bsc(self)
-        -> BscEvm<Self::Context, (), EthInstructions<EthInterpreter, Self::Context>>;
+        -> BscEvmInner<Self::Context, (), EthInstructions<EthInterpreter, Self::Context>>;
 
     /// Build the bsc with an inspector.
     fn build_bsc_with_inspector<INSP>(
         self,
         inspector: INSP,
-    ) -> BscEvm<Self::Context, INSP, EthInstructions<EthInterpreter, Self::Context>>;
+    ) -> BscEvmInner<Self::Context, INSP, EthInstructions<EthInterpreter, Self::Context>>;
 }
 
 impl<BLOCK, TX, CFG, DB, JOURNAL> BscBuilder for Context<BLOCK, TX, CFG, DB, JOURNAL>
@@ -36,14 +36,14 @@ where
 
     fn build_bsc(
         self,
-    ) -> BscEvm<Self::Context, (), EthInstructions<EthInterpreter, Self::Context>> {
-        BscEvm::new(self, ())
+    ) -> BscEvmInner<Self::Context, (), EthInstructions<EthInterpreter, Self::Context>> {
+        BscEvmInner::new(self, ())
     }
 
     fn build_bsc_with_inspector<INSP>(
         self,
         inspector: INSP,
-    ) -> BscEvm<Self::Context, INSP, EthInstructions<EthInterpreter, Self::Context>> {
-        BscEvm::new(self, inspector)
+    ) -> BscEvmInner<Self::Context, INSP, EthInstructions<EthInterpreter, Self::Context>> {
+        BscEvmInner::new(self, inspector)
     }
 }
