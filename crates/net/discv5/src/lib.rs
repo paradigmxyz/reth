@@ -334,7 +334,8 @@ impl Discv5 {
     }
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
-    /// w.r.t. local `RLPx` [`IpMode`]. Uses source socket as udp socket.
+    /// w.r.t. local `RLPx` [`IpMode`]. Uses source socket as udp socket to be compatible with
+    /// geth.
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
@@ -342,16 +343,15 @@ impl Discv5 {
     ) -> Result<NodeRecord, Error> {
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
-        if enr.tcp4().is_none() && enr.tcp6().is_none() {
-            return Err(Error::UnreachableRlpx)
-        }
-        let Some(tcp_port) = (match self.rlpx_ip_mode {
+        let tcp_port = (match self.rlpx_ip_mode {
             IpMode::Ip4 => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
-            _ => unimplemented!("dual-stack support not implemented for rlpx"),
-        }) else {
-            return Err(Error::IpVersionMismatchRlpx(self.rlpx_ip_mode))
-        };
+            IpMode::DualStack => unimplemented!("dual-stack support not implemented for rlpx"),
+        })
+        .unwrap_or_else(|| {
+            // tcp socket is missing from ENR, or is wrong IP version
+            socket.port()
+        });
 
         Ok(NodeRecord { address: socket.ip(), tcp_port, udp_port: socket.port(), id })
     }
