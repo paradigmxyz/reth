@@ -11,13 +11,13 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-./hive -client reth --sim "ethereum/eest" --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz -sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
-./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &
-./hive -client reth --sim "smoke/genesis" -sim.timelimit 1s || true &
-./hive -client reth --sim "smoke/network" -sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/sync" -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/eest" --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz -sim.timelimit 1s &
+./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s &
+./hive -client reth --sim "devp2p" -sim.timelimit 1s &
+./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s &
+./hive -client reth --sim "smoke/genesis" -sim.timelimit 1s &
+./hive -client reth --sim "smoke/network" -sim.timelimit 1s &
+./hive -client reth --sim "ethereum/sync" -sim.timelimit 1s &
 wait
 
 # Run docker save in parallel and wait
