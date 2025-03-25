@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fmt::Debug,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -84,32 +84,37 @@ impl CachedHashedCursorFactoryCache {
                 });
 
             match (value, hashed_post_state_account) {
-                (None, Some(_)) => {
-                    // Previously the seek didn't return anything, but now there's a hashed post
-                    // state address that matches the key.
-                    cache_updates.push((seek_address, hashed_post_state_account));
-                }
                 (Some((old_address, _)), Some((new_address, _))) => {
-                    if &new_address < old_address {
-                        // First matching address from the hashed post state is less than previously
-                        // sought address. This means that the hashed post state account should be
-                        // returned for this seek.
+                    if &new_address <= old_address {
+                        // First matching address from the hashed post state is less or equal to
+                        // previously sought address. This means that the hashed post state account
+                        // should be returned for this seek.
                         cache_updates.push((seek_address, hashed_post_state_account));
                     } else {
-                        // Nothing to do here, the most relevant address is already cached.
+                        // Nothing to do here. The most relevant address is already cached.
                         noops += 1;
                     }
                 }
-                (Some((old_address, _)), _)
-                    if hashed_post_state.accounts.get(old_address) == Some(&None) =>
-                {
-                    // Previously sought address is now deleted. We don't know if there's an account
-                    // in the underlying cursor that will match the key, so we
-                    // delete the cached entry.
-                    cache_deletions.push(seek_address);
+                (None, Some(_)) => {
+                    // Previously sought address wasn't found, but now there's a hashed post
+                    // state address that matches the key.
+                    cache_updates.push((seek_address, hashed_post_state_account));
                 }
-                _ => {
-                    cache_invalidations.push(seek_address);
+                (Some((old_address, _)), None) => {
+                    if hashed_post_state.accounts.get(old_address) == Some(&None) {
+                        // Previously sought address is now deleted. We don't know if there's an
+                        // address in the underlying cursor that will match the key, so we delete
+                        // the cached entry.
+                        cache_deletions.push(seek_address);
+                    } else {
+                        // TODO: Unsure what to do here yet.
+                        cache_invalidations.push(seek_address);
+                    }
+                }
+                (None, None) => {
+                    // Nothing to do here. Previously sought address wasn't found, and there's no
+                    // account in the hashed post state that matches the key.
+                    noops += 1;
                 }
             }
         }
