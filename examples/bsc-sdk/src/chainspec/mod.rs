@@ -3,12 +3,13 @@ use crate::hardforks::{bsc::BscHardfork, BscHardforks};
 use alloy_consensus::Header;
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use reth_chainspec::{
     BaseFeeParams, ChainSpec, DepositContract, EthChainSpec, EthereumHardfork, EthereumHardforks,
     ForkCondition, ForkFilter, ForkId, Hardforks, Head,
 };
 use reth_discv4::NodeRecord;
+use reth_evm::eth::spec::EthExecutorSpec;
 use std::fmt::Display;
 
 pub mod bsc;
@@ -109,5 +110,11 @@ impl EthereumHardforks for BscChainSpec {
 impl BscHardforks for BscChainSpec {
     fn bsc_fork_activation(&self, fork: BscHardfork) -> ForkCondition {
         self.fork(fork)
+    }
+}
+
+impl EthExecutorSpec for BscChainSpec {
+    fn deposit_contract_address(&self) -> Option<Address> {
+        None
     }
 }
