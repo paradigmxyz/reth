@@ -10,7 +10,7 @@ use alloy_consensus::{
     EthereumTxEnvelope, SignableTransaction,
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
+use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
@@ -188,6 +188,8 @@ mod op {
     use super::*;
     use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 
+    const DEPOSIT_SIGNATURE: Signature = Signature::new(U256::ZERO, U256::ZERO, false);
+
     impl SignedTransaction for OpPooledTransaction {
         fn tx_hash(&self) -> &TxHash {
             match self {
@@ -246,23 +248,22 @@ mod op {
                 Self::Eip2930(tx) => tx.signature(),
                 Self::Eip1559(tx) => tx.signature(),
                 Self::Eip7702(tx) => tx.signature(),
-                // TODO: The Deposit variant does not have a user signature since it originates
-                // from an L1 event. Decide how to represent or handle signature-less transactions.
-                Self::Deposit(_tx) => unimplemented!(),
+                Self::Deposit(_tx) => &DEPOSIT_SIGNATURE,
             }
         }
 
         fn recover_signer(&self) -> Result<Address, RecoveryError> {
+            if let Self::Deposit(tx) = self {
+                return Ok(tx.from);
+            }
+
             let signature_hash = match self {
                 Self::Legacy(tx) => tx.signature_hash(),
                 Self::Eip2930(tx) => tx.signature_hash(),
                 Self::Eip1559(tx) => tx.signature_hash(),
                 Self::Eip7702(tx) => tx.signature_hash(),
-                // TODO: The Deposit variant does not have a user signature since it originates
-                // from an L1 event. Decide how to represent or handle signature-less transactions.
-                Self::Deposit(_tx) => unimplemented!(),
+                Self::Deposit(_) => unreachable!(),
             };
-
             recover_signer(self.signature(), signature_hash)
         }
 
@@ -271,13 +272,11 @@ mod op {
             buf: &mut Vec<u8>,
         ) -> Result<Address, RecoveryError> {
             match self {
+                Self::Deposit(tx) => return Ok(tx.from),
                 Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
                 Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
                 Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
                 Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
-                // TODO: The Deposit variant does not have a user signature since it originates
-                // from an L1 event. Decide how to represent or handle signature-less transactions.
-                Self::Deposit(_tx) => unimplemented!(),
             }
             let signature_hash = keccak256(buf);
             recover_signer_unchecked(self.signature(), signature_hash)
