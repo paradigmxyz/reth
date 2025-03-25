@@ -117,7 +117,8 @@ pub enum CachedHashedCursorCacheChange {
 
 impl<CF: HashedCursorFactory> HashedCursorFactory for CachedHashedCursorFactory<CF> {
     type AccountCursor = CachedHashedCursor<CF::AccountCursor, Account>;
-    type StorageCursor = CachedHashedCursor<CF::StorageCursor, U256>;
+    type StorageCursor = CF::StorageCursor;
+    // type StorageCursor = CachedHashedCursor<CF::StorageCursor, U256>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
         Ok(CachedHashedCursor::new(
@@ -130,10 +131,11 @@ impl<CF: HashedCursorFactory> HashedCursorFactory for CachedHashedCursorFactory<
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, DatabaseError> {
-        Ok(CachedHashedCursor::new(
-            self.cursor_factory.hashed_storage_cursor(hashed_address)?,
-            self.cache.storage_cache.entry(hashed_address).or_default().clone(),
-        ))
+        self.cursor_factory.hashed_storage_cursor(hashed_address)
+        // Ok(CachedHashedCursor::new(
+        //     self.cursor_factory.hashed_storage_cursor(hashed_address)?,
+        //     self.cache.storage_cache.entry(hashed_address).or_default().clone(),
+        // ))
     }
 }
 
