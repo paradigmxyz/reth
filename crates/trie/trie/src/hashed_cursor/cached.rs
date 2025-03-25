@@ -144,11 +144,11 @@ pub struct CachedHashedCursorCache<T> {
 impl<T: Clone + Send + Sync + 'static> Default for CachedHashedCursorCache<T> {
     fn default() -> Self {
         Self {
-            cached_seeks_exact: CacheBuilder::new(10_000)
+            cached_seeks_exact: CacheBuilder::new(100_000)
                 .build_with_hasher(FbBuildHasher::default()),
-            cached_seeks_inexact: CacheBuilder::new(10_000)
+            cached_seeks_inexact: CacheBuilder::new(100_000)
                 .build_with_hasher(FbBuildHasher::default()),
-            cached_nexts: CacheBuilder::new(10_000).build_with_hasher(FbBuildHasher::default()),
+            cached_nexts: CacheBuilder::new(100_000).build_with_hasher(FbBuildHasher::default()),
             seeks_hit: AtomicUsize::new(0),
             seeks_total: AtomicUsize::new(0),
             nexts_hit: AtomicUsize::new(0),
@@ -232,7 +232,12 @@ where
     /// will be cached as well if it differs from the seeked key.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, C::Value)>, DatabaseError> {
         self.cache.seeks_total.fetch_add(1, Ordering::Relaxed);
-        let result = if let Some(result) = self.cache.cached_seeks_exact.get(&key) {
+        let result = if let Some(result) = self
+            .cache
+            .cached_seeks_exact
+            .get(&key)
+            .or_else(|| self.cache.cached_seeks_inexact.get(&key))
+        {
             self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
             self.seek_before_next = true;
             result
@@ -240,15 +245,11 @@ where
             self.seek_before_next = false;
 
             let result = self.cursor.seek(key)?;
-            if result.filter(|(k, _)| k == &key).is_some() {
-                self.cache.cached_seeks_exact.insert(key, result);
-            } else {
+            if let Some(actual_seek) = result.filter(|(k, _)| k != &key).map(|(k, _)| k) {
                 self.cache.cached_seeks_inexact.insert(key, result);
-            }
-
-            let actual_seek = result.filter(|(k, _)| k != &key).map(|(k, _)| k);
-            if let Some(actual_seek) = actual_seek {
                 self.cache.cached_seeks_exact.insert(actual_seek, result);
+            } else {
+                self.cache.cached_seeks_exact.insert(key, result);
             }
 
             result
