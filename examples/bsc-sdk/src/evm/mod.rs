@@ -1,6 +1,5 @@
-mod api;
-mod config;
+pub mod api;
 mod handler;
-mod precompiles;
+pub mod precompiles;
 pub mod spec;
-mod transaction;
+pub mod transaction;
