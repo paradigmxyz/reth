@@ -58,6 +58,7 @@ impl CachedHashedCursorFactoryCache {
         }
 
         let start = Instant::now();
+        let mut noops = 0;
         let mut cache_updates = Vec::new();
         let mut cache_deletions = Vec::new();
         let mut cache_invalidations = Vec::new();
@@ -85,30 +86,26 @@ impl CachedHashedCursorFactoryCache {
             match (value, hashed_post_state_account) {
                 (None, Some(_)) => {
                     // Previously the seek didn't return anything, but now there's a hashed post
-                    // state account that matches the key.
+                    // state address that matches the key.
                     cache_updates.push((seek_address, hashed_post_state_account));
                 }
-                (Some((old_address, _)), Some((new_address, _))) if old_address > &new_address => {
-                    // Previously the seek returned an address that is greater than the address in
-                    // the hashed post state that matches the key.
-                    cache_updates.push((seek_address, hashed_post_state_account));
+                (Some((old_address, _)), Some((new_address, _))) => {
+                    if &new_address < old_address {
+                        // First matching address from the hashed post state is less than previously
+                        // sought address. This means that the hashed post state account should be
+                        // returned for this seek.
+                        cache_updates.push((seek_address, hashed_post_state_account));
+                    } else {
+                        // Nothing to do here, the most relevant address is already cached.
+                        noops += 1;
+                    }
                 }
-                (Some((old_address, _)), Some((new_address, _))) if old_address == &new_address => {
-                    // Previously the seek returned an address that equals to the address in
-                    // the hashed post state that matches the key.
-                    cache_updates.push((seek_address, hashed_post_state_account));
-                }
-                (Some((old_address, _)), Some(_))
+                (Some((old_address, _)), _)
                     if hashed_post_state.accounts.get(old_address) == Some(&None) =>
                 {
-                    // Previously the seek returned an address for the account that is now deleted,
-                    // but there's a new account available that matches the key.
-                    cache_updates.push((seek_address, hashed_post_state_account));
-                }
-                (Some((old_address, _)), None)
-                    if hashed_post_state.accounts.get(old_address) == Some(&None) =>
-                {
-                    // Previously the seek returned an address for the account that is now deleted.
+                    // Previously sought address is now deleted. We don't know if there's an account
+                    // in the underlying cursor that will match the key, so we
+                    // delete the cached entry.
                     cache_deletions.push(seek_address);
                 }
                 _ => {
@@ -131,6 +128,7 @@ impl CachedHashedCursorFactoryCache {
         debug!(
             target: "trie::hashed_cursor::cached",
             elapsed = ?start.elapsed(),
+            noops,
             updated,
             deleted,
             invalidated,
