@@ -470,10 +470,6 @@ pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
     fetched_proof_targets: MultiProofTargets,
     /// Hashed cursor factory cache.
     hashed_cursor_cache: CachedHashedCursorFactoryCache,
-    /// Hashed post state sender.
-    hashed_post_state_tx: Sender<HashedPostState>,
-    /// Hashed post state receiver.
-    hashed_post_state_rx: Receiver<HashedPostState>,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
@@ -496,7 +492,6 @@ where
         hashed_cursor_cache: CachedHashedCursorFactoryCache,
     ) -> Self {
         let (tx, rx) = channel();
-        let (hashed_post_state_tx, hashed_post_state_rx) = channel();
         let metrics = MultiProofTaskMetrics::default();
 
         Self {
@@ -506,8 +501,6 @@ where
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             hashed_cursor_cache,
-            hashed_post_state_tx,
-            hashed_post_state_rx,
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 executor,
@@ -521,11 +514,6 @@ where
     /// Returns a [`Sender`] that can be used to send arbitrary [`MultiProofMessage`]s to this task.
     pub(super) fn state_root_message_sender(&self) -> Sender<MultiProofMessage> {
         self.tx.clone()
-    }
-
-    /// Returns a [`Sender`] that can be used to send the final hashed post state to this task.
-    pub(super) fn hashed_post_state_sender(&self) -> Sender<HashedPostState> {
-        self.hashed_post_state_tx.clone()
     }
 
     /// Handles request for proof prefetch.
@@ -919,12 +907,7 @@ where
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
         }
 
-        let Self { hashed_cursor_cache, hashed_post_state_rx, .. } = self;
-        if let Ok(hashed_post_state) = hashed_post_state_rx.recv() {
-            hashed_cursor_cache.apply_hashed_post_state(&hashed_post_state);
-        }
-
-        hashed_cursor_cache.log_stats();
+        self.hashed_cursor_cache.log_stats();
     }
 }
 

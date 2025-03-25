@@ -9,8 +9,8 @@ use std::{
 };
 
 use alloy_primitives::{map::FbBuildHasher, B256, U256};
-use itertools::Itertools;
 use mini_moka::sync::{CacheBuilder, ConcurrentCacheExt};
+use parking_lot::RwLock;
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostState;
@@ -50,92 +50,99 @@ impl Default for CachedHashedCursorFactoryCache {
 }
 
 impl CachedHashedCursorFactoryCache {
-    pub fn apply_hashed_post_state(&self, hashed_post_state: &HashedPostState) {
-        for (address, account) in &hashed_post_state.accounts {
-            self.account_cache
-                .cached_seeks_exact
-                .insert(*address, account.map(|account| (*address, account)));
-        }
+    pub fn apply_hashed_post_state(&self, hashed_post_state: HashedPostState) {
+        let cached_seeks_exact = self.account_cache.cached_seeks_exact.clone();
+        let cached_seeks_inexact = self.account_cache.cached_seeks_inexact.clone();
+        let cached_nexts = self.account_cache.cached_nexts.clone();
 
-        let start = Instant::now();
-        let mut noops = 0;
-        let mut cache_updates = Vec::new();
-        let mut cache_deletions = Vec::new();
-        let mut cache_invalidations = Vec::new();
+        std::thread::spawn(move || {
+            // TODO: acquire a lock outside of the thread
+            let cached_seeks_inexact_write = cached_seeks_inexact.write();
+            for (address, account) in &hashed_post_state.accounts {
+                cached_seeks_exact.insert(*address, account.map(|account| (*address, account)));
+            }
+            cached_nexts.invalidate_all();
 
-        let hashed_post_state_accounts =
-            hashed_post_state.accounts.iter().collect::<BTreeMap<_, _>>();
-        for entry in &self.account_cache.cached_seeks_inexact {
-            let (&seek_address, value) = entry.pair();
+            let start = Instant::now();
+            let mut noops = 0;
+            let mut cache_updates = Vec::new();
+            let mut cache_deletions = Vec::new();
+            let mut cache_invalidations = Vec::new();
 
-            // Find first hashed post state account that is greater than or equal to the address
-            // that was sought.
-            let hashed_post_state_account =
-                hashed_post_state_accounts.iter().find_map(|(&&post_state_address, account)| {
-                    account.and_then(|account| {
-                        (post_state_address >= seek_address)
-                            .then_some((post_state_address, account))
-                    })
-                });
+            let hashed_post_state_accounts =
+                hashed_post_state.accounts.iter().collect::<BTreeMap<_, _>>();
+            for entry in cached_seeks_inexact_write.iter() {
+                let (&seek_address, value) = entry.pair();
 
-            match (value, hashed_post_state_account) {
-                (Some((old_address, _)), Some((new_address, _))) => {
-                    if &new_address <= old_address {
-                        // First matching address from the hashed post state is less or equal to
-                        // previously sought address. This means that the hashed post state account
-                        // should be returned for this seek.
+                // Find first hashed post state account that is greater than or equal to the address
+                // that was sought.
+                let hashed_post_state_account = hashed_post_state_accounts.iter().find_map(
+                    |(&&post_state_address, account)| {
+                        account.and_then(|account| {
+                            (post_state_address >= seek_address)
+                                .then_some((post_state_address, account))
+                        })
+                    },
+                );
+
+                match (value, hashed_post_state_account) {
+                    (Some((old_address, _)), Some((new_address, _))) => {
+                        if &new_address <= old_address {
+                            // First matching address from the hashed post state is less or equal to
+                            // previously sought address. This means that the hashed post state
+                            // account should be returned for this seek.
+                            cache_updates.push((seek_address, hashed_post_state_account));
+                        } else {
+                            // Nothing to do here. The most relevant address is already cached.
+                            noops += 1;
+                        }
+                    }
+                    (None, Some(_)) => {
+                        // Previously sought address wasn't found, but now there's a hashed post
+                        // state address that matches the key.
                         cache_updates.push((seek_address, hashed_post_state_account));
-                    } else {
-                        // Nothing to do here. The most relevant address is already cached.
+                    }
+                    (Some((old_address, _)), None) => {
+                        if hashed_post_state.accounts.get(old_address) == Some(&None) {
+                            // Previously sought address is now deleted. We don't know if there's an
+                            // address in the underlying cursor that will match the key, so we
+                            // delete the cached entry.
+                            cache_deletions.push(seek_address);
+                        } else {
+                            // TODO: Unsure what to do here yet.
+                            cache_invalidations.push(seek_address);
+                        }
+                    }
+                    (None, None) => {
+                        // Nothing to do here. Previously sought address wasn't found, and there's
+                        // no account in the hashed post state that matches
+                        // the key.
                         noops += 1;
                     }
                 }
-                (None, Some(_)) => {
-                    // Previously sought address wasn't found, but now there's a hashed post
-                    // state address that matches the key.
-                    cache_updates.push((seek_address, hashed_post_state_account));
-                }
-                (Some((old_address, _)), None) => {
-                    if hashed_post_state.accounts.get(old_address) == Some(&None) {
-                        // Previously sought address is now deleted. We don't know if there's an
-                        // address in the underlying cursor that will match the key, so we delete
-                        // the cached entry.
-                        cache_deletions.push(seek_address);
-                    } else {
-                        // TODO: Unsure what to do here yet.
-                        cache_invalidations.push(seek_address);
-                    }
-                }
-                (None, None) => {
-                    // Nothing to do here. Previously sought address wasn't found, and there's no
-                    // account in the hashed post state that matches the key.
-                    noops += 1;
-                }
             }
-        }
 
-        let updated = cache_updates.len();
-        let deleted = cache_deletions.len();
-        let invalidated = cache_invalidations.len();
+            let updated = cache_updates.len();
+            let deleted = cache_deletions.len();
+            let invalidated = cache_invalidations.len();
 
-        for (address, account) in cache_updates {
-            self.account_cache.cached_seeks_inexact.insert(address, account);
-        }
-        for address in cache_deletions.into_iter().chain(cache_invalidations) {
-            self.account_cache.cached_seeks_inexact.invalidate(&address);
-        }
+            for (address, account) in cache_updates {
+                cached_seeks_inexact_write.insert(address, account);
+            }
+            for address in cache_deletions.into_iter().chain(cache_invalidations) {
+                cached_seeks_inexact_write.invalidate(&address);
+            }
 
-        debug!(
-            target: "trie::hashed_cursor::cached",
-            elapsed = ?start.elapsed(),
-            noops,
-            updated,
-            deleted,
-            invalidated,
-            "Updated cached account inexact seeks"
-        );
-
-        self.account_cache.cached_nexts.invalidate_all();
+            debug!(
+                target: "trie::hashed_cursor::cached",
+                elapsed = ?start.elapsed(),
+                noops,
+                updated,
+                deleted,
+                invalidated,
+                "Updated cached account inexact seeks"
+            );
+        });
     }
 
     pub fn reset_metrics(&self) {
@@ -162,10 +169,11 @@ impl CachedHashedCursorFactoryCache {
         //     );
 
         self.account_cache.cached_seeks_exact.sync();
-        self.account_cache.cached_seeks_inexact.sync();
+        self.account_cache.cached_seeks_inexact.read().sync();
         self.account_cache.cached_nexts.sync();
         let account_seeks_exact_size = self.account_cache.cached_seeks_exact.entry_count();
-        let account_seeks_inexact_size = self.account_cache.cached_seeks_inexact.entry_count();
+        let account_seeks_inexact_size =
+            self.account_cache.cached_seeks_inexact.read().entry_count();
         let account_nexts_size = self.account_cache.cached_nexts.entry_count();
 
         debug!(
@@ -213,7 +221,7 @@ pub struct CachedHashedCursorCache<T> {
     /// The cache of [`Self::seek`] calls that resulted in inexact matches.
     ///
     /// The key is the sought key, and the value is the result of the seek.
-    cached_seeks_inexact: Cache<Option<(B256, T)>>,
+    cached_seeks_inexact: Arc<RwLock<Cache<Option<(B256, T)>>>>,
     seeks_hit: AtomicUsize,
     seeks_total: AtomicUsize,
     /// The cache of [`Self::next`] calls.
@@ -230,8 +238,9 @@ impl<T: Clone + Send + Sync + 'static> Default for CachedHashedCursorCache<T> {
         Self {
             cached_seeks_exact: CacheBuilder::new(1_000_000)
                 .build_with_hasher(FbBuildHasher::default()),
-            cached_seeks_inexact: CacheBuilder::new(1_000_000)
-                .build_with_hasher(FbBuildHasher::default()),
+            cached_seeks_inexact: Arc::new(RwLock::new(
+                CacheBuilder::new(1_000_000).build_with_hasher(FbBuildHasher::default()),
+            )),
             cached_nexts: CacheBuilder::new(1_000_000).build_with_hasher(FbBuildHasher::default()),
             seeks_hit: AtomicUsize::new(0),
             seeks_total: AtomicUsize::new(0),
@@ -320,7 +329,7 @@ where
             .cache
             .cached_seeks_exact
             .get(&key)
-            .or_else(|| self.cache.cached_seeks_inexact.get(&key))
+            .or_else(|| self.cache.cached_seeks_inexact.read().get(&key))
         {
             self.cache.seeks_hit.fetch_add(1, Ordering::Relaxed);
             self.seek_before_next = true;
@@ -330,7 +339,7 @@ where
 
             let result = self.cursor.seek(key)?;
             if let Some(actual_seek) = result.filter(|(k, _)| k != &key).map(|(k, _)| k) {
-                self.cache.cached_seeks_inexact.insert(key, result);
+                self.cache.cached_seeks_inexact.read().insert(key, result);
                 self.cache.cached_seeks_exact.insert(actual_seek, result);
             } else {
                 self.cache.cached_seeks_exact.insert(key, result);
