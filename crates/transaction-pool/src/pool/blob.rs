@@ -1,4 +1,4 @@
-use super::all_tx::PendingFees;
+use super::all::PendingFees;
 use crate::{
     identifier::TransactionId, pool::size::SizeTracker, traits::BestTransactionsAttributes,
     PoolTransaction, SubPoolLimit, ValidPoolTransaction,

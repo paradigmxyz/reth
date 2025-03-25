@@ -71,7 +71,7 @@ use crate::{
     identifier::{SenderId, SenderIdentifiers, TransactionId},
     metrics::BlobStoreMetrics,
     pool::{
-        all_tx::SenderInfo,
+        all::SenderInfo,
         listener::{
             BlobTransactionSidecarListener, PendingTransactionHashListener, PoolEventBroadcast,
             TransactionListener,
@@ -110,7 +110,7 @@ pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool, QueuedOrd};
 pub use pending::PendingPool;
 use reth_primitives_traits::Block;
 
-mod all_tx;
+mod all;
 mod best;
 mod blob;
 mod listener;

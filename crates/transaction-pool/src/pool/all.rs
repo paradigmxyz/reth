@@ -897,7 +897,7 @@ pub(crate) struct InsertOk<T: PoolTransaction> {
 mod tests {
     use super::*;
     use crate::{
-        pool::all_tx::{AllTransactions, InsertErr, InsertOk},
+        pool::all::{AllTransactions, InsertErr, InsertOk},
         test_utils::{MockTransaction, MockTransactionFactory},
         traits::TransactionOrigin,
     };

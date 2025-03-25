@@ -6,7 +6,7 @@ use crate::{
     identifier::{SenderId, TransactionId},
     metrics::TxPoolMetrics,
     pool::{
-        all_tx::{AllTransactions, InsertErr, InsertOk, SenderInfo},
+        all::{AllTransactions, InsertErr, InsertOk, SenderInfo},
         best::BestTransactions,
         blob::BlobTransactions,
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
