@@ -95,6 +95,51 @@ macro_rules! max_values {
 max_values!(MaxU32, u32);
 max_values!(MaxU64, u64);
 
+/// A helper type that supports parsing "max" or delegates to another parser
+#[derive(Debug, Clone)]
+pub struct MaxOr<T> {
+    /// The inner parser
+    inner: T,
+    /// The parsed value
+    value: u64,
+}
+
+impl<T> MaxOr<T>
+where
+    T: clap::builder::TypedValueParser,
+    T::Value: Into<u64>,
+{
+    /// Creates a new instance with the given inner parser
+    pub fn new(inner: T) -> Self {
+        Self { inner, value: 0 }
+    }
+
+    /// Returns the parsed value
+    pub fn get(&self) -> u64 {
+        self.value
+    }
+}
+
+impl<T> clap::builder::TypedValueParser for MaxOr<T>
+where
+    T: clap::builder::TypedValueParser,
+    T::Value: Into<u64>,
+{
+    type Value = u64;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        if value.to_str().map(|s| s.eq_ignore_ascii_case("max")).unwrap_or(false) {
+            Ok(u64::MAX)
+        } else {
+            self.inner.parse_ref(cmd, arg, value).map(Into::into)
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
