@@ -2,8 +2,9 @@ use super::factory::BscEvmFactory;
 use crate::{
     chainspec::BscChainSpec, evm::spec::BscSpecId, hardforks::bsc::BscHardfork, node::evm::BscEvm,
 };
-use alloy_consensus::Header;
-use alloy_primitives::{BlockNumber, Bytes};
+use alloy_consensus::{BlockHeader, Header};
+use alloy_primitives::{BlockNumber, Bytes, U256};
+use reth_chainspec::EthChainSpec;
 use reth_ethereum_forks::EthereumHardfork;
 use reth_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
@@ -15,7 +16,12 @@ use reth_primitives::{
     BlockTy, EthPrimitives, HeaderTy, Receipt, SealedBlock, SealedHeader, TransactionSigned,
 };
 use reth_revm::{Database, State};
-use std::{convert::Infallible, sync::Arc};
+use revm::{
+    context::{BlockEnv, CfgEnv},
+    context_interface::block::BlobExcessGasAndPrice,
+    primitives::hardfork::SpecId,
+};
+use std::{borrow::Cow, convert::Infallible, sync::Arc};
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
@@ -88,6 +94,8 @@ impl BlockExecutorFactory for BscEvmConfig {
     }
 }
 
+const EIP1559_INITIAL_BASE_FEE: u64 = 0;
+
 impl ConfigureEvm for BscEvmConfig
 where
     Self: Send + Sync + Unpin + Clone + 'static,
@@ -108,30 +116,114 @@ where
     }
 
     fn evm_env(&self, header: &Header) -> EvmEnv<BscSpecId> {
-        todo!()
+        let spec = revm_spec(self.chain_spec().clone(), header.number());
+
+        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+
+        let block_env = BlockEnv {
+            number: header.number(),
+            beneficiary: header.beneficiary(),
+            timestamp: header.timestamp(),
+            difficulty: U256::ZERO,
+            prevrandao: header.mix_hash(),
+            gas_limit: header.gas_limit(),
+            basefee: header.base_fee_per_gas().unwrap_or_default(),
+            // EIP-4844 excess blob gas of this block, introduced in Cancun
+            blob_excess_gas_and_price: header.excess_blob_gas().map(|excess_blob_gas| {
+                BlobExcessGasAndPrice::new(excess_blob_gas, spec.into_eth_spec() >= SpecId::PRAGUE)
+            }),
+        };
+
+        EvmEnv { cfg_env, block_env }
     }
 
     fn next_evm_env(
         &self,
-        header: &Header,
+        parent: &Header,
         attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<BscSpecId>, Self::Error> {
-        todo!()
+        // ensure we're not missing any timestamp based hardforks
+        let spec_id =
+            revm_spec_by_timestamp_after_shanghai(self.chain_spec().clone(), attributes.timestamp);
+
+        // configure evm env based on parent block
+        let cfg_env =
+            CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
+
+        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
+        // cancun now, we need to set the excess blob gas to the default value(0)
+        let blob_excess_gas_and_price = parent
+            .maybe_next_block_excess_blob_gas(
+                self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
+            )
+            .or_else(|| (spec_id.into_eth_spec().is_enabled_in(SpecId::CANCUN)).then_some(0))
+            .map(|gas| BlobExcessGasAndPrice::new(gas, false));
+
+        let mut basefee = parent.next_block_base_fee(
+            self.chain_spec().base_fee_params_at_timestamp(attributes.timestamp),
+        );
+
+        let mut gas_limit = U256::from(parent.gas_limit);
+
+        // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
+        // elasticity multiplier to get the new gas limit.
+        if self
+            .chain_spec()
+            .inner
+            .fork(EthereumHardfork::London)
+            .transitions_at_block(parent.number + 1)
+        {
+            let elasticity_multiplier = self
+                .chain_spec()
+                .base_fee_params_at_timestamp(attributes.timestamp)
+                .elasticity_multiplier;
+
+            // multiply the gas limit by the elasticity multiplier
+            gas_limit *= U256::from(elasticity_multiplier);
+
+            // set the base fee to the initial base fee from the EIP-1559 spec
+            basefee = Some(EIP1559_INITIAL_BASE_FEE)
+        }
+
+        let block_env = BlockEnv {
+            number: parent.number() + 1,
+            beneficiary: attributes.suggested_fee_recipient,
+            timestamp: attributes.timestamp,
+            difficulty: U256::ZERO,
+            prevrandao: Some(attributes.prev_randao),
+            gas_limit: attributes.gas_limit,
+            // calculate basefee based on parent block's gas usage
+            basefee: basefee.unwrap_or_default(),
+            // calculate excess gas based on parent block's blob gas usage
+            blob_excess_gas_and_price,
+        };
+
+        Ok(EvmEnv { cfg_env, block_env })
     }
 
     fn context_for_block<'a>(
         &self,
         block: &'a SealedBlock<BlockTy<Self::Primitives>>,
     ) -> ExecutionCtxFor<'a, Self> {
-        todo!()
+        EthBlockExecutionCtx {
+            parent_hash: block.header().parent_hash,
+            parent_beacon_block_root: block.header().parent_beacon_block_root,
+            ommers: &block.body().ommers,
+            withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
+        }
     }
 
     fn context_for_next_block(
         &self,
-        header: &SealedHeader<HeaderTy<Self::Primitives>>,
+        parent: &SealedHeader<HeaderTy<Self::Primitives>>,
         attributes: Self::NextBlockEnvCtx,
     ) -> ExecutionCtxFor<'_, Self> {
-        todo!()
+        EthBlockExecutionCtx {
+            parent_hash: parent.hash(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            ommers: &[],
+            withdrawals: attributes.withdrawals.map(Cow::Owned),
+        }
     }
 }
 
