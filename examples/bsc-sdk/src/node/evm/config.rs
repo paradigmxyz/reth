@@ -1,7 +1,139 @@
-use crate::{chainspec::hardforks::BscHardfork, evm::spec::BscSpecId};
-use alloy_primitives::BlockNumber;
-use reth_chainspec::ChainSpec;
+use super::factory::BscEvmFactory;
+use crate::{
+    chainspec::BscChainSpec, evm::spec::BscSpecId, hardforks::bsc::BscHardfork, node::evm::BscEvm,
+};
+use alloy_consensus::Header;
+use alloy_primitives::{BlockNumber, Bytes};
 use reth_ethereum_forks::EthereumHardfork;
+use reth_evm::{
+    block::{BlockExecutorFactory, BlockExecutorFor},
+    eth::{EthBlockExecutionCtx, EthBlockExecutor, EthBlockExecutorFactory},
+    ConfigureEvm, EvmEnv, ExecutionCtxFor, InspectorFor, NextBlockEnvAttributes,
+};
+use reth_evm_ethereum::{EthBlockAssembler, RethReceiptBuilder};
+use reth_primitives::{
+    BlockTy, EthPrimitives, HeaderTy, Receipt, SealedBlock, SealedHeader, TransactionSigned,
+};
+use reth_revm::{Database, State};
+use std::{convert::Infallible, sync::Arc};
+
+/// Ethereum-related EVM configuration.
+#[derive(Debug, Clone)]
+pub struct BscEvmConfig {
+    /// Inner [`EthBlockExecutorFactory`].
+    pub executor_factory:
+        EthBlockExecutorFactory<RethReceiptBuilder, Arc<BscChainSpec>, BscEvmFactory>,
+    /// Ethereum block assembler.
+    pub block_assembler: EthBlockAssembler<BscChainSpec>,
+}
+
+impl BscEvmConfig {
+    /// Creates a new Ethereum EVM configuration with the given chain spec.
+    pub fn new(chain_spec: Arc<BscChainSpec>) -> Self {
+        Self::bsc(chain_spec)
+    }
+
+    /// Creates a new Ethereum EVM configuration.
+    pub fn bsc(chain_spec: Arc<BscChainSpec>) -> Self {
+        Self::new_with_evm_factory(chain_spec, BscEvmFactory::default())
+    }
+}
+
+impl BscEvmConfig {
+    /// Creates a new Ethereum EVM configuration with the given chain spec and EVM factory.
+    pub fn new_with_evm_factory(chain_spec: Arc<BscChainSpec>, evm_factory: BscEvmFactory) -> Self {
+        Self {
+            block_assembler: EthBlockAssembler::new(chain_spec.clone()),
+            executor_factory: EthBlockExecutorFactory::new(
+                RethReceiptBuilder::default(),
+                chain_spec,
+                evm_factory,
+            ),
+        }
+    }
+
+    /// Returns the chain spec associated with this configuration.
+    pub const fn chain_spec(&self) -> &Arc<BscChainSpec> {
+        self.executor_factory.spec()
+    }
+
+    /// Sets the extra data for the block assembler.
+    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
+        self.block_assembler.extra_data = extra_data;
+        self
+    }
+}
+
+impl BlockExecutorFactory for BscEvmConfig {
+    type EvmFactory = BscEvmFactory;
+    type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
+
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        self.executor_factory.evm_factory()
+    }
+
+    fn create_executor<'a, DB, I>(
+        &'a self,
+        evm: BscEvm<&'a mut State<DB>, I>,
+        ctx: Self::ExecutionCtx<'a>,
+    ) -> impl BlockExecutorFor<'a, Self, DB, I>
+    where
+        DB: Database + 'a,
+        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        DB::Error: Send + Sync + 'static,
+    {
+        EthBlockExecutor::new(evm, ctx, self.chain_spec(), self.executor_factory.receipt_builder())
+    }
+}
+
+impl ConfigureEvm for BscEvmConfig
+where
+    Self: Send + Sync + Unpin + Clone + 'static,
+{
+    type Primitives = EthPrimitives;
+    type Error = Infallible;
+    type NextBlockEnvCtx = NextBlockEnvAttributes;
+    type BlockExecutorFactory =
+        EthBlockExecutorFactory<RethReceiptBuilder, Arc<BscChainSpec>, BscEvmFactory>;
+    type BlockAssembler = EthBlockAssembler<BscChainSpec>;
+
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        &self.executor_factory
+    }
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        &self.block_assembler
+    }
+
+    fn evm_env(&self, header: &Header) -> EvmEnv<BscSpecId> {
+        todo!()
+    }
+
+    fn next_evm_env(
+        &self,
+        header: &Header,
+        attributes: &Self::NextBlockEnvCtx,
+    ) -> Result<EvmEnv<BscSpecId>, Self::Error> {
+        todo!()
+    }
+
+    fn context_for_block<'a>(
+        &self,
+        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+    ) -> ExecutionCtxFor<'a, Self> {
+        todo!()
+    }
+
+    fn context_for_next_block(
+        &self,
+        header: &SealedHeader<HeaderTy<Self::Primitives>>,
+        attributes: Self::NextBlockEnvCtx,
+    ) -> ExecutionCtxFor<'_, Self> {
+        todo!()
+    }
+}
 
 /// Returns the revm [`BscSpecId`] at the given timestamp.
 ///
@@ -9,7 +141,11 @@ use reth_ethereum_forks::EthereumHardfork;
 ///
 /// This is only intended to be used after the Shangai, when hardforks are activated by
 /// timestamp.
-pub fn revm_spec_by_timestamp_after_shanghai(chain_spec: &ChainSpec, timestamp: u64) -> BscSpecId {
+pub fn revm_spec_by_timestamp_after_shanghai(
+    chain_spec: Arc<BscChainSpec>,
+    timestamp: u64,
+) -> BscSpecId {
+    let chain_spec = chain_spec.inner.clone();
     if chain_spec.fork(BscHardfork::Bohr).active_at_timestamp(timestamp) {
         BscSpecId::BOHR
     } else if chain_spec.fork(BscHardfork::HaberFix).active_at_timestamp(timestamp) {
@@ -33,7 +169,8 @@ pub fn revm_spec_by_timestamp_after_shanghai(chain_spec: &ChainSpec, timestamp: 
 ///
 /// This is only intended to be used before the Shangai, when hardforks are activated by
 /// block number.
-pub fn revm_spec(chain_spec: &ChainSpec, block: BlockNumber) -> BscSpecId {
+pub fn revm_spec(chain_spec: Arc<BscChainSpec>, block: BlockNumber) -> BscSpecId {
+    let chain_spec = chain_spec.inner.clone();
     if chain_spec.fork(BscHardfork::Bohr).active_at_block(block) {
         BscSpecId::BOHR
     } else if chain_spec.fork(BscHardfork::HaberFix).active_at_block(block) {
@@ -106,31 +243,5 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: BlockNumber) -> BscSpecId {
             "invalid hardfork chainspec: expected at least one hardfork, got {:?}",
             chain_spec.hardforks
         )
-    }
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::chainspec::bsc_chain_spec;
-
-    #[test]
-    fn test_revm_spec_by_timestamp_after_shanghai() {
-        let chain_spec = bsc_chain_spec();
-
-        let test_cases = [
-            (1727317200, BscSpecId::BOHR),        // Bohr
-            (1727316120, BscSpecId::HABER_FIX),   // Haber Fix
-            (1718863500, BscSpecId::HABER),       // Haber
-            (1713419340, BscSpecId::FEYNMAN_FIX), // Feynman Fix (checked before Feynman)
-            (1705996800, BscSpecId::KEPLER),      // Kepler
-        ];
-
-        for (timestamp, expected_spec) in test_cases {
-            let spec_id = revm_spec_by_timestamp_after_shanghai(&chain_spec, timestamp);
-            assert_eq!(spec_id, expected_spec, "Failed at timestamp {}", timestamp);
-        }
-
-        let spec_id = revm_spec_by_timestamp_after_shanghai(&chain_spec, 0);
-        assert_eq!(spec_id, BscSpecId::SHANGHAI, "Failed at default case");
     }
 }

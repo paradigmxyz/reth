@@ -1,6 +1,6 @@
 use super::precompiles::BscPrecompiles;
 use revm::{
-    context::{ContextSetters, Evm, EvmData},
+    context::{ContextSetters, Evm as EvmCtx, EvmData},
     context_interface::ContextTr,
     handler::{
         instructions::{EthInstructions, InstructionProvider},
@@ -11,17 +11,19 @@ use revm::{
     Inspector,
 };
 
-mod builder;
-mod ctx;
+pub mod builder;
+pub mod ctx;
 mod exec;
 
-pub struct BscEvm<CTX, INSP, I = EthInstructions<EthInterpreter, CTX>, P = BscPrecompiles>(
-    pub Evm<CTX, INSP, I, P>,
+pub struct BscEvmInner<CTX, INSP, I = EthInstructions<EthInterpreter, CTX>, P = BscPrecompiles>(
+    pub EvmCtx<CTX, INSP, I, P>,
 );
 
-impl<CTX: ContextTr, INSP> BscEvm<CTX, INSP, EthInstructions<EthInterpreter, CTX>, BscPrecompiles> {
+impl<CTX: ContextTr, INSP>
+    BscEvmInner<CTX, INSP, EthInstructions<EthInterpreter, CTX>, BscPrecompiles>
+{
     pub fn new(ctx: CTX, inspector: INSP) -> Self {
-        Self(Evm {
+        Self(EvmCtx {
             data: EvmData { ctx, inspector },
             instruction: EthInstructions::new_mainnet(),
             precompiles: BscPrecompiles::default(),
@@ -29,7 +31,7 @@ impl<CTX: ContextTr, INSP> BscEvm<CTX, INSP, EthInstructions<EthInterpreter, CTX
     }
 }
 
-impl<CTX, INSP, I, P> InspectorEvmTr for BscEvm<CTX, INSP, I, P>
+impl<CTX, INSP, I, P> InspectorEvmTr for BscEvmInner<CTX, INSP, I, P>
 where
     CTX: ContextTr<Journal: JournalExt> + ContextSetters,
     I: InstructionProvider<
@@ -59,7 +61,7 @@ where
     }
 }
 
-impl<CTX, INSP, I, P> EvmTr for BscEvm<CTX, INSP, I, P>
+impl<CTX, INSP, I, P> EvmTr for BscEvmInner<CTX, INSP, I, P>
 where
     CTX: ContextTr,
     I: InstructionProvider<

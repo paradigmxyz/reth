@@ -1,4 +1,4 @@
-use super::BscEvm;
+use super::BscEvmInner;
 use crate::evm::{handler::BscHandler, spec::BscSpecId, transaction::BscTxTr};
 use revm::{
     context::{ContextSetters, JournalOutput},
@@ -31,7 +31,7 @@ impl<T> BscContextTr for T where
 type BscError<CTX> = EVMError<<<CTX as ContextTr>::Db as Database>::Error>;
 
 impl<CTX, INSP, PRECOMPILE> ExecuteEvm
-    for BscEvm<CTX, INSP, EthInstructions<EthInterpreter, CTX>, PRECOMPILE>
+    for BscEvmInner<CTX, INSP, EthInstructions<EthInterpreter, CTX>, PRECOMPILE>
 where
     CTX: BscContextTr + ContextSetters,
     PRECOMPILE: PrecompileProvider<CTX, Output = InterpreterResult>,
@@ -57,7 +57,7 @@ where
 }
 
 impl<CTX, INSP, PRECOMPILE> ExecuteCommitEvm
-    for BscEvm<CTX, INSP, EthInstructions<EthInterpreter, CTX>, PRECOMPILE>
+    for BscEvmInner<CTX, INSP, EthInstructions<EthInterpreter, CTX>, PRECOMPILE>
 where
     CTX: BscContextTr<Db: DatabaseCommit> + ContextSetters,
     PRECOMPILE: PrecompileProvider<CTX, Output = InterpreterResult>,
@@ -73,7 +73,7 @@ where
 }
 
 impl<CTX, INSP, PRECOMPILE> InspectEvm
-    for BscEvm<CTX, INSP, EthInstructions<EthInterpreter, CTX>, PRECOMPILE>
+    for BscEvmInner<CTX, INSP, EthInstructions<EthInterpreter, CTX>, PRECOMPILE>
 where
     CTX: BscContextTr<Journal: JournalExt> + ContextSetters,
     INSP: Inspector<CTX, EthInterpreter>,
@@ -92,7 +92,7 @@ where
 }
 
 impl<CTX, INSP, PRECOMPILE> InspectCommitEvm
-    for BscEvm<CTX, INSP, EthInstructions<EthInterpreter, CTX>, PRECOMPILE>
+    for BscEvmInner<CTX, INSP, EthInstructions<EthInterpreter, CTX>, PRECOMPILE>
 where
     CTX: BscContextTr<Journal: JournalExt, Db: DatabaseCommit> + ContextSetters,
     INSP: Inspector<CTX, EthInterpreter>,
