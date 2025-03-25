@@ -3657,6 +3657,10 @@ dependencies = [
 name = "example-bsc-sdk"
 version = "0.0.0"
 dependencies = [
+ "alloy-chains",
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
@@ -3683,6 +3687,8 @@ dependencies = [
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
+ "reth-evm",
+ "reth-evm-ethereum",
  "reth-network",
  "reth-network-api",
  "reth-network-peers",
@@ -3691,6 +3697,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-revm",
  "reth-tracing",
  "revm",
  "secp256k1",
