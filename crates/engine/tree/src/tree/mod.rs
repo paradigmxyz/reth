@@ -2525,8 +2525,6 @@ where
             }
         }
 
-        self.payload_processor.apply_hashed_post_state_to_cursor_cache(&hashed_state);
-
         let (state_root, trie_output, root_elapsed) = if let Some(maybe_state_root) =
             maybe_state_root
         {

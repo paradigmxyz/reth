@@ -78,10 +78,6 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             _marker: Default::default(),
         }
     }
-
-    pub fn apply_hashed_post_state_to_cursor_cache(&self, hashed_post_state: &HashedPostState) {
-        self.hashed_cursor_cache.apply_hashed_post_state(hashed_post_state);
-    }
 }
 
 impl<N, Evm> PayloadProcessor<N, Evm>

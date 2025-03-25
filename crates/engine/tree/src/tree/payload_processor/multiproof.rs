@@ -470,6 +470,8 @@ pub(super) struct MultiProofTask<Factory: DatabaseProviderFactory> {
     fetched_proof_targets: MultiProofTargets,
     /// Hashed cursor factory cache.
     hashed_cursor_cache: CachedHashedCursorFactoryCache,
+    /// Accumulated hashed post state.
+    hashed_post_state: HashedPostState,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
@@ -501,6 +503,7 @@ where
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             hashed_cursor_cache,
+            hashed_post_state: Default::default(),
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 executor,
@@ -625,6 +628,7 @@ where
     /// Returns a number of proofs that were spawned.
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
+        self.hashed_post_state.extend_ref(&hashed_state_update);
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) =
@@ -906,6 +910,9 @@ where
         if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
         }
+
+        drop(self.tx);
+        self.hashed_cursor_cache.apply_hashed_post_state(&self.hashed_post_state);
 
         self.hashed_cursor_cache.log_stats();
     }
