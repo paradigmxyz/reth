@@ -139,6 +139,7 @@ mod tests {
     use super::*;
     use clap::Parser;
 
+    /// A test command that uses the `MaxOr` parser
     #[derive(Parser, Debug)]
     struct NodeCommand {
         #[arg(long, value_parser = MaxOr::new(clap::value_parser!(u64)))]
