@@ -49,7 +49,7 @@ use std::sync::Arc;
 pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
-    /// Singer access in default (L1) trait method implementations.
+    /// Signer access in default (L1) trait method implementations.
     #[expect(clippy::type_complexity)]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
 

@@ -1,14 +1,15 @@
 //! Actions that can be performed in tests.
 
 use crate::testsuite::Environment;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes, PayloadStatusEnum};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
 use futures_util::future::BoxFuture;
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
-use std::{future::Future, marker::PhantomData};
+use std::{future::Future, marker::PhantomData, time::Duration};
+use tokio::time::sleep;
 use tracing::debug;
 
 /// An action that can be performed on an instance.
@@ -22,7 +23,7 @@ pub trait Action<I>: Send + 'static {
 }
 
 /// Simplified action container for storage in tests
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct ActionBox<I>(Box<dyn Action<I>>);
 
 impl<I: 'static> ActionBox<I> {
@@ -54,28 +55,47 @@ where
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.
 #[derive(Debug)]
-pub struct AssertMineBlock<Engine> {
+pub struct AssertMineBlock<Engine>
+where
+    Engine: PayloadTypes,
+{
     /// The node index to mine
     pub node_idx: usize,
     /// Transactions to include in the block
     pub transactions: Vec<Bytes>,
     /// Expected block hash (optional)
     pub expected_hash: Option<B256>,
+    /// Block's payload attributes
+    // TODO: refactor once we have actions to generate payload attributes.
+    pub payload_attributes: Engine::PayloadAttributes,
     /// Tracks engine type
     _phantom: PhantomData<Engine>,
 }
 
-impl<Engine> AssertMineBlock<Engine> {
+impl<Engine> AssertMineBlock<Engine>
+where
+    Engine: PayloadTypes,
+{
     /// Create a new `AssertMineBlock` action
-    pub fn new(node_idx: usize, transactions: Vec<Bytes>, expected_hash: Option<B256>) -> Self {
-        Self { node_idx, transactions, expected_hash, _phantom: Default::default() }
+    pub fn new(
+        node_idx: usize,
+        transactions: Vec<Bytes>,
+        expected_hash: Option<B256>,
+        payload_attributes: Engine::PayloadAttributes,
+    ) -> Self {
+        Self {
+            node_idx,
+            transactions,
+            expected_hash,
+            payload_attributes,
+            _phantom: Default::default(),
+        }
     }
 }
 
 impl<Engine> Action<Engine> for AssertMineBlock<Engine>
 where
     Engine: EngineTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -108,26 +128,10 @@ where
                 finalized_block_hash: parent_hash,
             };
 
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-
-            // create payload attributes for the new block
-            let payload_attributes = PayloadAttributes {
-                timestamp,
-                prev_randao: B256::random(),
-                suggested_fee_recipient: Address::random(),
-                withdrawals: Some(vec![]),
-                parent_beacon_block_root: Some(B256::ZERO),
-            };
-
-            let engine_payload_attributes: Engine::PayloadAttributes = payload_attributes.into();
-
-            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
+            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v2(
                 engine_client,
                 fork_choice_state,
-                Some(engine_payload_attributes),
+                Some(self.payload_attributes.clone()),
             )
             .await?;
 
@@ -141,7 +145,7 @@ where
 
                         // get the payload that was built
                         let _engine_payload =
-                            EngineApiClient::<Engine>::get_payload_v3(engine_client, payload_id)
+                            EngineApiClient::<Engine>::get_payload_v2(engine_client, payload_id)
                                 .await?;
                         Ok(())
                     } else {
@@ -154,26 +158,17 @@ where
     }
 }
 /// Pick the next block producer based on the latest block information.
-#[derive(Debug)]
-pub struct PickNextBlockProducer<Engine> {
-    /// Tracks engine type
-    _phantom: PhantomData<Engine>,
-}
+#[derive(Debug, Default)]
+pub struct PickNextBlockProducer {}
 
-impl<Engine> Default for PickNextBlockProducer<Engine> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<Engine> PickNextBlockProducer<Engine> {
+impl PickNextBlockProducer {
     /// Create a new `PickNextBlockProducer` action
     pub fn new() -> Self {
-        Self { _phantom: Default::default() }
+        Self {}
     }
 }
 
-impl<Engine> Action<Engine> for PickNextBlockProducer<Engine>
+impl<Engine> Action<Engine> for PickNextBlockProducer
 where
     Engine: EngineTypes,
 {
@@ -222,8 +217,141 @@ where
         })
     }
 }
+
+/// Store payload attributes for the next block.
+#[derive(Debug, Default)]
+pub struct GeneratePayloadAttributes {}
+
+impl<Engine> Action<Engine> for GeneratePayloadAttributes
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let latest_block = env
+                .latest_block_info
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+            let block_number = latest_block.number;
+            let timestamp = env.latest_header_time + env.block_timestamp_increment;
+            let payload_attributes = alloy_rpc_types_engine::PayloadAttributes {
+                timestamp,
+                prev_randao: B256::random(),
+                suggested_fee_recipient: alloy_primitives::Address::random(),
+                withdrawals: Some(vec![]),
+                parent_beacon_block_root: Some(B256::ZERO),
+            };
+
+            env.payload_attributes.insert(latest_block.number + 1, payload_attributes);
+            debug!("Stored payload attributes for block {}", block_number + 1);
+            Ok(())
+        })
+    }
+}
+/// Action that generates the next payload
+#[derive(Debug, Default)]
+pub struct GenerateNextPayload {}
+
+impl<Engine> Action<Engine> for GenerateNextPayload
+where
+    Engine: EngineTypes + PayloadTypes<PayloadAttributes = PayloadAttributes>,
+    reth_node_ethereum::engine::EthPayloadAttributes:
+        From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let latest_block = env
+                .latest_block_info
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+
+            let parent_hash = latest_block.hash;
+            debug!("Latest block hash: {parent_hash}");
+
+            let fork_choice_state = ForkchoiceState {
+                head_block_hash: parent_hash,
+                safe_block_hash: parent_hash,
+                finalized_block_hash: parent_hash,
+            };
+
+            let payload_attributes: PayloadAttributes = env
+                .payload_attributes
+                .get(&latest_block.number)
+                .cloned()
+                .ok_or_else(|| eyre::eyre!("No payload attributes found for latest block"))?;
+
+            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
+                &env.node_clients[0].engine,
+                fork_choice_state,
+                Some(payload_attributes.clone()),
+            )
+            .await?;
+
+            debug!("FCU result: {:?}", fcu_result);
+
+            let payload_id = fcu_result
+                .payload_id
+                .ok_or_else(|| eyre::eyre!("No payload ID returned from forkChoiceUpdated"))?;
+
+            debug!("Received payload ID: {:?}", payload_id);
+            env.next_payload_id = Some(payload_id);
+
+            sleep(Duration::from_secs(1)).await;
+
+            let built_payload: PayloadAttributes =
+                EngineApiClient::<Engine>::get_payload_v3(&env.node_clients[0].engine, payload_id)
+                    .await?
+                    .into();
+            env.payload_id_history.insert(latest_block.number + 1, payload_id);
+            env.latest_payload_built = Some(built_payload);
+
+            Ok(())
+        })
+    }
+}
+/// Action that produces a sequence of blocks using the available clients
+#[derive(Debug)]
+pub struct ProduceBlocks<Engine> {
+    /// Number of blocks to produce
+    pub num_blocks: u64,
+    /// Tracks engine type
+    _phantom: PhantomData<Engine>,
+}
+
+impl<Engine> ProduceBlocks<Engine> {
+    /// Create a new `ProduceBlocks` action
+    pub fn new(num_blocks: u64) -> Self {
+        Self { num_blocks, _phantom: Default::default() }
+    }
+}
+
+impl<Engine> Default for ProduceBlocks<Engine> {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+impl<Engine> Action<Engine> for ProduceBlocks<Engine>
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // Create a sequence for producing a single block
+            let mut sequence = Sequence::new(vec![
+                Box::new(PickNextBlockProducer::default()),
+                Box::new(GeneratePayloadAttributes::default()),
+            ]);
+            for _ in 0..self.num_blocks {
+                sequence.execute(env).await?;
+            }
+            Ok(())
+        })
+    }
+}
+
 /// Run a sequence of actions in series.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct Sequence<I> {
     /// Actions to execute in sequence
     pub actions: Vec<Box<dyn Action<I>>>,

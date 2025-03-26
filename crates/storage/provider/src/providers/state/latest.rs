@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
-use reth_primitives::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
@@ -219,7 +219,7 @@ mod tests {
     use super::*;
 
     const fn assert_state_provider<T: StateProvider>() {}
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn assert_latest_state_provider<
         T: DBProvider + BlockHashReader + StateCommitmentProvider,
     >() {

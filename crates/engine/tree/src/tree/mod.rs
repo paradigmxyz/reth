@@ -26,14 +26,14 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
-    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
-    EngineValidator, ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
+    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineValidator,
+    ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
+use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
     Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -72,7 +72,7 @@ mod metrics;
 mod payload_processor;
 mod persistence_state;
 // TODO(alexey): compare trie updates in `insert_block_inner`
-#[allow(unused)]
+#[expect(unused)]
 mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
@@ -562,7 +562,7 @@ pub enum TreeAction {
 pub struct EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
-    T: EngineTypes,
+    T: PayloadTypes,
 {
     provider: P,
     executor_provider: E,
@@ -608,7 +608,7 @@ where
     payload_processor: PayloadProcessor<N, C>,
 }
 
-impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
+impl<N, P: Debug, E: Debug, T: PayloadTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
     for EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
@@ -650,7 +650,7 @@ where
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
     C: ConfigureEvm<Primitives = N> + 'static,
-    T: EngineTypes,
+    T: PayloadTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
@@ -1176,26 +1176,7 @@ where
             return Ok(valid_outcome(state.head_block_hash))
         }
 
-        // 2. ensure we can apply a new chain update for the head block
-        if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
-            let tip = chain_update.tip().clone_sealed_header();
-            self.on_canonical_chain_update(chain_update);
-
-            // update the safe and finalized blocks and ensure their values are valid
-            if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
-                // safe or finalized hashes are invalid
-                return Ok(TreeOutcome::new(outcome))
-            }
-
-            if let Some(attr) = attrs {
-                let updated = self.process_payload_attributes(attr, &tip, state, version);
-                return Ok(TreeOutcome::new(updated))
-            }
-
-            return Ok(valid_outcome(state.head_block_hash))
-        }
-
-        // 3. check if the head is already part of the canonical chain
+        // 2. check if the head is already part of the canonical chain
         if let Ok(Some(canonical_header)) = self.find_canonical_header(state.head_block_hash) {
             debug!(target: "engine::tree", head = canonical_header.number(), "fcu head block is already canonical");
 
@@ -1219,6 +1200,25 @@ where
 
             // the head block is already canonical, so we're not triggering a payload job and can
             // return right away
+            return Ok(valid_outcome(state.head_block_hash))
+        }
+
+        // 3. ensure we can apply a new chain update for the head block
+        if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
+            let tip = chain_update.tip().clone_sealed_header();
+            self.on_canonical_chain_update(chain_update);
+
+            // update the safe and finalized blocks and ensure their values are valid
+            if let Err(outcome) = self.ensure_consistent_forkchoice_state(state) {
+                // safe or finalized hashes are invalid
+                return Ok(TreeOutcome::new(outcome))
+            }
+
+            if let Some(attr) = attrs {
+                let updated = self.process_payload_attributes(attr, &tip, state, version);
+                return Ok(TreeOutcome::new(updated))
+            }
+
             return Ok(valid_outcome(state.head_block_hash))
         }
 
@@ -3126,7 +3126,7 @@ mod tests {
         }
 
         /// Signals to the channel task that a value should be released
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         fn release(&self) {
             let _ = self.release.send(());
         }

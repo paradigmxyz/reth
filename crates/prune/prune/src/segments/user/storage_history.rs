@@ -235,7 +235,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            #[allow(clippy::skip_while_next)]
+            #[expect(clippy::skip_while_next)]
             let pruned = changesets
                 .iter()
                 .enumerate()

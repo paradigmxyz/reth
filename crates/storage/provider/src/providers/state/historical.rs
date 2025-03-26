@@ -12,7 +12,7 @@ use reth_db_api::{
     transaction::DbTx,
     BlockNumberList,
 };
-use reth_primitives::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BlockNumReader, DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
@@ -559,7 +559,7 @@ mod tests {
         b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
 
     const fn assert_state_provider<T: StateProvider>() {}
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn assert_historical_state_provider<
         T: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider,
     >() {

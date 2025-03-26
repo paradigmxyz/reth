@@ -2,7 +2,9 @@ use crate::{
     capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
 };
 use alloy_eips::{
-    eip1898::BlockHashOrNumber, eip4844::BlobAndProofV1, eip4895::Withdrawals,
+    eip1898::BlockHashOrNumber,
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
@@ -20,10 +22,11 @@ use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes, EngineVal
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, ExecutionPayload,
-    PayloadBuilderAttributes, PayloadOrAttributes,
+    PayloadBuilderAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
+use reth_rpc_server_types::result::internal_rpc_err;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -52,19 +55,19 @@ const MAX_BLOB_LIMIT: usize = 128;
 /// Implementing support for an engine API jsonrpsee RPC handler is done by defining the engine API
 /// server trait and implementing it on a type that can wrap this [`EngineApi`] type.
 /// See also [`EngineApiServer`] implementation for this type which is the L1 implementation.
-pub struct EngineApi<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
-    inner: Arc<EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>>,
+pub struct EngineApi<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec> {
+    inner: Arc<EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>>,
 }
 
-struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
+struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec> {
     /// The provider to interact with the chain.
     provider: Provider,
     /// Consensus configuration
     chain_spec: Arc<ChainSpec>,
     /// The channel to send messages to the beacon consensus engine.
-    beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
+    beacon_consensus: BeaconConsensusEngineHandle<PayloadT>,
     /// The type that can communicate with the payload service to retrieve payloads.
-    payload_store: PayloadStore<EngineT>,
+    payload_store: PayloadStore<PayloadT>,
     /// For spawning and executing async tasks
     task_spawner: Box<dyn TaskSpawner>,
     /// The latency and response type metrics for engine api calls
@@ -82,22 +85,22 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec
     accept_execution_requests_hash: bool,
 }
 
-impl<Provider, EngineT, Pool, Validator, ChainSpec>
-    EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+impl<Provider, PayloadT, Pool, Validator, ChainSpec>
+    EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes,
+    PayloadT: PayloadTypes,
     Pool: TransactionPool + 'static,
-    Validator: EngineValidator<EngineT>,
+    Validator: EngineValidator<PayloadT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Create new instance of [`EngineApi`].
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
-        beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
-        payload_store: PayloadStore<EngineT>,
+        beacon_consensus: BeaconConsensusEngineHandle<PayloadT>,
+        payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
         task_spawner: Box<dyn TaskSpawner>,
         client: ClientVersionV1,
@@ -134,7 +137,7 @@ where
     async fn get_payload_attributes(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::PayloadBuilderAttributes> {
+    ) -> EngineApiResult<PayloadT::PayloadBuilderAttributes> {
         Ok(self
             .inner
             .payload_store
@@ -147,12 +150,12 @@ where
     /// Caution: This should not accept the `withdrawals` field
     pub async fn new_payload_v1(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
-            EngineT::ExecutionData,
-            EngineT::PayloadAttributes,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
 
         self.inner
@@ -170,7 +173,7 @@ where
     /// Metered version of `new_payload_v1`.
     async fn new_payload_v1_metered(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
@@ -185,12 +188,12 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
-            EngineT::ExecutionData,
-            EngineT::PayloadAttributes,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
         self.inner
             .validator
@@ -206,7 +209,7 @@ where
     /// Metered version of `new_payload_v2`.
     pub async fn new_payload_v2_metered(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
@@ -221,12 +224,12 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     pub async fn new_payload_v3(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
-            EngineT::ExecutionData,
-            EngineT::PayloadAttributes,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
         self.inner
             .validator
@@ -243,7 +246,7 @@ where
     /// Metrics version of `new_payload_v3`
     pub async fn new_payload_v3_metered(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
@@ -258,12 +261,12 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
     pub async fn new_payload_v4(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
-            EngineT::ExecutionData,
-            EngineT::PayloadAttributes,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
         self.inner
             .validator
@@ -280,7 +283,7 @@ where
     /// Metrics version of `new_payload_v4`
     pub async fn new_payload_v4_metered(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
@@ -292,7 +295,17 @@ where
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
+}
 
+impl<Provider, EngineT, Pool, Validator, ChainSpec>
+    EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    EngineT: EngineTypes,
+    Pool: TransactionPool + 'static,
+    Validator: EngineValidator<EngineT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
     /// withdrawals.
     ///
@@ -862,10 +875,10 @@ where
     }
 }
 
-impl<Provider, EngineT, Pool, Validator, ChainSpec>
-    EngineApiInner<Provider, EngineT, Pool, Validator, ChainSpec>
+impl<Provider, PayloadT, Pool, Validator, ChainSpec>
+    EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
-    EngineT: EngineTypes,
+    PayloadT: PayloadTypes,
 {
     /// Tracks the elapsed time between the new payload response and the received forkchoice update
     /// request.
@@ -1137,6 +1150,14 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV1");
         Ok(self.get_blobs_v1_metered(versioned_hashes)?)
     }
+
+    async fn get_blobs_v2(
+        &self,
+        _versioned_hashes: Vec<B256>,
+    ) -> RpcResult<Vec<Option<BlobAndProofV2>>> {
+        trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
+        Err(internal_rpc_err("unimplemented"))
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
@@ -1150,10 +1171,10 @@ where
     }
 }
 
-impl<Provider, EngineT, Pool, Validator, ChainSpec> std::fmt::Debug
-    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+impl<Provider, PayloadT, Pool, Validator, ChainSpec> std::fmt::Debug
+    for EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
-    EngineT: EngineTypes,
+    PayloadT: PayloadTypes,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApi").finish_non_exhaustive()

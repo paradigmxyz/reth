@@ -324,7 +324,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
 #[derive(Debug)]
 pub struct DataReader {
     /// Data file descriptor. Needs to be kept alive as long as `data_mmap` handle.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     data_file: File,
     /// Mmap handle for data.
     data_mmap: Mmap,

@@ -213,7 +213,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[allow(clippy::reversed_empty_ranges)]
+    #[expect(clippy::reversed_empty_ranges)]
     async fn set_download_range_error_returned() {
         reth_tracing::init_test_tracing();
         let factory = create_test_provider_factory();

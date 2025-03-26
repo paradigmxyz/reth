@@ -443,7 +443,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         let status = sessions.status();
         let hello_message = sessions.hello_message();
 
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         NetworkStatus {
             client_version: hello_message.client_version,
             protocol_version: hello_message.protocol_version as u64,

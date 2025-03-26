@@ -46,7 +46,7 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
-    #[allow(clippy::doc_markdown)]
+    #[expect(clippy::doc_markdown)]
     /// Comma separated enode URLs of trusted peers for P2P connections.
     ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303

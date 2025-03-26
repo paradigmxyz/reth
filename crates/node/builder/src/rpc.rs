@@ -8,7 +8,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, NodeTypesWithEngine, ReceiptTy,
+    NodeAddOns, NodeTypes, NodeTypesWithEngine, PayloadTypes, ReceiptTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -77,7 +77,7 @@ where
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    #[allow(unused)]
+    #[expect(unused)]
     pub(crate) fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
         F: OnRpcStarted<Node, EthApi> + 'static,
@@ -96,7 +96,7 @@ where
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    #[allow(unused)]
+    #[expect(unused)]
     pub(crate) fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
         F: ExtendRpcModules<Node, EthApi> + 'static,
@@ -187,7 +187,7 @@ where
 
 /// Helper wrapper type to encapsulate the [`RpcRegistryInner`] over components trait.
 #[derive(Debug, Clone)]
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub(crate) registry: RpcRegistryInner<
         Node::Provider,
@@ -237,7 +237,7 @@ where
 /// [`reth_rpc::eth::EthApi`], and ultimately merge additional rpc handler into the configured
 /// transport modules [`TransportRpcModules`] as well as configured authenticated methods
 /// [`AuthRpcModule`].
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct RpcContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// The node components.
     pub(crate) node: Node,
@@ -293,7 +293,7 @@ where
     /// Returns the handle to the payload builder service
     pub fn payload_builder_handle(
         &self,
-    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
+    ) -> &PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Payload> {
         self.node.payload_builder_handle()
     }
 }
@@ -312,7 +312,7 @@ pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
         EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle:
-        BeaconConsensusEngineHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
+        BeaconConsensusEngineHandle<<Node::Types as NodeTypesWithEngine>::Payload>,
 }
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, EthApi> {
@@ -628,7 +628,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
 /// Helper trait that provides the validator for the engine API
 pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     /// The Validator type to use for the engine API.
-    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine, Block = BlockTy<Node::Types>>
+    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Payload, Block = BlockTy<Node::Types>>
         + Clone;
 
     /// Creates the engine validator for an engine API based node.
@@ -655,7 +655,7 @@ where
 /// A type that knows how to build the engine validator.
 pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The consensus implementation to build.
-    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine, Block = BlockTy<Node::Types>>
+    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Payload, Block = BlockTy<Node::Types>>
         + Clone;
 
     /// Creates the engine validator.
@@ -668,7 +668,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
 impl<Node, F, Fut, Validator> EngineValidatorBuilder<Node> for F
 where
     Node: FullNodeComponents,
-    Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine, Block = BlockTy<Node::Types>>
+    Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Payload, Block = BlockTy<Node::Types>>
         + Clone
         + Unpin
         + 'static,
@@ -708,14 +708,14 @@ where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec: EthereumHardforks,
-            Engine: EngineTypes<ExecutionData = ExecutionData>,
+            Payload: PayloadTypes<ExecutionData = ExecutionData> + EngineTypes,
         >,
     >,
     EV: EngineValidatorBuilder<N>,
 {
     type EngineApi = EngineApi<
         N::Provider,
-        <N::Types as NodeTypesWithEngine>::Engine,
+        <N::Types as NodeTypesWithEngine>::Payload,
         N::Pool,
         EV::Validator,
         <N::Types as NodeTypes>::ChainSpec,

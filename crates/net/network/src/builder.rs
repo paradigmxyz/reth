@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 pub(crate) const ETH_REQUEST_CHANNEL_CAPACITY: usize = 256;
 
 /// A builder that can configure all components of the network.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct NetworkBuilder<Tx, Eth, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub(crate) network: NetworkManager<N>,
     pub(crate) transactions: Tx,
