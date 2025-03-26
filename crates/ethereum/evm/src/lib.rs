@@ -103,10 +103,11 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
 impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
 where
     EvmF: EvmFactory<Tx: TransactionEnv + FromRecoveredTx<TransactionSigned>, Spec = SpecId>
+        + Clone
+        + Debug
         + Send
         + Sync
         + Unpin
-        + Clone
         + 'static,
 {
     type Primitives = EthPrimitives;

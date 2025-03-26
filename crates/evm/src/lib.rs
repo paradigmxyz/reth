@@ -89,7 +89,7 @@ pub use alloy_evm::block::state_changes as state_change;
 /// [`NextBlockEnvCtx`]: ConfigureEvm::NextBlockEnvCtx
 /// [`BlockExecutor`]: alloy_evm::block::BlockExecutor
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ConfigureEvm: Send + Sync + Unpin + Clone {
+pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// The primitives type used by the EVM.
     type Primitives: NodePrimitives;
 
