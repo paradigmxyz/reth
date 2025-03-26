@@ -55,10 +55,11 @@ where
         &self,
         filter: Filter,
         limits: QueryLimits,
-    ) -> impl Future<Output = RpcResult<Vec<Log>>> + Send {
+    ) -> impl Future<Output = RpcResult<Vec<Log>>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        // XXX FIXME YSG calc reorg_old_blocks
-        self.inner.logs_for_filter(filter, limits).map_err(|e| e.into())
+        let reorg_old_blocks =
+            futures::executor::block_on(self.get_reorg_old_blocks(filter.clone()));
+        self.inner.logs_for_filter(filter, limits, reorg_old_blocks).map_err(|e| e.into())
     }
 }
 
@@ -360,30 +361,21 @@ where
     ///
     /// Handler for `eth_getFilterLogs`
     pub async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>, EthFilterError> {
-        // XXX FIXME YSG, check eth_getFilterLogs _reorg_old_hashes
-        let (filter, _reorg_old_hashes) = {
+        // XXX FIXME YSG, check eth_getFilterLogs
+        let (filter, reorg_old_blocks) = {
             let active_filters = self.inner.active_filters.inner.lock().await;
             let active_filter =
                 active_filters.get(&id).ok_or(EthFilterError::FilterNotFound(id.clone()))?;
             if let FilterKind::Log(ref filter) = active_filter.kind {
                 // calc active_filter reorg_old_blocks once
-                // XXX FIXME YSG refactor
-                if active_filter.reorg_status.load(Ordering::Relaxed) == REORG_HAPPEN {
-                    self.calc_reorg_old_blocks_once(active_filter, filter).await?;
-                    active_filter.reorg_status.store(REORG_DEFAULT, Ordering::Relaxed);
-                }
-                let mut reorg_old_hashes =
-                    HashSet::with_capacity(active_filter.reorg_old_blocks.read().len());
-                for block_hash in active_filter.reorg_old_blocks.read().keys() {
-                    reorg_old_hashes.insert(*block_hash);
-                }
-                (*filter.clone(), Arc::new(reorg_old_hashes))
+                self.calc_reorg_old_blocks_once(active_filter, filter).await?;
+                (*filter.clone(), active_filter.reorg_old_blocks.clone())
             } else {
                 // Not a log filter
                 return Err(EthFilterError::FilterNotFound(id))
             }
         };
-        self.inner.logs_for_filter(filter, self.inner.query_limits).await
+        self.inner.logs_for_filter(filter, self.inner.query_limits, reorg_old_blocks).await
     }
 
     /// calc active filter reorg old blocks
@@ -392,6 +384,9 @@ where
         active_filter: &ActiveFilter<T>,
         filter: &Filter,
     ) -> Result<(), EthFilterError> {
+        if active_filter.reorg_status.load(Ordering::Relaxed) != REORG_HAPPEN {
+            return Ok(());
+        }
         let mut block_num_hashs = vec![];
         let mut reorg_old_blocks = HashSet::new();
         for (block_hash, reorg_old_block_info) in active_filter.reorg_old_blocks.read().iter() {
@@ -419,6 +414,7 @@ where
                 x.logs = logs;
             }
         }
+        active_filter.reorg_status.store(REORG_DEFAULT, Ordering::Relaxed);
         Ok(())
     }
 }
@@ -431,16 +427,19 @@ where
     async fn get_reorg_old_blocks(
         &self,
         filter: Filter,
-    ) -> Result<Arc<RwLock<HashMap<BlockHash, ReorgOldBlockInfo>>>, EthFilterError> {
+    ) -> Arc<RwLock<HashMap<BlockHash, ReorgOldBlockInfo>>> {
         for active_filter in self.active_filters().inner.lock().await.values() {
             if let FilterKind::Log(filter1) = &active_filter.kind {
                 if **filter1 == filter {
-                    self.calc_reorg_old_blocks_once(active_filter, &filter).await?;
-                    return Ok(active_filter.reorg_old_blocks.clone())
+                    let res = self.calc_reorg_old_blocks_once(active_filter, &filter).await;
+                    if res.is_err() {
+                        break;
+                    }
+                    return active_filter.reorg_old_blocks.clone()
                 }
             }
         }
-        Ok(Arc::new(RwLock::new(HashMap::new())))
+        Arc::new(RwLock::new(HashMap::new()))
     }
 }
 
@@ -530,9 +529,8 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        let _reorg_old_blocks = self.get_reorg_old_blocks(filter.clone()).await?;
-        // XXX FIXME YSG 查看eth_getLogs的行为
-        Ok(self.inner.logs_for_filter(filter, self.inner.query_limits).await?)
+        let reorg_old_blocks = self.get_reorg_old_blocks(filter.clone()).await;
+        Ok(self.inner.logs_for_filter(filter, self.inner.query_limits, reorg_old_blocks).await?)
     }
 }
 
@@ -585,9 +583,15 @@ where
         &self,
         filter: Filter,
         limits: QueryLimits,
+        reorg_old_blocks: Arc<RwLock<HashMap<BlockHash, ReorgOldBlockInfo>>>,
     ) -> Result<Vec<Log>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
+                if let Some(reorg_old_block_info) = reorg_old_blocks.read().get(&block_hash) {
+                    if !reorg_old_block_info.logs.is_empty() {
+                        return Ok(reorg_old_block_info.logs.clone())
+                    }
+                }
                 // for all matching logs in the block
                 // get the block header with the hash
                 let header = self
@@ -637,14 +641,21 @@ where
                     .flatten();
                 let (from_block_number, to_block_number) =
                     logs_utils::get_filter_block_range(from, to, start_block, info);
-                self.get_logs_in_block_range(
-                    &filter,
-                    from_block_number,
-                    to_block_number,
-                    info,
-                    limits,
-                )
-                .await
+                let mut all_log = self
+                    .get_logs_in_block_range(
+                        &filter,
+                        from_block_number,
+                        to_block_number,
+                        info,
+                        limits,
+                    )
+                    .await?;
+                for reorg_old_block_info in reorg_old_blocks.read().values() {
+                    if !reorg_old_block_info.logs.is_empty() {
+                        all_log.extend_from_slice(&reorg_old_block_info.logs);
+                    }
+                }
+                Ok(all_log)
             }
         }
     }
@@ -803,7 +814,6 @@ impl<T> ActiveFilters<T> {
 #[derive(Debug)]
 struct ReorgOldBlockInfo {
     logs: Vec<Log>,
-    #[allow(dead_code)]
     block_number: BlockNumber,
 }
 
