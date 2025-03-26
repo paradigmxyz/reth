@@ -10,7 +10,7 @@ use alloy_consensus::{
     EthereumTxEnvelope, SignableTransaction,
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256, U256};
+use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
@@ -186,6 +186,7 @@ where
 #[cfg(feature = "op")]
 mod op {
     use super::*;
+    use alloy_primitives::U256;
     use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 
     const DEPOSIT_SIGNATURE: Signature = Signature::new(U256::ZERO, U256::ZERO, false);
