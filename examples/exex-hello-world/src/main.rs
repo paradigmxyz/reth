@@ -16,7 +16,6 @@ use reth_ethereum::{
     },
     EthPrimitives,
 };
-use reth_node_ethereum::EthereumNode;
 use reth_optimism_node::OpNode;
 use reth_tracing::tracing::info;
 
