@@ -78,9 +78,6 @@ Database:
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout
 
-      --trusted-setup-file <PATH>
-          Overrides the KZG trusted setup by reading from the supplied file
-
       --parent-beacon-block-root <PARENT_BEACON_BLOCK_ROOT>
 
 
