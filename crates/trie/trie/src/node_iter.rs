@@ -298,9 +298,9 @@ mod tests {
         //     │      └── 1 -> Leaf (`account_2`, Key = 0x0)
         //     ├── 1 -> Branch (`branch_node_2`)
         //     │      ├── 0 -> Branch (`branch_node_3`)
-        //     │      │      ├── 0 -> Leaf (`account_3`, marked as changed)
+        //     │      │      ├── 0 -> Leaf (`account_3`)
         //     │      │      └── 1 -> Leaf (`account_4`)
-        //     │      └── 1 -> Leaf (`account_5`, Key = 0x0)
+        //     │      └── 1 -> Leaf (`account_5`, Key = 0x0, marked as changed)
 
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
         let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000010");
@@ -384,12 +384,8 @@ mod tests {
             ),
         );
 
-        let mock_trie_nodes = vec![
-            branch_node_0.clone(),
-            branch_node_1,
-            branch_node_2.clone(),
-            branch_node_3.clone(),
-        ];
+        let mock_trie_nodes =
+            vec![branch_node_0.clone(), branch_node_1, branch_node_2.clone(), branch_node_3];
         pretty_assertions::assert_eq!(
             hash_builder_branch_nodes.into_iter().sorted().collect::<Vec<_>>(),
             mock_trie_nodes,
@@ -398,9 +394,9 @@ mod tests {
         let trie_cursor_factory =
             MockTrieCursorFactory::new(mock_trie_nodes.into_iter().collect(), B256Map::default());
 
-        // Mark the account 3 as changed.
+        // Mark the account 5 as changed.
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::unpack(account_3));
+        prefix_set.insert(Nibbles::unpack(account_5));
         let prefix_set = prefix_set.freeze();
 
         let walker =
@@ -442,10 +438,6 @@ mod tests {
                     visited_key: Some(branch_node_2.0)
                 },
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(branch_node_3.0.clone()),
-                    visited_key: Some(branch_node_3.0)
-                },
-                KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
                     visited_key: None
                 }
@@ -467,28 +459,14 @@ mod tests {
                     visited_key: Some(account_3)
                 },
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(b256!(
-                        "0x0000000000000000000000000000000000000000000000000000000000000102"
-                    )),
+                    visit_type: KeyVisitType::SeekNonExact(account_5),
                     visited_key: Some(account_5)
                 },
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(b256!(
-                        "0x0000000000000000000000000000000000000000000000000000000000000120"
-                    )),
-                    visited_key: None
+                    visit_type: KeyVisitType::SeekNonExact(account_5),
+                    visited_key: Some(account_5)
                 },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
             ],
         );
     }
