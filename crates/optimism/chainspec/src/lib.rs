@@ -1065,7 +1065,7 @@ mod tests {
     #[test]
     fn display_hardorks() {
         let content = BASE_MAINNET.display_hardforks().to_string();
-        for eth_hf in EthereumHardfork::VARIANTS.iter() {
+        for eth_hf in EthereumHardfork::VARIANTS {
             assert!(!content.contains(eth_hf.name()));
         }
     }
