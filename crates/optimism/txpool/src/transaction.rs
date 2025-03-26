@@ -10,6 +10,7 @@ use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use c_kzg::KzgSettings;
 use core::fmt::Debug;
+use parking_lot::RwLock;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_transaction_pool::{
@@ -38,7 +39,7 @@ pub struct OpPooledTransaction<
     conditional: Option<Box<TransactionConditional>>,
 
     /// Optional interop validation attached to this transaction.
-    interop: Option<Box<TransactionInterop>>,
+    interop: Arc<RwLock<Option<TransactionInterop>>>,
 
     /// Cached EIP-2718 encoded bytes of the transaction, lazily computed.
     encoded_2718: OnceLock<Bytes>,
@@ -51,7 +52,7 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
             inner: EthPooledTransaction::new(transaction, encoded_length),
             estimated_tx_compressed_size: Default::default(),
             conditional: None,
-            interop: None,
+            interop: Arc::new(RwLock::new(None)),
             _pd: core::marker::PhantomData,
             encoded_2718: Default::default(),
         }
@@ -91,11 +92,11 @@ impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Poo
 
 impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled> {
     fn set_interop(&mut self, interop: TransactionInterop) {
-        self.interop = Some(Box::new(interop))
+        *self.interop.write() = Some(interop);
     }
 
-    fn interop(&self) -> Option<&TransactionInterop> {
-        self.interop.as_deref()
+    fn interop(&self) -> Option<TransactionInterop> {
+        self.interop.read().clone()
     }
 }
 

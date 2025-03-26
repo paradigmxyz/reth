@@ -6,7 +6,7 @@ pub trait MaybeInteropTransaction {
     fn set_interop(&mut self, conditional: TransactionInterop);
 
     /// Get attached [`TransactionInterop`] if any.
-    fn interop(&self) -> Option<&TransactionInterop>;
+    fn interop(&self) -> Option<TransactionInterop>;
 
     /// Helper that sets the conditional and returns the instance again
     fn with_interop(mut self, interop: TransactionInterop) -> Self
