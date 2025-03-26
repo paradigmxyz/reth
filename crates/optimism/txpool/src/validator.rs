@@ -159,20 +159,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions
-            .into_iter()
-            .map(|(origin, tx)| {
-                if tx.is_eip4844() {
-                    TransactionValidationOutcome::Invalid(
-                        tx,
-                        InvalidTransactionError::TxTypeNotSupported.into(),
-                    )
-                } else {
-                    let outcome = self.inner.validate_one(origin, tx);
-                    self.apply_op_checks(outcome)
-                }
-            })
-            .collect()
+        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
     }
 
     fn apply_op_checks(
