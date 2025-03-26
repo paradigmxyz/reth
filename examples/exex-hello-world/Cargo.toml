@@ -14,3 +14,4 @@ reth-tracing.workspace = true
 eyre.workspace = true
 futures.workspace = true
 clap = { workspace = true, features = ["derive"] }
+reth-optimism-node.workspace = true
