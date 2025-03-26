@@ -197,8 +197,10 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blob is in the blob cache and written to the disk.
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
-        let mut map = self.versioned_hashes_to_txhash.lock();
-        map.insert(tx, data.versioned_hashes());
+        {
+            let mut map = self.versioned_hashes_to_txhash.lock();
+            map.insert(tx, data.versioned_hashes());
+        }
 
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
         data.rlp_encode_fields(&mut buf);
@@ -212,9 +214,11 @@ impl DiskFileBlobStoreInner {
 
     /// Ensures blobs are in the blob cache and written to the disk.
     fn insert_many(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
-        let mut map = self.versioned_hashes_to_txhash.lock();
-        for (tx, data) in &txs {
-            map.insert(*tx, data.versioned_hashes());
+        {
+            let mut map = self.versioned_hashes_to_txhash.lock();
+            for (tx, data) in &txs {
+                map.insert(*tx, data.versioned_hashes());
+            }
         }
 
         let raw = txs
