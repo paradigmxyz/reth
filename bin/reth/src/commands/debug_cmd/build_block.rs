@@ -48,10 +48,6 @@ pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
     env: EnvironmentArgs<C>,
 
-    /// Overrides the KZG trusted setup by reading from the supplied file.
-    #[arg(long, value_name = "PATH")]
-    trusted_setup_file: Option<PathBuf>,
-
     #[arg(long)]
     parent_beacon_block_root: Option<B256>,
 
@@ -99,16 +95,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         ))
     }
 
-    /// Loads the trusted setup params from a given file path or falls back to
-    /// `EnvKzgSettings::Default`.
+    /// Returns the default KZG settings
     fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
-        if let Some(ref trusted_setup_file) = self.trusted_setup_file {
-            EnvKzgSettings::load_from_trusted_setup_file(trusted_setup_file).wrap_err_with(|| {
-                format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
-            })
-        } else {
-            Ok(EnvKzgSettings::Default)
-        }
+        Ok(EnvKzgSettings::Default)
     }
 
     /// Execute `debug in-memory-merkle` command
