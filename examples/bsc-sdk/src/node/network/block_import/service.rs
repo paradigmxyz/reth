@@ -1,5 +1,7 @@
-use super::handle::ImportHandle;
-use crate::block_import::parlia::{ParliaConsensus, ParliaConsensusErr};
+use super::{
+    handle::ImportHandle,
+    parlia::{ParliaConsensus, ParliaConsensusErr},
+};
 use alloy_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::{future::Either, stream::FuturesUnordered, StreamExt};
 use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes};
