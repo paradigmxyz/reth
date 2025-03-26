@@ -451,12 +451,12 @@ revm-inspectors = "0.17.0-alpha.1"
 
 # eth
 alloy-chains = { version = "0.1.64", default-features = false }
-alloy-dyn-abi = "0.8.20"
+alloy-dyn-abi = "0.8.25"
 alloy-eip2124 = { version = "0.1.0", default-features = false }
 alloy-evm = { version = "0.1.0-alpha.3", default-features = false }
-alloy-primitives = { version = "0.8.20", default-features = false, features = ["map-foldhash"] }
+alloy-primitives = { version = "0.8.25", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
-alloy-sol-types = { version = "0.8.20", default-features = false }
+alloy-sol-types = { version = "0.8.25", default-features = false }
 alloy-trie = { version = "0.7.9", default-features = false }
 
 alloy-hardforks = "0.1.2"
