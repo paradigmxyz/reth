@@ -141,7 +141,7 @@ mod tests {
 
     #[derive(Parser, Debug)]
     struct NodeCommand {
-        #[arg(long)]
+        #[arg(long, value_parser = MaxOr::new(clap::value_parser!(u64)))]
         max_value: u64,
     }
 
