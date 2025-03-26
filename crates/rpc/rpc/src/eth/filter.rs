@@ -186,7 +186,7 @@ where
         N: NodePrimitives,
         St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
     {
-        trace!(target: "rpc::eth", "Serving eth_watchReorgsFilter");
+        trace!(target: "rpc::eth", "watch reorg notifications");
         while let Some(notification) = notifications.next().await {
             if let CanonStateNotification::Reorg { old, .. } = notification {
                 self.update_reorg::<N>(old.blocks()).await;
@@ -405,7 +405,7 @@ where
                     QueryLimits::no_limits(),
                 )
                 .await?;
-            // set removed log
+            // set removed true
             for log in &mut logs {
                 log.removed = true;
             }
