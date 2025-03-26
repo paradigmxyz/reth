@@ -6,15 +6,15 @@ use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, ExecutionPayload as _,
-    OnForkChoiceUpdated, PayloadValidator,
+    BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload as _, OnForkChoiceUpdated,
+    PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm,
 };
-use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion};
+use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
 use reth_primitives_traits::{
     block::Block as _, BlockBody as _, BlockTy, HeaderTy, SealedBlock, SignedTransaction,
 };
@@ -30,9 +30,9 @@ use tokio::sync::oneshot;
 use tracing::*;
 
 #[derive(Debug)]
-enum EngineReorgState<Engine: EngineTypes> {
+enum EngineReorgState<T: PayloadTypes> {
     Forward,
-    Reorg { queue: VecDeque<BeaconEngineMessage<Engine>> },
+    Reorg { queue: VecDeque<BeaconEngineMessage<T>> },
 }
 
 type EngineReorgResponse = Result<
@@ -45,7 +45,7 @@ type ReorgResponseFut = Pin<Box<dyn Future<Output = EngineReorgResponse> + Send 
 /// Engine API stream wrapper that simulates reorgs with specified frequency.
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Validator> {
+pub struct EngineReorg<S, T: PayloadTypes, Provider, Evm, Validator> {
     /// Underlying stream
     #[pin]
     stream: S,
@@ -63,16 +63,14 @@ pub struct EngineReorg<S, Engine: EngineTypes, Provider, Evm, Validator> {
     /// This is reset after a reorg.
     forkchoice_states_forwarded: usize,
     /// Current state of the stream.
-    state: EngineReorgState<Engine>,
+    state: EngineReorgState<T>,
     /// Last forkchoice state.
     last_forkchoice_state: Option<ForkchoiceState>,
     /// Pending engine responses to reorg messages.
     reorg_responses: FuturesUnordered<ReorgResponseFut>,
 }
 
-impl<S, Engine: EngineTypes, Provider, Evm, Validator>
-    EngineReorg<S, Engine, Provider, Evm, Validator>
-{
+impl<S, T: PayloadTypes, Provider, Evm, Validator> EngineReorg<S, T, Provider, Evm, Validator> {
     /// Creates new [`EngineReorg`] stream wrapper.
     pub fn new(
         stream: S,
@@ -97,17 +95,15 @@ impl<S, Engine: EngineTypes, Provider, Evm, Validator>
     }
 }
 
-impl<S, Engine, Provider, Evm, Validator> Stream
-    for EngineReorg<S, Engine, Provider, Evm, Validator>
+impl<S, T, Provider, Evm, Validator> Stream for EngineReorg<S, T, Provider, Evm, Validator>
 where
-    S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: EngineTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
+    S: Stream<Item = BeaconEngineMessage<T>>,
+    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Evm::Primitives>>,
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
         + ChainSpecProvider,
     Evm: ConfigureEvm,
-    Validator:
-        PayloadValidator<ExecutionData = Engine::ExecutionData, Block = BlockTy<Evm::Primitives>>,
+    Validator: PayloadValidator<ExecutionData = T::ExecutionData, Block = BlockTy<Evm::Primitives>>,
 {
     type Item = S::Item;
 
@@ -198,7 +194,7 @@ where
                         BeaconEngineMessage::NewPayload { payload, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
-                            payload: Engine::block_to_payload(reorg_block),
+                            payload: T::block_to_payload(reorg_block),
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state

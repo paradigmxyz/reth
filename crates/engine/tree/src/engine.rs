@@ -8,8 +8,9 @@ use crate::{
 use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineTypes};
+use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage};
 use reth_ethereum_primitives::EthPrimitives;
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
 use std::{
     collections::HashSet,
@@ -241,14 +242,14 @@ impl EngineApiKind {
 
 /// The request variants that the engine API handler can receive.
 #[derive(Debug)]
-pub enum EngineApiRequest<T: EngineTypes, N: NodePrimitives> {
+pub enum EngineApiRequest<T: PayloadTypes, N: NodePrimitives> {
     /// A request received from the consensus engine.
     Beacon(BeaconEngineMessage<T>),
     /// Request to insert an already executed block, e.g. via payload building.
     InsertExecutedBlock(ExecutedBlockWithTrieUpdates<N>),
 }
 
-impl<T: EngineTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
+impl<T: PayloadTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Beacon(msg) => msg.fmt(f),
@@ -259,13 +260,13 @@ impl<T: EngineTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
     }
 }
 
-impl<T: EngineTypes, N: NodePrimitives> From<BeaconEngineMessage<T>> for EngineApiRequest<T, N> {
+impl<T: PayloadTypes, N: NodePrimitives> From<BeaconEngineMessage<T>> for EngineApiRequest<T, N> {
     fn from(msg: BeaconEngineMessage<T>) -> Self {
         Self::Beacon(msg)
     }
 }
 
-impl<T: EngineTypes, N: NodePrimitives> From<EngineApiRequest<T, N>>
+impl<T: PayloadTypes, N: NodePrimitives> From<EngineApiRequest<T, N>>
     for FromEngine<EngineApiRequest<T, N>, N::Block>
 {
     fn from(req: EngineApiRequest<T, N>) -> Self {

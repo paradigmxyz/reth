@@ -35,6 +35,11 @@ jobs:
             command: 'make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=profiling op-docker-build-push-nightly-profiling'
     steps:
       - uses: actions/checkout@v4
+      - name: Remove bloatware
+        uses: laverdet/remove-bloatware@v1.0.0
+        with:
+          docker: true
+          lang: rust
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

@@ -6,11 +6,12 @@ use crate::{
 };
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::{
-    transaction::{PooledTransaction, Recovered},
-    SignableTransaction,
+    transaction::{Recovered, RlpEcdsaEncodableTx},
+    EthereumTxEnvelope, SignableTransaction,
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
+use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
@@ -28,8 +29,8 @@ pub trait SignedTransaction:
     + PartialEq
     + Eq
     + Hash
-    + alloy_rlp::Encodable
-    + alloy_rlp::Decodable
+    + Encodable
+    + Decodable
     + Encodable2718
     + Decodable2718
     + alloy_consensus::Transaction
@@ -136,7 +137,11 @@ pub trait SignedTransaction:
     }
 }
 
-impl SignedTransaction for PooledTransaction {
+impl<T> SignedTransaction for EthereumTxEnvelope<T>
+where
+    T: RlpEcdsaEncodableTx + SignableTransaction<Signature> + Unpin,
+    Self: Clone + PartialEq + Eq + Decodable + Decodable2718 + MaybeSerde + InMemorySize,
+{
     fn tx_hash(&self) -> &TxHash {
         match self {
             Self::Legacy(tx) => tx.hash(),

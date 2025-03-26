@@ -17,7 +17,7 @@ pub use reth_primitives_traits::{
 use reth_chainspec::EthChainSpec;
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::EngineTypes;
-use reth_payload_primitives::BuiltPayload;
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_trie_db::StateCommitment;
 
 /// The type that configures the essential types of an Ethereum-like node.
@@ -39,7 +39,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 /// The type that configures an Ethereum-like node with an engine for consensus.
 pub trait NodeTypesWithEngine: NodeTypes {
     /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes<BuiltPayload: BuiltPayload<Primitives = Self::Primitives>>;
+    type Payload: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Self::Primitives>>;
 }
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds database to the
@@ -52,7 +52,7 @@ pub trait NodeTypesWithDB: NodeTypes {
 }
 
 /// An adapter type combining [`NodeTypes`] and db into [`NodeTypesWithDB`].
-#[derive(Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NodeTypesWithDBAdapter<Types, DB> {
     types: PhantomData<Types>,
     db: PhantomData<DB>,
@@ -62,18 +62,6 @@ impl<Types, DB> NodeTypesWithDBAdapter<Types, DB> {
     /// Create a new adapter with the configured types.
     pub fn new() -> Self {
         Self { types: Default::default(), db: Default::default() }
-    }
-}
-
-impl<Types, DB> Default for NodeTypesWithDBAdapter<Types, DB> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<Types, DB> Clone for NodeTypesWithDBAdapter<Types, DB> {
-    fn clone(&self) -> Self {
-        Self { types: self.types, db: self.db }
     }
 }
 
@@ -93,7 +81,7 @@ where
     Types: NodeTypesWithEngine,
     DB: Send + Sync + Unpin + 'static,
 {
-    type Engine = Types::Engine;
+    type Payload = Types::Payload;
 }
 
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
@@ -105,19 +93,13 @@ where
 }
 
 /// A [`NodeTypes`] type builder.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AnyNodeTypes<P = (), C = (), SC = (), S = ()>(
     PhantomData<P>,
     PhantomData<C>,
     PhantomData<SC>,
     PhantomData<S>,
 );
-
-impl<P, C, SC, S> Default for AnyNodeTypes<P, C, SC, S> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl<P, C, SC, S> AnyNodeTypes<P, C, SC, S> {
     /// Creates a new instance of [`AnyNodeTypes`].
@@ -160,18 +142,12 @@ where
 }
 
 /// A [`NodeTypesWithEngine`] type builder.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AnyNodeTypesWithEngine<P = (), E = (), C = (), SC = (), S = ()> {
     /// Embedding the basic node types.
     _base: AnyNodeTypes<P, C, SC, S>,
     /// Phantom data for the engine.
     _engine: PhantomData<E>,
-}
-
-impl<P, E, C, SC, S> Default for AnyNodeTypesWithEngine<P, E, C, SC, S> {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl<P, E, C, SC, S> AnyNodeTypesWithEngine<P, E, C, SC, S> {
@@ -228,7 +204,7 @@ where
     SC: StateCommitment,
     S: Default + Send + Sync + Unpin + Debug + 'static,
 {
-    type Engine = E;
+    type Payload = E;
 }
 
 /// Helper adapter type for accessing [`NodePrimitives::Block`] on [`NodeTypes`].

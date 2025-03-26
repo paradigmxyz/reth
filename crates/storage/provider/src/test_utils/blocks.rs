@@ -9,11 +9,9 @@ use alloy_consensus::Header;
 use alloy_eips::eip4895::{Withdrawal, Withdrawals};
 use alloy_primitives::PrimitiveSignature as Signature;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices, tables};
+use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned, TxType};
 use reth_node_types::NodeTypes;
-use reth_primitives::{
-    Account, BlockBody, Receipt, RecoveredBlock, SealedBlock, SealedHeader, Transaction,
-    TransactionSigned, TxType,
-};
+use reth_primitives_traits::{Account, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
@@ -22,7 +20,7 @@ use std::{str::FromStr, sync::LazyLock};
 /// Assert genesis block
 pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     provider: &DatabaseProviderRW<DB, N>,
-    g: SealedBlock,
+    g: SealedBlock<reth_ethereum_primitives::Block>,
 ) {
     let n = g.number;
     let h = B256::ZERO;
@@ -63,39 +61,40 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     // StageCheckpoints is not updated in tests
 }
 
-pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| {
-    SealedBlock::from_sealed_parts(
-        SealedHeader::new(
-            Header {
-                parent_hash: hex!(
-                    "c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94f"
-                )
-                .into(),
-                ommers_hash: EMPTY_OMMER_ROOT_HASH,
-                beneficiary: hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").into(),
-                state_root: hex!(
-                    "50554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583d"
-                )
-                .into(),
-                transactions_root: hex!(
-                    "0967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192"
-                )
-                .into(),
-                receipts_root: hex!(
-                    "e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290d"
-                )
-                .into(),
-                difficulty: U256::from(131_072),
-                number: 1,
-                gas_limit: 1_000_000,
-                gas_used: 14_352,
-                timestamp: 1_000,
-                ..Default::default()
-            },
-            hex!("cf7b274520720b50e6a4c3e5c4d553101f44945396827705518ce17cb7219a42").into(),
-        ),
-        BlockBody {
-            transactions: vec![TransactionSigned::new(
+pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Block>> =
+    LazyLock::new(|| {
+        SealedBlock::from_sealed_parts(
+            SealedHeader::new(
+                Header {
+                    parent_hash: hex!(
+                        "c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94f"
+                    )
+                    .into(),
+                    ommers_hash: EMPTY_OMMER_ROOT_HASH,
+                    beneficiary: hex!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").into(),
+                    state_root: hex!(
+                        "50554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583d"
+                    )
+                    .into(),
+                    transactions_root: hex!(
+                        "0967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192"
+                    )
+                    .into(),
+                    receipts_root: hex!(
+                        "e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290d"
+                    )
+                    .into(),
+                    difficulty: U256::from(131_072),
+                    number: 1,
+                    gas_limit: 1_000_000,
+                    gas_used: 14_352,
+                    timestamp: 1_000,
+                    ..Default::default()
+                },
+                hex!("cf7b274520720b50e6a4c3e5c4d553101f44945396827705518ce17cb7219a42").into(),
+            ),
+            BlockBody {
+                transactions: vec![TransactionSigned::new(
             Transaction::Legacy(TxLegacy {
                 gas_price: 10,
                 gas_limit: 400_000,
@@ -115,19 +114,19 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| {
             ),
             b256!("0x3541dd1d17e76adeb25dcf2b0a9b60a1669219502e58dcf26a2beafbfb550397"),
         )],
-            ..Default::default()
-        },
-    )
-});
+                ..Default::default()
+            },
+        )
+    });
 
 /// Test chain with genesis, blocks, execution results
 /// that have valid changesets.
 #[derive(Debug)]
 pub struct BlockchainTestData {
     /// Genesis
-    pub genesis: SealedBlock,
+    pub genesis: SealedBlock<reth_ethereum_primitives::Block>,
     /// Blocks with its execution result
-    pub blocks: Vec<(RecoveredBlock<reth_primitives::Block>, ExecutionOutcome)>,
+    pub blocks: Vec<(RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome)>,
 }
 
 impl BlockchainTestData {
@@ -162,7 +161,7 @@ impl Default for BlockchainTestData {
 }
 
 /// Genesis block
-pub fn genesis() -> SealedBlock {
+pub fn genesis() -> SealedBlock<reth_ethereum_primitives::Block> {
     SealedBlock::from_sealed_parts(
         SealedHeader::new(
             Header { number: 0, difficulty: U256::from(1), ..Default::default() },
@@ -192,7 +191,9 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
 }
 
 /// Block one that points to genesis
-fn block1(number: BlockNumber) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+fn block1(
+    number: BlockNumber,
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     // block changes
     let account1: Address = [0x60; 20].into();
     let account2: Address = [0x61; 20].into();
@@ -242,7 +243,7 @@ fn block2(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     // block changes
     let account: Address = [0x60; 20].into();
     let slot = U256::from(5);
@@ -300,7 +301,7 @@ fn block3(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -358,7 +359,7 @@ fn block4(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -441,7 +442,7 @@ fn block5(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_ethereum_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
