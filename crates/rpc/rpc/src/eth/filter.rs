@@ -194,7 +194,7 @@ where
         }
     }
 
-    /// Update a reorg block for all active filters.
+    /// Update reorg blocks for all active filters.
     async fn update_reorg<N>(&self, old_blocks: &BTreeMap<BlockNumber, RecoveredBlock<N::Block>>)
     where
         N: NodePrimitives,
