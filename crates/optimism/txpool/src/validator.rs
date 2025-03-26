@@ -246,6 +246,7 @@ where
             state_nonce,
             transaction: valid_tx,
             propagate,
+            bytecode_hash,
         } = outcome
         {
             let mut l1_block_info = self.block_info.l1_block_info.read().clone();
@@ -283,6 +284,7 @@ where
                 state_nonce,
                 transaction: valid_tx,
                 propagate,
+                bytecode_hash,
             }
         }
         outcome
