@@ -64,7 +64,6 @@ fn main() -> eyre::Result<()> {
                 .launch()
                 .await?
         };
-
         handle.wait_for_node_exit().await
     })
 }
