@@ -28,7 +28,7 @@ use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     fmt,
     future::Future,
     iter::StepBy,
@@ -57,8 +57,7 @@ where
         limits: QueryLimits,
     ) -> impl Future<Output = RpcResult<Vec<Log>>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        let reorg_old_blocks =
-            futures::executor::block_on(self.get_reorg_old_blocks(filter.clone()));
+        let reorg_old_blocks = futures::executor::block_on(self.get_reorg_old_blocks(&filter));
         self.inner.logs_for_filter(filter, limits, reorg_old_blocks).map_err(|e| e.into())
     }
 }
@@ -361,7 +360,6 @@ where
     ///
     /// Handler for `eth_getFilterLogs`
     pub async fn filter_logs(&self, id: FilterId) -> Result<Vec<Log>, EthFilterError> {
-        // XXX FIXME YSG, check eth_getFilterLogs
         let (filter, reorg_old_blocks) = {
             let active_filters = self.inner.active_filters.inner.lock().await;
             let active_filter =
@@ -378,7 +376,7 @@ where
         self.inner.logs_for_filter(filter, self.inner.query_limits, reorg_old_blocks).await
     }
 
-    /// calc active filter reorg old blocks
+    /// calc active filter's reorg old blocks when reorg status is `REORG_HAPPEN`
     async fn calc_reorg_old_blocks_once<T>(
         &self,
         active_filter: &ActiveFilter<T>,
@@ -388,18 +386,15 @@ where
             return Ok(());
         }
         let mut block_num_hashs = vec![];
-        let mut reorg_old_blocks = HashSet::new();
         for (block_hash, reorg_old_block_info) in active_filter.reorg_old_blocks.read().iter() {
             if reorg_old_block_info.logs.is_empty() {
                 block_num_hashs
                     .push(BlockNumHash::new(reorg_old_block_info.block_number, *block_hash));
-                reorg_old_blocks.insert(*block_hash);
             }
         }
-        let _reorg_old_hashes = Arc::new(reorg_old_blocks);
         let info = self.provider().chain_info()?;
         for num_hash in block_num_hashs {
-            // XXX FIXME YSG check get_logs_in_block_range hash == outside num_hash.hash
+            // confirm check get_logs_in_block_range hash == outside num_hash.hash
             let logs = self
                 .inner
                 .get_logs_in_block_range(
@@ -426,12 +421,12 @@ where
     /// get reorg old blocks from filter
     async fn get_reorg_old_blocks(
         &self,
-        filter: Filter,
+        filter: &Filter,
     ) -> Arc<RwLock<HashMap<BlockHash, ReorgOldBlockInfo>>> {
         for active_filter in self.active_filters().inner.lock().await.values() {
             if let FilterKind::Log(filter1) = &active_filter.kind {
-                if **filter1 == filter {
-                    let res = self.calc_reorg_old_blocks_once(active_filter, &filter).await;
+                if **filter1 == *filter {
+                    let res = self.calc_reorg_old_blocks_once(active_filter, filter).await;
                     if res.is_err() {
                         break;
                     }
@@ -529,7 +524,7 @@ where
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>> {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
-        let reorg_old_blocks = self.get_reorg_old_blocks(filter.clone()).await;
+        let reorg_old_blocks = self.get_reorg_old_blocks(&filter).await;
         Ok(self.inner.logs_for_filter(filter, self.inner.query_limits, reorg_old_blocks).await?)
     }
 }
@@ -833,6 +828,7 @@ struct ActiveFilter<T> {
     /// What kind of filter it is.
     kind: FilterKind<T>,
     /// Reorg old blocks that are relevant to this filter
+    /// maybe it can process multi times reorg?
     reorg_old_blocks: Arc<RwLock<HashMap<BlockHash, ReorgOldBlockInfo>>>,
     /// Reorg status, `REORG_DEFAULT`, `REORG_HAPPEN`,
     reorg_status: AtomicU8,

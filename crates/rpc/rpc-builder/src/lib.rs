@@ -809,7 +809,6 @@ where
 
         let notifications = provider.canonical_state_stream();
         let eth = EthHandlers::bootstrap(config.eth, executor.clone(), eth_api);
-        // XXX FIXME YSG
 
         let eth_filter = eth.filter.clone();
         executor.spawn_critical(
