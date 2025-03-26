@@ -763,7 +763,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blinded::DefaultBlindedProviderFactory;
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},

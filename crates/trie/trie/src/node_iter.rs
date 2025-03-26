@@ -202,11 +202,12 @@ struct TrieNodeIterMetrics {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, time::Instant};
 
     use alloy_primitives::{
         b256,
         map::{B256Map, HashMap},
+        B256,
     };
     use alloy_trie::{
         BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
@@ -224,7 +225,7 @@ mod tests {
             HashedPostStateAccountCursor,
         },
         metrics::TrieType,
-        mock::{KeyVisit, KeyVisitType},
+        mock::{CursorType, KeyVisit},
         trie_cursor::{
             mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
         },
@@ -422,52 +423,41 @@ mod tests {
         // Walk the iterator until it's exhausted.
         while iter.try_next().unwrap().is_some() {}
 
+        let visited_account_nodes = trie_cursor_factory
+            .visited_account_keys()
+            .iter()
+            .cloned()
+            .map(CursorType::Trie)
+            .chain(
+                hashed_cursor_factory
+                    .visited_account_keys()
+                    .iter()
+                    .cloned()
+                    .map(CursorType::Hashed),
+            )
+            .sorted()
+            .collect::<Vec<_>>();
+
         pretty_assertions::assert_eq!(
-            *trie_cursor_factory.visited_account_keys(),
+            visited_account_nodes,
             vec![
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekExact(Nibbles::default()),
-                    visited_key: None
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x0])),
-                    visited_key: Some(branch_node_0.0)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0.clone()),
-                    visited_key: Some(branch_node_2.0)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
-                    visited_key: None
-                }
+                CursorType::Trie(KeyVisit::seek_exact(Nibbles::default(), None)),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_1, Some(account_1))),
+                CursorType::Trie(KeyVisit::seek_non_exact(
+                    Nibbles::from_nibbles([0x0]),
+                    Some(branch_node_0.0)
+                )),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_3, Some(account_3))),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_3, Some(account_3))),
+                CursorType::Trie(KeyVisit::seek_non_exact(
+                    branch_node_2.0.clone(),
+                    Some(branch_node_2.0)
+                )),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_5, Some(account_5))),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_5, Some(account_5))),
+                CursorType::Trie(KeyVisit::seek_non_exact(Nibbles::from_nibbles([0x1]), None)),
+                CursorType::Hashed(KeyVisit::next(None)),
             ]
-        );
-        pretty_assertions::assert_eq!(
-            *hashed_cursor_factory.visited_account_keys(),
-            vec![
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_1),
-                    visited_key: Some(account_1)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_5),
-                    visited_key: Some(account_5)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_5),
-                    visited_key: Some(account_5)
-                },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
-            ],
         );
     }
 }

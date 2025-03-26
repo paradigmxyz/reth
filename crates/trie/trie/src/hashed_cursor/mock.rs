@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 
-use crate::mock::{KeyVisit, KeyVisitType};
+use crate::mock::KeyVisit;
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
@@ -108,10 +108,9 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
         }
-        self.visited_keys.lock().push(KeyVisit {
-            visit_type: KeyVisitType::SeekNonExact(key),
-            visited_key: entry.as_ref().map(|(k, _)| *k),
-        });
+        self.visited_keys
+            .lock()
+            .push(KeyVisit::seek_non_exact(key, entry.as_ref().map(|(k, _)| *k)));
         Ok(entry)
     }
 
@@ -129,10 +128,7 @@ impl<T: Debug + Clone> HashedCursor for MockHashedCursor<T> {
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
         }
-        self.visited_keys.lock().push(KeyVisit {
-            visit_type: KeyVisitType::Next,
-            visited_key: entry.as_ref().map(|(k, _)| *k),
-        });
+        self.visited_keys.lock().push(KeyVisit::next(entry.as_ref().map(|(k, _)| *k)));
         Ok(entry)
     }
 }
