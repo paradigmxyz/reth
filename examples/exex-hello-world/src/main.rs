@@ -50,20 +50,21 @@ async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::
 fn main() -> eyre::Result<()> {
     let args = ExExArgs::parse();
 
-    reth::cli::Cli::parse_args().run(move |builder, _| async move {
-        let handle = if args.optimism {
-            builder
-                .node(OpNode::default())
-                .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
-                .launch()
-                .await?
-        } else {
-            builder
-                .node(EthereumNode::default())
-                .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
-                .launch()
-                .await?
-        };
+    reth::cli::Cli::parse_args().run(move |builder, _| {
+        Box::pin(async move {
+            let handle = if args.optimism {
+                builder
+                    .node(OpNode::default())
+                    .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
+                    .launch()
+                    .await?
+            } else {
+                builder
+                    .node(EthereumNode::default())
+                    .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
+                    .launch()
+                    .await?
+            };
         handle.wait_for_node_exit().await
     })
 }
