@@ -309,10 +309,29 @@ where
                 )
             }
 
+            if transaction.to().is_none() {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    Eip7702PoolTransactionError::MissingEip7702To.into(),
+                )
+            }
+
             if transaction.authorization_list().is_none_or(|l| l.is_empty()) {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
+                )
+            }
+
+            let has_invalid_auth = transaction
+                .authorization_list()
+                .unwrap()
+                .iter()
+                .any(|auth| auth.recover_authority().is_err());
+            if has_invalid_auth {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    Eip7702PoolTransactionError::AuthorizationRecoverFailed.into(),
                 )
             }
         }
