@@ -85,13 +85,13 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     accept_execution_requests_hash: bool,
 }
 
-impl<Provider, EngineT, Pool, Validator, ChainSpec>
-    EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+impl<Provider, PayloadT, Pool, Validator, ChainSpec>
+    EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes,
+    PayloadT: PayloadTypes,
     Pool: TransactionPool + 'static,
-    Validator: EngineValidator<EngineT>,
+    Validator: EngineValidator<PayloadT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
     /// Create new instance of [`EngineApi`].
@@ -99,8 +99,8 @@ where
     pub fn new(
         provider: Provider,
         chain_spec: Arc<ChainSpec>,
-        beacon_consensus: BeaconConsensusEngineHandle<EngineT>,
-        payload_store: PayloadStore<EngineT>,
+        beacon_consensus: BeaconConsensusEngineHandle<PayloadT>,
+        payload_store: PayloadStore<PayloadT>,
         tx_pool: Pool,
         task_spawner: Box<dyn TaskSpawner>,
         client: ClientVersionV1,
@@ -137,7 +137,7 @@ where
     async fn get_payload_attributes(
         &self,
         payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::PayloadBuilderAttributes> {
+    ) -> EngineApiResult<PayloadT::PayloadBuilderAttributes> {
         Ok(self
             .inner
             .payload_store
@@ -150,12 +150,12 @@ where
     /// Caution: This should not accept the `withdrawals` field
     pub async fn new_payload_v1(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
-            EngineT::ExecutionData,
-            EngineT::PayloadAttributes,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
 
         self.inner
@@ -173,7 +173,7 @@ where
     /// Metered version of `new_payload_v1`.
     async fn new_payload_v1_metered(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
@@ -188,12 +188,12 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
     pub async fn new_payload_v2(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
-            EngineT::ExecutionData,
-            EngineT::PayloadAttributes,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
         self.inner
             .validator
@@ -209,7 +209,7 @@ where
     /// Metered version of `new_payload_v2`.
     pub async fn new_payload_v2_metered(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
@@ -224,12 +224,12 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#engine_newpayloadv3>
     pub async fn new_payload_v3(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
-            EngineT::ExecutionData,
-            EngineT::PayloadAttributes,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
         self.inner
             .validator
@@ -246,7 +246,7 @@ where
     /// Metrics version of `new_payload_v3`
     pub async fn new_payload_v3_metered(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
@@ -261,12 +261,12 @@ where
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
     pub async fn new_payload_v4(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
         let payload_or_attrs = PayloadOrAttributes::<
             '_,
-            EngineT::ExecutionData,
-            EngineT::PayloadAttributes,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
         >::from_execution_payload(&payload);
         self.inner
             .validator
@@ -283,7 +283,7 @@ where
     /// Metrics version of `new_payload_v4`
     pub async fn new_payload_v4_metered(
         &self,
-        payload: EngineT::ExecutionData,
+        payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
         let gas_used = payload.gas_used();
@@ -295,7 +295,17 @@ where
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
+}
 
+impl<Provider, EngineT, Pool, Validator, ChainSpec>
+    EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
+    EngineT: EngineTypes,
+    Pool: TransactionPool + 'static,
+    Validator: EngineValidator<EngineT>,
+    ChainSpec: EthereumHardforks + Send + Sync + 'static,
+{
     /// Sends a message to the beacon consensus engine to update the fork choice _without_
     /// withdrawals.
     ///

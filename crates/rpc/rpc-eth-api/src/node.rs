@@ -51,7 +51,7 @@ where
     type Pool = T::Pool;
     type Evm = T::Evm;
     type Network = T::Network;
-    type PayloadBuilder = PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Engine>;
+    type PayloadBuilder = PayloadBuilderHandle<<T::Types as NodeTypesWithEngine>::Payload>;
 
     #[inline]
     fn pool(&self) -> &Self::Pool {
