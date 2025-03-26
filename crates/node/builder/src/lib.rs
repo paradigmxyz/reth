@@ -1,4 +1,7 @@
 //! Standalone crate for Reth configuration and builder types.
+//!
+//! # features
+//! - `js-tracer`: Enable the `JavaScript` tracer for the `debug_trace` endpoints
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -17,12 +20,17 @@ pub use node::*;
 
 /// Support for configuring the components of a node.
 pub mod components;
+pub use components::{NodeComponents, NodeComponentsBuilder};
 
 mod builder;
-pub use builder::*;
+pub use builder::{add_ons::AddOns, *};
 
 mod launch;
-pub use launch::*;
+pub use launch::{
+    debug::{DebugNode, DebugNodeLauncher},
+    engine::EngineNodeLauncher,
+    *,
+};
 
 mod handle;
 pub use handle::NodeHandle;
@@ -31,12 +39,16 @@ pub mod rpc;
 
 pub mod setup;
 
+/// Type aliases for traits that are often used together
+pub mod aliases;
+pub use aliases::*;
+
 /// Support for installing the ExExs (execution extensions) in a node.
 pub mod exex;
 
 /// Re-export the core configuration traits.
 pub use reth_node_core::cli::config::{
-    PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig, RethTransactionPoolConfig,
+    PayloadBuilderConfig, RethNetworkConfig, RethTransactionPoolConfig,
 };
 
 // re-export the core config for convenience

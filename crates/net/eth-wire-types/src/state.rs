@@ -1,18 +1,17 @@
 //! Implements the `GetNodeData` and `NodeData` message types.
 
+use alloc::vec::Vec;
+use alloy_primitives::{Bytes, B256};
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
-use reth_codecs::derive_arbitrary;
-use reth_primitives::{Bytes, B256};
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use reth_codecs_derive::add_arbitrary_tests;
 
 /// A request for state tree nodes corresponding to the given hashes.
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetNodeData(pub Vec<B256>);
 
 /// The response to [`GetNodeData`], containing the state tree nodes or contract bytecode
@@ -20,14 +19,15 @@ pub struct GetNodeData(pub Vec<B256>);
 ///
 /// Not all nodes are guaranteed to be returned by the peer.
 /// This message was removed in `eth/67`.
-#[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct NodeData(pub Vec<Bytes>);
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::hex;
+    use alloy_primitives::hex;
 
     use crate::{message::RequestPair, GetNodeData, NodeData};
     use alloy_rlp::{Decodable, Encodable};
@@ -37,7 +37,7 @@ mod tests {
     fn encode_get_node_data() {
         let expected = hex!("f847820457f842a000000000000000000000000000000000000000000000000000000000deadc0dea000000000000000000000000000000000000000000000000000000000feedbeef");
         let mut data = vec![];
-        let request = RequestPair::<GetNodeData> {
+        let request = RequestPair {
             request_id: 1111,
             message: GetNodeData(vec![
                 hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
@@ -55,7 +55,7 @@ mod tests {
         let request = RequestPair::<GetNodeData>::decode(&mut &data[..]).unwrap();
         assert_eq!(
             request,
-            RequestPair::<GetNodeData> {
+            RequestPair {
                 request_id: 1111,
                 message: GetNodeData(vec![
                     hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
@@ -70,7 +70,7 @@ mod tests {
     fn encode_node_data() {
         let expected = hex!("ce820457ca84deadc0de84feedbeef");
         let mut data = vec![];
-        let request = RequestPair::<NodeData> {
+        let request = RequestPair {
             request_id: 1111,
             message: NodeData(vec![
                 hex!("deadc0de").as_slice().into(),
@@ -88,7 +88,7 @@ mod tests {
         let request = RequestPair::<NodeData>::decode(&mut &data[..]).unwrap();
         assert_eq!(
             request,
-            RequestPair::<NodeData> {
+            RequestPair {
                 request_id: 1111,
                 message: NodeData(vec![
                     hex!("deadc0de").as_slice().into(),

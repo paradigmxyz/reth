@@ -4,7 +4,7 @@
 //!
 //! ## Feature Flags
 //!
-//! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
+//! - `arbitrary`: Adds `arbitrary` support for primitive types.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -12,19 +12,21 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
-mod forkid;
-mod hardfork;
-mod head;
+extern crate alloc;
 
-pub use forkid::{
-    EnrForkIdEntry, ForkFilter, ForkFilterKey, ForkHash, ForkId, ForkTransition, ValidationError,
-};
-pub use hardfork::Hardfork;
-pub use head::Head;
+/// Re-exported EIP-2124 forkid types.
+pub use alloy_eip2124::*;
+
+mod display;
+mod hardforks;
+
+pub use alloy_hardforks::*;
+
+pub use display::DisplayHardforks;
+pub use hardforks::*;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

@@ -2,31 +2,33 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p manual-p2p
 //! ```
 
+#![warn(unused_crate_dependencies)]
+
 use std::time::Duration;
 
+use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 use futures::StreamExt;
-use once_cell::sync::Lazy;
+use reth_chainspec::{Chain, MAINNET};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     EthMessage, EthStream, HelloMessage, P2PStream, Status, UnauthedEthStream, UnauthedP2PStream,
 };
-use reth_network::config::rng_secret_key;
-use reth_network_types::pk2id;
-use reth_primitives::{
-    mainnet_nodes, Chain, Hardfork, Head, NodeRecord, MAINNET, MAINNET_GENESIS_HASH,
-};
+use reth_network::{config::rng_secret_key, EthNetworkPrimitives};
+use reth_network_peers::{mainnet_nodes, pk2id, NodeRecord};
+use reth_primitives::{EthereumHardfork, Head};
 use secp256k1::{SecretKey, SECP256K1};
+use std::sync::LazyLock;
 use tokio::net::TcpStream;
 
 type AuthedP2PStream = P2PStream<ECIESStream<TcpStream>>;
-type AuthedEthStream = EthStream<P2PStream<ECIESStream<TcpStream>>>;
+type AuthedEthStream = EthStream<P2PStream<ECIESStream<TcpStream>>, EthNetworkPrimitives>;
 
-pub static MAINNET_BOOT_NODES: Lazy<Vec<NodeRecord>> = Lazy::new(mainnet_nodes);
+pub static MAINNET_BOOT_NODES: LazyLock<Vec<NodeRecord>> = LazyLock::new(mainnet_nodes);
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -96,17 +98,18 @@ async fn handshake_p2p(
 // Perform a ETH Wire handshake with a peer
 async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthStream, Status)> {
     let fork_filter = MAINNET.fork_filter(Head {
-        timestamp: MAINNET.fork(Hardfork::Shanghai).as_timestamp().unwrap(),
+        timestamp: MAINNET.fork(EthereumHardfork::Shanghai).as_timestamp().unwrap(),
         ..Default::default()
     });
 
     let status = Status::builder()
         .chain(Chain::mainnet())
         .genesis(MAINNET_GENESIS_HASH)
-        .forkid(MAINNET.hardfork_fork_id(Hardfork::Shanghai).unwrap())
+        .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Shanghai).unwrap())
         .build();
 
-    let status = Status { version: p2p_stream.shared_capabilities().eth()?.version(), ..status };
+    let status =
+        Status { version: p2p_stream.shared_capabilities().eth()?.version().try_into()?, ..status };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     Ok(eth_unauthed.handshake(status, fork_filter).await?)
 }

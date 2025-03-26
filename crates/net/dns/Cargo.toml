@@ -13,12 +13,13 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
-reth-net-common.workspace = true
-reth-network-types.workspace = true
+reth-ethereum-forks.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
+reth-tokio-util = { workspace = true, features = ["time"] }
 
 # ethereum
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
+alloy-primitives.workspace = true
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery", "serde"] }
 enr.workspace = true
 
 # async/futures
@@ -26,24 +27,37 @@ tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tokio-stream.workspace = true
 
 # trust-dns
-trust-dns-resolver = "0.23"
+hickory-resolver = { workspace = true, features = ["tokio"] }
 
 # misc
-data-encoding = "2"
-linked_hash_set = "0.1"
+data-encoding.workspace = true
+linked_hash_set.workspace = true
 schnellru.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
 serde = { workspace = true, optional = true }
-serde_with = { version = "3.3.0", optional = true }
+serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-chainspec.workspace = true
 alloy-rlp.workspace = true
+alloy-chains.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 reth-tracing.workspace = true
 rand.workspace = true
 
 [features]
-default = ["serde"]
-serde = ["dep:serde", "dep:serde_with"]
+serde = [
+    "dep:serde",
+    "dep:serde_with",
+    "alloy-chains/serde",
+    "alloy-primitives/serde",
+    "enr/serde",
+    "linked_hash_set/serde",
+    "parking_lot/serde",
+    "rand/serde",
+    "secp256k1/serde",
+    "hickory-resolver/serde",
+    "reth-ethereum-forks/serde",
+]

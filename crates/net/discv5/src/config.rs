@@ -6,10 +6,14 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
 };
 
+use alloy_primitives::Bytes;
 use derive_more::Display;
-use discv5::ListenConfig;
-use multiaddr::{Multiaddr, Protocol};
-use reth_primitives::{Bytes, EnrForkIdEntry, ForkId, NodeRecord};
+use discv5::{
+    multiaddr::{Multiaddr, Protocol},
+    ListenConfig,
+};
+use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_network_peers::NodeRecord;
 use tracing::warn;
 
 use crate::{enr::discv4_id_to_multiaddr_id, filter::MustNotIncludeKeys, NetworkStackId};
@@ -26,8 +30,14 @@ pub const DEFAULT_DISCOVERY_V5_ADDR_IPV6: Ipv6Addr = Ipv6Addr::UNSPECIFIED;
 
 /// The default port for discv5 via UDP.
 ///
-/// Default is port 9000. See [`discv5::ListenConfig`] default.
-pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9000;
+/// Default is port 9200.
+pub const DEFAULT_DISCOVERY_V5_PORT: u16 = 9200;
+
+/// The default [`discv5::ListenConfig`].
+///
+/// This is different from the upstream default.
+pub const DEFAULT_DISCOVERY_V5_LISTEN_CONFIG: ListenConfig =
+    ListenConfig::Ipv4 { ip: DEFAULT_DISCOVERY_V5_ADDR, port: DEFAULT_DISCOVERY_V5_PORT };
 
 /// Default interval in seconds at which to run a lookup up query.
 ///
@@ -40,7 +50,7 @@ pub const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
 /// Default is 100 counts.
 pub const DEFAULT_COUNT_BOOTSTRAP_LOOKUPS: u64 = 100;
 
-/// Default duration of look up interval, for pulse look ups at bootstrap.
+/// Default duration of the pulse lookup interval at bootstrap.
 ///
 /// Default is 5 seconds.
 pub const DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL: u64 = 5;
@@ -57,9 +67,9 @@ pub struct ConfigBuilder {
     ///
     /// Defaults to L1 mainnet if not set.
     fork: Option<(&'static [u8], ForkId)>,
-    /// RLPx TCP socket to advertise.
+    /// `RLPx` TCP socket to advertise.
     ///
-    /// NOTE: IP address of RLPx socket overwrites IP address of same IP version in
+    /// NOTE: IP address of `RLPx` socket overwrites IP address of same IP version in
     /// [`discv5::ListenConfig`].
     tcp_socket: SocketAddr,
     /// List of `(key, rlp-encoded-value)` tuples that should be advertised in local node record
@@ -129,7 +139,7 @@ impl ConfigBuilder {
     }
 
     /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
-    pub fn add_unsigned_boot_nodes(mut self, enodes: impl Iterator<Item = NodeRecord>) -> Self {
+    pub fn add_unsigned_boot_nodes(mut self, enodes: impl IntoIterator<Item = NodeRecord>) -> Self {
         for node in enodes {
             if let Ok(node) = BootNode::from_unsigned(node) {
                 self.bootstrap_nodes.insert(node);
@@ -154,7 +164,7 @@ impl ConfigBuilder {
 
     /// Set fork ID kv-pair to set in local [`Enr`](discv5::enr::Enr). This lets peers on discovery
     /// network know which chain this node belongs to.
-    pub fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
+    pub const fn fork(mut self, fork_key: &'static [u8], fork_id: ForkId) -> Self {
         self.fork = Some((fork_key, fork_id));
         self
     }
@@ -162,7 +172,7 @@ impl ConfigBuilder {
     /// Sets the tcp socket to advertise in the local [`Enr`](discv5::enr::Enr). The IP address of
     /// this socket will overwrite the discovery address of the same IP version, if one is
     /// configured.
-    pub fn tcp_socket(mut self, socket: SocketAddr) -> Self {
+    pub const fn tcp_socket(mut self, socket: SocketAddr) -> Self {
         self.tcp_socket = socket;
         self
     }
@@ -176,20 +186,20 @@ impl ConfigBuilder {
 
     /// Sets the interval at which to run lookup queries, in order to fill kbuckets. Lookup queries
     /// are done periodically at the given interval for the whole run of the program.
-    pub fn lookup_interval(mut self, seconds: u64) -> Self {
+    pub const fn lookup_interval(mut self, seconds: u64) -> Self {
         self.lookup_interval = Some(seconds);
         self
     }
 
     /// Sets the interval at which to run boost lookup queries at start up. Queries will be started
     /// at this interval for the configured number of times after start up.
-    pub fn bootstrap_lookup_interval(mut self, seconds: u64) -> Self {
+    pub const fn bootstrap_lookup_interval(mut self, seconds: u64) -> Self {
         self.bootstrap_lookup_interval = Some(seconds);
         self
     }
 
-    /// Sets the the number of times at which to run boost lookup queries to bootstrap the node.
-    pub fn bootstrap_lookup_countdown(mut self, counts: u64) -> Self {
+    /// Sets the number of times at which to run boost lookup queries to bootstrap the node.
+    pub const fn bootstrap_lookup_countdown(mut self, counts: u64) -> Self {
         self.bootstrap_lookup_countdown = Some(counts);
         self
     }
@@ -218,8 +228,9 @@ impl ConfigBuilder {
             discovered_peer_filter,
         } = self;
 
-        let mut discv5_config = discv5_config
-            .unwrap_or_else(|| discv5::ConfigBuilder::new(ListenConfig::default()).build());
+        let mut discv5_config = discv5_config.unwrap_or_else(|| {
+            discv5::ConfigBuilder::new(DEFAULT_DISCOVERY_V5_LISTEN_CONFIG).build()
+        });
 
         discv5_config.listen_config =
             amend_listen_config_wrt_rlpx(&discv5_config.listen_config, tcp_socket.ip());
@@ -250,7 +261,7 @@ impl ConfigBuilder {
 }
 
 /// Config used to bootstrap [`discv5::Discv5`].
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// Config used by [`discv5::Discv5`]. Contains the [`ListenConfig`], with the discovery listen
     /// socket.
@@ -260,9 +271,9 @@ pub struct Config {
     /// Fork kv-pair to set in local node record. Identifies which network/chain/fork the node
     /// belongs, e.g. `(b"opstack", ChainId)` or `(b"eth", [ForkId])`.
     pub(super) fork: Option<(&'static [u8], EnrForkIdEntry)>,
-    /// RLPx TCP socket to advertise.
+    /// `RLPx` TCP socket to advertise.
     ///
-    /// NOTE: IP address of RLPx socket overwrites IP address of same IP version in
+    /// NOTE: IP address of `RLPx` socket overwrites IP address of same IP version in
     /// [`discv5::ListenConfig`].
     pub(super) tcp_socket: SocketAddr,
     /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
@@ -281,12 +292,12 @@ pub struct Config {
 }
 
 impl Config {
-    /// Returns a new [`ConfigBuilder`], with the RLPx TCP port and IP version configured w.r.t.
+    /// Returns a new [`ConfigBuilder`], with the `RLPx` TCP port and IP version configured w.r.t.
     /// the given socket.
     pub fn builder(rlpx_tcp_socket: SocketAddr) -> ConfigBuilder {
         ConfigBuilder {
             discv5_config: None,
-            bootstrap_nodes: HashSet::new(),
+            bootstrap_nodes: HashSet::default(),
             fork: None,
             tcp_socket: rlpx_tcp_socket,
             other_enr_kv_pairs: Vec::new(),
@@ -296,9 +307,28 @@ impl Config {
             discovered_peer_filter: None,
         }
     }
-}
 
-impl Config {
+    /// Inserts a new boot node to the list of boot nodes.
+    pub fn insert_boot_node(&mut self, boot_node: BootNode) {
+        self.bootstrap_nodes.insert(boot_node);
+    }
+
+    /// Inserts a new unsigned enode boot node to the list of boot nodes if it can be parsed, see
+    /// also [`BootNode::from_unsigned`].
+    pub fn insert_unsigned_boot_node(&mut self, node_record: NodeRecord) {
+        let _ = BootNode::from_unsigned(node_record).map(|node| self.insert_boot_node(node));
+    }
+
+    /// Extends the list of boot nodes with a list of enode boot nodes if they can be parsed.
+    pub fn extend_unsigned_boot_nodes(
+        &mut self,
+        node_records: impl IntoIterator<Item = NodeRecord>,
+    ) {
+        for node_record in node_records {
+            self.insert_unsigned_boot_node(node_record);
+        }
+    }
+
     /// Returns the discovery (UDP) socket contained in the [`discv5::Config`]. Returns the IPv6
     /// socket, if both IPv4 and v6 are configured. This socket will be advertised to peers in the
     /// local [`Enr`](discv5::enr::Enr).
@@ -310,15 +340,15 @@ impl Config {
         }
     }
 
-    /// Returns the RLPx (TCP) socket contained in the [`discv5::Config`]. This socket will be
+    /// Returns the `RLPx` (TCP) socket contained in the [`discv5::Config`]. This socket will be
     /// advertised to peers in the local [`Enr`](discv5::enr::Enr).
-    pub fn rlpx_socket(&self) -> &SocketAddr {
+    pub const fn rlpx_socket(&self) -> &SocketAddr {
         &self.tcp_socket
     }
 }
 
 /// Returns the IPv4 discovery socket if one is configured.
-pub fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
+pub const fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
     match listen_config {
         ListenConfig::Ipv4 { ip, port } |
         ListenConfig::DualStack { ipv4: ip, ipv4_port: port, .. } => {
@@ -329,7 +359,7 @@ pub fn ipv4(listen_config: &ListenConfig) -> Option<SocketAddrV4> {
 }
 
 /// Returns the IPv6 discovery socket if one is configured.
-pub fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
+pub const fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
     match listen_config {
         ListenConfig::Ipv4 { .. } => None,
         ListenConfig::Ipv6 { ip, port } |
@@ -339,9 +369,9 @@ pub fn ipv6(listen_config: &ListenConfig) -> Option<SocketAddrV6> {
     }
 }
 
-/// Returns the amended [`discv5::ListenConfig`] based on the RLPx IP address. The ENR is limited
+/// Returns the amended [`discv5::ListenConfig`] based on the `RLPx` IP address. The ENR is limited
 /// to one IP address per IP version (atm, may become spec'd how to advertise different addresses).
-/// The RLPx address overwrites the discv5 address w.r.t. IP version.
+/// The `RLPx` address overwrites the discv5 address w.r.t. IP version.
 pub fn amend_listen_config_wrt_rlpx(
     listen_config: &ListenConfig,
     rlpx_addr: IpAddr,
@@ -367,8 +397,8 @@ pub fn amend_listen_config_wrt_rlpx(
     ListenConfig::from_two_sockets(discv5_socket_ipv4, discv5_socket_ipv6)
 }
 
-/// Returns the sockets that can be used for discv5 with respect to the RLPx address. ENR specs only
-/// acknowledge one address per IP version.
+/// Returns the sockets that can be used for discv5 with respect to the `RLPx` address. ENR specs
+/// only acknowledge one address per IP version.
 pub fn discv5_sockets_wrt_rlpx_addr(
     rlpx_addr: IpAddr,
     discv5_addr_ipv4: Option<Ipv4Addr>,
@@ -382,11 +412,13 @@ pub fn discv5_sockets_wrt_rlpx_addr(
                 discv5_addr_ipv6.map(|ip| SocketAddrV6::new(ip, discv5_port_ipv6, 0, 0));
 
             if let Some(discv5_addr) = discv5_addr_ipv4 {
-                warn!(target: "discv5",
-                    %discv5_addr,
-                    %rlpx_addr,
-                    "Overwriting discv5 IPv4 address with RLPx IPv4 address, limited to one advertised IP address per IP version"
-                );
+                if discv5_addr != rlpx_addr {
+                    warn!(target: "net::discv5",
+                        %discv5_addr,
+                        %rlpx_addr,
+                        "Overwriting discv5 IPv4 address with RLPx IPv4 address, limited to one advertised IP address per IP version"
+                    );
+                }
             }
 
             // overwrite discv5 ipv4 addr with RLPx address. this is since there is no
@@ -399,11 +431,13 @@ pub fn discv5_sockets_wrt_rlpx_addr(
                 discv5_addr_ipv4.map(|ip| SocketAddrV4::new(ip, discv5_port_ipv4));
 
             if let Some(discv5_addr) = discv5_addr_ipv6 {
-                warn!(target: "discv5",
-                    %discv5_addr,
-                    %rlpx_addr,
-                    "Overwriting discv5 IPv6 address with RLPx IPv6 address, limited to one advertised IP address per IP version"
-                );
+                if discv5_addr != rlpx_addr {
+                    warn!(target: "net::discv5",
+                        %discv5_addr,
+                        %rlpx_addr,
+                        "Overwriting discv5 IPv6 address with RLPx IPv6 address, limited to one advertised IP address per IP version"
+                    );
+                }
             }
 
             // overwrite discv5 ipv6 addr with RLPx address. this is since there is no
@@ -416,13 +450,13 @@ pub fn discv5_sockets_wrt_rlpx_addr(
 
 /// A boot node can be added either as a string in either 'enode' URL scheme or serialized from
 /// [`Enr`](discv5::Enr) type.
-#[derive(Debug, PartialEq, Eq, Hash, Display)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Display)]
 pub enum BootNode {
     /// An unsigned node record.
-    #[display(fmt = "{_0}")]
+    #[display("{_0}")]
     Enode(Multiaddr),
     /// A signed node record.
-    #[display(fmt = "{_0:?}")]
+    #[display("{_0:?}")]
     Enr(discv5::Enr),
 }
 
@@ -447,11 +481,9 @@ impl BootNode {
 
 #[cfg(test)]
 mod test {
-    use std::net::SocketAddrV4;
-
-    use reth_primitives::hex;
-
     use super::*;
+    use alloy_primitives::hex;
+    use std::net::SocketAddrV4;
 
     const MULTI_ADDRESSES: &str = "/ip4/184.72.129.189/udp/30301/p2p/16Uiu2HAmSG2hdLwyQHQmG4bcJBgD64xnW63WMTLcrNq6KoZREfGb,/ip4/3.231.11.52/udp/30301/p2p/16Uiu2HAmMy4V8bi3XP7KDfSLQcLACSvTLroRRwEsTyFUKo8NCkkp,/ip4/54.198.153.150/udp/30301/p2p/16Uiu2HAmSVsb7MbRf1jg3Dvd6a3n5YNqKQwn1fqHCFgnbqCsFZKe,/ip4/3.220.145.177/udp/30301/p2p/16Uiu2HAm74pBDGdQ84XCZK27GRQbGFFwQ7RsSqsPwcGmCR3Cwn3B,/ip4/3.231.138.188/udp/30301/p2p/16Uiu2HAmMnTiJwgFtSVGV14ZNpwAvS1LUoF4pWWeNtURuV6C3zYB";
     const BOOT_NODES_OP_MAINNET_AND_BASE_MAINNET: &[&str] = &[
@@ -505,7 +537,7 @@ mod test {
     fn overwrite_ipv4_addr() {
         let rlpx_addr: Ipv4Addr = "192.168.0.1".parse().unwrap();
 
-        let listen_config = ListenConfig::default();
+        let listen_config = DEFAULT_DISCOVERY_V5_LISTEN_CONFIG;
 
         let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into());
 
@@ -520,7 +552,7 @@ mod test {
     fn overwrite_ipv6_addr() {
         let rlpx_addr: Ipv6Addr = "fe80::1".parse().unwrap();
 
-        let listen_config = ListenConfig::default();
+        let listen_config = DEFAULT_DISCOVERY_V5_LISTEN_CONFIG;
 
         let amended_config = amend_listen_config_wrt_rlpx(&listen_config, rlpx_addr.into());
 

@@ -15,7 +15,7 @@ workspace = true
 proc-macro = true
 
 [dependencies]
-convert_case = "0.6.0"
+convert_case.workspace = true
 proc-macro2.workspace = true
 quote.workspace = true
 syn.workspace = true
@@ -23,6 +23,3 @@ syn.workspace = true
 [dev-dependencies]
 similar-asserts.workspace = true
 syn = { workspace = true, features = ["full", "extra-traits"] }
-
-[features]
-optimism = []

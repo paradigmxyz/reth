@@ -1,0 +1,51 @@
+[package]
+name = "reth-payload-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives-traits.workspace = true
+reth-chainspec.workspace = true
+reth-errors.workspace = true
+reth-chain-state.workspace = true
+
+# alloy
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
+op-alloy-rpc-types-engine = { workspace = true, optional = true }
+
+# misc
+auto_impl.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, default-features = false, features = ["sync"] }
+
+[dev-dependencies]
+assert_matches.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-chainspec/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "op-alloy-rpc-types-engine?/std",
+    "serde/std",
+    "thiserror/std",
+    "reth-primitives-traits/std",
+]
+op = [
+    "dep:op-alloy-rpc-types-engine",
+    "reth-primitives-traits/op",
+]

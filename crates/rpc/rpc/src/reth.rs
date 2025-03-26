@@ -1,12 +1,14 @@
-use crate::eth::error::{EthApiError, EthResult};
+use std::{collections::HashMap, future::Future, sync::Arc};
+
+use alloy_eips::BlockId;
+use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_interfaces::RethResult;
-use reth_primitives::{Address, BlockId, U256};
+use reth_errors::RethResult;
 use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;
+use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_tasks::TaskSpawner;
-use std::{collections::HashMap, future::Future, sync::Arc};
 use tokio::sync::oneshot;
 
 /// `reth` API implementation.
@@ -24,7 +26,7 @@ impl<Provider> RethApi<Provider> {
         &self.inner.provider
     }
 
-    /// Create a new instance of the [RethApi]
+    /// Create a new instance of the [`RethApi`]
     pub fn new(provider: Provider, task_spawner: Box<dyn TaskSpawner>) -> Self {
         let inner = Arc::new(RethApiInner { provider, task_spawner });
         Self { inner }
@@ -63,15 +65,15 @@ where
 
     fn try_balance_changes_in_block(&self, block_id: BlockId) -> EthResult<HashMap<Address, U256>> {
         let Some(block_number) = self.provider().block_number_for_id(block_id)? else {
-            return Err(EthApiError::UnknownBlockNumber)
+            return Err(EthApiError::HeaderNotFound(block_id))
         };
 
         let state = self.provider().state_by_block_id(block_id)?;
         let accounts_before = self.provider().account_block_changeset(block_number)?;
         let hash_map = accounts_before.iter().try_fold(
-            HashMap::new(),
+            HashMap::default(),
             |mut hash_map, account_before| -> RethResult<_> {
-                let current_balance = state.account_balance(account_before.address)?;
+                let current_balance = state.account_balance(&account_before.address)?;
                 let prev_balance = account_before.info.map(|info| info.balance);
                 if current_balance != prev_balance {
                     hash_map.insert(account_before.address, current_balance.unwrap_or_default());
@@ -93,7 +95,7 @@ where
         &self,
         block_id: BlockId,
     ) -> RpcResult<HashMap<Address, U256>> {
-        Ok(RethApi::balance_changes_in_block(self, block_id).await?)
+        Ok(Self::balance_changes_in_block(self, block_id).await?)
     }
 }
 

@@ -1,16 +1,46 @@
 # Troubleshooting
 
-As Reth is still in alpha, while running the node you can experience some problems related to different parts of the system: pipeline sync, blockchain tree, p2p, database, etc.
-
 This page tries to answer how to deal with the most popular issues.
 
+- [Troubleshooting](#troubleshooting)
+  - [Database](#database)
+    - [Docker](#docker)
+    - [Error code 13](#error-code-13)
+    - [Slow database inserts and updates](#slow-database-inserts-and-updates)
+      - [Compact the database](#compact-the-database)
+      - [Re-sync from scratch](#re-sync-from-scratch)
+    - [Database write error](#database-write-error)
+    - [Concurrent database access error (using containers/Docker)](#concurrent-database-access-error-using-containersdocker)
+  - [Hardware Performance Testing](#hardware-performance-testing)
+    - [Disk Speed Testing with IOzone](#disk-speed-testing-with-iozone)
+
+
 ## Database
+
+### Docker 
+
+Externally accessing a `datadir` inside a named docker volume will usually come with folder/file ownership/permissions issues.
+
+**It is not recommended** to use the path to the named volume as it will trigger an error code 13. `RETH_DB_PATH: /var/lib/docker/volumes/named_volume/_data/eth/db cargo r --examples db-access --path ` is **DISCOURAGED** and a mounted volume with the right permissions should be used instead.
+
+### Error code 13 
+
+`the environment opened in read-only code: 13`
+
+Externally accessing a database in a read-only folder is not supported, **UNLESS** there's no `mdbx.lck` present, and it's called with `exclusive` on calling `open_db_read_only`. Meaning that there's no node syncing concurrently.
+
+If the error persists, ensure that you have the right `rx`  permissions on the `datadir` **and its parent** folders. Eg. the following command should succeed:
+
+```bash,ignore
+stat /full/path/datadir
+```
+
 
 ### Slow database inserts and updates
 
 If you're:
 1. Running behind the tip
-2. Have slow canonical commit time according to the `Canonical Commit Latency time` chart on [Grafana dashboard](./observability.md#prometheus--grafana) (more than 2-3 seconds)
+2. Have slow canonical commit time according to the `Canonical Commit Latency Time` chart on [Grafana dashboard](./observability.md#prometheus--grafana) (more than 2-3 seconds)
 3. Seeing warnings in your logs such as 
    ```console
    2023-11-08T15:17:24.789731Z  WARN providers::db: Transaction insertion took too long block_number=18528075 tx_num=2150227643 hash=0xb7de1d6620efbdd3aa8547c47a0ff09a7fd3e48ba3fd2c53ce94c6683ed66e7c elapsed=6.793759034s
@@ -50,7 +80,7 @@ equal to the [freshly synced node](../installation/installation.md#hardware-requ
    mv reth_compact.dat $(reth db path)/mdbx.dat
    ```
 7. Start Reth
-8. Confirm that the values on the `Freelist` chart is near zero and the values on the `Canonical Commit Latency time` chart
+8. Confirm that the values on the `Freelist` chart are near zero and the values on the `Canonical Commit Latency Time` chart
 is less than 1 second.
 9. Delete original database
    ```bash
@@ -111,3 +141,71 @@ pthread_mutex_lock.c:438: __pthread_mutex_lock_full: Assertion `e != ESRCH || !r
 If you are using Docker, a possible solution is to run all database-accessing containers with `--pid=host` flag.
 
 For more information, check out the `Containers` section in the [libmdbx README](https://github.com/erthink/libmdbx#containers).
+
+## Hardware Performance Testing
+
+If you're experiencing degraded performance, it may be related to hardware issues. Below are some tools and tests you can run to evaluate your hardware performance.
+
+If your hardware performance is significantly lower than these reference numbers, it may explain degraded node performance. Consider upgrading your hardware or investigating potential issues with your current setup.
+
+### Disk Speed Testing with [IOzone](https://linux.die.net/man/1/iozone)
+
+1. Test disk speed:
+   ```bash
+   iozone -e -t1 -i0 -i2 -r1k -s1g /tmp
+   ```
+   Reference numbers (on Latitude c3.large.x86):
+
+   ```console
+   Children see throughput for  1 initial writers  =  907733.81 kB/sec
+   Parent sees throughput for  1 initial writers   =  907239.68 kB/sec
+   Children see throughput for  1 rewriters        = 1765222.62 kB/sec
+   Parent sees throughput for  1 rewriters         = 1763433.35 kB/sec
+   Children see throughput for 1 random readers    = 1557497.38 kB/sec
+   Parent sees throughput for 1 random readers     = 1554846.58 kB/sec
+   Children see throughput for 1 random writers    =  984428.69 kB/sec
+   Parent sees throughput for 1 random writers     =  983476.67 kB/sec
+   ```
+2. Test disk speed with memory-mapped files:
+   ```bash
+   iozone -B -G -e -t1 -i0 -i2 -r1k -s1g /tmp
+   ```
+   Reference numbers (on Latitude c3.large.x86):
+
+   ```console
+   Children see throughput for  1 initial writers  =   56471.06 kB/sec
+   Parent sees throughput for  1 initial writers   =   56365.14 kB/sec
+   Children see throughput for  1 rewriters        =  241650.69 kB/sec
+   Parent sees throughput for  1 rewriters         =  239067.96 kB/sec
+   Children see throughput for 1 random readers    = 6833161.00 kB/sec
+   Parent sees throughput for 1 random readers     = 5597659.65 kB/sec
+   Children see throughput for 1 random writers    =  220248.53 kB/sec
+   Parent sees throughput for 1 random writers     =  219112.26 kB/sec
+    ```
+
+### RAM Speed and Health Testing
+
+1. Check RAM speed with [lshw](https://linux.die.net/man/1/lshw):
+   ```bash
+   sudo lshw -short -C memory
+   ```
+   Look for the frequency in the output. Reference output:
+
+   ```console
+   H/W path              Device          Class          Description
+   ================================================================
+   /0/24/0                               memory         64GiB DIMM DDR4 Synchronous Registered (Buffered) 3200 MHz (0.3 ns)
+   /0/24/1                               memory         64GiB DIMM DDR4 Synchronous Registered (Buffered) 3200 MHz (0.3 ns)
+   ...
+   ```
+
+2. Test RAM health with [memtester](https://linux.die.net/man/8/memtester):
+   ```bash
+   sudo memtester 10G
+   ```
+   This will take a while. You can test with a smaller amount first:
+
+   ```bash
+   sudo memtester 1G 1
+   ```
+   All checks should report "ok".

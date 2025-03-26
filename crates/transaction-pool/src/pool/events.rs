@@ -1,5 +1,5 @@
-use crate::{traits::PropagateKind, PoolTransaction, ValidPoolTransaction};
-use reth_primitives::{TxHash, B256};
+use crate::{traits::PropagateKind, PoolTransaction, SubPool, ValidPoolTransaction};
+use alloy_primitives::{TxHash, B256};
 use std::sync::Arc;
 
 #[cfg(feature = "serde")]
@@ -80,11 +80,21 @@ impl TransactionEvent {
     /// Returns `true` if the event is final and no more events are expected for this transaction
     /// hash.
     pub const fn is_final(&self) -> bool {
-        matches!(
-            self,
-            TransactionEvent::Replaced(_) |
-                TransactionEvent::Mined(_) |
-                TransactionEvent::Discarded
-        )
+        matches!(self, Self::Replaced(_) | Self::Mined(_) | Self::Discarded)
+    }
+}
+
+/// Represents a new transaction
+#[derive(Debug)]
+pub struct NewTransactionEvent<T: PoolTransaction> {
+    /// The pool which the transaction was moved to.
+    pub subpool: SubPool,
+    /// Actual transaction
+    pub transaction: Arc<ValidPoolTransaction<T>>,
+}
+
+impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
+    fn clone(&self) -> Self {
+        Self { subpool: self.subpool, transaction: self.transaction.clone() }
     }
 }

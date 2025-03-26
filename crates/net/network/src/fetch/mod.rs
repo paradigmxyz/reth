@@ -1,16 +1,21 @@
 //! Fetch data from the network.
 
-use crate::{message::BlockRequest, peers::PeersHandle};
+mod client;
+
+pub use client::FetchClient;
+
+use crate::message::BlockRequest;
+use alloy_primitives::B256;
 use futures::StreamExt;
-use reth_eth_wire::{GetBlockBodies, GetBlockHeaders};
-use reth_interfaces::p2p::{
+use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives};
+use reth_network_api::test_utils::PeersHandle;
+use reth_network_p2p::{
     error::{EthResponseValidator, PeerRequestResult, RequestError, RequestResult},
     headers::client::HeadersRequest,
     priority::Priority,
 };
-use reth_network_api::ReputationChangeKind;
-use reth_network_types::PeerId;
-use reth_primitives::{BlockBody, Header, B256};
+use reth_network_peers::PeerId;
+use reth_network_types::ReputationChangeKind;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -22,8 +27,8 @@ use std::{
 use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-mod client;
-pub use client::FetchClient;
+type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H>>>;
+type InflightBodiesRequest<B> = Request<Vec<B256>, PeerRequestResult<Vec<B>>>;
 
 /// Manages data fetching operations.
 ///
@@ -32,13 +37,11 @@ pub use client::FetchClient;
 ///
 /// This type maintains a list of connected peers that are available for requests.
 #[derive(Debug)]
-pub struct StateFetcher {
+pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests:
-        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
+    inflight_headers_requests: HashMap<PeerId, InflightHeadersRequest<N::BlockHeader>>,
     /// Currently active [`GetBlockBodies`] requests
-    inflight_bodies_requests:
-        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<BlockBody>>>>,
+    inflight_bodies_requests: HashMap<PeerId, InflightBodiesRequest<N::BlockBody>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -46,16 +49,16 @@ pub struct StateFetcher {
     /// Number of active peer sessions the node's currently handling.
     num_active_peers: Arc<AtomicUsize>,
     /// Requests queued for processing
-    queued_requests: VecDeque<DownloadRequest>,
+    queued_requests: VecDeque<DownloadRequest<N>>,
     /// Receiver for new incoming download requests
-    download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
+    download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
-    download_requests_tx: UnboundedSender<DownloadRequest>,
+    download_requests_tx: UnboundedSender<DownloadRequest<N>>,
 }
 
 // === impl StateSyncer ===
 
-impl StateFetcher {
+impl<N: NetworkPrimitives> StateFetcher<N> {
     pub(crate) fn new(peers_handle: PeersHandle, num_active_peers: Arc<AtomicUsize>) -> Self {
         let (download_requests_tx, download_requests_rx) = mpsc::unbounded_channel();
         Self {
@@ -212,7 +215,7 @@ impl StateFetcher {
     /// Handles a new request to a peer.
     ///
     /// Caution: this assumes the peer exists and is idle
-    fn prepare_block_request(&mut self, peer_id: PeerId, req: DownloadRequest) -> BlockRequest {
+    fn prepare_block_request(&mut self, peer_id: PeerId, req: DownloadRequest<N>) -> BlockRequest {
         // update the peer's state
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.state = req.peer_state();
@@ -249,23 +252,21 @@ impl StateFetcher {
 
     /// Called on a `GetBlockHeaders` response from a peer.
     ///
-    /// This delegates the response and returns a [BlockResponseOutcome] to either queue in a direct
-    /// followup request or get the peer reported if the response was a
-    /// [EthResponseValidator::reputation_change_err]
+    /// This delegates the response and returns a [`BlockResponseOutcome`] to either queue in a
+    /// direct followup request or get the peer reported if the response was a
+    /// [`EthResponseValidator::reputation_change_err`]
     pub(crate) fn on_block_headers_response(
         &mut self,
         peer_id: PeerId,
-        res: RequestResult<Vec<Header>>,
+        res: RequestResult<Vec<N::BlockHeader>>,
     ) -> Option<BlockResponseOutcome> {
         let is_error = res.is_err();
         let maybe_reputation_change = res.reputation_change_err();
 
         let resp = self.inflight_headers_requests.remove(&peer_id);
 
-        let is_likely_bad_response = resp
-            .as_ref()
-            .map(|r| res.is_likely_bad_headers_response(&r.request))
-            .unwrap_or_default();
+        let is_likely_bad_response =
+            resp.as_ref().is_some_and(|r| res.is_likely_bad_headers_response(&r.request));
 
         if let Some(resp) = resp {
             // delegate the response
@@ -293,7 +294,7 @@ impl StateFetcher {
     pub(crate) fn on_block_bodies_response(
         &mut self,
         peer_id: PeerId,
-        res: RequestResult<Vec<BlockBody>>,
+        res: RequestResult<Vec<N::BlockBody>>,
     ) -> Option<BlockResponseOutcome> {
         let is_likely_bad_response = res.as_ref().map_or(true, |bodies| bodies.is_empty());
 
@@ -312,7 +313,7 @@ impl StateFetcher {
     }
 
     /// Returns a new [`FetchClient`] that can send requests to this type.
-    pub(crate) fn client(&self) -> FetchClient {
+    pub(crate) fn client(&self) -> FetchClient<N> {
         FetchClient {
             request_tx: self.download_requests_tx.clone(),
             peers_handle: self.peers_handle.clone(),
@@ -371,8 +372,8 @@ enum PeerState {
 
 impl PeerState {
     /// Returns true if the peer is currently idle.
-    fn is_idle(&self) -> bool {
-        matches!(self, PeerState::Idle)
+    const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
     }
 
     /// Resets the state on a received response.
@@ -381,8 +382,8 @@ impl PeerState {
     ///
     /// Returns `true` if the peer is ready for another request.
     fn on_request_finished(&mut self) -> bool {
-        if !matches!(self, PeerState::Closing) {
-            *self = PeerState::Idle;
+        if !matches!(self, Self::Closing) {
+            *self = Self::Idle;
             return true
         }
         false
@@ -402,42 +403,43 @@ struct Request<Req, Resp> {
 
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
 #[derive(Debug)]
-pub(crate) enum DownloadRequest {
+pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
     /// Download the requested headers and send response through channel
     GetBlockHeaders {
         request: HeadersRequest,
-        response: oneshot::Sender<PeerRequestResult<Vec<Header>>>,
+        response: oneshot::Sender<PeerRequestResult<Vec<N::BlockHeader>>>,
         priority: Priority,
     },
     /// Download the requested headers and send response through channel
     GetBlockBodies {
         request: Vec<B256>,
-        response: oneshot::Sender<PeerRequestResult<Vec<BlockBody>>>,
+        response: oneshot::Sender<PeerRequestResult<Vec<N::BlockBody>>>,
         priority: Priority,
     },
 }
 
 // === impl DownloadRequest ===
 
-impl DownloadRequest {
+impl<N: NetworkPrimitives> DownloadRequest<N> {
     /// Returns the corresponding state for a peer that handles the request.
-    fn peer_state(&self) -> PeerState {
+    const fn peer_state(&self) -> PeerState {
         match self {
-            DownloadRequest::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
-            DownloadRequest::GetBlockBodies { .. } => PeerState::GetBlockBodies,
+            Self::GetBlockHeaders { .. } => PeerState::GetBlockHeaders,
+            Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
         }
     }
 
     /// Returns the requested priority of this request
-    fn get_priority(&self) -> &Priority {
+    const fn get_priority(&self) -> &Priority {
         match self {
-            DownloadRequest::GetBlockHeaders { priority, .. } => priority,
-            DownloadRequest::GetBlockBodies { priority, .. } => priority,
+            Self::GetBlockHeaders { priority, .. } | Self::GetBlockBodies { priority, .. } => {
+                priority
+            }
         }
     }
 
     /// Returns `true` if this request is normal priority.
-    fn is_normal_priority(&self) -> bool {
+    const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
     }
 }
@@ -468,13 +470,15 @@ pub(crate) enum BlockResponseOutcome {
 mod tests {
     use super::*;
     use crate::{peers::PeersManager, PeersConfig};
-    use reth_primitives::{SealedHeader, B512};
+    use alloy_consensus::Header;
+    use alloy_primitives::B512;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_poll_fetcher() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
         poll_fn(move |cx| {
             assert!(fetcher.poll(cx).is_pending());
@@ -494,7 +498,8 @@ mod tests {
     #[tokio::test]
     async fn test_peer_rotation() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         // Add a few random peers
         let peer1 = B512::random();
         let peer2 = B512::random();
@@ -517,7 +522,8 @@ mod tests {
     #[tokio::test]
     async fn test_peer_prioritization() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         // Add a few random peers
         let peer1 = B512::random();
         let peer2 = B512::random();
@@ -542,7 +548,8 @@ mod tests {
     #[tokio::test]
     async fn test_on_block_headers_response() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         let peer_id = B512::random();
 
         assert_eq!(fetcher.on_block_headers_response(peer_id, Ok(vec![Header::default()])), None);
@@ -572,7 +579,8 @@ mod tests {
     #[tokio::test]
     async fn test_header_response_outcome() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         let peer_id = B512::random();
 
         let request_pair = || {
@@ -585,8 +593,7 @@ mod tests {
                 },
                 response: tx,
             };
-            let mut header = SealedHeader::default().unseal();
-            header.number = 0u64;
+            let header = Header { number: 0, ..Default::default() };
             (req, header)
         };
 
@@ -607,7 +614,10 @@ mod tests {
         let outcome =
             fetcher.on_block_headers_response(peer_id, Err(RequestError::Timeout)).unwrap();
 
-        assert!(EthResponseValidator::reputation_change_err(&Err(RequestError::Timeout)).is_some());
+        assert!(EthResponseValidator::reputation_change_err(&Err::<Vec<Header>, _>(
+            RequestError::Timeout
+        ))
+        .is_some());
 
         match outcome {
             BlockResponseOutcome::BadResponse(peer, _) => {

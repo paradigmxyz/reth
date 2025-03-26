@@ -30,6 +30,7 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
         true
     }
 
+    #[cfg(test)]
     /// If required, prepares compression algorithm with an early pass on the data.
     fn prepare_compression(
         &mut self,
@@ -43,21 +44,23 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Compressors {
+    /// Zstandard compression algorithm with custom settings.
     Zstd(Zstd),
+    /// LZ4 compression algorithm with custom settings.
     Lz4(Lz4),
 }
 
 impl Compression for Compressors {
     fn decompress_to(&self, value: &[u8], dest: &mut Vec<u8>) -> Result<(), NippyJarError> {
         match self {
-            Compressors::Zstd(zstd) => zstd.decompress_to(value, dest),
-            Compressors::Lz4(lz4) => lz4.decompress_to(value, dest),
+            Self::Zstd(zstd) => zstd.decompress_to(value, dest),
+            Self::Lz4(lz4) => lz4.decompress_to(value, dest),
         }
     }
     fn decompress(&self, value: &[u8]) -> Result<Vec<u8>, NippyJarError> {
         match self {
-            Compressors::Zstd(zstd) => zstd.decompress(value),
-            Compressors::Lz4(lz4) => lz4.decompress(value),
+            Self::Zstd(zstd) => zstd.decompress(value),
+            Self::Lz4(lz4) => lz4.decompress(value),
         }
     }
 
@@ -65,8 +68,8 @@ impl Compression for Compressors {
         let initial_capacity = dest.capacity();
         loop {
             let result = match self {
-                Compressors::Zstd(zstd) => zstd.compress_to(src, dest),
-                Compressors::Lz4(lz4) => lz4.compress_to(src, dest),
+                Self::Zstd(zstd) => zstd.compress_to(src, dest),
+                Self::Lz4(lz4) => lz4.compress_to(src, dest),
             };
 
             match result {
@@ -83,25 +86,26 @@ impl Compression for Compressors {
 
     fn compress(&self, src: &[u8]) -> Result<Vec<u8>, NippyJarError> {
         match self {
-            Compressors::Zstd(zstd) => zstd.compress(src),
-            Compressors::Lz4(lz4) => lz4.compress(src),
+            Self::Zstd(zstd) => zstd.compress(src),
+            Self::Lz4(lz4) => lz4.compress(src),
         }
     }
 
     fn is_ready(&self) -> bool {
         match self {
-            Compressors::Zstd(zstd) => zstd.is_ready(),
-            Compressors::Lz4(lz4) => lz4.is_ready(),
+            Self::Zstd(zstd) => zstd.is_ready(),
+            Self::Lz4(lz4) => lz4.is_ready(),
         }
     }
 
+    #[cfg(test)]
     fn prepare_compression(
         &mut self,
         columns: Vec<impl IntoIterator<Item = Vec<u8>>>,
     ) -> Result<(), NippyJarError> {
         match self {
-            Compressors::Zstd(zstd) => zstd.prepare_compression(columns),
-            Compressors::Lz4(lz4) => lz4.prepare_compression(columns),
+            Self::Zstd(zstd) => zstd.prepare_compression(columns),
+            Self::Lz4(lz4) => lz4.prepare_compression(columns),
         }
     }
 }

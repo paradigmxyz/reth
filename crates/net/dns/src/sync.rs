@@ -41,11 +41,11 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
     }
 
     #[cfg(test)]
-    pub(crate) fn root(&self) -> &TreeRootEntry {
+    pub(crate) const fn root(&self) -> &TreeRootEntry {
         &self.root
     }
 
-    pub(crate) fn link(&self) -> &LinkEntry<K> {
+    pub(crate) const fn link(&self) -> &LinkEntry<K> {
         &self.link
     }
 
@@ -138,7 +138,7 @@ pub(crate) enum SyncAction {
     Link(String),
 }
 
-/// How the [SyncTree::update_root] changed the root
+/// How the [`SyncTree::update_root`] changed the root
 enum SyncState {
     RootUpdate,
     Pending,
@@ -156,7 +156,7 @@ pub(crate) enum ResolveKind {
 // === impl ResolveKind ===
 
 impl ResolveKind {
-    pub(crate) fn is_link(&self) -> bool {
-        matches!(self, ResolveKind::Link)
+    pub(crate) const fn is_link(&self) -> bool {
+        matches!(self, Self::Link)
     }
 }

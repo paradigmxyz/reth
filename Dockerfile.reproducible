@@ -1,0 +1,20 @@
+# Use the Rust 1.85 image based on Debian Bullseye
+FROM rust:1.85-bullseye AS builder
+
+# Install specific version of libclang-dev
+RUN apt-get update && apt-get install -y libclang-dev=1:11.0-51+nmu5
+
+# Copy the project to the container
+COPY ./ /app
+WORKDIR /app
+
+# Build the project with the reproducible settings
+RUN make build-reproducible
+
+RUN mv /app/target/x86_64-unknown-linux-gnu/release/reth /reth
+
+# Create a minimal final image with just the binary
+FROM gcr.io/distroless/cc-debian12:nonroot-6755e21ccd99ddead6edc8106ba03888cbeed41a
+COPY --from=builder /reth /reth
+EXPOSE 30303 30303/udp 9001 8545 8546
+ENTRYPOINT [ "/reth" ]

@@ -1,26 +1,29 @@
 //! Module that interacts with MDBX.
 
 use crate::{
-    cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
-    models::client_version::ClientVersion,
-    tables::{self, TableType, Tables},
-    transaction::{DbTx, DbTxMut},
+    tables::{self, Tables},
     utils::default_page_size,
-    DatabaseError,
+    DatabaseError, TableSet,
 };
 use eyre::Context;
 use metrics::{gauge, Label};
-use reth_interfaces::db::LogLevel;
-use reth_libmdbx::{
-    DatabaseFlags, Environment, EnvironmentFlags, Geometry, MaxReadTransactionDuration, Mode,
-    PageSize, SyncMode, RO, RW,
+use reth_db_api::{
+    cursor::{DbCursorRO, DbCursorRW},
+    database::Database,
+    database_metrics::DatabaseMetrics,
+    models::ClientVersion,
+    transaction::{DbTx, DbTxMut},
 };
+use reth_libmdbx::{
+    ffi, DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode,
+    MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
+};
+use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
-    ops::Deref,
+    ops::{Deref, Range},
     path::Path,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -30,19 +33,26 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
-const GIGABYTE: usize = 1024 * 1024 * 1024;
-const TERABYTE: usize = GIGABYTE * 1024;
+mod utils;
+
+/// 1 KB in bytes
+pub const KILOBYTE: usize = 1024;
+/// 1 MB in bytes
+pub const MEGABYTE: usize = KILOBYTE * 1024;
+/// 1 GB in bytes
+pub const GIGABYTE: usize = MEGABYTE * 1024;
+/// 1 TB in bytes
+pub const TERABYTE: usize = GIGABYTE * 1024;
 
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
 
 /// Space that a read-only transaction can occupy until the warning is emitted.
-/// See [reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers] for more information.
-#[cfg(not(windows))]
+/// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
 /// Environment used when opening a MDBX environment. RO/RW.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DatabaseEnvKind {
     /// Read-only MDBX environment.
     RO,
@@ -52,16 +62,18 @@ pub enum DatabaseEnvKind {
 
 impl DatabaseEnvKind {
     /// Returns `true` if the environment is read-write.
-    pub fn is_rw(&self) -> bool {
+    pub const fn is_rw(&self) -> bool {
         matches!(self, Self::RW)
     }
 }
 
 /// Arguments for database initialization.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
+    /// Database geometry settings.
+    geometry: Geometry<Range<usize>>,
     /// Database log level. If [None], the default value is used.
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
@@ -89,25 +101,53 @@ pub struct DatabaseArguments {
     exclusive: Option<bool>,
 }
 
+impl Default for DatabaseArguments {
+    fn default() -> Self {
+        Self::new(ClientVersion::default())
+    }
+}
+
 impl DatabaseArguments {
     /// Create new database arguments with given client version.
     pub fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
+            geometry: Geometry {
+                size: Some(0..(4 * TERABYTE)),
+                growth_step: Some(4 * GIGABYTE as isize),
+                shrink_threshold: Some(0),
+                page_size: Some(PageSize::Set(default_page_size())),
+            },
             log_level: None,
             max_read_transaction_duration: None,
             exclusive: None,
         }
     }
 
+    /// Sets the upper size limit of the db environment, the maximum database size in bytes.
+    pub const fn with_geometry_max_size(mut self, max_size: Option<usize>) -> Self {
+        if let Some(max_size) = max_size {
+            self.geometry.size = Some(0..max_size);
+        }
+        self
+    }
+
+    /// Configures the database growth step in bytes.
+    pub const fn with_growth_step(mut self, growth_step: Option<usize>) -> Self {
+        if let Some(growth_step) = growth_step {
+            self.geometry.growth_step = Some(growth_step as isize);
+        }
+        self
+    }
+
     /// Set the log level.
-    pub fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
+    pub const fn with_log_level(mut self, log_level: Option<LogLevel>) -> Self {
         self.log_level = log_level;
         self
     }
 
     /// Set the maximum duration of a read transaction.
-    pub fn with_max_read_transaction_duration(
+    pub const fn with_max_read_transaction_duration(
         mut self,
         max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     ) -> Self {
@@ -116,13 +156,13 @@ impl DatabaseArguments {
     }
 
     /// Set the mdbx exclusive flag.
-    pub fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
+    pub const fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
         self.exclusive = exclusive;
         self
     }
 
     /// Returns the client version if any.
-    pub fn client_version(&self) -> &ClientVersion {
+    pub const fn client_version(&self) -> &ClientVersion {
         &self.client_version
     }
 }
@@ -134,6 +174,8 @@ pub struct DatabaseEnv {
     inner: Environment,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Write lock for when dealing with a read-write environment.
+    _lock_file: Option<StorageLock>,
 }
 
 impl Database for DatabaseEnv {
@@ -143,7 +185,7 @@ impl Database for DatabaseEnv {
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.metrics.as_ref().cloned(),
+            self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -151,7 +193,7 @@ impl Database for DatabaseEnv {
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.metrics.as_ref().cloned(),
+            self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -160,7 +202,7 @@ impl Database for DatabaseEnv {
 impl DatabaseMetrics for DatabaseEnv {
     fn report_metrics(&self) {
         for (name, value, labels) in self.gauge_metrics() {
-            gauge!(name, value, labels);
+            gauge!(name, labels).set(value);
         }
     }
 
@@ -236,12 +278,6 @@ impl DatabaseMetrics for DatabaseEnv {
     }
 }
 
-impl DatabaseMetadata for DatabaseEnv {
-    fn metadata(&self) -> DatabaseMetadataValue {
-        DatabaseMetadataValue::new(self.freelist().ok())
-    }
-}
-
 impl DatabaseEnv {
     /// Opens the database at the specified path with the given `EnvKind`.
     ///
@@ -250,7 +286,15 @@ impl DatabaseEnv {
         path: &Path,
         kind: DatabaseEnvKind,
         args: DatabaseArguments,
-    ) -> Result<DatabaseEnv, DatabaseError> {
+    ) -> Result<Self, DatabaseError> {
+        let _lock_file = if kind.is_rw() {
+            StorageLock::try_acquire(path)
+                .map_err(|err| DatabaseError::Other(err.to_string()))?
+                .into()
+        } else {
+            None
+        };
+
         let mut inner_env = Environment::builder();
 
         let mode = match kind {
@@ -266,51 +310,53 @@ impl DatabaseEnv {
         // environment creation.
         debug_assert!(Tables::ALL.len() <= 256, "number of tables exceed max dbs");
         inner_env.set_max_dbs(256);
-        inner_env.set_geometry(Geometry {
-            // Maximum database size of 4 terabytes
-            size: Some(0..(4 * TERABYTE)),
-            // We grow the database in increments of 4 gigabytes
-            growth_step: Some(4 * GIGABYTE as isize),
-            // The database never shrinks
-            shrink_threshold: None,
-            page_size: Some(PageSize::Set(default_page_size())),
-        });
-        #[cfg(not(windows))]
-        {
-            fn is_current_process(id: u32) -> bool {
-                #[cfg(unix)]
-                {
-                    id == std::os::unix::process::parent_id() || id == std::process::id()
-                }
+        inner_env.set_geometry(args.geometry);
 
-                #[cfg(not(unix))]
-                {
-                    id == std::process::id()
-                }
+        fn is_current_process(id: u32) -> bool {
+            #[cfg(unix)]
+            {
+                id == std::os::unix::process::parent_id() || id == std::process::id()
             }
-            inner_env.set_handle_slow_readers(
-                |process_id: u32, thread_id: u32, read_txn_id: u64, gap: usize, space: usize, retry: isize| {
-                    if space > MAX_SAFE_READER_SPACE {
-                        let message = if is_current_process(process_id) {
-                            "Current process has a long-lived database transaction that grows the database file."
-                        } else {
-                            "External process has a long-lived database transaction that grows the database file. Use shorter-lived read transactions or shut down the node."
-                        };
-                        reth_tracing::tracing::warn!(
-                            target: "storage::db::mdbx",
-                            ?process_id,
-                            ?thread_id,
-                            ?read_txn_id,
-                            ?gap,
-                            ?space,
-                            ?retry,
-                            message
-                        )
-                    }
 
-                    reth_libmdbx::HandleSlowReadersReturnCode::ProceedWithoutKillingReader
-                });
+            #[cfg(not(unix))]
+            {
+                id == std::process::id()
+            }
         }
+
+        extern "C" fn handle_slow_readers(
+            _env: *const ffi::MDBX_env,
+            _txn: *const ffi::MDBX_txn,
+            process_id: ffi::mdbx_pid_t,
+            thread_id: ffi::mdbx_tid_t,
+            read_txn_id: u64,
+            gap: std::ffi::c_uint,
+            space: usize,
+            retry: std::ffi::c_int,
+        ) -> HandleSlowReadersReturnCode {
+            if space > MAX_SAFE_READER_SPACE {
+                let message = if is_current_process(process_id as u32) {
+                    "Current process has a long-lived database transaction that grows the database file."
+                } else {
+                    "External process has a long-lived database transaction that grows the database file. \
+                     Use shorter-lived read transactions or shut down the node."
+                };
+                reth_tracing::tracing::warn!(
+                    target: "storage::db::mdbx",
+                    ?process_id,
+                    ?thread_id,
+                    ?read_txn_id,
+                    ?gap,
+                    ?space,
+                    ?retry,
+                    "{message}"
+                )
+            }
+
+            reth_libmdbx::HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+        }
+        inner_env.set_handle_slow_readers(handle_slow_readers);
+
         inner_env.set_flags(EnvironmentFlags {
             mode,
             // We disable readahead because it improves performance for linear scans, but
@@ -379,9 +425,10 @@ impl DatabaseEnv {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
         }
 
-        let env = DatabaseEnv {
+        let env = Self {
             inner: inner_env.open(path).map_err(|e| DatabaseError::Open(e.into()))?,
             metrics: None,
+            _lock_file,
         };
 
         Ok(env)
@@ -393,15 +440,18 @@ impl DatabaseEnv {
         self
     }
 
-    /// Creates all the defined tables, if necessary.
+    /// Creates all the tables defined in [`Tables`], if necessary.
     pub fn create_tables(&self) -> Result<(), DatabaseError> {
+        self.create_tables_for::<Tables>()
+    }
+
+    /// Creates all the tables defined in the given [`TableSet`], if necessary.
+    pub fn create_tables_for<TS: TableSet>(&self) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
 
-        for table in Tables::ALL {
-            let flags = match table.table_type() {
-                TableType::Table => DatabaseFlags::default(),
-                TableType::DupSort => DatabaseFlags::DUP_SORT,
-            };
+        for table in TS::tables() {
+            let flags =
+                if table.is_dupsort() { DatabaseFlags::DUP_SORT } else { DatabaseFlags::default() };
 
             tx.create_db(Some(table.name()), flags)
                 .map_err(|e| DatabaseError::CreateTable(e.into()))?;
@@ -425,7 +475,7 @@ impl DatabaseEnv {
         if Some(&version) != last_version.as_ref() {
             version_cursor.upsert(
                 SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-                version,
+                &version,
             )?;
             tx.commit()?;
         }
@@ -446,18 +496,22 @@ impl Deref for DatabaseEnv {
 mod tests {
     use super::*;
     use crate::{
-        abstraction::table::{Encode, Table},
-        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        models::{AccountBeforeTx, ShardedKey},
         tables::{
             AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
         },
         test_utils::*,
         AccountChangeSets,
     };
-    use reth_interfaces::db::{DatabaseWriteError, DatabaseWriteOperation};
+    use alloy_consensus::Header;
+    use alloy_primitives::{address, Address, B256, U256};
+    use reth_db_api::{
+        cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
+        models::{AccountBeforeTx, IntegerList, ShardedKey},
+        table::{Encode, Table},
+    };
     use reth_libmdbx::Error;
-    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
+    use reth_primitives_traits::{Account, StorageEntry};
+    use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
 
@@ -522,8 +576,8 @@ mod tests {
         let entry_0 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(0) };
         let entry_1 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
 
-        dup_cursor.upsert(Address::with_last_byte(1), entry_0).expect(ERROR_UPSERT);
-        dup_cursor.upsert(Address::with_last_byte(1), entry_1).expect(ERROR_UPSERT);
+        dup_cursor.upsert(Address::with_last_byte(1), &entry_0).expect(ERROR_UPSERT);
+        dup_cursor.upsert(Address::with_last_byte(1), &entry_1).expect(ERROR_UPSERT);
 
         assert_eq!(
             dup_cursor.walk(None).unwrap().collect::<Result<Vec<_>, _>>(),
@@ -681,7 +735,7 @@ mod tests {
         assert_eq!(walker.next(), None);
     }
 
-    #[allow(clippy::reversed_empty_ranges)]
+    #[expect(clippy::reversed_empty_ranges)]
     #[test]
     fn db_cursor_walk_range_invalid() {
         let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
@@ -852,12 +906,12 @@ mod tests {
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
         // INSERT
-        assert_eq!(cursor.insert(key_to_insert, B256::ZERO), Ok(()));
+        assert_eq!(cursor.insert(key_to_insert, &B256::ZERO), Ok(()));
         assert_eq!(cursor.current(), Ok(Some((key_to_insert, B256::ZERO))));
 
         // INSERT (failure)
         assert_eq!(
-            cursor.insert(key_to_insert, B256::ZERO),
+            cursor.insert(key_to_insert, &B256::ZERO),
             Err(DatabaseWriteError {
                 info: Error::KeyExist.into(),
                 operation: DatabaseWriteOperation::CursorInsert,
@@ -889,11 +943,11 @@ mod tests {
         let subkey2 = B256::random();
 
         let entry1 = StorageEntry { key: subkey1, value: U256::ZERO };
-        assert!(dup_cursor.insert(key, entry1).is_ok());
+        assert!(dup_cursor.insert(key, &entry1).is_ok());
 
         // Can't insert
         let entry2 = StorageEntry { key: subkey2, value: U256::ZERO };
-        assert!(dup_cursor.insert(key, entry2).is_err());
+        assert!(dup_cursor.insert(key, &entry2).is_err());
     }
 
     #[test]
@@ -906,9 +960,9 @@ mod tests {
         let key3 = Address::with_last_byte(3);
         let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
 
-        assert!(cursor.insert(key1, Account::default()).is_ok());
-        assert!(cursor.insert(key2, Account::default()).is_ok());
-        assert!(cursor.insert(key3, Account::default()).is_ok());
+        assert!(cursor.insert(key1, &Account::default()).is_ok());
+        assert!(cursor.insert(key2, &Account::default()).is_ok());
+        assert!(cursor.insert(key3, &Account::default()).is_ok());
 
         // Seek & delete key2
         cursor.seek_exact(key2).unwrap();
@@ -944,7 +998,7 @@ mod tests {
         assert_eq!(cursor.current(), Ok(Some((9, B256::ZERO))));
 
         for pos in (2..=8).step_by(2) {
-            assert_eq!(cursor.insert(pos, B256::ZERO), Ok(()));
+            assert_eq!(cursor.insert(pos, &B256::ZERO), Ok(()));
             assert_eq!(cursor.current(), Ok(Some((pos, B256::ZERO))));
         }
         tx.commit().expect(ERROR_COMMIT);
@@ -973,7 +1027,7 @@ mod tests {
         let key_to_append = 5;
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-        assert_eq!(cursor.append(key_to_append, B256::ZERO), Ok(()));
+        assert_eq!(cursor.append(key_to_append, &B256::ZERO), Ok(()));
         tx.commit().expect(ERROR_COMMIT);
 
         // Confirm the result
@@ -1001,7 +1055,7 @@ mod tests {
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
         assert_eq!(
-            cursor.append(key_to_append, B256::ZERO),
+            cursor.append(key_to_append, &B256::ZERO),
             Err(DatabaseWriteError {
                 info: Error::KeyMismatch.into(),
                 operation: DatabaseWriteOperation::CursorAppend,
@@ -1030,15 +1084,15 @@ mod tests {
         let key = Address::random();
 
         let account = Account::default();
-        cursor.upsert(key, account).expect(ERROR_UPSERT);
+        cursor.upsert(key, &account).expect(ERROR_UPSERT);
         assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
 
         let account = Account { nonce: 1, ..Default::default() };
-        cursor.upsert(key, account).expect(ERROR_UPSERT);
+        cursor.upsert(key, &account).expect(ERROR_UPSERT);
         assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
 
         let account = Account { nonce: 2, ..Default::default() };
-        cursor.upsert(key, account).expect(ERROR_UPSERT);
+        cursor.upsert(key, &account).expect(ERROR_UPSERT);
         assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
 
         let mut dup_cursor = tx.cursor_dup_write::<PlainStorageState>().unwrap();
@@ -1046,12 +1100,12 @@ mod tests {
 
         let value = U256::from(1);
         let entry1 = StorageEntry { key: subkey, value };
-        dup_cursor.upsert(key, entry1).expect(ERROR_UPSERT);
+        dup_cursor.upsert(key, &entry1).expect(ERROR_UPSERT);
         assert_eq!(dup_cursor.seek_by_key_subkey(key, subkey), Ok(Some(entry1)));
 
         let value = U256::from(2);
         let entry2 = StorageEntry { key: subkey, value };
-        dup_cursor.upsert(key, entry2).expect(ERROR_UPSERT);
+        dup_cursor.upsert(key, &entry2).expect(ERROR_UPSERT);
         assert_eq!(dup_cursor.seek_by_key_subkey(key, subkey), Ok(Some(entry1)));
         assert_eq!(dup_cursor.next_dup_val(), Ok(Some(entry2)));
     }
@@ -1069,7 +1123,7 @@ mod tests {
             .try_for_each(|val| {
                 cursor.append(
                     transition_id,
-                    AccountBeforeTx { address: Address::with_last_byte(val), info: None },
+                    &AccountBeforeTx { address: Address::with_last_byte(val), info: None },
                 )
             })
             .expect(ERROR_APPEND);
@@ -1095,7 +1149,7 @@ mod tests {
         assert_eq!(
             cursor.append(
                 transition_id - 1,
-                AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
+                &AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Err(DatabaseWriteError {
                 info: Error::KeyMismatch.into(),
@@ -1108,7 +1162,7 @@ mod tests {
         assert_eq!(
             cursor.append(
                 transition_id,
-                AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
+                &AccountBeforeTx { address: Address::with_last_byte(subkey_to_append), info: None }
             ),
             Ok(())
         );
@@ -1287,11 +1341,11 @@ mod tests {
     #[test]
     fn db_sharded_key() {
         let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
-        let real_key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047").unwrap();
+        let real_key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
         for i in 1..5 {
             let key = ShardedKey::new(real_key, i * 100);
-            let list: IntegerList = vec![i * 100u64].into();
+            let list = IntegerList::new_pre_sorted([i * 100u64]);
 
             db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))
                 .unwrap();
@@ -1312,7 +1366,7 @@ mod tests {
                 .expect("should be able to retrieve it.");
 
             assert_eq!(ShardedKey::new(real_key, 200), key);
-            let list200: IntegerList = vec![200u64].into();
+            let list200 = IntegerList::new_pre_sorted([200u64]);
             assert_eq!(list200, list);
         }
         // Seek greatest index
@@ -1329,7 +1383,7 @@ mod tests {
                 .expect("should be able to retrieve it.");
 
             assert_eq!(ShardedKey::new(real_key, 400), key);
-            let list400: IntegerList = vec![400u64].into();
+            let list400 = IntegerList::new_pre_sorted([400u64]);
             assert_eq!(list400, list);
         }
     }

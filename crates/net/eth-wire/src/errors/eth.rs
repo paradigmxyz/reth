@@ -1,12 +1,13 @@
-//! Error handling for (`EthStream`)[crate::EthStream]
+//! Error handling for (`EthStream`)[`crate::EthStream`]
 
 use crate::{
-    errors::{MuxDemuxError, P2PStreamError},
-    message::MessageError,
-    version::ParseVersionError,
-    DisconnectReason,
+    errors::P2PStreamError, message::MessageError, version::ParseVersionError, DisconnectReason,
 };
-use reth_primitives::{Chain, GotExpected, GotExpectedBoxed, ValidationError, B256};
+use alloy_chains::Chain;
+use alloy_primitives::B256;
+use reth_eth_wire_types::EthVersion;
+use reth_ethereum_forks::ValidationError;
+use reth_primitives_traits::{GotExpected, GotExpectedBoxed};
 use std::io;
 
 /// Errors when sending/receiving messages
@@ -15,9 +16,6 @@ pub enum EthStreamError {
     #[error(transparent)]
     /// Error of the underlying P2P connection.
     P2PStreamError(#[from] P2PStreamError),
-    #[error(transparent)]
-    /// Error of the underlying de-/muxed P2P connection.
-    MuxDemuxError(#[from] MuxDemuxError),
     #[error(transparent)]
     /// Failed to parse peer's version.
     ParseVersionError(#[from] ParseVersionError),
@@ -49,19 +47,17 @@ pub enum EthStreamError {
 
 impl EthStreamError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
-    pub fn as_disconnected(&self) -> Option<DisconnectReason> {
-        if let EthStreamError::P2PStreamError(err) = self {
-            err.as_disconnected()
-        } else if let EthStreamError::MuxDemuxError(MuxDemuxError::P2PStreamError(err)) = self {
+    pub const fn as_disconnected(&self) -> Option<DisconnectReason> {
+        if let Self::P2PStreamError(err) = self {
             err.as_disconnected()
         } else {
             None
         }
     }
 
-    /// Returns the [io::Error] if it was caused by IO
-    pub fn as_io(&self) -> Option<&io::Error> {
-        if let EthStreamError::P2PStreamError(P2PStreamError::Io(io)) = self {
+    /// Returns the [`io::Error`] if it was caused by IO
+    pub const fn as_io(&self) -> Option<&io::Error> {
+        if let Self::P2PStreamError(P2PStreamError::Io(io)) = self {
             return Some(io)
         }
         None
@@ -94,7 +90,7 @@ pub enum EthHandshakeError {
     MismatchedGenesis(GotExpectedBoxed<B256>),
     #[error("mismatched protocol version in status message: {0}")]
     /// Mismatched protocol versions in status messages.
-    MismatchedProtocolVersion(GotExpected<u8>),
+    MismatchedProtocolVersion(GotExpected<EthVersion>),
     #[error("mismatched chain in status message: {0}")]
     /// Mismatch in chain details in status messages.
     MismatchedChain(GotExpected<Chain>),

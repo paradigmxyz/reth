@@ -1,6 +1,6 @@
+use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_rpc_types_anvil::{Forking, Metadata};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, Bytes, B256, U256};
-use reth_rpc_types::anvil::{Forking, Metadata};
 
 /// Hardhat rpc interface.
 /// https://hardhat.org/hardhat-network/docs/reference#hardhat-network-methods

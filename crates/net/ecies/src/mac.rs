@@ -1,7 +1,7 @@
 //! # Ethereum MAC Module
 //!
 //! This module provides the implementation of the Ethereum MAC (Message Authentication Code)
-//! construction, as specified in the Ethereum RLPx protocol.
+//! construction, as specified in the Ethereum `RLPx` protocol.
 //!
 //! The Ethereum MAC is a nonstandard MAC construction that utilizes AES-256 (as a block cipher)
 //! and Keccak-256. It is specifically designed for messages of 128 bits in length and is not
@@ -10,17 +10,17 @@
 //! For more information, refer to the [Ethereum MAC specification](https://github.com/ethereum/devp2p/blob/master/rlpx.md#mac).
 
 use aes::Aes256Enc;
+use alloy_primitives::{B128, B256};
 use block_padding::NoPadding;
 use cipher::BlockEncrypt;
 use digest::KeyInit;
 use generic_array::GenericArray;
-use reth_primitives::{B128, B256};
 use sha3::{Digest, Keccak256};
 use typenum::U16;
 
 /// Type alias for a fixed-size array of 16 bytes used as headers.
 ///
-/// This type is defined as [`GenericArray<u8, U16>`] and is commonly employed in Ethereum RLPx
+/// This type is defined as [`GenericArray<u8, U16>`] and is commonly employed in Ethereum `RLPx`
 /// protocol-related structures for headers. It represents 16 bytes of data used in various
 /// cryptographic operations, such as MAC (Message Authentication Code) computation.
 pub type HeaderBytes = GenericArray<u8, U16>;

@@ -3,7 +3,7 @@
 //! clap [Args](clap::Args) for optimism rollup configuration
 
 /// Parameters for rollup configuration
-#[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
+#[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "Rollup")]
 pub struct RollupArgs {
     /// HTTP endpoint for the sequencer mempool
@@ -29,6 +29,28 @@ pub struct RollupArgs {
     /// that this flag is not yet functional.
     #[arg(long = "rollup.compute-pending-block")]
     pub compute_pending_block: bool,
+
+    /// enables discovery v4 if provided
+    #[arg(long = "rollup.discovery.v4", default_value = "false")]
+    pub discovery_v4: bool,
+
+    /// Enable transaction conditional support on sequencer
+    #[arg(long = "rollup.enable-tx-conditional", default_value = "false")]
+    pub enable_tx_conditional: bool,
+}
+
+#[expect(clippy::derivable_impls)]
+impl Default for RollupArgs {
+    fn default() -> Self {
+        Self {
+            sequencer_http: None,
+            disable_txpool_gossip: false,
+            enable_genesis_walkback: false,
+            compute_pending_block: false,
+            discovery_v4: false,
+            enable_tx_conditional: false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -44,9 +66,88 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_database_args() {
+    fn test_parse_optimism_default_args() {
         let default_args = RollupArgs::default();
         let args = CommandParser::<RollupArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_parse_optimism_walkback_args() {
+        let expected_args = RollupArgs { enable_genesis_walkback: true, ..Default::default() };
+        let args =
+            CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.enable-genesis-walkback"])
+                .args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
+    fn test_parse_optimism_compute_pending_block_args() {
+        let expected_args = RollupArgs { compute_pending_block: true, ..Default::default() };
+        let args =
+            CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.compute-pending-block"])
+                .args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
+    fn test_parse_optimism_discovery_v4_args() {
+        let expected_args = RollupArgs { discovery_v4: true, ..Default::default() };
+        let args = CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.discovery.v4"]).args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
+    fn test_parse_optimism_sequencer_http_args() {
+        let expected_args =
+            RollupArgs { sequencer_http: Some("http://host:port".into()), ..Default::default() };
+        let args = CommandParser::<RollupArgs>::parse_from([
+            "reth",
+            "--rollup.sequencer-http",
+            "http://host:port",
+        ])
+        .args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
+    fn test_parse_optimism_disable_txpool_args() {
+        let expected_args = RollupArgs { disable_txpool_gossip: true, ..Default::default() };
+        let args =
+            CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.disable-tx-pool-gossip"])
+                .args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
+    fn test_parse_optimism_enable_tx_conditional() {
+        let expected_args = RollupArgs { enable_tx_conditional: true, ..Default::default() };
+        let args =
+            CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.enable-tx-conditional"])
+                .args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
+    fn test_parse_optimism_many_args() {
+        let expected_args = RollupArgs {
+            disable_txpool_gossip: true,
+            compute_pending_block: true,
+            enable_genesis_walkback: true,
+            enable_tx_conditional: true,
+            sequencer_http: Some("http://host:port".into()),
+            ..Default::default()
+        };
+        let args = CommandParser::<RollupArgs>::parse_from([
+            "reth",
+            "--rollup.disable-tx-pool-gossip",
+            "--rollup.compute-pending-block",
+            "--rollup.enable-genesis-walkback",
+            "--rollup.enable-tx-conditional",
+            "--rollup.sequencer-http",
+            "http://host:port",
+        ])
+        .args;
+        assert_eq!(args, expected_args);
     }
 }

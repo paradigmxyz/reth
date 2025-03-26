@@ -1,0 +1,35 @@
+[package]
+name = "reth-network-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Commonly used network types"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-network-peers.workspace = true
+reth-net-banlist.workspace = true
+
+alloy-eip2124.workspace = true
+
+# misc
+serde = { workspace = true, optional = true }
+humantime-serde = { workspace = true, optional = true }
+serde_json = { workspace = true, features = ["std"] }
+
+# misc
+tracing.workspace = true
+
+[features]
+serde = [
+    "dep:serde",
+    "dep:humantime-serde",
+    "alloy-eip2124/serde",
+]
+test-utils = []

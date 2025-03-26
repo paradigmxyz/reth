@@ -1,23 +1,71 @@
 //! Helper provider traits to encapsulate all provider traits for simplicity.
 
 use crate::{
-    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    DatabaseProviderFactory, EvmEnvProvider, StageCheckpointReader, StateProviderFactory,
-    StaticFileProviderFactory,
+    AccountReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
+    HeaderProvider, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
+    TransactionsProvider,
 };
-use reth_db::database::Database;
+use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
+use reth_chainspec::EthereumHardforks;
+use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_storage_api::NodePrimitivesProvider;
+use std::fmt::Debug;
 
 /// Helper trait to unify all provider traits for simplicity.
-pub trait FullProvider<DB: Database>:
-    DatabaseProviderFactory<DB>
-    + StaticFileProviderFactory
-    + BlockReaderIdExt
-    + AccountReader
+pub trait FullProvider<N: NodeTypesWithDB>:
+    DatabaseProviderFactory<DB = N::DB>
+    + NodePrimitivesProvider<Primitives = N::Primitives>
+    + StaticFileProviderFactory<Primitives = N::Primitives>
+    + BlockReaderIdExt<
+        Transaction = TxTy<N>,
+        Block = BlockTy<N>,
+        Receipt = ReceiptTy<N>,
+        Header = HeaderTy<N>,
+    > + AccountReader
     + StateProviderFactory
-    + EvmEnvProvider
-    + ChainSpecProvider
+    + ChainSpecProvider<ChainSpec = N::ChainSpec>
     + ChangeSetReader
     + CanonStateSubscriptions
+    + ForkChoiceSubscriptions<Header = HeaderTy<N>>
+    + StageCheckpointReader
+    + Clone
+    + Debug
+    + Unpin
+    + 'static
+{
+}
+
+impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
+    T: DatabaseProviderFactory<DB = N::DB>
+        + NodePrimitivesProvider<Primitives = N::Primitives>
+        + StaticFileProviderFactory<Primitives = N::Primitives>
+        + BlockReaderIdExt<
+            Transaction = TxTy<N>,
+            Block = BlockTy<N>,
+            Receipt = ReceiptTy<N>,
+            Header = HeaderTy<N>,
+        > + AccountReader
+        + StateProviderFactory
+        + ChainSpecProvider<ChainSpec = N::ChainSpec>
+        + ChangeSetReader
+        + CanonStateSubscriptions
+        + ForkChoiceSubscriptions<Header = HeaderTy<N>>
+        + StageCheckpointReader
+        + Clone
+        + Debug
+        + Unpin
+        + 'static
+{
+}
+
+/// Helper trait to unify all provider traits required to support `eth` RPC server behaviour, for
+/// simplicity.
+pub trait FullRpcProvider:
+    StateProviderFactory
+    + ChainSpecProvider<ChainSpec: EthereumHardforks>
+    + BlockReaderIdExt
+    + HeaderProvider
+    + TransactionsProvider
     + StageCheckpointReader
     + Clone
     + Unpin
@@ -25,16 +73,12 @@ pub trait FullProvider<DB: Database>:
 {
 }
 
-impl<T, DB: Database> FullProvider<DB> for T where
-    T: DatabaseProviderFactory<DB>
-        + StaticFileProviderFactory
+impl<T> FullRpcProvider for T where
+    T: StateProviderFactory
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + BlockReaderIdExt
-        + AccountReader
-        + StateProviderFactory
-        + EvmEnvProvider
-        + ChainSpecProvider
-        + ChangeSetReader
-        + CanonStateSubscriptions
+        + HeaderProvider
+        + TransactionsProvider
         + StageCheckpointReader
         + Clone
         + Unpin

@@ -1,0 +1,57 @@
+# https://github.com/paradigmxyz/reth/issues/13879
+rpc-compat:
+  - debug_getRawBlock/get-invalid-number (reth)
+  - debug_getRawHeader/get-invalid-number (reth)
+  - debug_getRawReceipts/get-invalid-number (reth)
+  - debug_getRawReceipts/get-block-n (reth)
+  - debug_getRawTransaction/get-invalid-hash (reth)
+
+  - eth_call/call-callenv (reth)
+  - eth_getStorageAt/get-storage-invalid-key-too-large (reth)
+  - eth_getStorageAt/get-storage-invalid-key (reth)
+  - eth_getTransactionReceipt/get-access-list (reth)
+  - eth_getTransactionReceipt/get-blob-tx (reth)
+  - eth_getTransactionReceipt/get-dynamic-fee (reth)
+  - eth_getTransactionReceipt/get-legacy-contract (reth)
+  - eth_getTransactionReceipt/get-legacy-input (reth)
+  - eth_getTransactionReceipt/get-legacy-receipt (reth)
+
+# https://github.com/paradigmxyz/reth/issues/8732
+engine-withdrawals:
+  - Withdrawals Fork On Genesis (Paris) (reth)
+  - Withdrawals Fork on Block 1 (Paris) (reth)
+  - Withdrawals Fork on Block 2 (Paris) (reth)
+  - Withdrawals Fork on Block 3 (Paris) (reth)
+  - Withdraw to a single account (Paris) (reth)
+  - Withdraw to two accounts (Paris) (reth)
+  - Withdraw many accounts (Paris) (reth)
+  - Withdraw zero amount (Paris) (reth)
+  - Empty Withdrawals (Paris) (reth)
+  - Corrupted Block Hash Payload (INVALID) (Paris) (reth)
+  - Withdrawals Fork on Block 1 - 8 Block Re-Org NewPayload (Paris) (reth)
+  - Withdrawals Fork on Block 1 - 8 Block Re-Org, Sync (Paris) (reth)
+  - Withdrawals Fork on Block 8 - 10 Block Re-Org NewPayload (Paris) (reth)
+  - Withdrawals Fork on Block 8 - 10 Block Re-Org Sync (Paris) (reth)
+  - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org (Paris) (reth)
+  - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org Sync (Paris) (reth)
+  - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org (Paris) (reth)
+  - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org Sync (Paris) (reth)
+
+engine-api: []
+
+# https://github.com/paradigmxyz/reth/issues/8305
+# https://github.com/paradigmxyz/reth/issues/6217
+# https://github.com/paradigmxyz/reth/issues/8306
+# https://github.com/paradigmxyz/reth/issues/7144
+engine-cancun:
+  - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
+  - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
+  - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+
+sync: []
+
+# no fix: it’s too expensive to check whether the storage is empty on each creation
+eest/consume-engine:
+  - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test_engine-zero_nonce]-reth
+eest/consume-rlp:
+  - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test-zero_nonce]-reth

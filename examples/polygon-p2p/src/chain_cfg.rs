@@ -1,33 +1,16 @@
-use reth_primitives::{
-    b256, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork, Head, NodeRecord, B256,
-};
+use alloy_genesis::Genesis;
+use reth_chainspec::ChainSpec;
+use reth_discv4::NodeRecord;
+use reth_primitives::Head;
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
-const SHANGAI_BLOCK: u64 = 50523000;
+const SHANGHAI_BLOCK: u64 = 50523000;
 
 pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
-    const GENESIS: B256 = b256!("a9c28ce2141b56c474f1dc504bee9b01eb1bd7d1a507580d5519d4437a97de1b");
-
-    ChainSpec {
-        chain: Chain::from_id(137),
-        // <https://github.com/maticnetwork/bor/blob/d521b8e266b97efe9c8fdce8167e9dd77b04637d/builder/files/genesis-mainnet-v1.json>
-        genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
-        genesis_hash: Some(GENESIS),
-        paris_block_and_final_difficulty: None,
-        hardforks: BTreeMap::from([
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(3395000)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(3395000)),
-            (Hardfork::Berlin, ForkCondition::Block(14750000)),
-            (Hardfork::London, ForkCondition::Block(23850000)),
-            (Hardfork::Shanghai, ForkCondition::Block(SHANGAI_BLOCK)),
-        ]),
-        deposit_contract: None,
-        base_fee_params: reth_primitives::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 0,
-    }
-    .into()
+    let genesis: Genesis =
+        serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis");
+    Arc::new(genesis.into())
 }
 
 /// Polygon mainnet boot nodes <https://github.com/maticnetwork/bor/blob/master/params/bootnodes.go#L79>
@@ -39,7 +22,7 @@ static BOOTNODES : [&str; 4] = [
 ];
 
 pub(crate) fn head() -> Head {
-    Head { number: SHANGAI_BLOCK, ..Default::default() }
+    Head { number: SHANGHAI_BLOCK, ..Default::default() }
 }
 
 pub(crate) fn boot_nodes() -> Vec<NodeRecord> {

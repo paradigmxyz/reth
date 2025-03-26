@@ -1,119 +1,105 @@
 //! Helper type that represents one of two possible executor types
 
-use crate::execute::{
-    BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
-    BlockExecutorProvider, Executor,
+use crate::{
+    execute::{BlockExecutorProvider, Executor},
+    Database, OnStateHook,
 };
-use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
-use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt};
-use revm_primitives::db::Database;
 
 // re-export Either
 pub use futures_util::future::Either;
+use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 impl<A, B> BlockExecutorProvider for Either<A, B>
 where
     A: BlockExecutorProvider,
-    B: BlockExecutorProvider,
+    B: BlockExecutorProvider<Primitives = A::Primitives>,
 {
-    type Executor<DB: Database<Error = ProviderError>> = Either<A::Executor<DB>, B::Executor<DB>>;
-    type BatchExecutor<DB: Database<Error = ProviderError>> =
-        Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
+    type Primitives = A::Primitives;
+
+    type Executor<DB: Database> = Either<A::Executor<DB>, B::Executor<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database,
     {
         match self {
-            Either::Left(a) => Either::Left(a.executor(db)),
-            Either::Right(b) => Either::Right(b.executor(db)),
-        }
-    }
-
-    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
-    where
-        DB: Database<Error = ProviderError>,
-    {
-        match self {
-            Either::Left(a) => Either::Left(a.batch_executor(db, prune_modes)),
-            Either::Right(b) => Either::Right(b.batch_executor(db, prune_modes)),
+            Self::Left(a) => Either::Left(a.executor(db)),
+            Self::Right(b) => Either::Right(b.executor(db)),
         }
     }
 }
 
 impl<A, B, DB> Executor<DB> for Either<A, B>
 where
-    A: for<'a> Executor<
-        DB,
-        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
-        Error = BlockExecutionError,
-    >,
-    B: for<'a> Executor<
-        DB,
-        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BlockExecutionOutput<Receipt>,
-        Error = BlockExecutionError,
-    >,
-    DB: Database<Error = ProviderError>,
+    A: Executor<DB>,
+    B: Executor<DB, Primitives = A::Primitives, Error = A::Error>,
+    DB: Database,
 {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BlockExecutionOutput<Receipt>;
-    type Error = BlockExecutionError;
+    type Primitives = A::Primitives;
+    type Error = A::Error;
 
-    fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute_one(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
         match self {
-            Either::Left(a) => a.execute(input),
-            Either::Right(b) => b.execute(input),
-        }
-    }
-}
-
-impl<A, B, DB> BatchExecutor<DB> for Either<A, B>
-where
-    A: for<'a> BatchExecutor<
-        DB,
-        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BatchBlockExecutionOutput,
-        Error = BlockExecutionError,
-    >,
-    B: for<'a> BatchExecutor<
-        DB,
-        Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BatchBlockExecutionOutput,
-        Error = BlockExecutionError,
-    >,
-    DB: Database<Error = ProviderError>,
-{
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BatchBlockExecutionOutput;
-    type Error = BlockExecutionError;
-
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
-        match self {
-            Either::Left(a) => a.execute_one(input),
-            Either::Right(b) => b.execute_one(input),
+            Self::Left(a) => a.execute_one(block),
+            Self::Right(b) => b.execute_one(block),
         }
     }
 
-    fn finalize(self) -> Self::Output {
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: OnStateHook + 'static,
+    {
         match self {
-            Either::Left(a) => a.finalize(),
-            Either::Right(b) => b.finalize(),
+            Self::Left(a) => a.execute_one_with_state_hook(block, state_hook),
+            Self::Right(b) => b.execute_one_with_state_hook(block, state_hook),
         }
     }
 
-    fn set_tip(&mut self, tip: BlockNumber) {
+    fn execute(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    {
         match self {
-            Either::Left(a) => a.set_tip(tip),
-            Either::Right(b) => b.set_tip(tip),
+            Self::Left(a) => a.execute(block),
+            Self::Right(b) => b.execute(block),
         }
     }
 
-    fn size_hint(&self) -> Option<usize> {
+    fn execute_with_state_closure<F>(
+        self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        state: F,
+    ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
+    where
+        F: FnMut(&revm::database::State<DB>),
+    {
         match self {
-            Either::Left(a) => a.size_hint(),
-            Either::Right(b) => b.size_hint(),
+            Self::Left(a) => a.execute_with_state_closure(block, state),
+            Self::Right(b) => b.execute_with_state_closure(block, state),
+        }
+    }
+
+    fn into_state(self) -> revm::database::State<DB> {
+        match self {
+            Self::Left(a) => a.into_state(),
+            Self::Right(b) => b.into_state(),
+        }
+    }
+
+    fn size_hint(&self) -> usize {
+        match self {
+            Self::Left(a) => a.size_hint(),
+            Self::Right(b) => b.size_hint(),
         }
     }
 }

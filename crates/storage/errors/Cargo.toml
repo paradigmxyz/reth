@@ -1,0 +1,42 @@
+[package]
+name = "reth-storage-errors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives-traits.workspace = true
+reth-prune-types.workspace = true
+reth-static-file-types.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+
+# misc
+derive_more.workspace = true
+thiserror.workspace = true
+
+revm-database-interface.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "derive_more/std",
+    "reth-primitives-traits/std",
+    "thiserror/std",
+    "revm-database-interface/std",
+    "reth-prune-types/std",
+    "reth-static-file-types/std",
+]

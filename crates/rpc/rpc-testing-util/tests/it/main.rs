@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 mod trace;
 
-fn main() {}
+const fn main() {}

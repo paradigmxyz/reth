@@ -1,12 +1,12 @@
 //! Listeners for the transaction-pool
 
 use crate::{
-    pool::events::{FullTransactionEvent, TransactionEvent},
-    traits::PropagateKind,
+    pool::events::{FullTransactionEvent, NewTransactionEvent, TransactionEvent},
+    traits::{NewBlobSidecar, PropagateKind},
     PoolTransaction, ValidPoolTransaction,
 };
+use alloy_primitives::{TxHash, B256};
 use futures_util::Stream;
-use reth_primitives::{TxHash, B256};
 use std::{
     collections::{hash_map::Entry, HashMap},
     pin::Pin,
@@ -14,13 +14,13 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::mpsc::{
-    error::TrySendError, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    self as mpsc, error::TrySendError, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
-
+use tracing::debug;
 /// The size of the event channel used to propagate transaction events.
 const TX_POOL_EVENT_CHANNEL_SIZE: usize = 1024;
 
-/// A Stream that receives [TransactionEvent] only for the transaction with the given hash.
+/// A Stream that receives [`TransactionEvent`] only for the transaction with the given hash.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
 pub struct TransactionEvents {
@@ -46,7 +46,7 @@ impl Stream for TransactionEvents {
     }
 }
 
-/// A Stream that receives [FullTransactionEvent] for _all_ transaction.
+/// A Stream that receives [`FullTransactionEvent`] for _all_ transaction.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless polled"]
 pub struct AllTransactionsEvents<T: PoolTransaction> {
@@ -184,7 +184,7 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
 
 /// All Sender half(s) of the event channels for all transactions.
 ///
-/// This mimics [tokio::sync::broadcast] but uses separate channels.
+/// This mimics [`tokio::sync::broadcast`] but uses separate channels.
 #[derive(Debug)]
 struct AllPoolEventsBroadcaster<T: PoolTransaction> {
     /// Corresponding sender half(s) for event listener channel
@@ -209,7 +209,7 @@ impl<T: PoolTransaction> AllPoolEventsBroadcaster<T> {
 
 /// All Sender half(s) of the event channels for a specific transaction.
 ///
-/// This mimics [tokio::sync::broadcast] but uses separate channels and is unbounded.
+/// This mimics [`tokio::sync::broadcast`] but uses separate channels and is unbounded.
 #[derive(Default, Debug)]
 struct PoolEventBroadcaster {
     /// Corresponding sender half(s) for event listener channel
@@ -225,5 +225,110 @@ impl PoolEventBroadcaster {
     // Broadcast an event to all listeners. Dropped listeners are silently evicted.
     fn broadcast(&mut self, event: TransactionEvent) {
         self.senders.retain(|sender| sender.send(event.clone()).is_ok())
+    }
+}
+
+/// An active listener for new pending transactions.
+#[derive(Debug)]
+pub(crate) struct PendingTransactionHashListener {
+    pub(crate) sender: mpsc::Sender<TxHash>,
+    /// Whether to include transactions that should not be propagated over the network.
+    pub(crate) kind: TransactionListenerKind,
+}
+
+impl PendingTransactionHashListener {
+    /// Attempts to send all hashes to the listener.
+    ///
+    /// Returns false if the channel is closed (receiver dropped)
+    pub(crate) fn send_all(&self, hashes: impl IntoIterator<Item = TxHash>) -> bool {
+        for tx_hash in hashes {
+            match self.sender.try_send(tx_hash) {
+                Ok(()) => {}
+                Err(err) => {
+                    return if matches!(err, mpsc::error::TrySendError::Full(_)) {
+                        debug!(
+                            target: "txpool",
+                            "[{:?}] failed to send pending tx; channel full",
+                            tx_hash,
+                        );
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        }
+        true
+    }
+}
+
+/// An active listener for new pending transactions.
+#[derive(Debug)]
+pub(crate) struct TransactionListener<T: PoolTransaction> {
+    pub(crate) sender: mpsc::Sender<NewTransactionEvent<T>>,
+    /// Whether to include transactions that should not be propagated over the network.
+    pub(crate) kind: TransactionListenerKind,
+}
+
+impl<T: PoolTransaction> TransactionListener<T> {
+    /// Attempts to send the event to the listener.
+    ///
+    /// Returns false if the channel is closed (receiver dropped)
+    pub(crate) fn send(&self, event: NewTransactionEvent<T>) -> bool {
+        self.send_all(std::iter::once(event))
+    }
+
+    /// Attempts to send all events to the listener.
+    ///
+    /// Returns false if the channel is closed (receiver dropped)
+    pub(crate) fn send_all(
+        &self,
+        events: impl IntoIterator<Item = NewTransactionEvent<T>>,
+    ) -> bool {
+        for event in events {
+            match self.sender.try_send(event) {
+                Ok(()) => {}
+                Err(err) => {
+                    return if let mpsc::error::TrySendError::Full(event) = err {
+                        debug!(
+                            target: "txpool",
+                            "[{:?}] failed to send pending tx; channel full",
+                            event.transaction.hash(),
+                        );
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        }
+        true
+    }
+}
+
+/// An active listener for new blobs
+#[derive(Debug)]
+pub(crate) struct BlobTransactionSidecarListener {
+    pub(crate) sender: mpsc::Sender<NewBlobSidecar>,
+}
+
+/// Determines what kind of new transactions should be emitted by a stream of transactions.
+///
+/// This gives control whether to include transactions that are allowed to be propagated.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TransactionListenerKind {
+    /// Any new pending transactions
+    All,
+    /// Only transactions that are allowed to be propagated.
+    ///
+    /// See also [`ValidPoolTransaction`]
+    PropagateOnly,
+}
+
+impl TransactionListenerKind {
+    /// Returns true if we're only interested in transactions that are allowed to be propagated.
+    #[inline]
+    pub const fn is_propagate_only(&self) -> bool {
+        matches!(self, Self::PropagateOnly)
     }
 }

@@ -1,5 +1,5 @@
+use alloy_primitives::U64;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_rpc_types::PeerCount;
 
 /// Net rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "net"))]
@@ -11,7 +11,7 @@ pub trait NetApi {
 
     /// Returns number of peers connected to node.
     #[method(name = "peerCount")]
-    fn peer_count(&self) -> RpcResult<PeerCount>;
+    fn peer_count(&self) -> RpcResult<U64>;
 
     /// Returns true if client is actively listening for network connections.
     /// Otherwise false.

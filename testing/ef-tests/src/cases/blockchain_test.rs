@@ -6,9 +6,13 @@ use crate::{
 };
 use alloy_rlp::Decodable;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+use reth_chainspec::ChainSpec;
+use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
-use reth_provider::{providers::StaticFileWriter, HashingWriter, ProviderFactory};
+use reth_provider::{
+    providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
+    DatabaseProviderFactory, HashingWriter, StaticFileProviderFactory,
+};
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
@@ -20,7 +24,7 @@ pub struct BlockchainTests {
 
 impl BlockchainTests {
     /// Create a new handler for a subset of the blockchain test suite.
-    pub fn new(suite: String) -> Self {
+    pub const fn new(suite: String) -> Self {
         Self { suite }
     }
 }
@@ -42,7 +46,7 @@ pub struct BlockchainTestCase {
 
 impl Case for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
-        Ok(BlockchainTestCase {
+        Ok(Self {
             tests: {
                 let s = fs::read_to_string(path)
                     .map_err(|error| Error::Io { path: path.into(), error })?;
@@ -81,49 +85,36 @@ impl Case for BlockchainTestCase {
             .par_bridge()
             .try_for_each(|case| {
                 // Create a new test database and initialize a provider for the test case.
-                let db = create_test_rw_db();
-                let (_static_files_dir, static_files_dir_path) = create_test_static_files_dir();
-                let provider = ProviderFactory::new(
-                    db.as_ref(),
-                    Arc::new(case.network.clone().into()),
-                    static_files_dir_path,
-                )?
-                .provider_rw()
-                .unwrap();
+                let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
+                let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
+                    .database_provider_rw()
+                    .unwrap();
 
                 // Insert initial test state into the provider.
-                provider
-                    .insert_historical_block(
-                        SealedBlock::new(
-                            case.genesis_block_header.clone().into(),
-                            BlockBody::default(),
-                        )
-                        .try_seal_with_senders()
-                        .unwrap(),
-                        None,
+                provider.insert_historical_block(
+                    SealedBlock::<reth_primitives::Block>::from_sealed_parts(
+                        case.genesis_block_header.clone().into(),
+                        BlockBody::default(),
                     )
-                    .map_err(|err| Error::RethError(err.into()))?;
+                    .try_recover()
+                    .unwrap(),
+                )?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
                 // Initialize receipts static file with genesis
                 {
-                    let mut receipts_writer = provider
-                        .static_file_provider()
-                        .latest_writer(StaticFileSegment::Receipts)
-                        .unwrap();
-                    receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+                    let static_file_provider = provider.static_file_provider();
+                    let mut receipts_writer =
+                        static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+                    receipts_writer.increment_block(0).unwrap();
                     receipts_writer.commit_without_sync_all().unwrap();
                 }
 
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
-                    let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                    provider
-                        .insert_historical_block(
-                            decoded.clone().try_seal_with_senders().unwrap(),
-                            None,
-                        )
-                        .map_err(|err| Error::RethError(err.into()))?;
+                    let decoded =
+                        SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
+                    provider.insert_historical_block(decoded.clone().try_recover().unwrap())?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider
@@ -136,9 +127,8 @@ impl Case for BlockchainTestCase {
                 // Execute the execution stage using the EVM processor factory for the test case
                 // network.
                 let _ = ExecutionStage::new_with_executor(
-                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(Arc::new(
-                        case.network.clone().into(),
-                    )),
+                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec.clone()),
+                    Arc::new(EthBeaconConsensus::new(chain_spec)),
                 )
                 .execute(
                     &provider,
@@ -149,20 +139,18 @@ impl Case for BlockchainTestCase {
                 match (&case.post_state, &case.post_state_hash) {
                     (Some(state), None) => {
                         // Validate accounts in the state against the provider's database.
-                        for (&address, account) in state.iter() {
+                        for (&address, account) in state {
                             account.assert_db(address, provider.tx_ref())?;
                         }
                     }
                     (None, Some(expected_state_root)) => {
                         // Insert state hashes into the provider based on the expected state root.
                         let last_block = last_block.unwrap_or_default();
-                        provider
-                            .insert_hashes(
-                                0..=last_block.number,
-                                last_block.hash(),
-                                *expected_state_root,
-                            )
-                            .map_err(|err| Error::RethError(err.into()))?;
+                        provider.insert_hashes(
+                            0..=last_block.number,
+                            last_block.hash(),
+                            *expected_state_root,
+                        )?;
                     }
                     _ => return Err(Error::MissingPostState),
                 }
@@ -192,7 +180,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "ValueOverflow.json"
         | "ValueOverflowParis.json"
 
-        // txbyte is of type 02 and we dont parse tx bytes for this test to fail.
+        // txbyte is of type 02 and we don't parse tx bytes for this test to fail.
         | "typeTwoBerlin.json"
 
         // Test checks if nonce overflows. We are handling this correctly but we are not parsing
@@ -220,6 +208,18 @@ pub fn should_skip(path: &Path) -> bool {
         | "loopMul.json"
         | "CALLBlake2f_MaxRounds.json"
         | "shiftCombinations.json"
+
+        // Skipped by revm as well: <https://github.com/bluealloy/revm/blob/be92e1db21f1c47b34c5a58cfbf019f6b97d7e4b/bins/revme/src/cmd/statetest/runner.rs#L115-L125>
+        | "RevertInCreateInInit_Paris.json"
+        | "RevertInCreateInInit.json"
+        | "dynamicAccountOverwriteEmpty.json"
+        | "dynamicAccountOverwriteEmpty_Paris.json"
+        | "RevertInCreateInInitCreate2Paris.json"
+        | "create2collisionStorage.json"
+        | "RevertInCreateInInitCreate2.json"
+        | "create2collisionStorageParis.json"
+        | "InitCollision.json"
+        | "InitCollisionParis.json"
     )
     // Ignore outdated EOF tests that haven't been updated for Cancun yet.
     || path_contains(path_str, &["EIPTests", "stEOF"])

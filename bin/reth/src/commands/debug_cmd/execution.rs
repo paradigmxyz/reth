@@ -1,79 +1,53 @@
 //! Command for debugging execution.
 
-use crate::{
-    args::{
-        get_secret_key,
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-    macros::block_executor,
-    utils::get_single_header,
-};
+use crate::{args::NetworkArgs, utils::get_single_header};
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
-use futures::{stream::select as stream_select, StreamExt};
-use reth_beacon_consensus::EthBeaconConsensus;
+use futures::StreamExt;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
-use reth_config::{config::EtlConfig, Config};
-use reth_consensus::Consensus;
-use reth_db::{database::Database, init_db, DatabaseEnv};
+use reth_cli_util::get_secret_key;
+use reth_config::Config;
+use reth_consensus::FullConsensus;
+use reth_db::DatabaseEnv;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_errors::ConsensusError;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
-use reth_network::{NetworkEvents, NetworkHandle};
+use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_core::init::init_genesis;
-use reth_primitives::{
-    fs, stage::StageId, BlockHashOrNumber, BlockNumber, ChainSpec, PruneModes, B256,
-};
+use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
+use reth_node_api::NodeTypesWithDBAdapter;
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
+use reth_node_events::node::NodeEvent;
 use reth_provider::{
-    BlockExecutionWriter, HeaderSyncMode, ProviderFactory, StageCheckpointReader,
-    StaticFileProviderFactory,
+    providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
+use reth_prune::PruneModes;
 use reth_stages::{
-    sets::DefaultStages,
-    stages::{ExecutionStage, ExecutionStageThresholds},
-    Pipeline, StageSet,
+    sets::DefaultStages, stages::ExecutionStage, ExecutionStageThresholds, Pipeline, StageId,
+    StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
 
 /// `reth debug execution` command
 #[derive(Debug, Parser)]
-pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
+pub struct Command<C: ChainSpecParser> {
+    #[command(flatten)]
+    env: EnvironmentArgs<C>,
 
     #[command(flatten)]
     network: NetworkArgs,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
 
     /// The maximum block height.
     #[arg(long)]
@@ -85,51 +59,51 @@ pub struct Command {
     pub interval: u64,
 }
 
-impl Command {
-    fn build_pipeline<DB, Client>(
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+    fn build_pipeline<N, Client>(
         &self,
         config: &Config,
         client: Client,
-        consensus: Arc<dyn Consensus>,
-        provider_factory: ProviderFactory<DB>,
+        consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
+        provider_factory: ProviderFactory<N>,
         task_executor: &TaskExecutor,
-        static_file_producer: StaticFileProducer<DB>,
-    ) -> eyre::Result<Pipeline<DB>>
+        static_file_producer: StaticFileProducer<ProviderFactory<N>>,
+    ) -> eyre::Result<Pipeline<N>>
     where
-        DB: Database + Unpin + Clone + 'static,
-        Client: HeadersClient + BodiesClient + Clone + 'static,
+        N: ProviderNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives> + CliNodeTypes,
+        Client: EthBlockClient + 'static,
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(client.clone(), Arc::clone(&consensus))
+            .build(client.clone(), consensus.clone().as_header_validator())
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), provider_factory.clone())
+            .build(client, consensus.clone().as_consensus(), provider_factory.clone())
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let executor = block_executor!(self.chain.clone());
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
-        let header_mode = HeaderSyncMode::Tip(tip_rx);
-        let pipeline = Pipeline::builder()
+        let pipeline = Pipeline::<N>::builder()
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
                     provider_factory.clone(),
-                    header_mode,
-                    Arc::clone(&consensus),
+                    tip_rx,
+                    consensus.clone(),
                     header_downloader,
                     body_downloader,
                     executor.clone(),
                     stage_conf.clone(),
-                    prune_modes.clone(),
+                    prune_modes,
                 )
                 .set(ExecutionStage::new(
                     executor,
+                    consensus.clone(),
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,
@@ -137,7 +111,6 @@ impl Command {
                         max_duration: None,
                     },
                     stage_conf.execution_external_clean_threshold(),
-                    prune_modes,
                     ExExManagerHandle::empty(),
                 )),
             )
@@ -146,29 +119,22 @@ impl Command {
         Ok(pipeline)
     }
 
-    async fn build_network(
+    async fn build_network<
+        N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>,
+    >(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        db: Arc<DatabaseEnv>,
+        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
     ) -> eyre::Result<NetworkHandle> {
         let secret_key = get_secret_key(&network_secret_path)?;
         let network = self
             .network
-            .network_config(config, self.chain.clone(), secret_key, default_peers_path)
+            .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
-            .discovery_addr(SocketAddr::new(
-                self.network.discovery.addr,
-                self.network.discovery.port,
-            ))
-            .build(ProviderFactory::new(
-                db,
-                self.chain.clone(),
-                self.datadir.unwrap_or_chain_default(self.chain.chain).static_files(),
-            )?)
+            .build(provider_factory)
             .start_network()
             .await?;
         info!(target: "reth::cli", peer_id = %network.peer_id(), local_addr = %network.local_addr(), "Connected to P2P network");
@@ -176,11 +142,14 @@ impl Command {
         Ok(network)
     }
 
-    async fn fetch_block_hash<Client: HeadersClient>(
+    async fn fetch_block_hash<Client>(
         &self,
         client: Client,
         block: BlockNumber,
-    ) -> eyre::Result<B256> {
+    ) -> eyre::Result<B256>
+    where
+        Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
+    {
         info!(target: "reth::cli", ?block, "Fetching block from the network.");
         loop {
             match get_single_header(&client, BlockHashOrNumber::Number(block)).await {
@@ -196,27 +165,15 @@ impl Command {
     }
 
     /// Execute `execution-debug` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let mut config = Config::default();
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, config, data_dir } =
+            self.env.init::<N>(AccessRights::RW)?;
 
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db();
-
-        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
-        if config.stages.etl.dir.is_none() {
-            config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
-        }
-
-        fs::create_dir_all(&db_path)?;
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), data_dir.static_files())?;
-
-        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(provider_factory.clone())?;
-
-        let consensus: Arc<dyn Consensus> =
-            Arc::new(EthBeaconConsensus::new(Arc::clone(&self.chain)));
+        let consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>> =
+            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         // Configure and build network
         let network_secret_path =
@@ -225,24 +182,21 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                db.clone(),
+                provider_factory.clone(),
                 network_secret_path,
                 data_dir.known_peers(),
             )
             .await?;
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
         // Configure the pipeline
         let fetch_client = network.fetch_client().await?;
         let mut pipeline = self.build_pipeline(
             &config,
             fetch_client.clone(),
-            Arc::clone(&consensus),
+            consensus.clone(),
             provider_factory.clone(),
             &ctx.task_executor,
             static_file_producer,
@@ -257,18 +211,12 @@ impl Command {
             return Ok(())
         }
 
-        let pipeline_events = pipeline.events();
-        let events = stream_select(
-            network.event_listener().map(Into::into),
-            pipeline_events.map(Into::into),
-        );
         ctx.task_executor.spawn_critical(
             "events task",
             reth_node_events::node::handle_events(
-                Some(network.clone()),
+                Some(Box::new(network)),
                 latest_block_number,
-                events,
-                db.clone(),
+                pipeline.events().map(Into::<NodeEvent<N::Primitives>>::into),
             ),
         );
 
@@ -286,11 +234,7 @@ impl Command {
             trace!(target: "reth::cli", from = next_block, to = target_block, tip = ?target_block_hash, ?result, "Pipeline finished");
 
             // Unwind the pipeline without committing.
-            {
-                provider_factory
-                    .provider_rw()?
-                    .take_block_and_execution_range(next_block..=target_block)?;
-            }
+            provider_factory.provider_rw()?.unwind_trie_state_range(next_block..=target_block)?;
 
             // Update latest block
             current_max_block = target_block;

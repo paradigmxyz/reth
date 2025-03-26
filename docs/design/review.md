@@ -4,7 +4,7 @@ This document contains some of our research in how other codebases designed vari
 
 ## P2P
 
-* [`Sentry`](https://github.com/vorot93/sentry), a pluggable p2p node following the [Erigon gRPC architecture](https://erigon.substack.com/p/current-status-of-silkworm-and-silkrpc):
+* [`Sentry`](https://erigon.gitbook.io/erigon/advanced-usage/sentry), a pluggable p2p node following the [Erigon gRPC architecture](https://erigon.substack.com/p/current-status-of-silkworm-and-silkrpc):
     * [`vorot93`](https://github.com/vorot93/) first started by implementing a rust devp2p stack in [`devp2p`](https://github.com/vorot93/devp2p)
     * vorot93 then started work on sentry, using devp2p, to satisfy the erigon architecture of modular components connected with gRPC.
     * The code from rust-ethereum/devp2p was merged into sentry, and rust-ethereum/devp2p was archived
@@ -19,13 +19,12 @@ This document contains some of our research in how other codebases designed vari
 ## Database
 
 * [Erigon's DB walkthrough](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) contains an overview. They made the most noticeable improvements on storage reduction.
-* [Erigon Videos](https://youtu.be/QqL72qWhF-g) explain new proposals in improving in future versions and take some insights from it. (example: CumulativeTxCount, EliasFano)
 * [Gio's erigon-db table macros](https://github.com/gio256/erigon-db) + [Akula's macros](https://github.com/akula-bft/akula/blob/74b172ee1d2d2a4f04ce057b5a76679c1b83df9c/src/kv/tables.rs#L61).
 
 ## Header Downloaders
 
 * Erigon Header Downloader:
-    * A header downloader algo was introduced in [`erigon#1016`](https://github.com/ledgerwatch/erigon/pull/1016) and finished in [`erigon#1145`](https://github.com/ledgerwatch/erigon/pull/1145). At a high level, the downloader concurrently requested headers by hash, then sorted, validated and fused the responses into chain segments. Smaller segments were fused into larger as the gaps between them were filled. The downloader also used to maintain hardcoded hashes (later renamed to preverified) to bootstrap the sync.
+    * A header downloader algo was introduced in [`erigon#1016`](https://github.com/ledgerwatch/erigon/pull/1016) and finished in [`erigon#1145`](https://github.com/ledgerwatch/erigon/pull/1145). At a high level, the downloader concurrently requested headers by hash, then sorted, validated and fused the responses into chain segments. Smaller segments were fused into larger as the gaps between them were filled. The downloader is also used to maintain hardcoded hashes (later renamed to preverified) to bootstrap the sync.
     * The downloader was refactored multiple times: [`erigon#1471`](https://github.com/ledgerwatch/erigon/pull/1471), [`erigon#1559`](https://github.com/ledgerwatch/erigon/pull/1559) and [`erigon#2035`](https://github.com/ledgerwatch/erigon/pull/2035).
     * With PoS transition in [`erigon#3075`](https://github.com/ledgerwatch/erigon/pull/3075) terminal td was introduced to the algo to stop forward syncing. For the downward sync (post merge), the download was now delegated to [`EthBackendServer`](https://github.com/ledgerwatch/erigon/blob/3c95db00788dc740849c2207d886fe4db5a8c473/ethdb/privateapi/ethbackend.go#L245)
     * Proper reverse PoS downloader was introduced in [`erigon#3092`](https://github.com/ledgerwatch/erigon/pull/3092) which downloads the header batches from tip until local head is reached. Refactored later in [`erigon#3340`](https://github.com/ledgerwatch/erigon/pull/3340) and [`erigon#3717`](https://github.com/ledgerwatch/erigon/pull/3717).

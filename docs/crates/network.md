@@ -8,8 +8,6 @@ Reth's P2P networking consists primarily of 4 ongoing tasks:
 - **ETH Requests**: Responds to incoming requests for headers and bodies
 - **Network Management**: Handles incoming & outgoing connections with peers, and routes requests between peers and the other tasks
 
-We'll leave most of the discussion of the discovery task for the [discv4](./discv4.md) chapter, and will focus on the other three here.
-
 Let's take a look at how the main Reth CLI (i.e., a default-configured full node) makes use of the P2P layer to explore the primary interfaces and entrypoints into the `network` crate.
 
 ---
@@ -145,7 +143,7 @@ pub struct NetworkConfig<C> {
     pub executor: Option<TaskExecutor>,
     /// The `Status` message to send to peers at the beginning.
     pub status: Status,
-    /// Sets the hello message for the p2p handshake in RLPx
+    /// Sets the hello message for the p2p handshake in ``RLPx``
     pub hello_message: HelloMessage,
 }
 ```
@@ -167,8 +165,6 @@ pub(crate) struct Swarm<C> {
 The `Swarm` struct glues together incoming connections from peers, managing sessions with peers, and recording the network's state (e.g. number of active peers, genesis hash of the network, etc.). It emits these as `SwarmEvent`s to the `NetworkManager`, and routes commands and events between the `SessionManager` and `NetworkState` structs that it holds.
 
 We'll touch more on the `NetworkManager` shortly! It's perhaps the most important struct in this crate.
-
-More information about the discovery task can be found in the [discv4](./discv4.md) chapter.
 
 The ETH requests and transactions task will be explained in their own sections, following this one.
 
@@ -312,7 +308,7 @@ pub struct NetworkState<C> {
     genesis_hash: B256,
     /// The type that handles requests.
     ///
-    /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
+    /// The fetcher streams ``RLPx`` related requests on a per-peer basis to this type. This type will
     /// then queue in the request and notify the fetcher once the result has been received.
     state_fetcher: StateFetcher,
 }
@@ -461,7 +457,7 @@ pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
     client: Arc<C>,
     /// Used for reporting peers.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
@@ -648,8 +644,8 @@ fn on_bodies_request(
 
 ## Transactions Task
 
-The transactions task listens for, requests, and propagates transactions both from the node's peers, and those that are added locally (e.g., submitted via RPC). Note that this task focuses solely on the network communication involved with Ethereum transactions, we will talk more about the structure of the transaction pool itself 
-in the [transaction-pool](../../../ethereum/transaction-pool/README.md) chapter.
+The transactions task listens for, requests, and propagates transactions both from the node's peers, and those that are added locally (e.g., submitted via RPC). Note that this task focuses solely on the network communication involved with Ethereum transactions, we will talk more about the structure of the transaction pool itself
+in the [transaction-pool](https://reth.rs/docs/reth_transaction_pool/index.html) chapter.
 
 Again, like the network management and ETH requests tasks, the transactions task is implemented as an endless future that runs as a background task on a standalone `tokio::task`. It's represented by the `TransactionsManager` struct:
 
@@ -787,8 +783,24 @@ The `TransactionsManager.network_events` stream is the first to have all of its 
 The events received in this channel are of type `NetworkEvent`:
 
 [File: crates/net/network/src/manager.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/manager.rs)
+
 ```rust,ignore
-pub enum NetworkEvent {
+pub enum NetworkEvent<R = PeerRequest> {
+    /// Basic peer lifecycle event.
+    Peer(PeerEvent),
+    /// Session established with requests.
+    ActivePeerSession {
+        /// Session information
+        info: SessionInfo,
+        /// A request channel to the session task.
+        messages: PeerRequestSender<R>,
+    },
+}
+```
+
+and with  
+```rust,ignore
+pub enum PeerEvent {
     /// Closed the peer session.
     SessionClosed {
         /// The identifier of the peer to which a session was closed.
@@ -797,29 +809,29 @@ pub enum NetworkEvent {
         reason: Option<DisconnectReason>,
     },
     /// Established a new session with the given peer.
-    SessionEstablished {
-        /// The identifier of the peer to which a session was established.
-        peer_id: PeerId,
-        /// Capabilities the peer announced
-        capabilities: Arc<Capabilities>,
-        /// A request channel to the session task.
-        messages: PeerRequestSender,
-        /// The status of the peer to which a session was established.
-        status: Status,
-    },
+    SessionEstablished(SessionInfo),
     /// Event emitted when a new peer is added
     PeerAdded(PeerId),
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
 }
 ```
+[File: crates/net/network-api/src/events.rs](https://github.com/paradigmxyz/reth/blob/c46b5fc1157d12184d1dceb4dc45e26cf74b2bc6/crates/net/network-api/src/events.rs)
 
-They're handled with the `on_network_event` method, which responds to the two variants of the `NetworkEvent` enum in the following ways:
+They're handled with the `on_network_event` method, which processes session events through both `NetworkEvent::Peer(PeerEvent::SessionClosed)`, `NetworkEvent::Peer(PeerEvent::SessionEstablished)`, and `NetworkEvent::ActivePeerSession` for initializing peer connections and transaction broadcasting.
 
-**`NetworkEvent::SessionClosed`**
+Variants of the `PeerEvent` enum are defined in the following ways:
+
+**`PeerEvent::PeerAdded`**
+Adds a peer to the network node via network handle
+
+**`PeerEvent::PeerRemoved`**
 Removes the peer given by `NetworkEvent::SessionClosed.peer_id` from the `TransactionsManager.peers` map.
 
-**`NetworkEvent::SessionEstablished`**
+**`PeerEvent::SessionClosed`**
+Closes the peer session after disconnection
+
+**`PeerEvent::SessionEstablished`**
 Begins by inserting a `Peer` into `TransactionsManager.peers` by `peer_id`, which is a struct of the following form:
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
@@ -832,7 +844,7 @@ struct Peer {
 }
 ```
 
-Note that the `Peer` struct contains a field `transactions`, which is an [LRU cache](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) of the transactions this peer is aware of. 
+Note that the `Peer` struct contains a field `transactions`, which is an [LRU cache](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) of the transactions this peer is aware of.
 
 The `request_tx` field on the `Peer` is used as the sender end of a channel to send requests to the session with the peer.
 
@@ -840,33 +852,30 @@ After the `Peer` is added to `TransactionsManager.peers`, the hashes of all of t
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
 ```rust,ignore
-fn on_network_event(&mut self, event: NetworkEvent) {
-    match event {
-        NetworkEvent::SessionClosed { peer_id, .. } => {
+fn on_network_event(&mut self, event_result: NetworkEvent) {
+    match event_result {
+        NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
             // remove the peer
             self.peers.remove(&peer_id);
+            self.transaction_fetcher.remove_peer(&peer_id);
         }
-        NetworkEvent::SessionEstablished { peer_id, messages, .. } => {
-            // insert a new peer
-            self.peers.insert(
-                peer_id,
-                Peer {
-                    transactions: LruCache::new(
-                        NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
-                    ),
-                    request_tx: messages,
-                },
-            );
-
-            // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
-            // pool
-            let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
-            self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
-                peer_id,
-                msg,
-            })
+        NetworkEvent::ActivePeerSession { info, messages } => {
+            // process active peer session and broadcast available transaction from the pool
+            self.handle_peer_session(info, messages);
         }
-        _ => {}
+        NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+            let peer_id = info.peer_id;
+            // get messages from existing peer
+             let messages = match self.peers.get(&peer_id) {
+                Some(p) => p.request_tx.clone(),
+                None => {
+                    debug!(target: "net::tx", ?peer_id, "No peer request sender found");
+                    return;
+                }
+            };
+            self.handle_peer_session(info, messages);
+        }
+         _ => {}
     }
 }
 ```
@@ -896,7 +905,7 @@ fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
             .get_all(hashes)
             .into_iter()
             .map(|tx| {
-                (*tx.hash(), Arc::new(tx.transaction.to_recovered_transaction().into_signed()))
+                (*tx.hash(), Arc::new(tx.transaction.to_recovered_transaction().into_tx()))
             })
             .collect(),
     );
@@ -991,9 +1000,9 @@ fn import_transactions(&mut self, peer_id: PeerId, transactions: Vec<Transaction
             };
 
             // track that the peer knows this transaction
-            peer.transactions.insert(tx.hash);
+            peer.transactions.insert(tx.hash());
 
-            match self.transactions_by_peers.entry(tx.hash) {
+            match self.transactions_by_peers.entry(tx.hash()) {
                 Entry::Occupied(mut entry) => {
                     // transaction was already inserted
                     entry.get_mut().push(peer_id);
@@ -1085,7 +1094,7 @@ fn on_get_pooled_transactions(
             .pool
             .get_all(request.0)
             .into_iter()
-            .map(|tx| tx.transaction.to_recovered_transaction().into_signed())
+            .map(|tx| tx.transaction.to_recovered_transaction().into_tx())
             .collect::<Vec<_>>();
 
         // we sent a response at which point we assume that the peer is aware of the transaction

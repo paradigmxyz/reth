@@ -136,7 +136,7 @@ are only a few cases of changing data.
 | _DELETING_|||
 |Key is absent → Error since no such key      |\ref mdbx_del() or \ref mdbx_replace()|Error \ref MDBX_NOTFOUND|
 |Key exist → Delete by key                    |\ref mdbx_del() with the parameter `data = NULL`|Deletion|
-|Key exist → Delete by key with with data matching check|\ref mdbx_del() with the parameter `data` filled with the value which should be match for deletion|Deletion or \ref MDBX_NOTFOUND if the value does not match|
+|Key exist → Delete by key with data matching check|\ref mdbx_del() with the parameter `data` filled with the value which should be match for deletion|Deletion or \ref MDBX_NOTFOUND if the value does not match|
 |Delete at the current cursor position        |\ref mdbx_cursor_del() with \ref MDBX_CURRENT flag|Deletion|
 |Extract (read & delete) value by the key     |\ref mdbx_replace() with zero flag and parameter `new_data = NULL`|Returning a deleted value|
 
@@ -1413,7 +1413,7 @@ enum MDBX_env_flags_t {
    * \ref mdbx_env_set_syncbytes() and \ref mdbx_env_set_syncperiod() functions
    * could be very useful with `MDBX_SAFE_NOSYNC` flag.
    *
-   * The number and volume of of disk IOPs with MDBX_SAFE_NOSYNC flag will
+   * The number and volume of disk IOPs with MDBX_SAFE_NOSYNC flag will
    * exactly the as without any no-sync flags. However, you should expect a
    * larger process's [work set](https://bit.ly/2kA2tFX) and significantly worse
    * a [locality of reference](https://bit.ly/2mbYq2J), due to the more
@@ -2079,7 +2079,7 @@ enum MDBX_option_t {
    * for all processes interacting with the database.
    *
    * \details This defines the number of slots in the lock table that is used to
-   * track readers in the the environment. The default is about 100 for 4K
+   * track readers in the environment. The default is about 100 for 4K
    * system page size. Starting a read-only transaction normally ties a lock
    * table slot to the current thread until the environment closes or the thread
    * exits. If \ref MDBX_NOTLS is in use, \ref mdbx_txn_begin() instead ties the
@@ -3343,7 +3343,7 @@ mdbx_limits_txnsize_max(intptr_t pagesize);
  * \ingroup c_settings
  *
  * \details This defines the number of slots in the lock table that is used to
- * track readers in the the environment. The default is about 100 for 4K system
+ * track readers in the environment. The default is about 100 for 4K system
  * page size. Starting a read-only transaction normally ties a lock table slot
  * to the current thread until the environment closes or the thread exits. If
  * \ref MDBX_NOTLS is in use, \ref mdbx_txn_begin() instead ties the slot to the
@@ -5264,7 +5264,7 @@ LIBMDBX_API int mdbx_dbi_sequence(MDBX_txn *txn, MDBX_dbi dbi, uint64_t *result,
  * This returns a comparison as if the two data items were keys in the
  * specified database.
  *
- * \warning There ss a Undefined behavior if one of arguments is invalid.
+ * \warning There is a Undefined behavior if one of arguments is invalid.
  *
  * \param [in] txn   A transaction handle returned by \ref mdbx_txn_begin().
  * \param [in] dbi   A database handle returned by \ref mdbx_dbi_open().

@@ -14,7 +14,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Metrics derive macro.
-pub use reth_metrics_derive::Metrics;
+pub use metrics_derive::Metrics;
 
 /// Implementation of common metric utilities.
 #[cfg(feature = "common")]

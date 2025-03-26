@@ -1,7 +1,8 @@
 //! Events related to Consensus Layer health.
 
+use alloy_consensus::Header;
 use futures::Stream;
-use reth_provider::CanonChainTracker;
+use reth_storage_api::CanonChainTracker;
 use std::{
     fmt,
     pin::Pin,
@@ -19,28 +20,28 @@ const NO_TRANSITION_CONFIG_EXCHANGED_PERIOD: Duration = Duration::from_secs(120)
 /// after which the warning is issued.
 const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 
-/// A Stream of [ConsensusLayerHealthEvent].
-pub struct ConsensusLayerHealthEvents {
+/// A Stream of [`ConsensusLayerHealthEvent`].
+pub struct ConsensusLayerHealthEvents<H = Header> {
     interval: Interval,
-    canon_chain: Box<dyn CanonChainTracker>,
+    canon_chain: Box<dyn CanonChainTracker<Header = H>>,
 }
 
-impl fmt::Debug for ConsensusLayerHealthEvents {
+impl<H> fmt::Debug for ConsensusLayerHealthEvents<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConsensusLayerHealthEvents").field("interval", &self.interval).finish()
     }
 }
 
-impl ConsensusLayerHealthEvents {
-    /// Creates a new [ConsensusLayerHealthEvents] with the given canonical chain tracker.
-    pub fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
+impl<H> ConsensusLayerHealthEvents<H> {
+    /// Creates a new [`ConsensusLayerHealthEvents`] with the given canonical chain tracker.
+    pub fn new(canon_chain: Box<dyn CanonChainTracker<Header = H>>) -> Self {
         // Skip the first tick to prevent the false `ConsensusLayerHealthEvent::NeverSeen` event.
         let interval = tokio::time::interval_at(Instant::now() + CHECK_INTERVAL, CHECK_INTERVAL);
         Self { interval, canon_chain }
     }
 }
 
-impl Stream for ConsensusLayerHealthEvents {
+impl<H: Send + Sync> Stream for ConsensusLayerHealthEvents<H> {
     type Item = ConsensusLayerHealthEvent;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -53,14 +54,13 @@ impl Stream for ConsensusLayerHealthEvents {
                 if fork_choice.elapsed() <= NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD {
                     // We had an FCU, and it's recent. CL is healthy.
                     continue
-                } else {
-                    // We had an FCU, but it's too old.
-                    return Poll::Ready(Some(
-                        ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(
-                            fork_choice.elapsed(),
-                        ),
-                    ))
                 }
+                // We had an FCU, but it's too old.
+                return Poll::Ready(Some(
+                    ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(
+                        fork_choice.elapsed(),
+                    ),
+                ))
             }
 
             if let Some(transition_config) =

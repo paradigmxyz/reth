@@ -23,10 +23,7 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
-        this.receiver.poll(cx).map(|r| match r {
-            Ok(r) => r,
-            Err(err) => Err(err.into()),
-        })
+        this.receiver.poll(cx).map(|r| r.unwrap_or_else(|err| Err(err.into())))
     }
 }
 

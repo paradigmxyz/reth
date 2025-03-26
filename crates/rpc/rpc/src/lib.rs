@@ -11,7 +11,7 @@
 //! and can reduce overall performance of all concurrent requests handled via the jsonrpsee server.
 //!
 //! To avoid this, all blocking or CPU intensive handlers must be spawned to a separate task. See
-//! the [EthApi] handler implementations for examples. The rpc-api traits make no use of the
+//! the [`EthApi`] handler implementations for examples. The rpc-api traits make no use of the
 //! available jsonrpsee `blocking` attribute to give implementers more freedom because the
 //! `blocking` attribute and async handlers are mutually exclusive. However, as mentioned above, a
 //! lot of handlers make use of async functions, caching for example, but are also using blocking
@@ -36,22 +36,26 @@ mod admin;
 mod debug;
 mod engine;
 pub mod eth;
+mod miner;
 mod net;
 mod otterscan;
 mod reth;
 mod rpc;
 mod trace;
 mod txpool;
+mod validation;
 mod web3;
+
 pub use admin::AdminApi;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
-pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvider};
+pub use eth::{EthApi, EthApiBuilder, EthBundle, EthFilter, EthPubSub};
+pub use miner::MinerApi;
 pub use net::NetApi;
 pub use otterscan::OtterscanApi;
 pub use reth::RethApi;
 pub use rpc::RPCApi;
 pub use trace::TraceApi;
 pub use txpool::TxPoolApi;
+pub use validation::{ValidationApi, ValidationApiConfig};
 pub use web3::Web3Api;
-pub mod result;

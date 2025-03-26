@@ -15,46 +15,56 @@
 //! Once traits are implemented and custom types are defined, the [EngineTypes] trait can be
 //! implemented:
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
-use reth::{
-    builder::{
-        components::{ComponentsBuilder, PayloadServiceBuilder},
-        node::NodeTypes,
-        BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
+use alloy_eips::eip4895::Withdrawals;
+use alloy_genesis::Genesis;
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types::{
+    engine::{
+        ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+        ExecutionPayloadEnvelopeV4, ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
+        PayloadId,
     },
-    primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    providers::{CanonStateSubscriptions, StateProviderFactory},
+    Withdrawal,
+};
+use reth::{
+    api::{InvalidPayloadAttributesError, PayloadTypes},
+    builder::{
+        components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
+        node::{NodeTypes, NodeTypesWithEngine},
+        rpc::{EngineValidatorBuilder, RpcAddOns},
+        BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
+    },
+    primitives::{Block, EthPrimitives, RecoveredBlock, SealedBlock, TransactionSigned},
+    providers::{EthStorage, StateProviderFactory},
+    rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,
-    transaction_pool::TransactionPool,
+    transaction_pool::{PoolTransaction, TransactionPool},
 };
-use reth_basic_payload_builder::{
-    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
-    PayloadBuilder, PayloadConfig,
-};
+use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
+use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
+use reth_engine_local::payload::UnsupportedLocalAttributes;
+use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
 use reth_node_api::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+    payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
+    validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
+    FullNodeComponents, NewPayloadError, PayloadAttributes, PayloadBuilderAttributes,
+    PayloadValidator,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::node::{
-    EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
-};
-use reth_payload_builder::{
-    error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
-    PayloadBuilderService,
-};
-use reth_primitives::{Address, Chain, ChainSpec, Genesis, Header, Withdrawals, B256};
-use reth_rpc_types::{
-    engine::{
-        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
+use reth_node_ethereum::{
+    node::{
+        EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
+        EthereumPoolBuilder,
     },
-    ExecutionPayloadV1, Withdrawal,
+    EthEvmConfig, EthereumEthApiBuilder,
 };
+use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
+use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
+use std::{convert::Infallible, sync::Arc};
 use thiserror::Error;
 
 /// A custom payload attributes type.
@@ -66,6 +76,9 @@ pub struct CustomPayloadAttributes {
     /// A custom field
     pub custom: u64,
 }
+
+// TODO(mattsse): remove this tmp workaround
+impl UnsupportedLocalAttributes for CustomPayloadAttributes {}
 
 /// Custom error type used in payload attributes validation
 #[derive(Debug, Error)]
@@ -86,23 +99,6 @@ impl PayloadAttributes for CustomPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.inner.parent_beacon_block_root()
     }
-
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, self.into())?;
-
-        // custom validation logic - ensure that the custom field is not zero
-        if self.custom == 0 {
-            return Err(EngineObjectValidationError::invalid_params(
-                CustomError::CustomFieldIsNotZero,
-            ))
-        }
-
-        Ok(())
-    }
 }
 
 /// New type around the payload builder attributes type
@@ -113,7 +109,11 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
     type RpcPayloadAttributes = CustomPayloadAttributes;
     type Error = Infallible;
 
-    fn try_new(parent: B256, attributes: CustomPayloadAttributes) -> Result<Self, Infallible> {
+    fn try_new(
+        parent: B256,
+        attributes: CustomPayloadAttributes,
+        _version: u8,
+    ) -> Result<Self, Infallible> {
         Ok(Self(EthPayloadBuilderAttributes::new(parent, attributes.inner)))
     }
 
@@ -144,14 +144,6 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
     fn withdrawals(&self) -> &Withdrawals {
         &self.0.withdrawals
     }
-
-    fn cfg_and_block_env(
-        &self,
-        chain_spec: &ChainSpec,
-        parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        self.0.cfg_and_block_env(chain_spec, parent)
-    }
 }
 
 /// Custom engine types - uses a custom payload attributes RPC type, but uses the default
@@ -160,20 +152,126 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 #[non_exhaustive]
 pub struct CustomEngineTypes;
 
-impl EngineTypes for CustomEngineTypes {
+impl PayloadTypes for CustomEngineTypes {
+    type ExecutionData = ExecutionData;
+    type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
-    type BuiltPayload = EthBuiltPayload;
-    type ExecutionPayloadV1 = ExecutionPayloadV1;
-    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
 
+    fn block_to_payload(
+        block: SealedBlock<
+                <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
+            >,
+    ) -> ExecutionData {
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        ExecutionData { payload, sidecar }
+    }
+}
+
+impl EngineTypes for CustomEngineTypes {
+    type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
+    type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
+    type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
+}
+
+/// Custom engine validator
+#[derive(Debug, Clone)]
+pub struct CustomEngineValidator {
+    inner: EthereumExecutionPayloadValidator<ChainSpec>,
+}
+
+impl CustomEngineValidator {
+    /// Instantiates a new validator.
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { inner: EthereumExecutionPayloadValidator::new(chain_spec) }
+    }
+
+    /// Returns the chain spec used by the validator.
+    #[inline]
+    fn chain_spec(&self) -> &ChainSpec {
+        self.inner.chain_spec()
+    }
+}
+
+impl PayloadValidator for CustomEngineValidator {
+    type Block = Block;
+    type ExecutionData = ExecutionData;
+
+    fn ensure_well_formed_payload(
+        &self,
+        payload: ExecutionData,
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+    }
+}
+
+impl<T> EngineValidator<T> for CustomEngineValidator
+where
+    T: PayloadTypes<PayloadAttributes = CustomPayloadAttributes, ExecutionData = ExecutionData>,
+{
     fn validate_version_specific_fields(
-        chain_spec: &ChainSpec,
+        &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, CustomPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, T::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, payload_or_attrs)
+        validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
+    }
+
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &T::PayloadAttributes,
+    ) -> Result<(), EngineObjectValidationError> {
+        validate_version_specific_fields(
+            self.chain_spec(),
+            version,
+            PayloadOrAttributes::<Self::ExecutionData, T::PayloadAttributes>::PayloadAttributes(
+                attributes,
+            ),
+        )?;
+
+        // custom validation logic - ensure that the custom field is not zero
+        if attributes.custom == 0 {
+            return Err(EngineObjectValidationError::invalid_params(
+                CustomError::CustomFieldIsNotZero,
+            ))
+        }
+
+        Ok(())
+    }
+
+    fn validate_payload_attributes_against_header(
+        &self,
+        _attr: &<T as PayloadTypes>::PayloadAttributes,
+        _header: &<Self::Block as reth::api::Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
+        // skip default timestamp validation
+        Ok(())
+    }
+}
+
+/// Custom engine validator builder
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct CustomEngineValidatorBuilder;
+
+impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
+where
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            Payload = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
+    >,
+{
+    type Validator = CustomEngineValidator;
+
+    async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
+        Ok(CustomEngineValidator::new(ctx.config.chain.clone()))
     }
 }
 
@@ -183,138 +281,136 @@ struct MyCustomNode;
 
 /// Configure the node types
 impl NodeTypes for MyCustomNode {
-    type Primitives = ();
-    // use the custom engine types
-    type Engine = CustomEngineTypes;
+    type Primitives = EthPrimitives;
+    type ChainSpec = ChainSpec;
+    type StateCommitment = MerklePatriciaTrie;
+    type Storage = EthStorage;
 }
+
+/// Configure the node types with the custom engine types
+impl NodeTypesWithEngine for MyCustomNode {
+    type Payload = CustomEngineTypes;
+}
+
+/// Custom addons configuring RPC types
+pub type MyNodeAddOns<N> = RpcAddOns<N, EthereumEthApiBuilder, CustomEngineValidatorBuilder>;
 
 /// Implement the Node trait for the custom node
 ///
 /// This provides a preset configuration for the node
 impl<N> Node<N> for MyCustomNode
 where
-    N: FullNodeTypes<Engine = CustomEngineTypes>,
+    N: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Payload = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+            Storage = EthStorage,
+        >,
+    >,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
         EthereumPoolBuilder,
-        CustomPayloadServiceBuilder,
+        BasicPayloadServiceBuilder<CustomPayloadBuilderBuilder>,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
+        EthereumConsensusBuilder,
+    >;
+    type AddOns = MyNodeAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
     >;
 
-    fn components_builder(self) -> Self::ComponentsBuilder {
+    fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
-            .payload(CustomPayloadServiceBuilder::default())
+            .payload(BasicPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
+            .consensus(EthereumConsensusBuilder::default())
+    }
+
+    fn add_ons(&self) -> Self::AddOns {
+        MyNodeAddOns::default()
     }
 }
 
 /// A custom payload service builder that supports the custom engine types
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct CustomPayloadServiceBuilder;
+pub struct CustomPayloadBuilderBuilder;
 
-impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
+impl<Node, Pool> PayloadBuilderBuilder<Node, Pool> for CustomPayloadBuilderBuilder
 where
-    Node: FullNodeTypes<Engine = CustomEngineTypes>,
-    Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Payload = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
+    >,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
 {
-    async fn spawn_payload_service(
+    type PayloadBuilder = CustomPayloadBuilder<Pool, Node::Provider>;
+
+    async fn build_payload_builder(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
-        let payload_builder = CustomPayloadBuilder::default();
-        let conf = ctx.payload_builder_config();
-
-        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-            .interval(conf.interval())
-            .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_bytes());
-
-        let payload_generator = BasicPayloadJobGenerator::with_builder(
-            ctx.provider().clone(),
-            pool,
-            ctx.task_executor().clone(),
-            payload_job_config,
-            ctx.chain_spec(),
-            payload_builder,
-        );
-        let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-
-        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
-
+    ) -> eyre::Result<Self::PayloadBuilder> {
+        let payload_builder = CustomPayloadBuilder {
+            inner: reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+                ctx.provider().clone(),
+                pool,
+                EthEvmConfig::new(ctx.provider().chain_spec().clone()),
+                EthereumBuilderConfig::new(),
+            ),
+        };
         Ok(payload_builder)
     }
 }
 
 /// The type responsible for building custom payloads
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct CustomPayloadBuilder;
+pub struct CustomPayloadBuilder<Pool, Client> {
+    inner: reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Client>,
+}
 
-impl<Pool, Client> PayloadBuilder<Pool, Client> for CustomPayloadBuilder
+impl<Pool, Client> PayloadBuilder for CustomPayloadBuilder<Pool, Client>
 where
-    Client: StateProviderFactory,
-    Pool: TransactionPool,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = CustomPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let BuildArguments { client, pool, cached_reads, config, cancel, best_payload } = args;
-        let PayloadConfig {
-            initialized_block_env,
-            initialized_cfg,
-            parent_block,
-            extra_data,
-            attributes,
-            chain_spec,
-        } = config;
+        let BuildArguments { cached_reads, config, cancel, best_payload } = args;
+        let PayloadConfig { parent_header, attributes } = config;
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
-        reth_ethereum_payload_builder::EthereumPayloadBuilder::default().try_build(BuildArguments {
-            client,
-            pool,
+        self.inner.try_build(BuildArguments {
             cached_reads,
-            config: PayloadConfig {
-                initialized_block_env,
-                initialized_cfg,
-                parent_block,
-                extra_data,
-                attributes: attributes.0,
-                chain_spec,
-            },
+            config: PayloadConfig { parent_header, attributes: attributes.0 },
             cancel,
             best_payload,
         })
     }
 
     fn build_empty_payload(
-        client: &Client,
+        &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let PayloadConfig {
-            initialized_block_env,
-            initialized_cfg,
-            parent_block,
-            extra_data,
-            attributes,
-            chain_spec,
-        } = config;
-        <reth_ethereum_payload_builder::EthereumPayloadBuilder  as PayloadBuilder<Pool,Client>>  ::build_empty_payload(client,
-                                                                                                                       PayloadConfig { initialized_block_env, initialized_cfg, parent_block, extra_data, attributes: attributes.0, chain_spec }
-        )
+        let PayloadConfig { parent_header, attributes } = config;
+        self.inner.build_empty_payload(PayloadConfig { parent_header, attributes: attributes.0 })
     }
 }
 

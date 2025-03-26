@@ -1,21 +1,22 @@
 //! Helpers for testing debug trace calls.
 
-use futures::{Stream, StreamExt};
-use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::{BlockId, TxHash, B256};
-use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
-use reth_rpc_types::{
-    trace::{
-        common::TraceResult,
-        geth::{GethDebugTracerType, GethDebugTracingOptions, GethTrace},
-    },
-    TransactionRequest,
-};
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
+
+use alloy_eips::BlockId;
+use alloy_primitives::{TxHash, B256};
+use alloy_rpc_types_eth::{transaction::TransactionRequest, Block, Header, Transaction};
+use alloy_rpc_types_trace::{
+    common::TraceResult,
+    geth::{GethDebugTracerType, GethDebugTracingOptions, GethTrace},
+};
+use futures::{Stream, StreamExt};
+use jsonrpsee::core::client::Error as RpcError;
+use reth_ethereum_primitives::Receipt;
+use reth_rpc_api::{clients::DebugApiClient, EthApiClient};
 
 const NOOP_TRACER: &str = include_str!("../assets/noop-tracer.js");
 const JS_TRACER_TEMPLATE: &str = include_str!("../assets/tracer-template.js");
@@ -32,7 +33,7 @@ pub trait DebugApiExt {
     /// The provider type that is used to make the requests.
     type Provider;
 
-    /// Same as [DebugApiClient::debug_trace_transaction] but returns the result as json.
+    /// Same as [`DebugApiClient::debug_trace_transaction`] but returns the result as json.
     fn debug_trace_transaction_json(
         &self,
         hash: B256,
@@ -59,14 +60,14 @@ pub trait DebugApiExt {
         I: IntoIterator<Item = B>,
         B: Into<BlockId> + Send;
 
-    ///  method  for debug_traceCall
+    ///  method  for `debug_traceCall`
     fn debug_trace_call_json(
         &self,
         request: TransactionRequest,
         opts: GethDebugTracingOptions,
     ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 
-    ///  method for debug_traceCall using raw JSON strings for the request and options.
+    ///  method for `debug_traceCall` using raw JSON strings for the request and options.
     fn debug_trace_call_raw_json(
         &self,
         request_json: String,
@@ -74,9 +75,9 @@ pub trait DebugApiExt {
     ) -> impl Future<Output = Result<serde_json::Value, RpcError>> + Send;
 }
 
-impl<T: DebugApiClient + Sync> DebugApiExt for T
+impl<T> DebugApiExt for T
 where
-    T: EthApiClient,
+    T: EthApiClient<Transaction, Block, Receipt, Header> + DebugApiClient + Sync,
 {
     type Provider = T;
 
@@ -104,7 +105,7 @@ where
             BlockId::Number(tag) => self.block_by_number(tag, false).await,
         }?
         .ok_or_else(|| RpcError::Custom("block not found".to_string()))?;
-        let hashes = block.transactions.hashes().map(|tx| (*tx, opts.clone())).collect::<Vec<_>>();
+        let hashes = block.transactions.hashes().map(|tx| (tx, opts.clone())).collect::<Vec<_>>();
         let stream = futures::stream::iter(hashes.into_iter().map(move |(tx, opts)| async move {
             match self.debug_trace_transaction_json(tx, opts).await {
                 Ok(result) => Ok((result, tx)),
@@ -131,10 +132,8 @@ where
         let stream =
             futures::stream::iter(blocks.into_iter().map(move |(block, opts)| async move {
                 let trace_future = match block {
-                    BlockId::Hash(hash) => {
-                        self.debug_trace_block_by_hash(hash.block_hash, opts.clone())
-                    }
-                    BlockId::Number(tag) => self.debug_trace_block_by_number(tag, opts.clone()),
+                    BlockId::Hash(hash) => self.debug_trace_block_by_hash(hash.block_hash, opts),
+                    BlockId::Number(tag) => self.debug_trace_block_by_number(tag, opts),
                 };
 
                 match trace_future.await {
@@ -272,7 +271,7 @@ impl std::fmt::Display for JsTracerBuilder {
 
 impl From<JsTracerBuilder> for GethDebugTracingOptions {
     fn from(b: JsTracerBuilder) -> Self {
-        GethDebugTracingOptions {
+        Self {
             tracer: Some(GethDebugTracerType::JsTracer(b.code())),
             tracer_config: serde_json::Value::Object(Default::default()).into(),
             ..Default::default()
@@ -291,19 +290,19 @@ pub struct DebugTraceTransactionsStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceTransactionResult> + 'a>>,
 }
 
-impl<'a> DebugTraceTransactionsStream<'a> {
+impl DebugTraceTransactionsStream<'_> {
     /// Returns the next error result of the stream.
     pub async fn next_err(&mut self) -> Option<(RpcError, TxHash)> {
         loop {
             match self.next().await? {
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(err) => return Some(err),
             }
         }
     }
 }
 
-impl<'a> Stream for DebugTraceTransactionsStream<'a> {
+impl Stream for DebugTraceTransactionsStream<'_> {
     type Item = TraceTransactionResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -311,7 +310,7 @@ impl<'a> Stream for DebugTraceTransactionsStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for DebugTraceTransactionsStream<'a> {
+impl std::fmt::Debug for DebugTraceTransactionsStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugTraceTransactionsStream").finish_non_exhaustive()
     }
@@ -323,19 +322,19 @@ pub struct DebugTraceBlockStream<'a> {
     stream: Pin<Box<dyn Stream<Item = DebugTraceBlockResult> + 'a>>,
 }
 
-impl<'a> DebugTraceBlockStream<'a> {
+impl DebugTraceBlockStream<'_> {
     /// Returns the next error result of the stream.
     pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
         loop {
             match self.next().await? {
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(err) => return Some(err),
             }
         }
     }
 }
 
-impl<'a> Stream for DebugTraceBlockStream<'a> {
+impl Stream for DebugTraceBlockStream<'_> {
     type Item = DebugTraceBlockResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -343,7 +342,7 @@ impl<'a> Stream for DebugTraceBlockStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for DebugTraceBlockStream<'a> {
+impl std::fmt::Debug for DebugTraceBlockStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugTraceBlockStream").finish_non_exhaustive()
     }
@@ -356,7 +355,7 @@ pub struct NoopJsTracer;
 
 impl From<NoopJsTracer> for GethDebugTracingOptions {
     fn from(_: NoopJsTracer) -> Self {
-        GethDebugTracingOptions {
+        Self {
             tracer: Some(GethDebugTracerType::JsTracer(NOOP_TRACER.to_string())),
             tracer_config: serde_json::Value::Object(Default::default()).into(),
             ..Default::default()
@@ -375,9 +374,9 @@ mod tests {
         debug::{DebugApiExt, JsTracerBuilder, NoopJsTracer},
         utils::parse_env_url,
     };
+    use alloy_rpc_types_trace::geth::{CallConfig, GethDebugTracingOptions};
     use futures::StreamExt;
     use jsonrpsee::http_client::HttpClientBuilder;
-    use reth_rpc_types::trace::geth::{CallConfig, GethDebugTracingOptions};
 
     // random tx <https://sepolia.etherscan.io/tx/0x5525c63a805df2b83c113ebcc8c7672a3b290673c4e81335b410cd9ebc64e085>
     const TX_1: &str = "0x5525c63a805df2b83c113ebcc8c7672a3b290673c4e81335b410cd9ebc64e085";
@@ -413,8 +412,8 @@ mod tests {
         let url = parse_env_url("RETH_RPC_TEST_NODE_URL").unwrap();
         let client = HttpClientBuilder::default().build(url).unwrap();
 
-        let opts =
-            GethDebugTracingOptions::default().call_config(CallConfig::default().only_top_call());
+        let opts = GethDebugTracingOptions::default()
+            .with_call_config(CallConfig::default().only_top_call());
 
         let mut stream = client.debug_trace_transactions_in_block(block, opts).await.unwrap();
         while let Some(res) = stream.next().await {

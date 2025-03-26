@@ -1,29 +1,44 @@
 #![allow(missing_docs)]
 
-// We use jemalloc for performance reasons.
-#[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
-#[cfg(all(feature = "optimism", not(test)))]
-compile_error!("Cannot build the `reth` binary with the `optimism` feature flag enabled. Did you mean to build `op-reth`?");
+use clap::Parser;
+use reth::{args::RessArgs, cli::Cli, ress::install_ress_subprotocol};
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+use reth_node_builder::NodeHandle;
+use reth_node_ethereum::EthereumNode;
+use tracing::info;
 
-#[cfg(not(feature = "optimism"))]
 fn main() {
-    use reth::cli::Cli;
-    use reth_node_ethereum::EthereumNode;
-
-    reth::sigsegv_handler::install();
+    reth_cli_util::sigsegv_handler::install();
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {
-        std::env::set_var("RUST_BACKTRACE", "1");
+        unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
     }
 
-    if let Err(err) = Cli::parse_args().run(|builder, _| async {
-        let handle = builder.launch_node(EthereumNode::default()).await?;
-        handle.node_exit_future.await
-    }) {
+    if let Err(err) =
+        Cli::<EthereumChainSpecParser, RessArgs>::parse().run(async move |builder, ress_args| {
+            info!(target: "reth::cli", "Launching node");
+            let NodeHandle { node, node_exit_future } =
+                builder.node(EthereumNode::default()).launch_with_debug_capabilities().await?;
+
+            // Install ress subprotocol.
+            if ress_args.enabled {
+                install_ress_subprotocol(
+                    ress_args,
+                    node.provider,
+                    node.block_executor,
+                    node.network,
+                    node.task_executor,
+                    node.add_ons_handle.engine_events.new_listener(),
+                )?;
+            }
+
+            node_exit_future.await
+        })
+    {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }

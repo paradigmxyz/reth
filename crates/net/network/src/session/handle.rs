@@ -7,12 +7,11 @@ use crate::{
 };
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    errors::EthStreamError,
-    DisconnectReason, EthVersion, Status,
+    errors::EthStreamError, Capabilities, DisconnectReason, EthVersion, NetworkPrimitives, Status,
 };
 use reth_network_api::PeerInfo;
-use reth_network_types::PeerId;
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_types::PeerKind;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{
     mpsc::{self, error::SendError},
@@ -42,17 +41,17 @@ impl PendingSessionHandle {
     }
 
     /// Returns the direction of the pending session (inbound or outbound).
-    pub fn direction(&self) -> Direction {
+    pub const fn direction(&self) -> Direction {
         self.direction
     }
 }
 
 /// An established session with a remote peer.
 ///
-/// Within an active session that supports the `Ethereum Wire Protocol `, three high-level tasks can
+/// Within an active session that supports the `Ethereum Wire Protocol`, three high-level tasks can
 /// be performed: chain synchronization, block propagation and transaction exchange.
 #[derive(Debug)]
-pub struct ActiveSessionHandle {
+pub struct ActiveSessionHandle<N: NetworkPrimitives> {
     /// The direction of the session
     pub(crate) direction: Direction,
     /// The assigned id for this session
@@ -66,7 +65,7 @@ pub struct ActiveSessionHandle {
     /// Announced capabilities of the peer.
     pub(crate) capabilities: Arc<Capabilities>,
     /// Sender half of the command channel used send commands _to_ the spawned session
-    pub(crate) commands_to_session: mpsc::Sender<SessionCommand>,
+    pub(crate) commands_to_session: mpsc::Sender<SessionCommand<N>>,
     /// The client's name and version
     pub(crate) client_version: Arc<str>,
     /// The address we're connected to
@@ -79,7 +78,7 @@ pub struct ActiveSessionHandle {
 
 // === impl ActiveSessionHandle ===
 
-impl ActiveSessionHandle {
+impl<N: NetworkPrimitives> ActiveSessionHandle<N> {
     /// Sends a disconnect command to the session.
     pub fn disconnect(&self, reason: Option<DisconnectReason>) {
         // Note: we clone the sender which ensures the channel has capacity to send the message
@@ -91,32 +90,32 @@ impl ActiveSessionHandle {
     pub async fn try_disconnect(
         &self,
         reason: Option<DisconnectReason>,
-    ) -> Result<(), SendError<SessionCommand>> {
+    ) -> Result<(), SendError<SessionCommand<N>>> {
         self.commands_to_session.clone().send(SessionCommand::Disconnect { reason }).await
     }
 
     /// Returns the direction of the active session (inbound or outbound).
-    pub fn direction(&self) -> Direction {
+    pub const fn direction(&self) -> Direction {
         self.direction
     }
 
     /// Returns the assigned session id for this session.
-    pub fn session_id(&self) -> SessionId {
+    pub const fn session_id(&self) -> SessionId {
         self.session_id
     }
 
     /// Returns the negotiated eth version for this session.
-    pub fn version(&self) -> EthVersion {
+    pub const fn version(&self) -> EthVersion {
         self.version
     }
 
     /// Returns the identifier of the remote peer.
-    pub fn remote_id(&self) -> PeerId {
+    pub const fn remote_id(&self) -> PeerId {
         self.remote_id
     }
 
     /// Returns the timestamp when the session has been established.
-    pub fn established(&self) -> Instant {
+    pub const fn established(&self) -> Instant {
         self.established
     }
 
@@ -131,15 +130,17 @@ impl ActiveSessionHandle {
     }
 
     /// Returns the address we're connected to.
-    pub fn remote_addr(&self) -> SocketAddr {
+    pub const fn remote_addr(&self) -> SocketAddr {
         self.remote_addr
     }
 
-    /// Extracts the [PeerInfo] from the session handle.
-    pub(crate) fn peer_info(&self) -> PeerInfo {
+    /// Extracts the [`PeerInfo`] from the session handle.
+    pub(crate) fn peer_info(&self, record: &NodeRecord, kind: PeerKind) -> PeerInfo {
         PeerInfo {
             remote_id: self.remote_id,
             direction: self.direction,
+            enode: record.to_string(),
+            enr: None,
             remote_addr: self.remote_addr,
             local_addr: self.local_addr,
             capabilities: self.capabilities.clone(),
@@ -147,6 +148,7 @@ impl ActiveSessionHandle {
             eth_version: self.version,
             status: self.status.clone(),
             session_established: self.established,
+            kind,
         }
     }
 }
@@ -157,7 +159,7 @@ impl ActiveSessionHandle {
 ///
 /// A session starts with a `Handshake`, followed by a `Hello` message which
 #[derive(Debug)]
-pub enum PendingSessionEvent {
+pub enum PendingSessionEvent<N: NetworkPrimitives> {
     /// Represents a successful `Hello` and `Status` exchange: <https://github.com/ethereum/devp2p/blob/6b0abc3d956a626c28dce1307ee9f546db17b6bd/rlpx.md#hello-0x00>
     Established {
         /// An internal identifier for the established session
@@ -174,7 +176,7 @@ pub enum PendingSessionEvent {
         status: Arc<Status>,
         /// The actual connection stream which can be used to send and receive `eth` protocol
         /// messages
-        conn: EthRlpxConnection,
+        conn: EthRlpxConnection<N>,
         /// The direction of the session, either `Inbound` or `Outgoing`
         direction: Direction,
         /// The remote node's user agent, usually containing the client name and version
@@ -217,20 +219,20 @@ pub enum PendingSessionEvent {
 
 /// Commands that can be sent to the spawned session.
 #[derive(Debug)]
-pub enum SessionCommand {
+pub enum SessionCommand<N: NetworkPrimitives> {
     /// Disconnect the connection
     Disconnect {
         /// Why the disconnect was initiated
         reason: Option<DisconnectReason>,
     },
     /// Sends a message to the peer
-    Message(PeerMessage),
+    Message(PeerMessage<N>),
 }
 
 /// Message variants an active session can produce and send back to the
 /// [`SessionManager`](crate::session::SessionManager)
 #[derive(Debug)]
-pub enum ActiveSessionMessage {
+pub enum ActiveSessionMessage<N: NetworkPrimitives> {
     /// Session was gracefully disconnected.
     Disconnected {
         /// The remote node's public key
@@ -247,21 +249,12 @@ pub enum ActiveSessionMessage {
         /// The error that caused the session to close
         error: EthStreamError,
     },
-    /// A session received a valid message via RLPx.
+    /// A session received a valid message via `RLPx`.
     ValidMessage {
         /// Identifier of the remote peer.
         peer_id: PeerId,
         /// Message received from the peer.
-        message: PeerMessage,
-    },
-    /// Received a message that does not match the announced capabilities of the peer.
-    InvalidMessage {
-        /// Identifier of the remote peer.
-        peer_id: PeerId,
-        /// Announced capabilities of the remote peer.
-        capabilities: Arc<Capabilities>,
-        /// Message received from the peer.
-        message: CapabilityMessage,
+        message: PeerMessage<N>,
     },
     /// Received a bad message from the peer.
     BadMessage {

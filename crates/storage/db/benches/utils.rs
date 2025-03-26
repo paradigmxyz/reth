@@ -1,20 +1,23 @@
-use reth_db::{
-    database::Database,
+#![allow(missing_docs)]
+#![cfg(feature = "test-utils")]
+
+use alloy_primitives::Bytes;
+use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv};
+use reth_db_api::{
     table::{Compress, Encode, Table, TableRow},
-    test_utils::create_test_rw_db_with_path,
     transaction::DbTxMut,
-    DatabaseEnv,
+    Database,
 };
-use reth_primitives::{fs, Bytes};
+use reth_fs_util as fs;
 use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.
 #[allow(dead_code)]
-const BENCH_DB_PATH: &str = "/tmp/reth-benches";
+pub(crate) const BENCH_DB_PATH: &str = "/tmp/reth-benches";
 
-/// Used for RandomRead and RandomWrite benchmarks.
+/// Used for `RandomRead` and `RandomWrite` benchmarks.
 #[allow(dead_code)]
-const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
+pub(crate) const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 
 /// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
 #[allow(dead_code)]
@@ -23,13 +26,11 @@ where
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
+    let path =
+        format!("{}/../../../testdata/micro/db/{}.json", env!("CARGO_MANIFEST_DIR"), T::NAME);
     let list: Vec<TableRow<T>> = serde_json::from_reader(std::io::BufReader::new(
-        std::fs::File::open(format!(
-            "{}/../../../testdata/micro/db/{}.json",
-            env!("CARGO_MANIFEST_DIR"),
-            T::NAME
-        ))
-        .expect("Test vectors not found. They can be generated from the workspace by calling `cargo run --bin reth -- test-vectors tables`."),
+        std::fs::File::open(&path)
+        .unwrap_or_else(|_| panic!("Test vectors not found. They can be generated from the workspace by calling `cargo run --bin reth --features dev -- test-vectors tables`: {:?}", path))
     ))
     .unwrap();
 
@@ -46,7 +47,7 @@ where
 }
 
 /// Sets up a clear database at `bench_db_path`.
-#[allow(clippy::ptr_arg)]
+#[expect(clippy::ptr_arg)]
 #[allow(dead_code)]
 pub(crate) fn set_up_db<T>(
     bench_db_path: &Path,

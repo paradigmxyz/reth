@@ -3,11 +3,14 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run --release -p network-txpool -- node
 //! ```
 
-use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+#![warn(unused_crate_dependencies)]
+
+use alloy_consensus::Transaction;
+use reth_network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, validate::ValidTransaction, CoinbaseTipOrdering,
@@ -34,7 +37,9 @@ async fn main() -> eyre::Result<()> {
     let local_key = rng_secret_key();
 
     // Configure the network
-    let config = NetworkConfig::builder(local_key).mainnet_boot_nodes().build(client);
+    let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key)
+        .mainnet_boot_nodes()
+        .build(client);
     let transactions_manager_config = config.transactions_manager_config.clone();
     // create the network instance
     let (_handle, network, txpool, _) = NetworkManager::builder(config)
@@ -68,7 +73,7 @@ async fn main() -> eyre::Result<()> {
 ///
 /// CAUTION: This validator is not safe to use since it doesn't actually validate the transaction's
 /// properties such as chain id, balance, nonce, etc.
-#[derive(Default)]
+#[derive(Debug, Default)]
 #[non_exhaustive]
 struct OkValidator;
 
@@ -82,7 +87,7 @@ impl TransactionValidator for OkValidator {
     ) -> TransactionValidationOutcome<Self::Transaction> {
         // Always return valid
         TransactionValidationOutcome::Valid {
-            balance: transaction.cost(),
+            balance: *transaction.cost(),
             state_nonce: transaction.nonce(),
             transaction: ValidTransaction::Valid(transaction),
             propagate: false,

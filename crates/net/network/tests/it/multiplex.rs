@@ -1,32 +1,35 @@
 #![allow(unreachable_pub)]
 //! Testing gossiping of transactions.
 
-use crate::multiplex::proto::{PingPongProtoMessage, PingPongProtoMessageKind};
+use std::{
+    net::SocketAddr,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+
+use alloy_primitives::bytes::BytesMut;
 use futures::{Stream, StreamExt};
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network::{
     protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
-    test_utils::Testnet,
+    test_utils::{NetworkEventStream, Testnet},
+    NetworkConfigBuilder, NetworkEventListenerProvider, NetworkManager,
 };
-use reth_network_api::Direction;
-use reth_primitives::BytesMut;
-use reth_provider::test_utils::MockEthProvider;
-use reth_rpc_types::PeerId;
-use std::{
-    net::SocketAddr,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
+use reth_network_api::{Direction, NetworkInfo, PeerId, Peers};
+use reth_provider::{noop::NoopProvider, test_utils::MockEthProvider};
+use secp256k1::SecretKey;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+
+use crate::multiplex::proto::{PingPongProtoMessage, PingPongProtoMessageKind};
 
 /// A simple Rlpx subprotocol that sends pings and pongs
 mod proto {
     use super::*;
-    use reth_eth_wire::capability::Capability;
-    use reth_primitives::{Buf, BufMut};
+    use alloy_primitives::bytes::{Buf, BufMut};
+    use reth_eth_wire::Capability;
 
     #[repr(u8)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,7 +48,7 @@ mod proto {
         PongMessage(String),
     }
 
-    /// An protocol message, containing a message ID and payload.
+    /// A protocol message, containing a message ID and payload.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct PingPongProtoMessage {
         pub message_type: PingPongProtoMessageId,
@@ -54,17 +57,17 @@ mod proto {
 
     impl PingPongProtoMessage {
         /// Returns the capability for the `ping` protocol.
-        pub fn capability() -> Capability {
+        pub const fn capability() -> Capability {
             Capability::new_static("ping", 1)
         }
 
         /// Returns the protocol for the `test` protocol.
-        pub fn protocol() -> Protocol {
+        pub const fn protocol() -> Protocol {
             Protocol::new(Self::capability(), 4)
         }
 
         /// Creates a ping message
-        pub fn ping() -> Self {
+        pub const fn ping() -> Self {
             Self {
                 message_type: PingPongProtoMessageId::Ping,
                 message: PingPongProtoMessageKind::Ping,
@@ -72,7 +75,7 @@ mod proto {
         }
 
         /// Creates a pong message
-        pub fn pong() -> Self {
+        pub const fn pong() -> Self {
             Self {
                 message_type: PingPongProtoMessageId::Pong,
                 message: PingPongProtoMessageKind::Pong,
@@ -99,11 +102,8 @@ mod proto {
             let mut buf = BytesMut::new();
             buf.put_u8(self.message_type as u8);
             match &self.message {
-                PingPongProtoMessageKind::Ping => {}
-                PingPongProtoMessageKind::Pong => {}
-                PingPongProtoMessageKind::PingMessage(msg) => {
-                    buf.put(msg.as_bytes());
-                }
+                PingPongProtoMessageKind::Ping | PingPongProtoMessageKind::Pong => {}
+                PingPongProtoMessageKind::PingMessage(msg) |
                 PingPongProtoMessageKind::PongMessage(msg) => {
                     buf.put(msg.as_bytes());
                 }
@@ -169,7 +169,7 @@ struct ProtocolState {
 #[derive(Debug)]
 enum ProtocolEvent {
     Established {
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         direction: Direction,
         peer_id: PeerId,
         to_connection: mpsc::UnboundedSender<Command>,
@@ -202,7 +202,7 @@ impl ConnectionHandler for PingPongConnectionHandler {
         _direction: Direction,
         _peer_id: PeerId,
     ) -> OnNotSupported {
-        OnNotSupported::KeepAlive
+        OnNotSupported::Disconnect
     }
 
     fn into_connection(
@@ -275,6 +275,47 @@ impl Stream for PingPongProtoConnection {
             return Poll::Pending
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connect_to_non_multiplex_peer() {
+    reth_tracing::init_test_tracing();
+
+    let net = Testnet::create(1).await;
+
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .build(NoopProvider::default());
+
+    let mut network = NetworkManager::new(config).await.unwrap();
+
+    let (tx, _) = mpsc::unbounded_channel();
+    network.add_rlpx_sub_protocol(PingPongProtoHandler { state: ProtocolState { events: tx } });
+
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    // create networkeventstream to get the next session event easily.
+    let events = handle.event_listener();
+    let mut event_stream = NetworkEventStream::new(events);
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    drop(handles);
+
+    let _handle = net.spawn();
+
+    handle.add_peer(*handle0.peer_id(), handle0.local_addr());
+
+    let added_peer_id = event_stream.peer_added().await.unwrap();
+    assert_eq!(added_peer_id, *handle0.peer_id());
+
+    // peer with mismatched capability version should fail to connect and be removed.
+    let removed_peer_id = event_stream.peer_removed().await.unwrap();
+    assert_eq!(removed_peer_id, *handle0.peer_id());
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -1,11 +1,19 @@
-use reth_db::open_db_read_only;
-use reth_primitives::{Address, ChainSpecBuilder, B256};
-use reth_provider::{
-    AccountReader, BlockReader, BlockSource, HeaderProvider, ProviderFactory, ReceiptProvider,
-    StateProvider, TransactionsProvider,
+#![warn(unused_crate_dependencies)]
+
+use alloy_primitives::{Address, B256};
+use reth_ethereum::{
+    chainspec::ChainSpecBuilder,
+    node::EthereumNode,
+    primitives::{
+        transaction::signed::SignedTransaction, AlloyBlockHeader, SealedBlock, SealedHeader,
+    },
+    provider::{
+        providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
+        ReceiptProvider, StateProvider, TransactionsProvider,
+    },
+    rpc::eth::primitives::{Filter, FilteredParams},
+    TransactionSigned,
 };
-use reth_rpc_types::{Filter, FilteredParams};
-use std::path::Path;
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
 // exposing a familiar API to query the chain's information without requiring knowledge
@@ -14,17 +22,13 @@ use std::path::Path;
 // These abstractions do not include any caching and the user is responsible for doing that.
 // Other parts of the code which include caching are parts of the `EthApi` abstraction.
 fn main() -> eyre::Result<()> {
-    // Opens a RO handle to the database file.
-    // TODO: Should be able to do `ProviderFactory::new_with_db_path_ro(...)` instead of
-    //  doing in 2 steps.
-    let db_path = std::env::var("RETH_DB_PATH")?;
-    let db_path = Path::new(&db_path);
-    let db = open_db_read_only(db_path.join("db").as_path(), Default::default())?;
+    // The path to data directory, e.g. "~/.local/reth/share/mainnet"
+    let datadir = std::env::var("RETH_DATADIR")?;
 
-    // Instantiate a provider factory for Ethereum mainnet using the provided DB.
-    // TODO: Should the DB version include the spec so that you do not need to specify it here?
+    // Instantiate a provider factory for Ethereum mainnet using the provided datadir path.
     let spec = ChainSpecBuilder::mainnet().build();
-    let factory = ProviderFactory::new(db, spec.into(), db_path.join("static_files"))?;
+    let factory = EthereumNode::provider_factory_builder()
+        .open_read_only(spec.into(), ReadOnlyConfig::from_datadir(datadir))?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
@@ -57,7 +61,7 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 
     // We can convert a header to a sealed header which contains the hash w/o needing to re-compute
     // it every time.
-    let sealed_header = header.seal_slow();
+    let sealed_header = SealedHeader::seal_slow(header);
 
     // Can also query the header by hash!
     let header_by_hash =
@@ -77,7 +81,9 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
 }
 
 /// The `TransactionsProvider` allows querying transaction-related information
-fn txs_provider_example<T: TransactionsProvider>(provider: T) -> eyre::Result<()> {
+fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>>(
+    provider: T,
+) -> eyre::Result<()> {
     // Try the 5th tx
     let txid = 5;
 
@@ -86,16 +92,17 @@ fn txs_provider_example<T: TransactionsProvider>(provider: T) -> eyre::Result<()
 
     // Can query the tx by hash
     let tx_by_hash =
-        provider.transaction_by_hash(tx.hash)?.ok_or(eyre::eyre!("txhash not found"))?;
+        provider.transaction_by_hash(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(tx, tx_by_hash);
 
     // Can query the tx by hash with info about the block it was included in
-    let (tx, meta) =
-        provider.transaction_by_hash_with_meta(tx.hash)?.ok_or(eyre::eyre!("txhash not found"))?;
-    assert_eq!(tx.hash, meta.tx_hash);
+    let (tx, meta) = provider
+        .transaction_by_hash_with_meta(*tx.tx_hash())?
+        .ok_or(eyre::eyre!("txhash not found"))?;
+    assert_eq!(*tx.tx_hash(), meta.tx_hash);
 
     // Can reverse lookup the key too
-    let id = provider.transaction_id(tx.hash)?.ok_or(eyre::eyre!("txhash not found"))?;
+    let id = provider.transaction_id(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(id, txid);
 
     // Can find the block of a transaction given its key
@@ -110,7 +117,10 @@ fn txs_provider_example<T: TransactionsProvider>(provider: T) -> eyre::Result<()
 }
 
 /// The `BlockReader` allows querying the headers-related tables.
-fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Result<()> {
+fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
+    provider: T,
+    number: u64,
+) -> eyre::Result<()> {
     // Can query a block by number
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
     assert_eq!(block.number, number);
@@ -121,7 +131,7 @@ fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Res
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
 
     // Can seal the block to cache the hash, like the Header above.
-    let sealed_block = block.clone().seal_slow();
+    let sealed_block = SealedBlock::seal_slow(block.clone());
 
     // Can also query the block by hash directly
     let block_by_hash = provider
@@ -153,7 +163,11 @@ fn block_provider_example<T: BlockReader>(provider: T, number: u64) -> eyre::Res
 }
 
 /// The `ReceiptProvider` allows querying the receipts tables.
-fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderProvider>(
+fn receipts_provider_example<
+    T: ReceiptProvider<Receipt = reth_ethereum::Receipt>
+        + TransactionsProvider<Transaction = TransactionSigned>
+        + HeaderProvider,
+>(
     provider: T,
 ) -> eyre::Result<()> {
     let txid = 5;
@@ -164,8 +178,9 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
 
     // Can query receipt by txhash too
     let tx = provider.transaction_by_id(txid)?.unwrap();
-    let receipt_by_hash =
-        provider.receipt_by_hash(tx.hash)?.ok_or(eyre::eyre!("tx receipt by hash not found"))?;
+    let receipt_by_hash = provider
+        .receipt_by_hash(*tx.tx_hash())?
+        .ok_or(eyre::eyre!("tx receipt by hash not found"))?;
     assert_eq!(receipt, receipt_by_hash);
 
     // Can query all the receipts in a block
@@ -177,7 +192,7 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     // receipts and do something with the data
     // 1. get the bloom from the header
     let header = provider.header_by_number(header_num)?.unwrap();
-    let bloom = header.logs_bloom;
+    let bloom = header.logs_bloom();
 
     // 2. Construct the address/topics filters
     // For a hypothetical address, we'll want to filter down for a specific indexed topic (e.g.
@@ -186,7 +201,7 @@ fn receipts_provider_example<T: ReceiptProvider + TransactionsProvider + HeaderP
     let topic = B256::random();
 
     // TODO: Make it clearer how to choose between event_signature(topic0) (event name) and the
-    // other 3 indexed topics. This API is a bit clunky and not obvious to use at the moemnt.
+    // other 3 indexed topics. This API is a bit clunky and not obvious to use at the moment.
     let filter = Filter::new().address(addr).event_signature(topic);
     let filter_params = FilteredParams::new(Some(filter));
     let address_filter = FilteredParams::address_filter(&addr.into());
@@ -217,8 +232,8 @@ fn state_provider_example<T: StateProvider + AccountReader>(provider: T) -> eyre
     let storage_key = B256::random();
 
     // Can get account / storage state with simple point queries
-    let _account = provider.basic_account(address)?;
-    let _code = provider.account_code(address)?;
+    let _account = provider.basic_account(&address)?;
+    let _code = provider.account_code(&address)?;
     let _storage = provider.storage(address, storage_key)?;
     // TODO: unimplemented.
     // let _proof = provider.proof(address, &[])?;

@@ -1,0 +1,93 @@
+[package]
+name = "reth-db-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Database abstraction used in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-codecs.workspace = true
+reth-db-models = { workspace = true, features = ["serde", "reth-codec"] }
+reth-ethereum-primitives = { workspace = true, features = ["serde", "reth-codec"] }
+reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
+reth-stages-types = { workspace = true, features = ["serde", "reth-codec"] }
+reth-prune-types = { workspace = true, features = ["serde", "reth-codec"] }
+reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true
+
+# optimism
+reth-optimism-primitives = { workspace = true, optional = true }
+
+# codecs
+modular-bitfield.workspace = true
+roaring.workspace = true
+parity-scale-codec = { workspace = true, features = ["bytes"] }
+serde = { workspace = true, default-features = false }
+
+# metrics
+metrics.workspace = true
+
+# misc
+derive_more.workspace = true
+bytes.workspace = true
+
+# arbitrary utils
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
+
+[dev-dependencies]
+# reth libs with arbitrary
+reth-codecs = { workspace = true, features = ["test-utils"] }
+
+rand.workspace = true
+
+test-fuzz.workspace = true
+
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
+
+[features]
+test-utils = [
+    "arbitrary",
+    "reth-primitives-traits/test-utils",
+    "reth-codecs/test-utils",
+    "reth-db-models/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-prune-types/test-utils",
+    "reth-stages-types/test-utils",
+    "reth-ethereum-primitives/test-utils",
+]
+arbitrary = [
+    "reth-db-models/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "reth-primitives-traits/arbitrary",
+    "reth-trie-common/arbitrary",
+    "alloy-primitives/arbitrary",
+    "parity-scale-codec/arbitrary",
+    "reth-codecs/arbitrary",
+    "reth-prune-types/arbitrary",
+    "reth-stages-types/arbitrary",
+    "alloy-consensus/arbitrary",
+    "reth-optimism-primitives?/arbitrary",
+    "reth-ethereum-primitives/arbitrary",
+]
+op = [
+    "dep:reth-optimism-primitives",
+    "reth-codecs/op",
+    "reth-primitives-traits/op",
+]
+bench = []

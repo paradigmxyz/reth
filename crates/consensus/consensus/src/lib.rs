@@ -7,24 +7,75 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
-use reth_primitives::{
-    BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, HeaderValidationError,
-    InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
+extern crate alloc;
+
+use alloc::{fmt::Debug, string::String, sync::Arc, vec::Vec};
+use alloy_consensus::Header;
+use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
+use reth_execution_types::BlockExecutionResult;
+use reth_primitives_traits::{
+    constants::MINIMUM_GAS_LIMIT, transaction::error::InvalidTransactionError, Block, GotExpected,
+    GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
-use std::fmt::Debug;
+
+/// A consensus implementation that does nothing.
+pub mod noop;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking consensus
 pub mod test_utils;
 
+/// [`Consensus`] implementation which knows full node primitives and is able to validation block's
+/// execution outcome.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait FullConsensus<N: NodePrimitives>: AsConsensus<N::Block> {
+    /// Validate a block considering world state, i.e. things that can not be checked before
+    /// execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block_post_execution(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+        result: &BlockExecutionResult<N::Receipt>,
+    ) -> Result<(), ConsensusError>;
+}
+
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus: Debug + Send + Sync {
+pub trait Consensus<B: Block>: AsHeaderValidator<B::Header> {
+    /// The error type related to consensus.
+    type Error;
+
+    /// Ensures that body field values match the header.
+    fn validate_body_against_header(
+        &self,
+        body: &B::Body,
+        header: &SealedHeader<B::Header>,
+    ) -> Result<(), Self::Error>;
+
+    /// Validate a block disregarding world state, i.e. things that can be checked before sender
+    /// recovery and execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
+    /// 11.1 "Ommer Validation".
+    ///
+    /// **This should not be called for the genesis block**.
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error>;
+}
+
+/// HeaderValidator is a protocol that validates headers and their relationships.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
     ///
     /// This is called on standalone header to check if all hashes are correct.
-    fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError>;
+    fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError>;
 
     /// Validate that the header information regarding parent are correct.
     /// This checks the block number, timestamp, basefee and gas limit increment.
@@ -34,11 +85,12 @@ pub trait Consensus: Debug + Send + Sync {
     ///
     /// **This should not be called for the genesis block**.
     ///
-    /// Note: Validating header against its parent does not include other Consensus validations.
+    /// Note: Validating header against its parent does not include other HeaderValidator
+    /// validations.
     fn validate_header_against_parent(
         &self,
-        header: &SealedHeader,
-        parent: &SealedHeader,
+        header: &SealedHeader<H>,
+        parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError>;
 
     /// Validates the given headers
@@ -47,7 +99,13 @@ pub trait Consensus: Debug + Send + Sync {
     /// on its own and valid against its parent.
     ///
     /// Note: this expects that the headers are in natural order (ascending block number)
-    fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), HeaderConsensusError> {
+    fn validate_header_range(
+        &self,
+        headers: &[SealedHeader<H>],
+    ) -> Result<(), HeaderConsensusError<H>>
+    where
+        H: Clone,
+    {
         if let Some((initial_header, remaining_headers)) = headers.split_first() {
             self.validate_header(initial_header)
                 .map_err(|e| HeaderConsensusError(e, initial_header.clone()))?;
@@ -67,27 +125,50 @@ pub trait Consensus: Debug + Send + Sync {
     ///
     /// Some consensus engines may want to do additional checks here.
     ///
-    /// Note: validating headers with TD does not include other Consensus validation.
+    /// Note: validating headers with TD does not include other HeaderValidator validation.
     fn validate_header_with_total_difficulty(
         &self,
-        header: &Header,
+        header: &H,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError>;
+}
 
-    /// Validate a block disregarding world state, i.e. things that can be checked before sender
-    /// recovery and execution.
-    ///
-    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
-    /// 11.1 "Ommer Validation".
-    ///
-    /// **This should not be called for the genesis block**.
-    ///
-    /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError>;
+/// Helper trait to cast `Arc<dyn Consensus>` to `Arc<dyn HeaderValidator>`
+pub trait AsHeaderValidator<H>: HeaderValidator<H> {
+    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
+    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
+    where
+        Self: 'a;
+}
+
+impl<T: HeaderValidator<H>, H> AsHeaderValidator<H> for T {
+    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
+    where
+        Self: 'a,
+    {
+        self
+    }
+}
+
+/// Helper trait to cast `Arc<dyn FullConsensus>` to `Arc<dyn Consensus>`
+pub trait AsConsensus<B: Block>: Consensus<B> {
+    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
+    where
+        Self: 'a;
+}
+
+impl<T: Consensus<B>, B: Block> AsConsensus<B> for T {
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
+    where
+        Self: 'a,
+    {
+        self
+    }
 }
 
 /// Consensus Errors
-#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
 pub enum ConsensusError {
     /// Error when the gas used in the header exceeds the gas limit.
     #[error("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
@@ -96,6 +177,15 @@ pub enum ConsensusError {
         gas_used: u64,
         /// The gas limit in the block header.
         gas_limit: u64,
+    },
+
+    /// Error when block gas used doesn't match expected value
+    #[error("block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}")]
+    BlockGasUsed {
+        /// The gas diff.
+        gas: GotExpected<u64>,
+        /// Gas spent by each transaction
+        gas_spent_by_tx: Vec<(u64, u64)>,
     },
 
     /// Error when the hash of block ommer is different from the expected hash.
@@ -111,10 +201,23 @@ pub enum ConsensusError {
     #[error("mismatched block transaction root: {0}")]
     BodyTransactionRootDiff(GotExpectedBoxed<B256>),
 
+    /// Error when the receipt root in the block is different from the expected receipt root.
+    #[error("receipt root mismatch: {0}")]
+    BodyReceiptRootDiff(GotExpectedBoxed<B256>),
+
+    /// Error when header bloom filter is different from the expected bloom filter.
+    #[error("header bloom filter mismatch: {0}")]
+    BodyBloomLogDiff(GotExpectedBoxed<Bloom>),
+
     /// Error when the withdrawals root in the block is different from the expected withdrawals
     /// root.
     #[error("mismatched block withdrawals root: {0}")]
     BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
+
+    /// Error when the requests hash in the block is different from the expected requests
+    /// hash.
+    #[error("mismatched block requests hash: {0}")]
+    BodyRequestsHashDiff(GotExpectedBoxed<B256>),
 
     /// Error when a block with a specific hash and number is already known.
     #[error("block with [hash={hash}, number={number}] is already known")]
@@ -143,8 +246,14 @@ pub enum ConsensusError {
         block_number: BlockNumber,
     },
 
+    /// Error when the parent hash does not match the expected parent hash.
+    #[error("mismatched parent hash: {0}")]
+    ParentHashMismatch(GotExpectedBoxed<B256>),
+
     /// Error when the block timestamp is in the future compared to our clock time.
-    #[error("block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}")]
+    #[error(
+        "block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}"
+    )]
     TimestampIsInFuture {
         /// The block's timestamp.
         timestamp: u64,
@@ -183,13 +292,25 @@ pub enum ConsensusError {
     #[error("missing withdrawals root")]
     WithdrawalsRootMissing,
 
+    /// Error when the requests hash is missing.
+    #[error("missing requests hash")]
+    RequestsHashMissing,
+
     /// Error when an unexpected withdrawals root is encountered.
     #[error("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
 
+    /// Error when an unexpected requests hash is encountered.
+    #[error("unexpected requests hash")]
+    RequestsHashUnexpected,
+
     /// Error when withdrawals are missing.
     #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
+
+    /// Error when requests are missing.
+    #[error("missing requests")]
+    BodyRequestsMissing,
 
     /// Error when blob gas used is missing.
     #[error("missing blob gas used")]
@@ -237,7 +358,7 @@ pub enum ConsensusError {
 
     /// Error when excess blob gas is not a multiple of blob gas per blob.
     #[error(
-    "excess blob gas {excess_blob_gas} is not a multiple of blob gas per blob {blob_gas_per_blob}"
+        "excess blob gas {excess_blob_gas} is not a multiple of blob gas per blob {blob_gas_per_blob}"
     )]
     ExcessBlobGasNotMultipleOfBlobGasPerBlob {
         /// The actual excess blob gas.
@@ -252,21 +373,85 @@ pub enum ConsensusError {
 
     /// Error for a transaction that violates consensus.
     #[error(transparent)]
-    InvalidTransaction(#[from] InvalidTransactionError),
+    InvalidTransaction(InvalidTransactionError),
 
-    /// Error type transparently wrapping HeaderValidationError.
-    #[error(transparent)]
-    HeaderValidationError(#[from] HeaderValidationError),
+    /// Error when the block's base fee is different from the expected base fee.
+    #[error("block base fee mismatch: {0}")]
+    BaseFeeDiff(GotExpected<u64>),
+
+    /// Error when there is an invalid excess blob gas.
+    #[error(
+        "invalid excess blob gas: {diff}; \
+            parent excess blob gas: {parent_excess_blob_gas}, \
+            parent blob gas used: {parent_blob_gas_used}"
+    )]
+    ExcessBlobGasDiff {
+        /// The excess blob gas diff.
+        diff: GotExpected<u64>,
+        /// The parent excess blob gas.
+        parent_excess_blob_gas: u64,
+        /// The parent blob gas used.
+        parent_blob_gas_used: u64,
+    },
+
+    /// Error when the child gas limit exceeds the maximum allowed increase.
+    #[error("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
+    GasLimitInvalidIncrease {
+        /// The parent gas limit.
+        parent_gas_limit: u64,
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error indicating that the child gas limit is below the minimum allowed limit.
+    ///
+    /// This error occurs when the child gas limit is less than the specified minimum gas limit.
+    #[error(
+        "child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})"
+    )]
+    GasLimitInvalidMinimum {
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error when the child gas limit exceeds the maximum allowed decrease.
+    #[error("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
+    GasLimitInvalidDecrease {
+        /// The parent gas limit.
+        parent_gas_limit: u64,
+        /// The child gas limit.
+        child_gas_limit: u64,
+    },
+
+    /// Error when the block timestamp is in the past compared to the parent timestamp.
+    #[error(
+        "block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}"
+    )]
+    TimestampIsInPast {
+        /// The parent block's timestamp.
+        parent_timestamp: u64,
+        /// The block's timestamp.
+        timestamp: u64,
+    },
+    /// Other, likely an injected L2 error.
+    #[error("{0}")]
+    Other(String),
 }
 
 impl ConsensusError {
     /// Returns `true` if the error is a state root error.
-    pub fn is_state_root_error(&self) -> bool {
-        matches!(self, ConsensusError::BodyStateRootDiff(_))
+    pub const fn is_state_root_error(&self) -> bool {
+        matches!(self, Self::BodyStateRootDiff(_))
+    }
+}
+
+impl From<InvalidTransactionError> for ConsensusError {
+    fn from(value: InvalidTransactionError) -> Self {
+        Self::InvalidTransaction(value)
     }
 }
 
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
 #[derive(thiserror::Error, Debug)]
 #[error("Consensus error: {0}, Invalid header: {1:?}")]
-pub struct HeaderConsensusError(ConsensusError, SealedHeader);
+pub struct HeaderConsensusError<H>(ConsensusError, SealedHeader<H>);

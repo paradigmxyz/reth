@@ -25,7 +25,7 @@ In this tutorial, we will be reviewing:
 
 [Jemalloc](https://jemalloc.net/) is a general-purpose allocator that is used [across the industry in production](https://engineering.fb.com/2011/01/03/core-data/scalable-memory-allocation-using-jemalloc/), well known for its performance benefits, predictability, and profiling capabilities.
 We've seen significant performance benefits in reth when using jemalloc, but will be primarily focusing on its profiling capabilities.
-Jemalloc also provides tools for analyzing and visualizing its the allocation profiles it generates, notably `jeprof`.
+Jemalloc also provides tools for analyzing and visualizing its allocation profiles it generates, notably `jeprof`.
 
 
 #### Enabling jemalloc in reth
@@ -41,12 +41,12 @@ cargo build --features jemalloc-prof
 ```
 
 When performing a longer-running or performance-sensitive task with reth, such as a sync test or load benchmark, it's usually recommended to use the `maxperf` profile. However, the `maxperf`
-profile does not enable debug symbols, which are required for tools like `perf` and `jemalloc` to produce results that a human can interpret. Reth includes a performance profile with debug symbols called `debug-fast`. To compile reth with debug symbols, jemalloc, profiling, and a performance profile:
+profile does not enable debug symbols, which are required for tools like `perf` and `jemalloc` to produce results that a human can interpret. Reth includes a performance profile with debug symbols called `profiling`. To compile reth with debug symbols, jemalloc, profiling, and a performance profile:
 ```
-cargo build --features jemalloc-prof --profile debug-fast
+cargo build --features jemalloc-prof --profile profiling
 
 # May improve performance even more
-RUSTFLAGS="-C target-cpu=native" cargo build --features jemalloc-prof --profile debug-fast
+RUSTFLAGS="-C target-cpu=native" cargo build --features jemalloc-prof --profile profiling
 ```
 
 ### Monitoring memory usage
@@ -74,6 +74,8 @@ Memory leaks that cause OOMs can be difficult to trigger sometimes, and highly d
 memory spikes or leaks as often as a machine with only 8GB of RAM. Development machines are powerful for a reason, so artificially limiting memory usage is often the best way to replicate a
 user's hardware. This can help developers debug issues that only occur on devices with limited hardware. `cgroups` is a tool that allows developers to limit the memory usage of a process,
 making it extremely useful to developers in understanding how their application performs in low-memory environments.
+
+See the [canonical documentation for cgroups](https://git.kernel.org/pub/scm/linux/kernel/git/tj/cgroup.git/tree/Documentation/admin-guide/cgroup-v2.rst) for more information.
 
 ### How to use cgroups to limit process memory
 
@@ -124,6 +126,6 @@ If reth is not built properly, you will see this when you try to run reth:
 If this happens, jemalloc likely needs to be rebuilt with the `jemalloc-prof` feature enabled.
 
 If everything is working, this will output `jeprof.*.heap` files while reth is running.
-[The jemalloc website](http://jemalloc.net/jemalloc.3.html#opt.abort) has a helpful overview of the options available, for example `lg_prof_interval`, `lg_prof_sample`, `prof_leak`, and `prof_final`.
+[The jemalloc website](https://jemalloc.net/jemalloc.3.html#opt.abort) has a helpful overview of the options available, for example `lg_prof_interval`, `lg_prof_sample`, `prof_leak`, and `prof_final`.
 
 Now that we have the heap snapshots, we can analyze them using `jeprof`. An example of jeprof usage and output can be seen on the jemalloc github repository: https://github.com/jemalloc/jemalloc/wiki/Use-Case:-Leak-Checking

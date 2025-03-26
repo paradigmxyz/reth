@@ -26,8 +26,7 @@ impl<'a> EnumHandler<'a> {
                 //  The following method will advance the
                 // `fields_iterator` by itself and stop right before the next variant.
                 FieldTypes::EnumVariant(name) => self.to(name, ident),
-                FieldTypes::EnumUnnamedField(_) => unreachable!(),
-                FieldTypes::StructField(_) => unreachable!(),
+                FieldTypes::EnumUnnamedField(_) | FieldTypes::StructField(_) => unreachable!(),
             }
         }
         self.enum_lines
@@ -39,8 +38,7 @@ impl<'a> EnumHandler<'a> {
                 //  The following method will advance the
                 // `fields_iterator` by itself and stop right before the next variant.
                 FieldTypes::EnumVariant(name) => self.from(name, ident),
-                FieldTypes::EnumUnnamedField(_) => unreachable!(),
-                FieldTypes::StructField(_) => unreachable!(),
+                FieldTypes::EnumUnnamedField(_) | FieldTypes::StructField(_) => unreachable!(),
             }
         }
         self.enum_lines
@@ -48,8 +46,8 @@ impl<'a> EnumHandler<'a> {
 
     /// Generates `from_compact` code for an enum variant.
     ///
-    /// `fields_iterator` might look something like \[VariantUnit, VariantUnnamedField, Field,
-    /// VariantUnit...\].
+    /// `fields_iterator` might look something like \[`VariantUnit`, `VariantUnnamedField`, Field,
+    /// `VariantUnit`...\].
     pub fn from(&mut self, variant_name: &str, ident: &Ident) {
         let variant_name = format_ident!("{variant_name}");
         let current_variant_index = self.current_variant_index;
@@ -59,10 +57,10 @@ impl<'a> EnumHandler<'a> {
                 FieldTypes::EnumUnnamedField((next_ftype, use_alt_impl)) => {
                     // This variant is of the type `EnumVariant(UnnamedField)`
                     let field_type = format_ident!("{next_ftype}");
-                    let from_compact_ident = if !use_alt_impl {
-                        format_ident!("from_compact")
-                    } else {
+                    let from_compact_ident = if *use_alt_impl {
                         format_ident!("specialized_from_compact")
+                    } else {
+                        format_ident!("from_compact")
                     };
 
                     // Unnamed type
@@ -91,8 +89,8 @@ impl<'a> EnumHandler<'a> {
 
     /// Generates `to_compact` code for an enum variant.
     ///
-    /// `fields_iterator` might look something like [VariantUnit, VariantUnnamedField, Field,
-    /// VariantUnit...].
+    /// `fields_iterator` might look something like [`VariantUnit`, `VariantUnnamedField`, Field,
+    /// `VariantUnit`...].
     pub fn to(&mut self, variant_name: &str, ident: &Ident) {
         let variant_name = format_ident!("{variant_name}");
         let current_variant_index = self.current_variant_index;
@@ -100,10 +98,10 @@ impl<'a> EnumHandler<'a> {
         if let Some(next_field) = self.fields_iterator.peek() {
             match next_field {
                 FieldTypes::EnumUnnamedField((_, use_alt_impl)) => {
-                    let to_compact_ident = if !use_alt_impl {
-                        format_ident!("to_compact")
-                    } else {
+                    let to_compact_ident = if *use_alt_impl {
                         format_ident!("specialized_to_compact")
+                    } else {
+                        format_ident!("to_compact")
                     };
 
                     // Unnamed type

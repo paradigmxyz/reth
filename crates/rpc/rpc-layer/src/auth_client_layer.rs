@@ -1,21 +1,20 @@
 use crate::{Claims, JwtSecret};
-use http::HeaderValue;
-use hyper::{header::AUTHORIZATION, service::Service};
+use http::{header::AUTHORIZATION, HeaderValue};
 use std::{
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tower::Layer;
+use tower::{Layer, Service};
 
-/// A layer that adds a new JWT token to every request using AuthClientService.
+/// A layer that adds a new JWT token to every request using `AuthClientService`.
 #[derive(Debug)]
 pub struct AuthClientLayer {
     secret: JwtSecret,
 }
 
 impl AuthClientLayer {
-    /// Create a new AuthClientLayer with the given `secret`.
-    pub fn new(secret: JwtSecret) -> Self {
+    /// Create a new `AuthClientLayer` with the given `secret`.
+    pub const fn new(secret: JwtSecret) -> Self {
         Self { secret }
     }
 }
@@ -24,7 +23,7 @@ impl<S> Layer<S> for AuthClientLayer {
     type Service = AuthClientService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        AuthClientService::new(self.secret.clone(), inner)
+        AuthClientService::new(self.secret, inner)
     }
 }
 
@@ -36,14 +35,14 @@ pub struct AuthClientService<S> {
 }
 
 impl<S> AuthClientService<S> {
-    fn new(secret: JwtSecret, inner: S) -> Self {
+    const fn new(secret: JwtSecret, inner: S) -> Self {
         Self { secret, inner }
     }
 }
 
-impl<S, B> Service<hyper::Request<B>> for AuthClientService<S>
+impl<S, B> Service<http::Request<B>> for AuthClientService<S>
 where
-    S: Service<hyper::Request<B>>,
+    S: Service<http::Request<B>>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -53,7 +52,7 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut request: hyper::Request<B>) -> Self::Future {
+    fn call(&mut self, mut request: http::Request<B>) -> Self::Future {
         request.headers_mut().insert(AUTHORIZATION, secret_to_bearer_header(&self.secret));
         self.inner.call(request)
     }

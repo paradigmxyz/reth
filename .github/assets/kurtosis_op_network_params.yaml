@@ -1,0 +1,14 @@
+ethereum_package:
+  participants:
+    - el_type: reth
+      el_extra_params:
+        - "--rpc.eth-proof-window=100"
+      cl_type: teku
+optimism_package:
+  chains:
+    - participants:
+      - el_type: op-geth
+        cl_type: op-node
+      - el_type: op-reth
+        el_image: "ghcr.io/paradigmxyz/op-reth:kurtosis-ci"
+        cl_type: op-node

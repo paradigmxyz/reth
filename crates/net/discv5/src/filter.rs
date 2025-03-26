@@ -19,8 +19,8 @@ pub enum FilterOutcome {
 
 impl FilterOutcome {
     /// Returns `true` for [`FilterOutcome::Ok`].
-    pub fn is_ok(&self) -> bool {
-        matches!(self, FilterOutcome::Ok)
+    pub const fn is_ok(&self) -> bool {
+        matches!(self, Self::Ok)
     }
 }
 
@@ -58,14 +58,14 @@ impl MustNotIncludeKeys {
             _ = keys.insert(MustIncludeKey::new(key));
         }
 
-        MustNotIncludeKeys { keys }
+        Self { keys }
     }
 }
 
 impl MustNotIncludeKeys {
     /// Returns `true` if [`Enr`](discv5::Enr) passes filtering rules.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
-        for key in self.keys.iter() {
+        for key in &self.keys {
             if matches!(key.filter(enr), FilterOutcome::Ok) {
                 return FilterOutcome::Ignore {
                     reason: format!(
@@ -89,12 +89,10 @@ impl MustNotIncludeKeys {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::NetworkStackId;
     use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
-
-    use crate::NetworkStackId;
-
-    use super::*;
 
     #[test]
     fn must_not_include_key_filter() {

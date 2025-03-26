@@ -1,0 +1,73 @@
+[package]
+name = "reth-execution-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-trie-common.workspace = true
+
+revm.workspace = true
+
+# alloy
+alloy-evm.workspace = true
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
+serde = { workspace = true, optional = true }
+serde_with = { workspace = true, optional = true }
+
+derive_more.workspace = true
+
+[dev-dependencies]
+reth-primitives-traits = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-ethereum-primitives = { workspace = true, features = ["arbitrary"] }
+alloy-primitives = { workspace = true, features = ["rand", "arbitrary"] }
+arbitrary.workspace = true
+bincode.workspace = true
+rand.workspace = true
+
+[features]
+default = ["std"]
+serde = [
+    "dep:serde",
+    "rand/serde",
+    "revm/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "reth-primitives-traits/serde",
+    "alloy-consensus/serde",
+    "reth-trie-common/serde",
+    "reth-ethereum-primitives/serde",
+]
+serde-bincode-compat = [
+    "serde",
+    "reth-trie-common/serde-bincode-compat",
+    "reth-primitives-traits/serde-bincode-compat",
+    "serde_with",
+    "alloy-eips/serde-bincode-compat",
+    "alloy-consensus/serde-bincode-compat",
+    "reth-ethereum-primitives/serde-bincode-compat",
+]
+std = [
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "revm/std",
+    "serde?/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "serde_with?/std",
+    "derive_more/std",
+    "reth-ethereum-primitives/std",
+    "reth-trie-common/std",
+    "alloy-evm/std",
+]

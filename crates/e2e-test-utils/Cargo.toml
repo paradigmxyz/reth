@@ -7,32 +7,58 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
 
 [dependencies]
-reth.workspace = true
-reth-node-core.workspace = true
-reth-primitives.workspace = true
-reth-node-ethereum.workspace = true
+reth-chainspec.workspace = true
 reth-tracing.workspace = true
-reth-db.workspace = true
-reth-rpc.workspace = true
+reth-db = { workspace = true, features = ["test-utils"] }
+reth-network-api.workspace = true
 reth-rpc-layer.workspace = true
+reth-rpc-server-types.workspace = true
+reth-rpc-eth-api.workspace = true
+reth-rpc-api = { workspace = true, features = ["client"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-payload-builder-primitives.workspace = true
+reth-payload-primitives.workspace = true
 reth-provider.workspace = true
-reth-node-builder.workspace = true
+reth-network.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-node-builder = { workspace = true, features = ["test-utils"] }
+reth-tokio-util.workspace = true
+reth-stages-types.workspace = true
+reth-network-peers.workspace = true
+reth-engine-local.workspace = true
+reth-tasks.workspace = true
+reth-node-ethereum.workspace = true
+reth-primitives-traits.workspace = true
+reth-rpc-builder.workspace = true
+reth-ethereum-primitives.workspace = true
 
+revm.workspace = true
+
+# rpc
 jsonrpsee.workspace = true
+url.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+op-alloy-rpc-types-engine.workspace = true
 
 futures-util.workspace = true
 eyre.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 serde_json.workspace = true
-rand.workspace = true
-secp256k1.workspace = true
 alloy-signer.workspace = true
-alloy-signer-wallet = { workspace = true, features = ["mnemonic"] }
-alloy-rpc-types.workspace = true
+alloy-signer-local = { workspace = true, features = ["mnemonic"] }
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-engine.workspace = true
 alloy-network.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
 tracing.workspace = true
+derive_more.workspace = true

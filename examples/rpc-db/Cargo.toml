@@ -1,5 +1,5 @@
 [package]
-name = "rpc-db"
+name = "example-rpc-db"
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -9,7 +9,9 @@ license.workspace = true
 futures.workspace = true
 jsonrpsee.workspace = true
 reth.workspace = true
+reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-node-ethereum.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 eyre.workspace = true

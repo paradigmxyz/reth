@@ -1,0 +1,13 @@
+[package]
+name = "my-exex"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+reth = { git = "https://github.com/paradigmxyz/reth.git" } # Reth
+reth-exex = { git = "https://github.com/paradigmxyz/reth.git" } # Execution Extensions
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git" } # Ethereum Node implementation
+reth-tracing = { git = "https://github.com/paradigmxyz/reth.git" } # Logging
+
+eyre = "0.6" # Easy error handling
+futures-util = "0.3" # Stream utilities for consuming notifications

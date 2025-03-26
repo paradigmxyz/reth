@@ -1,15 +1,15 @@
-use reth_interfaces::p2p::error::DownloadError;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
+use reth_network_p2p::error::DownloadError;
 
 /// Common body downloader metrics.
 ///
 /// These metrics will be initialized with the `downloaders.bodies` scope.
 /// ```
 /// use reth_downloaders::metrics::BodyDownloaderMetrics;
-/// use reth_interfaces::p2p::error::DownloadError;
+/// use reth_network_p2p::error::DownloadError;
 ///
 /// // Initialize metrics.
 /// let metrics = BodyDownloaderMetrics::default();
@@ -30,7 +30,7 @@ pub struct BodyDownloaderMetrics {
     pub buffered_responses: Gauge,
     /// The number of blocks the internal buffer of the
     /// downloader.
-    /// These are bodies that have been received, but not cannot be committed yet because they're
+    /// These are bodies that have been received, but cannot be committed yet because they're
     /// not contiguous
     pub buffered_blocks: Gauge,
     /// Total amount of memory used by the buffered blocks in bytes
@@ -80,7 +80,7 @@ pub struct ResponseMetrics {
 /// These metrics will be initialized with the `downloaders.headers` scope.
 /// ```
 /// use reth_downloaders::metrics::HeaderDownloaderMetrics;
-/// use reth_interfaces::p2p::error::DownloadError;
+/// use reth_network_p2p::error::DownloadError;
 ///
 /// // Initialize metrics.
 /// let metrics = HeaderDownloaderMetrics::default();
@@ -101,7 +101,7 @@ pub struct HeaderDownloaderMetrics {
     pub buffered_responses: Gauge,
     /// The number of blocks the internal buffer of the
     /// downloader.
-    /// These are bodies that have been received, but not cannot be committed yet because they're
+    /// These are bodies that have been received, but cannot be committed yet because they're
     /// not contiguous
     pub buffered_blocks: Gauge,
     /// Total amount of memory used by the buffered blocks in bytes

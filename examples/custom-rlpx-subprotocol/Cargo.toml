@@ -1,0 +1,20 @@
+[package]
+name = "example-custom-rlpx-subprotocol"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { workspace = true, features = ["full"] }
+futures.workspace = true
+reth-eth-wire.workspace = true
+reth-network.workspace = true
+reth-network-api.workspace = true
+reth-node-ethereum.workspace = true
+reth.workspace = true
+tokio-stream.workspace = true
+eyre.workspace = true
+rand.workspace = true
+tracing.workspace = true
+alloy-primitives.workspace = true

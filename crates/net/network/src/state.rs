@@ -2,29 +2,29 @@
 
 use crate::{
     cache::LruCache,
-    discovery::{Discovery, DiscoveryEvent},
+    discovery::Discovery,
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
-    manager::DiscoveredEvent,
-    message::{
-        BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
-        PeerResponseResult,
-    },
+    message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
     FetchClient,
 };
+use alloy_consensus::BlockHeader;
+use alloy_primitives::B256;
 use rand::seq::SliceRandom;
-
 use reth_eth_wire::{
-    capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
+    BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
+    NewBlockHashes, Status,
 };
-use reth_network_api::PeerKind;
-use reth_network_types::PeerId;
-use reth_primitives::{ForkId, B256};
-use reth_provider::BlockNumReader;
+use reth_ethereum_forks::ForkId;
+use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
+use reth_network_peers::PeerId;
+use reth_network_types::{PeerAddr, PeerKind};
+use reth_primitives_traits::Block;
 use std::{
     collections::{HashMap, VecDeque},
+    fmt,
     net::{IpAddr, SocketAddr},
-    num::NonZeroUsize,
+    ops::Deref,
     sync::{
         atomic::{AtomicU64, AtomicUsize},
         Arc,
@@ -35,7 +35,31 @@ use tokio::sync::oneshot;
 use tracing::{debug, trace};
 
 /// Cache limit of blocks to keep track of for a single peer.
-const PEER_BLOCK_CACHE_LIMIT: usize = 512;
+const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
+
+/// Wrapper type for the [`BlockNumReader`] trait.
+pub(crate) struct BlockNumReader(Box<dyn reth_storage_api::BlockNumReader>);
+
+impl BlockNumReader {
+    /// Create a new instance with the given reader.
+    pub fn new(reader: impl reth_storage_api::BlockNumReader + 'static) -> Self {
+        Self(Box::new(reader))
+    }
+}
+
+impl fmt::Debug for BlockNumReader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlockNumReader").field("inner", &"<dyn BlockNumReader>").finish()
+    }
+}
+
+impl Deref for BlockNumReader {
+    type Target = Box<dyn reth_storage_api::BlockNumReader>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// The [`NetworkState`] keeps track of the state of all peers in the network.
 ///
@@ -48,34 +72,32 @@ const PEER_BLOCK_CACHE_LIMIT: usize = 512;
 ///
 /// This type is also responsible for responding for received request.
 #[derive(Debug)]
-pub struct NetworkState<C> {
+pub struct NetworkState<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// All active peers and their state.
-    active_peers: HashMap<PeerId, ActivePeer>,
+    active_peers: HashMap<PeerId, ActivePeer<N>>,
     /// Manages connections to peers.
     peers_manager: PeersManager,
     /// Buffered messages until polled.
-    queued_messages: VecDeque<StateAction>,
+    queued_messages: VecDeque<StateAction<N>>,
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
     /// [Status] block hash.
-    client: C,
+    client: BlockNumReader,
     /// Network discovery.
     discovery: Discovery,
     /// The type that handles requests.
     ///
-    /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
-    /// then queue in the request and notify the fetcher once the result has been received.
-    state_fetcher: StateFetcher,
+    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type
+    /// will then queue in the request and notify the fetcher once the result has been
+    /// received.
+    state_fetcher: StateFetcher<N>,
 }
 
-impl<C> NetworkState<C>
-where
-    C: BlockNumReader,
-{
+impl<N: NetworkPrimitives> NetworkState<N> {
     /// Create a new state instance with the given params
     pub(crate) fn new(
-        client: C,
+        client: BlockNumReader,
         discovery: Discovery,
         peers_manager: PeersManager,
         num_active_peers: Arc<AtomicUsize>,
@@ -102,12 +124,12 @@ where
     }
 
     /// Returns access to the [`PeersManager`]
-    pub(crate) fn peers(&self) -> &PeersManager {
+    pub(crate) const fn peers(&self) -> &PeersManager {
         &self.peers_manager
     }
 
     /// Returns a new [`FetchClient`]
-    pub(crate) fn fetch_client(&self) -> FetchClient {
+    pub(crate) fn fetch_client(&self) -> FetchClient<N> {
         self.state_fetcher.client()
     }
 
@@ -125,7 +147,7 @@ where
         peer: PeerId,
         capabilities: Arc<Capabilities>,
         status: Arc<Status>,
-        request_tx: PeerRequestSender,
+        request_tx: PeerRequestSender<PeerRequest<N>>,
         timeout: Arc<AtomicU64>,
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
@@ -142,7 +164,7 @@ where
                 capabilities,
                 request_tx,
                 pending_response: None,
-                blocks: LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_LIMIT).unwrap()),
+                blocks: LruCache::new(PEER_BLOCK_CACHE_LIMIT),
             },
         );
     }
@@ -163,19 +185,19 @@ where
     /// > the total number of peers) using the `NewBlock` message.
     ///
     /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md>
-    pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage) {
+    pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage<N::Block>) {
         // send a `NewBlock` message to a fraction of the connected peers (square root of the total
         // number of peers)
         let num_propagate = (self.active_peers.len() as f64).sqrt() as u64 + 1;
 
-        let number = msg.block.block.header.number;
+        let number = msg.block.block.header().number();
         let mut count = 0;
 
         // Shuffle to propagate to a random sample of peers on every block announcement
         let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
         peers.shuffle(&mut rand::thread_rng());
 
-        for (peer_id, peer) in peers.into_iter() {
+        for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -205,10 +227,10 @@ where
 
     /// Completes the block propagation process started in [`NetworkState::announce_new_block()`]
     /// but sending `NewBlockHash` broadcast to all peers that haven't seen it yet.
-    pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
-        let number = msg.block.block.header.number;
+    pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage<N::Block>) {
+        let number = msg.block.block.header().number();
         let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
-        for (peer_id, peer) in self.active_peers.iter_mut() {
+        for (peer_id, peer) in &mut self.active_peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -274,13 +296,19 @@ where
     }
 
     /// Adds a peer and its address with the given kind to the peerset.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
+    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
         self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
-    pub(crate) fn remove_peer(&mut self, peer_id: PeerId, kind: PeerKind) {
+    /// Connects a peer and its address with the given kind
+    pub(crate) fn add_and_connect(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
+        self.peers_manager.add_and_connect_kind(peer_id, kind, addr, None)
+    }
+
+    /// Removes a peer and its address with the given kind from the peerset.
+    pub(crate) fn remove_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind) {
         match kind {
-            PeerKind::Basic => self.peers_manager.remove_peer(peer_id),
+            PeerKind::Basic | PeerKind::Static => self.peers_manager.remove_peer(peer_id),
             PeerKind::Trusted => self.peers_manager.remove_peer_from_trusted_set(peer_id),
         }
     }
@@ -288,14 +316,10 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
-                peer_id,
-                socket_addr,
-                fork_id,
-            }) => {
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued { peer_id, addr, fork_id }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
                     peer_id,
-                    socket_addr,
+                    addr,
                     fork_id,
                 });
             }
@@ -316,10 +340,7 @@ where
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
             }
-            PeerAction::DisconnectBannedIncoming { peer_id } => {
-                self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
-            }
+            PeerAction::DisconnectBannedIncoming { peer_id } |
             PeerAction::DisconnectUntrustedIncoming { peer_id } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
@@ -334,8 +355,7 @@ where
             PeerAction::PeerRemoved(peer_id) => {
                 self.queued_messages.push_back(StateAction::PeerRemoved(peer_id))
             }
-            PeerAction::BanPeer { .. } => {}
-            PeerAction::UnBanPeer { .. } => {}
+            PeerAction::BanPeer { .. } | PeerAction::UnBanPeer { .. } => {}
         }
     }
 
@@ -365,7 +385,7 @@ where
     }
 
     /// Handle the outcome of processed response, for example directly queue another request.
-    fn on_block_response_outcome(&mut self, outcome: BlockResponseOutcome) -> Option<StateAction> {
+    fn on_block_response_outcome(&mut self, outcome: BlockResponseOutcome) {
         match outcome {
             BlockResponseOutcome::Request(peer, request) => {
                 self.handle_block_request(peer, request);
@@ -374,30 +394,31 @@ where
                 self.peers_manager.apply_reputation_change(&peer, reputation_change);
             }
         }
-        None
     }
 
     /// Invoked when received a response from a connected peer.
     ///
     /// Delegates the response result to the fetcher which may return an outcome specific
-    /// instruction that needs to be handled in [Self::on_block_response_outcome]. This could be
+    /// instruction that needs to be handled in [`Self::on_block_response_outcome`]. This could be
     /// a follow-up request or an instruction to slash the peer's reputation.
-    fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
-        match resp {
+    fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult<N>) {
+        let outcome = match resp {
             PeerResponseResult::BlockHeaders(res) => {
-                let outcome = self.state_fetcher.on_block_headers_response(peer, res)?;
-                self.on_block_response_outcome(outcome)
+                self.state_fetcher.on_block_headers_response(peer, res)
             }
             PeerResponseResult::BlockBodies(res) => {
-                let outcome = self.state_fetcher.on_block_bodies_response(peer, res)?;
-                self.on_block_response_outcome(outcome)
+                self.state_fetcher.on_block_bodies_response(peer, res)
             }
             _ => None,
+        };
+
+        if let Some(outcome) = outcome {
+            self.on_block_response_outcome(outcome);
         }
     }
 
     /// Advances the state
-    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateAction> {
+    pub(crate) fn poll(&mut self, cx: &mut Context<'_>) -> Poll<StateAction<N>> {
         loop {
             // drain buffered messages
             if let Some(message) = self.queued_messages.pop_front() {
@@ -416,24 +437,26 @@ where
                 }
             }
 
-            // need to buffer results here to make borrow checker happy
-            let mut closed_sessions = Vec::new();
-            let mut received_responses = Vec::new();
+            loop {
+                // need to buffer results here to make borrow checker happy
+                let mut closed_sessions = Vec::new();
+                let mut received_responses = Vec::new();
 
-            // poll all connected peers for responses
-            for (id, peer) in self.active_peers.iter_mut() {
-                if let Some(mut response) = peer.pending_response.take() {
+                // poll all connected peers for responses
+                for (id, peer) in &mut self.active_peers {
+                    let Some(mut response) = peer.pending_response.take() else { continue };
                     match response.poll(cx) {
                         Poll::Ready(res) => {
                             // check if the error is due to a closed channel to the session
-                            if res.err().map(|err| err.is_channel_closed()).unwrap_or_default() {
+                            if res.err().is_some_and(|err| err.is_channel_closed()) {
                                 debug!(
                                     target: "net",
                                     ?id,
                                     "Request canceled, response channel from session closed."
                                 );
                                 // if the channel is closed, this means the peer session is also
-                                // closed, in which case we can invoke the [Self::on_closed_session]
+                                // closed, in which case we can invoke the
+                                // [Self::on_closed_session]
                                 // immediately, preventing followup requests and propagate the
                                 // connection dropped error
                                 closed_sessions.push(*id);
@@ -447,15 +470,17 @@ where
                         }
                     };
                 }
-            }
 
-            for peer in closed_sessions {
-                self.on_session_closed(peer)
-            }
+                for peer in closed_sessions {
+                    self.on_session_closed(peer)
+                }
 
-            for (peer_id, resp) in received_responses {
-                if let Some(action) = self.on_eth_response(peer_id, resp) {
-                    self.queued_messages.push_back(action);
+                if received_responses.is_empty() {
+                    break;
+                }
+
+                for (peer_id, resp) in received_responses {
+                    self.on_eth_response(peer_id, resp);
                 }
             }
 
@@ -464,6 +489,8 @@ where
                 self.on_peer_action(action);
             }
 
+            // We need to poll again tn case we have received any responses because they may have
+            // triggered follow-up requests.
             if self.queued_messages.is_empty() {
                 return Poll::Pending
             }
@@ -475,29 +502,29 @@ where
 ///
 /// For example known blocks,so we can decide what to announce.
 #[derive(Debug)]
-pub(crate) struct ActivePeer {
+pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     /// Best block of the peer.
     pub(crate) best_hash: B256,
     /// The capabilities of the remote peer.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) capabilities: Arc<Capabilities>,
     /// A communication channel directly to the session task.
-    pub(crate) request_tx: PeerRequestSender,
+    pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
     /// The response receiver for a currently active request to that peer.
-    pub(crate) pending_response: Option<PeerResponse>,
+    pub(crate) pending_response: Option<PeerResponse<N>>,
     /// Blocks we know the peer has.
     pub(crate) blocks: LruCache<B256>,
 }
 
 /// Message variants triggered by the [`NetworkState`]
 #[derive(Debug)]
-pub(crate) enum StateAction {
+pub(crate) enum StateAction<N: NetworkPrimitives> {
     /// Dispatch a `NewBlock` message to the peer
     NewBlock {
         /// Target of the message
         peer_id: PeerId,
         /// The `NewBlock` message
-        block: NewBlockMessage,
+        block: NewBlockMessage<N::Block>,
     },
     NewBlockHashes {
         /// Target of the message
@@ -519,8 +546,8 @@ pub(crate) enum StateAction {
         /// The reported [`ForkId`] by this peer.
         fork_id: ForkId,
     },
-    /// A new node was found through the discovery, possibly with a ForkId
-    DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
+    /// A new node was found through the discovery, possibly with a `ForkId`
+    DiscoveredNode { peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId> },
     /// A peer was added
     PeerAdded(PeerId),
     /// A peer was dropped
@@ -530,17 +557,20 @@ pub(crate) enum StateAction {
 #[cfg(test)]
 mod tests {
     use crate::{
-        discovery::Discovery, fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager,
-        state::NetworkState, PeerRequest,
+        discovery::Discovery,
+        fetch::StateFetcher,
+        peers::PeersManager,
+        state::{BlockNumReader, NetworkState},
+        PeerRequest,
     };
-    use reth_eth_wire::{
-        capability::{Capabilities, Capability},
-        BlockBodies, EthVersion,
-    };
-    use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_network_types::PeerId;
-    use reth_primitives::{BlockBody, Header, B256};
-    use reth_provider::test_utils::NoopProvider;
+    use alloy_consensus::Header;
+    use alloy_primitives::B256;
+    use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion};
+    use reth_ethereum_primitives::BlockBody;
+    use reth_network_api::PeerRequestSender;
+    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_network_peers::PeerId;
+    use reth_storage_api::noop::NoopProvider;
     use std::{
         future::poll_fn,
         sync::{atomic::AtomicU64, Arc},
@@ -548,15 +578,15 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
-    /// Returns a testing instance of the [NetworkState].
-    fn state() -> NetworkState<NoopProvider> {
+    /// Returns a testing instance of the [`NetworkState`].
+    fn state() -> NetworkState<EthNetworkPrimitives> {
         let peers = PeersManager::default();
         let handle = peers.handle();
         NetworkState {
             active_peers: Default::default(),
             peers_manager: Default::default(),
             queued_messages: Default::default(),
-            client: NoopProvider::default(),
+            client: BlockNumReader(Box::new(NoopProvider::default())),
             discovery: Discovery::noop(),
             state_fetcher: StateFetcher::new(handle, Default::default()),
         }

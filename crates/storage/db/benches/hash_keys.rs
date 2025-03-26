@@ -1,16 +1,29 @@
 #![allow(missing_docs)]
+
+use std::{collections::HashSet, path::Path, sync::Arc};
+
 use criterion::{
-    black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
     arbitrary::Arbitrary,
-    prelude::{any_with, ProptestConfig},
+    prelude::any_with,
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_db::{cursor::DbCursorRW, TransactionHashNumbers};
-use std::collections::HashSet;
+use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv, TransactionHashNumbers};
+use reth_db_api::{
+    cursor::DbCursorRW,
+    database::Database,
+    table::{Table, TableRow},
+    transaction::DbTxMut,
+};
+use reth_fs_util as fs;
+use std::hint::black_box;
+
+mod utils;
+use utils::*;
 
 criterion_group! {
     name = benches;
@@ -26,7 +39,7 @@ criterion_main!(benches);
 /// * `put_sorted`: Table is preloaded with rows (same as batch size). Sorts during benchmark.
 /// * `put_unsorted`: Table is preloaded with rows (same as batch size).
 ///
-/// It does the above steps with different batches of rows. 10_000, 100_000, 1_000_000. In the
+/// It does the above steps with different batches of rows. `10_000`, `100_000`, `1_000_000`. In the
 /// end, the table statistics are shown (eg. number of pages, table size...)
 pub fn hash_keys(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash-Keys Table Insertion");
@@ -34,6 +47,12 @@ pub fn hash_keys(c: &mut Criterion) {
     group.sample_size(10);
 
     for size in [10_000, 100_000, 1_000_000] {
+        // Too slow.
+        #[expect(unexpected_cfgs)]
+        if cfg!(codspeed) && size > 10_000 {
+            continue;
+        }
+
         measure_table_insertion::<TransactionHashNumbers>(&mut group, size);
     }
 }
@@ -129,7 +148,6 @@ where
 
 /// Generates two batches. The first is to be inserted into the database before running the
 /// benchmark. The second is to be benchmarked with.
-#[allow(clippy::type_complexity)]
 fn generate_batches<T>(size: usize) -> (Vec<TableRow<T>>, Vec<TableRow<T>>)
 where
     T: Table,
@@ -146,11 +164,11 @@ where
     .no_shrink()
     .boxed();
 
-    let mut runner = TestRunner::new(ProptestConfig::default());
+    let mut runner = TestRunner::deterministic();
     let mut preload = strategy.new_tree(&mut runner).unwrap().current();
     let mut input = strategy.new_tree(&mut runner).unwrap().current();
 
-    let mut unique_keys = HashSet::new();
+    let mut unique_keys = HashSet::with_capacity(preload.len() + input.len());
     preload.retain(|(k, _)| unique_keys.insert(k.clone()));
     input.retain(|(k, _)| unique_keys.insert(k.clone()));
 
@@ -166,7 +184,7 @@ where
         let mut crsr = tx.cursor_write::<T>().expect("cursor");
         black_box({
             for (k, v) in input {
-                crsr.append(k, v).expect("submit");
+                crsr.append(k, &v).expect("submit");
             }
 
             tx.inner.commit().unwrap()
@@ -184,7 +202,7 @@ where
         let mut crsr = tx.cursor_write::<T>().expect("cursor");
         black_box({
             for (k, v) in input {
-                crsr.insert(k, v).expect("submit");
+                crsr.insert(k, &v).expect("submit");
             }
 
             tx.inner.commit().unwrap()
@@ -211,7 +229,7 @@ where
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 struct TableStats {
     page_size: usize,
     leaf_pages: usize,
@@ -252,5 +270,3 @@ where
     })
     .unwrap();
 }
-
-include!("./utils.rs");

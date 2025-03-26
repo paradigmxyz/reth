@@ -1,0 +1,95 @@
+[package]
+name = "reth-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Benchmarking for ethereum nodes"
+default-run = "reth-bench"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-cli-runner.workspace = true
+reth-cli-util.workspace = true
+reth-fs-util.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-primitives-traits.workspace = true
+reth-tracing.workspace = true
+
+# alloy
+alloy-eips.workspace = true
+alloy-json-rpc.workspace = true
+alloy-primitives.workspace = true
+alloy-provider = { workspace = true, features = ["engine-api", "reqwest-rustls-tls"], default-features = false }
+alloy-pubsub.workspace = true
+alloy-rpc-client.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-transport-http.workspace = true
+alloy-transport-ipc.workspace = true
+alloy-transport-ws.workspace = true
+alloy-transport.workspace = true
+op-alloy-consensus = { workspace = true, features = ["alloy-compat"] }
+
+# reqwest
+reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots"] }
+
+# tower
+tower.workspace = true
+
+# tracing
+tracing.workspace = true
+
+# serde
+serde.workspace = true
+serde_json.workspace = true
+
+# async
+async-trait.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
+
+# misc
+clap = { workspace = true, features = ["derive", "env"] }
+eyre.workspace = true
+thiserror.workspace = true
+humantime.workspace = true
+
+# for writing data
+csv.workspace = true
+
+[dev-dependencies]
+reth-tracing.workspace = true
+
+[features]
+default = ["jemalloc"]
+
+asm-keccak = [
+    "reth-node-core/asm-keccak",
+    "alloy-primitives/asm-keccak",
+]
+
+jemalloc = [
+    "reth-cli-util/jemalloc",
+    "reth-node-core/jemalloc",
+]
+jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
+tracy-allocator = ["reth-cli-util/tracy-allocator"]
+
+min-error-logs = ["tracing/release_max_level_error"]
+min-warn-logs = ["tracing/release_max_level_warn"]
+min-info-logs = ["tracing/release_max_level_info"]
+min-debug-logs = ["tracing/release_max_level_debug"]
+min-trace-logs = ["tracing/release_max_level_trace"]
+
+# no-op feature flag for switching between the `optimism` and default functionality in CI matrices
+ethereum = []
+
+[[bin]]
+name = "reth-bench"
+path = "src/main.rs"

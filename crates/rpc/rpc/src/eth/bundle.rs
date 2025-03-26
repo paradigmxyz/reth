@@ -1,27 +1,23 @@
 //! `Eth` bundle implementation and helpers.
 
-use crate::eth::{
-    error::{EthApiError, EthResult, RpcInvalidTransactionError},
-    revm_utils::FillableTransaction,
-    utils::recover_raw_transaction,
-    EthTransactions,
-};
+use alloy_consensus::{EnvKzgSettings, Transaction as _};
+use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
+use alloy_primitives::{Keccak256, U256};
+use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{
-    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP,
-    keccak256,
-    revm_primitives::db::{DatabaseCommit, DatabaseRef},
-    PooledTransactionsElement, U256,
+use reth_evm::{ConfigureEvm, Evm};
+use reth_primitives_traits::SignedTransaction;
+use reth_revm::{database::StateProviderDatabase, db::CacheDB};
+use reth_rpc_eth_api::{
+    helpers::{Call, EthTransactions, LoadPendingBlock},
+    EthCallBundleApiServer, FromEthApiError, FromEvmError,
 };
-use reth_revm::database::StateProviderDatabase;
-use reth_rpc_api::EthCallBundleApiServer;
-use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
-use revm::{
-    db::CacheDB,
-    primitives::{ResultAndState, TxEnv},
+use reth_transaction_pool::{
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
 };
-use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
+use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -35,115 +31,161 @@ impl<Eth> EthBundle<Eth> {
     pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
         Self { inner: Arc::new(EthBundleInner { eth_api, blocking_task_guard }) }
     }
+
+    /// Access the underlying `Eth` API.
+    pub fn eth_api(&self) -> &Eth {
+        &self.inner.eth_api
+    }
 }
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions + 'static,
+    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current
     /// state, or it can be used to simulate a past block. The sender is responsible for signing the
     /// transactions and using the correct nonce and ensuring validity
-    pub async fn call_bundle(&self, bundle: EthCallBundle) -> EthResult<EthCallBundleResponse> {
-        let EthCallBundle { txs, block_number, state_block_number, timestamp } = bundle;
+    pub async fn call_bundle(
+        &self,
+        bundle: EthCallBundle,
+    ) -> Result<EthCallBundleResponse, Eth::Error> {
+        let EthCallBundle {
+            txs,
+            block_number,
+            coinbase,
+            state_block_number,
+            timeout: _,
+            timestamp,
+            gas_limit,
+            difficulty,
+            base_fee,
+            ..
+        } = bundle;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
-            ))
+            )
+            .into())
         }
         if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
-            ))
+            )
+            .into())
         }
 
         let transactions = txs
             .into_iter()
-            .map(recover_raw_transaction)
+            .map(|tx| recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .map(|tx| tx.into_components())
             .collect::<Vec<_>>();
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
         // transactions.
-        if transactions
-            .iter()
-            .filter_map(|(tx, _)| {
-                if let PooledTransactionsElement::BlobTransaction(tx) = tx {
-                    Some(tx.transaction.blob_gas())
-                } else {
-                    None
-                }
-            })
-            .sum::<u64>() >
-            MAX_BLOB_GAS_PER_BLOCK
+        if transactions.iter().filter_map(|tx| tx.blob_gas_used()).sum::<u64>() >
+            MAX_DATA_GAS_PER_BLOCK
         {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::Eip4844BlobGasExceeded.to_string(),
-            ))
+            )
+            .into())
         }
 
-        let block_id: reth_rpc_types::BlockId = state_block_number.into();
-        let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
+        let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
+        // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
+        let (mut evm_env, at) = self.eth_api().evm_env_at(block_id).await?;
+
+        if let Some(coinbase) = coinbase {
+            evm_env.block_env.beneficiary = coinbase;
+        }
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
-            block_env.timestamp = U256::from(timestamp);
+            evm_env.block_env.timestamp = timestamp;
         } else {
-            block_env.timestamp += U256::from(12);
+            evm_env.block_env.timestamp += 12;
         }
 
-        let state_block_number = block_env.number;
-        // use the block number of the request
-        block_env.number = U256::from(block_number);
+        if let Some(difficulty) = difficulty {
+            evm_env.block_env.difficulty = U256::from(difficulty);
+        }
 
-        self.inner
-            .eth_api
+        // default to call gas limit unless user requests a smaller limit
+        evm_env.block_env.gas_limit = self.inner.eth_api.call_gas_limit();
+        if let Some(gas_limit) = gas_limit {
+            if gas_limit > evm_env.block_env.gas_limit {
+                return Err(
+                    EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
+                )
+            }
+            evm_env.block_env.gas_limit = gas_limit;
+        }
+
+        if let Some(base_fee) = base_fee {
+            evm_env.block_env.basefee = base_fee.try_into().unwrap_or(u64::MAX);
+        }
+
+        let state_block_number = evm_env.block_env.number;
+        // use the block number of the request
+        evm_env.block_env.number = block_number;
+
+        let eth_api = self.eth_api().clone();
+
+        self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
-                let coinbase = block_env.coinbase;
-                let basefee = Some(block_env.basefee.to::<u64>());
-                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, TxEnv::default());
+                let coinbase = evm_env.block_env.beneficiary;
+                let basefee = evm_env.block_env.basefee;
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
-                let initial_coinbase = DatabaseRef::basic_ref(&db, coinbase)?
+                let initial_coinbase = db
+                    .basic_ref(coinbase)
+                    .map_err(Eth::Error::from_eth_err)?
                     .map(|acc| acc.balance)
                     .unwrap_or_default();
                 let mut coinbase_balance_before_tx = initial_coinbase;
                 let mut coinbase_balance_after_tx = initial_coinbase;
                 let mut total_gas_used = 0u64;
-                let mut total_gas_fess = U256::ZERO;
-                let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
+                let mut total_gas_fees = U256::ZERO;
+                let mut hasher = Keccak256::new();
 
-                let mut evm =
-                    revm::Evm::builder().with_db(db).with_env_with_handler_cfg(env).build();
+                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
 
-                while let Some((tx, signer)) = transactions.next() {
-                    // Verify that the given blob data, commitments, and proofs are all valid for
-                    // this transaction.
-                    if let PooledTransactionsElement::BlobTransaction(ref tx) = tx {
-                        tx.validate(MAINNET_KZG_TRUSTED_SETUP.as_ref())
-                            .map_err(|e| EthApiError::InvalidParams(e.to_string()))?;
-                    }
+                while let Some(tx) = transactions.next() {
+                    let signer = tx.signer();
+                    let tx = {
+                        let mut tx = <Eth::Pool as TransactionPool>::Transaction::from_pooled(tx);
 
-                    let tx = tx.into_ecrecovered_transaction(signer);
+                        if let EthBlobTransactionSidecar::Present(sidecar) = tx.take_blob() {
+                            tx.validate_blob(&sidecar, EnvKzgSettings::Default.get()).map_err(
+                                |e| {
+                                    Eth::Error::from_eth_err(EthApiError::InvalidParams(
+                                        e.to_string(),
+                                    ))
+                                },
+                            )?;
+                        }
 
-                    hash_bytes.extend_from_slice(tx.hash().as_slice());
+                        tx.into_consensus()
+                    };
+
+                    hasher.update(*tx.tx_hash());
+                    let ResultAndState { result, state } = evm
+                        .transact(eth_api.evm_config().tx_env(&tx))
+                        .map_err(Eth::Error::from_evm_err)?;
+
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
-                        .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)?;
-                    tx.try_fill_tx_env(evm.tx_mut())?;
-                    let ResultAndState { result, state } = evm.transact()?;
-
+                        .expect("fee is always valid; execution succeeded");
                     let gas_used = result.gas_used();
                     total_gas_used += gas_used;
 
                     let gas_fees = U256::from(gas_used) * U256::from(gas_price);
-                    total_gas_fess += gas_fees;
+                    total_gas_fees += gas_fees;
 
                     // coinbase is always present in the result state
                     coinbase_balance_after_tx =
@@ -167,12 +209,12 @@ where
                     let tx_res = EthCallBundleTransactionResult {
                         coinbase_diff,
                         eth_sent_to_coinbase,
-                        from_address: tx.signer(),
+                        from_address: signer,
                         gas_fees,
                         gas_price: U256::from(gas_price),
                         gas_used,
                         to_address: tx.to(),
-                        tx_hash: tx.hash(),
+                        tx_hash: *tx.tx_hash(),
                         value,
                         revert,
                     };
@@ -183,24 +225,24 @@ where
                     if transactions.peek().is_some() {
                         // need to apply the state changes of this call before executing
                         // the next call
-                        evm.context.evm.db.commit(state)
+                        evm.db_mut().commit(state)
                     }
                 }
 
                 // populate the response
 
                 let coinbase_diff = coinbase_balance_after_tx.saturating_sub(initial_coinbase);
-                let eth_sent_to_coinbase = coinbase_diff.saturating_sub(total_gas_fess);
+                let eth_sent_to_coinbase = coinbase_diff.saturating_sub(total_gas_fees);
                 let bundle_gas_price =
                     coinbase_diff.checked_div(U256::from(total_gas_used)).unwrap_or_default();
                 let res = EthCallBundleResponse {
                     bundle_gas_price,
-                    bundle_hash: keccak256(&hash_bytes),
+                    bundle_hash: hasher.finalize(),
                     coinbase_diff,
                     eth_sent_to_coinbase,
-                    gas_fees: total_gas_fess,
+                    gas_fees: total_gas_fees,
                     results,
-                    state_block_number: state_block_number.to(),
+                    state_block_number,
                     total_gas_used,
                 };
 
@@ -213,10 +255,10 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
-    Eth: EthTransactions + 'static,
+    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
-        Ok(EthBundle::call_bundle(self, request).await?)
+        Self::call_bundle(self, request).await.map_err(Into::into)
     }
 }
 
@@ -226,7 +268,7 @@ struct EthBundleInner<Eth> {
     /// Access to commonly used code of the `eth` namespace
     eth_api: Eth,
     // restrict the number of concurrent tracing calls.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     blocking_task_guard: BlockingTaskGuard,
 }
 
@@ -242,7 +284,7 @@ impl<Eth> Clone for EthBundle<Eth> {
     }
 }
 
-/// [EthBundle] specific errors.
+/// [`EthBundle`] specific errors.
 #[derive(Debug, thiserror::Error)]
 pub enum EthBundleError {
     /// Thrown if the bundle does not contain any transactions.
@@ -251,8 +293,7 @@ pub enum EthBundleError {
     /// Thrown if the bundle does not contain a block number, or block number is 0.
     #[error("bundle missing blockNumber")]
     BundleMissingBlockNumber,
-    /// Thrown when the blob gas usage of the blob transactions in a bundle exceed
-    /// [MAX_BLOB_GAS_PER_BLOCK].
-    #[error("blob gas usage exceeds the limit of {MAX_BLOB_GAS_PER_BLOCK} gas per block.")]
+    /// Thrown when the blob gas usage of the blob transactions in a bundle exceed the maximum.
+    #[error("blob gas usage exceeds the limit of {MAX_DATA_GAS_PER_BLOCK} gas per block.")]
     Eip4844BlobGasExceeded,
 }

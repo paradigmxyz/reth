@@ -1,6 +1,6 @@
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
-    message::{PeerMessage, PeerRequestSender},
+    message::PeerMessage,
     peers::InboundConnectionError,
     protocol::IntoRlpxSubProtocol,
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
@@ -8,12 +8,11 @@ use crate::{
 };
 use futures::Stream;
 use reth_eth_wire::{
-    capability::{Capabilities, CapabilityMessage},
-    errors::EthStreamError,
-    EthVersion, Status,
+    errors::EthStreamError, Capabilities, DisconnectReason, EthNetworkPrimitives, EthVersion,
+    NetworkPrimitives, Status,
 };
-use reth_network_types::PeerId;
-use reth_provider::{BlockNumReader, BlockReader};
+use reth_network_api::{PeerRequest, PeerRequestSender};
+use reth_network_peers::PeerId;
 use std::{
     io,
     net::SocketAddr,
@@ -21,7 +20,6 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-
 use tracing::trace;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -33,10 +31,10 @@ use tracing::trace;
 /// [`SessionManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
 ///
-/// Following diagram gives displays the dataflow contained in the [`Swarm`]
+/// Following diagram displays the dataflow contained in the [`Swarm`]
 ///
 /// The [`ConnectionListener`] yields incoming [`TcpStream`]s from peers that are spawned as session
-/// tasks. After a successful RLPx authentication, the task is ready to accept ETH requests or
+/// tasks. After a successful `RLPx` authentication, the task is ready to accept ETH requests or
 /// broadcast messages. A task listens for messages from the [`SessionManager`] which include
 /// broadcast messages like `Transactions` or internal commands, for example to disconnect the
 /// session.
@@ -47,65 +45,62 @@ use tracing::trace;
 /// [`StateFetcher`], which receives request objects from the client interfaces responsible for
 /// downloading headers and bodies.
 ///
-/// include_mmd!("docs/mermaid/swarm.mmd")
+/// `include_mmd!("docs/mermaid/swarm.mmd`")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
-pub(crate) struct Swarm<C> {
+pub(crate) struct Swarm<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
-    sessions: SessionManager,
+    sessions: SessionManager<N>,
     /// Tracks the entire state of the network and handles events received from the sessions.
-    state: NetworkState<C>,
+    state: NetworkState<N>,
 }
 
 // === impl Swarm ===
 
-impl<C> Swarm<C> {
+impl<N: NetworkPrimitives> Swarm<N> {
     /// Configures a new swarm instance.
-    pub(crate) fn new(
+    pub(crate) const fn new(
         incoming: ConnectionListener,
-        sessions: SessionManager,
-        state: NetworkState<C>,
+        sessions: SessionManager<N>,
+        state: NetworkState<N>,
     ) -> Self {
         Self { incoming, sessions, state }
     }
 
-    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    /// Adds a protocol handler to the `RLPx` sub-protocol list.
     pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.sessions_mut().add_rlpx_sub_protocol(protocol);
     }
 
     /// Access to the state.
-    pub(crate) fn state(&self) -> &NetworkState<C> {
+    pub(crate) const fn state(&self) -> &NetworkState<N> {
         &self.state
     }
 
     /// Mutable access to the state.
-    pub(crate) fn state_mut(&mut self) -> &mut NetworkState<C> {
+    pub(crate) fn state_mut(&mut self) -> &mut NetworkState<N> {
         &mut self.state
     }
 
     /// Access to the [`ConnectionListener`].
-    pub(crate) fn listener(&self) -> &ConnectionListener {
+    pub(crate) const fn listener(&self) -> &ConnectionListener {
         &self.incoming
     }
 
     /// Access to the [`SessionManager`].
-    pub(crate) fn sessions(&self) -> &SessionManager {
+    pub(crate) const fn sessions(&self) -> &SessionManager<N> {
         &self.sessions
     }
 
     /// Mutable access to the [`SessionManager`].
-    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
+    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager<N> {
         &mut self.sessions
     }
 }
 
-impl<C> Swarm<C>
-where
-    C: BlockNumReader,
-{
+impl<N: NetworkPrimitives> Swarm<N> {
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -115,7 +110,7 @@ where
     ///
     /// This either updates the state or produces a new [`SwarmEvent`] that is bubbled up to the
     /// manager.
-    fn on_session_event(&mut self, event: SessionEvent) -> Option<SwarmEvent> {
+    fn on_session_event(&mut self, event: SessionEvent<N>) -> Option<SwarmEvent<N>> {
         match event {
             SessionEvent::SessionEstablished {
                 peer_id,
@@ -154,9 +149,6 @@ where
             SessionEvent::ValidMessage { peer_id, message } => {
                 Some(SwarmEvent::ValidMessage { peer_id, message })
             }
-            SessionEvent::InvalidMessage { peer_id, capabilities, message } => {
-                Some(SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message })
-            }
             SessionEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                 Some(SwarmEvent::IncomingPendingSessionClosed { remote_addr, error })
             }
@@ -184,7 +176,7 @@ where
     /// Callback for events produced by [`ConnectionListener`].
     ///
     /// Depending on the event, this will produce a new [`SwarmEvent`].
-    fn on_connection(&mut self, event: ListenerEvent) -> Option<SwarmEvent> {
+    fn on_connection(&mut self, event: ListenerEvent) -> Option<SwarmEvent<N>> {
         match event {
             ListenerEvent::Error(err) => return Some(SwarmEvent::TcpListenerError(err)),
             ListenerEvent::ListenerClosed { local_address: address } => {
@@ -205,6 +197,10 @@ where
                         }
                         InboundConnectionError::ExceedsCapacity => {
                             trace!(target: "net", ?remote_addr, "No capacity for incoming connection");
+                            self.sessions.try_disconnect_incoming_connection(
+                                stream,
+                                DisconnectReason::TooManyPeers,
+                            );
                         }
                     }
                     return None
@@ -228,7 +224,7 @@ where
     }
 
     /// Hook for actions pulled from the state
-    fn on_state_action(&mut self, event: StateAction) -> Option<SwarmEvent> {
+    fn on_state_action(&mut self, event: StateAction<N>) -> Option<SwarmEvent<N>> {
         match event {
             StateAction::Connect { remote_addr, peer_id } => {
                 self.dial_outbound(remote_addr, peer_id);
@@ -247,14 +243,14 @@ where
             }
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
-            StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
+            StateAction::DiscoveredNode { peer_id, addr, fork_id } => {
                 // Don't try to connect to peer if node is shutting down
                 if self.is_shutting_down() {
                     return None
                 }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
-                    self.state_mut().peers_mut().add_peer(peer_id, socket_addr, fork_id);
+                    self.state_mut().peers_mut().add_peer(peer_id, addr, fork_id);
                 }
             }
             StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
@@ -273,9 +269,9 @@ where
         self.state_mut().peers_mut().on_shutdown();
     }
 
-    /// Checks if the node's network connection state is 'ShuttingDown'
+    /// Checks if the node's network connection state is '`ShuttingDown`'
     #[inline]
-    pub(crate) fn is_shutting_down(&self) -> bool {
+    pub(crate) const fn is_shutting_down(&self) -> bool {
         self.state().peers().connection_state().is_shutting_down()
     }
 
@@ -285,11 +281,8 @@ where
     }
 }
 
-impl<C> Stream for Swarm<C>
-where
-    C: BlockReader + Unpin,
-{
-    type Item = SwarmEvent;
+impl<N: NetworkPrimitives> Stream for Swarm<N> {
+    type Item = SwarmEvent<N>;
 
     /// This advances all components.
     ///
@@ -340,21 +333,13 @@ where
 
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
-pub(crate) enum SwarmEvent {
+pub(crate) enum SwarmEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Events related to the actual network protocol.
     ValidMessage {
         /// The peer that sent the message
         peer_id: PeerId,
         /// Message received from the peer
-        message: PeerMessage,
-    },
-    /// Received a message that does not match the announced capabilities of the peer.
-    InvalidCapabilityMessage {
-        peer_id: PeerId,
-        /// Announced capabilities of the remote peer.
-        capabilities: Arc<Capabilities>,
-        /// Message received from the peer.
-        message: CapabilityMessage,
+        message: PeerMessage<N>,
     },
     /// Received a bad message from the peer.
     BadMessage {
@@ -396,7 +381,7 @@ pub(crate) enum SwarmEvent {
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,
-        messages: PeerRequestSender,
+        messages: PeerRequestSender<PeerRequest<N>>,
         status: Arc<Status>,
         direction: Direction,
     },
@@ -442,12 +427,12 @@ pub enum NetworkConnectionState {
 
 impl NetworkConnectionState {
     /// Returns true if the node is active.
-    pub(crate) fn is_active(&self) -> bool {
-        matches!(self, NetworkConnectionState::Active)
+    pub(crate) const fn is_active(&self) -> bool {
+        matches!(self, Self::Active)
     }
 
     /// Returns true if the node is shutting down.
-    pub(crate) fn is_shutting_down(&self) -> bool {
-        matches!(self, NetworkConnectionState::ShuttingDown)
+    pub(crate) const fn is_shutting_down(&self) -> bool {
+        matches!(self, Self::ShuttingDown)
     }
 }

@@ -13,6 +13,11 @@ impl ECIESError {
     pub fn into_inner(self) -> ECIESErrorImpl {
         *self.inner
     }
+
+    /// Returns a reference to the inner error
+    pub const fn inner(&self) -> &ECIESErrorImpl {
+        &self.inner
+    }
 }
 
 impl fmt::Display for ECIESError {
@@ -57,6 +62,14 @@ pub enum ECIESErrorImpl {
     /// The encrypted data is not large enough for all fields
     #[error("encrypted data is not large enough for all fields")]
     EncryptedDataTooSmall,
+    /// The initial header body is too large.
+    #[error("initial header body is {body_size} but the max is {max_body_size}")]
+    InitialHeaderBodyTooLarge {
+        /// The body size from the header
+        body_size: usize,
+        /// The max body size
+        max_body_size: usize,
+    },
     /// Error when trying to split an array beyond its length
     #[error("requested {idx} but array len is {len}")]
     OutOfBounds {
@@ -77,18 +90,18 @@ pub enum ECIESErrorImpl {
     ///
     /// This exact error case happens when the wrapped stream in
     /// [`Framed`](tokio_util::codec::Framed) is closed by the peer, See
-    /// [ConnectionReset](std::io::ErrorKind::ConnectionReset) and the ecies codec fails to decode
-    /// a message from the (partially filled) buffer.
+    /// [`ConnectionReset`](std::io::ErrorKind::ConnectionReset) and the ecies codec fails to
+    /// decode a message from the (partially filled) buffer.
     #[error("stream closed due to not being readable")]
     UnreadableStream,
-    // Error when data is not received from peer for a prolonged period.
+    /// Error when data is not received from peer for a prolonged period.
     #[error("never received data from remote peer")]
     StreamTimeout,
 }
 
 impl From<ECIESErrorImpl> for ECIESError {
     fn from(source: ECIESErrorImpl) -> Self {
-        ECIESError { inner: Box::new(source) }
+        Self { inner: Box::new(source) }
     }
 }
 

@@ -1,0 +1,103 @@
+[package]
+name = "reth-trie"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Merkle trie implementation"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-execution-errors.workspace = true
+reth-primitives-traits.workspace = true
+reth-stages-types.workspace = true
+reth-storage-errors.workspace = true
+reth-trie-sparse.workspace = true
+reth-trie-common = { workspace = true, features = ["rayon"] }
+
+revm-database.workspace = true
+
+# alloy
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-trie.workspace = true
+
+# tracing
+tracing.workspace = true
+
+# misc
+auto_impl.workspace = true
+itertools.workspace = true
+
+# `metrics` feature
+reth-metrics = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
+
+# `test-utils` feature
+triehash = { workspace = true, optional = true }
+
+[dev-dependencies]
+# reth
+reth-ethereum-primitives = { workspace = true, features = ["arbitrary", "std"] }
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
+reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
+
+# revm
+revm-state.workspace = true
+
+# trie
+triehash.workspace = true
+
+# misc
+criterion.workspace = true
+parking_lot.workspace = true
+pretty_assertions.workspace = true
+proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+
+[features]
+metrics = ["reth-metrics", "dep:metrics"]
+serde = [
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-trie/serde",
+    "alloy-eips/serde",
+    "reth-trie-common/serde",
+    "reth-primitives-traits/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-trie/serde",
+    "alloy-eips/serde",
+    "reth-trie-common/serde",
+    "revm-database/serde",
+    "reth-stages-types/serde",
+    "revm-state/serde",
+    "parking_lot/serde",
+    "reth-ethereum-primitives/serde",
+]
+test-utils = [
+    "triehash",
+    "reth-primitives-traits/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-ethereum-primitives/test-utils",
+    "reth-trie-sparse/test-utils",
+    "reth-stages-types/test-utils",
+]
+
+[[bench]]
+name = "hash_post_state"
+harness = false
+
+[[bench]]
+name = "trie_root"
+required-features = ["test-utils"]
+harness = false

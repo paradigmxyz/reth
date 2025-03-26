@@ -17,7 +17,7 @@ pub enum Error {
     /// Missing key used to identify rlpx network.
     #[error("fork missing on enr, key missing")]
     ForkMissing(&'static [u8]),
-    /// Failed to decode [`ForkId`](reth_primitives::ForkId) rlp value.
+    /// Failed to decode [`ForkId`](reth_ethereum_forks::ForkId) rlp value.
     #[error("failed to decode fork id, 'eth': {0:?}")]
     ForkIdDecodeError(#[from] alloy_rlp::Error),
     /// Peer is unreachable over discovery.

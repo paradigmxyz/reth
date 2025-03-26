@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 mod payload;
 
-fn main() {}
+const fn main() {}

@@ -1,0 +1,69 @@
+[package]
+name = "reth-chain-state"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Reth state related types and functionality."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-chainspec.workspace = true
+reth-errors.workspace = true
+reth-execution-types.workspace = true
+reth-metrics.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
+reth-trie.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives = { workspace = true, features = ["std"] }
+alloy-consensus.workspace = true
+revm-database.workspace = true
+revm-state = { workspace = true, optional = true }
+
+# async
+tokio = { workspace = true, default-features = false, features = ["sync", "macros"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+
+# tracing
+tracing.workspace = true
+
+# misc
+derive_more.workspace = true
+metrics.workspace = true
+parking_lot.workspace = true
+pin-project.workspace = true
+
+# optional deps for test-utils
+alloy-signer = { workspace = true, optional = true }
+alloy-signer-local = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
+reth-testing-utils.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+alloy-consensus.workspace = true
+rand.workspace = true
+
+[features]
+test-utils = [
+    "alloy-primitives/getrandom",
+    "alloy-signer",
+    "alloy-signer-local",
+    "rand",
+    "revm-state",
+    "reth-chainspec/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-trie/test-utils",
+    "reth-ethereum-primitives/test-utils",
+]

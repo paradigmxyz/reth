@@ -1,10 +1,12 @@
 use super::queue::BodiesRequestQueue;
 use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
+use alloy_consensus::BlockHeader;
+use alloy_primitives::BlockNumber;
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
-use reth_consensus::Consensus;
-use reth_interfaces::p2p::{
+use reth_consensus::{Consensus, ConsensusError};
+use reth_network_p2p::{
     bodies::{
         client::BodiesClient,
         downloader::{BodyDownloader, BodyDownloaderResult},
@@ -12,12 +14,13 @@ use reth_interfaces::p2p::{
     },
     error::{DownloadError, DownloadResult},
 };
-use reth_primitives::{BlockNumber, SealedHeader};
-use reth_provider::HeaderProvider;
+use reth_primitives_traits::{size::InMemorySize, Block, SealedHeader};
+use reth_storage_api::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::Ordering,
     collections::BinaryHeap,
+    fmt::Debug,
     mem,
     ops::RangeInclusive,
     pin::Pin,
@@ -31,11 +34,15 @@ use tracing::info;
 /// All blocks in a batch are fetched at the same time.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
-pub struct BodiesDownloader<B: BodiesClient, Provider> {
+pub struct BodiesDownloader<
+    B: Block,
+    C: BodiesClient<Body = B::Body>,
+    Provider: HeaderProvider<Header = B::Header>,
+> {
     /// The bodies client
-    client: Arc<B>,
+    client: Arc<C>,
     /// The consensus client
-    consensus: Arc<dyn Consensus>,
+    consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
     /// The database handle
     provider: Provider,
     /// The maximum number of non-empty blocks per one request
@@ -53,22 +60,23 @@ pub struct BodiesDownloader<B: BodiesClient, Provider> {
     /// The latest block number returned.
     latest_queued_block_number: Option<BlockNumber>,
     /// Requests in progress
-    in_progress_queue: BodiesRequestQueue<B>,
+    in_progress_queue: BodiesRequestQueue<B, C>,
     /// Buffered responses
-    buffered_responses: BinaryHeap<OrderedBodiesResponse>,
+    buffered_responses: BinaryHeap<OrderedBodiesResponse<B>>,
     /// Queued body responses that can be returned for insertion into the database.
-    queued_bodies: Vec<BlockResponse>,
+    queued_bodies: Vec<BlockResponse<B>>,
     /// The bodies downloader metrics.
     metrics: BodyDownloaderMetrics,
 }
 
-impl<B, Provider> BodiesDownloader<B, Provider>
+impl<B, C, Provider> BodiesDownloader<B, C, Provider>
 where
-    B: BodiesClient + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
+    B: Block,
+    C: BodiesClient<Body = B::Body> + 'static,
+    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
     /// Returns the next contiguous request.
-    fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader>>> {
+    fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader<Provider::Header>>>> {
         let start_at = match self.in_progress_queue.last_requested_block_number {
             Some(num) => num + 1,
             None => *self.download_range.start(),
@@ -93,9 +101,9 @@ where
         &self,
         range: RangeInclusive<BlockNumber>,
         max_non_empty: u64,
-    ) -> DownloadResult<Option<Vec<SealedHeader>>> {
+    ) -> DownloadResult<Option<Vec<SealedHeader<B::Header>>>> {
         if range.is_empty() || max_non_empty == 0 {
-            return Ok(None);
+            return Ok(None)
         }
 
         // Collect headers while
@@ -106,7 +114,7 @@ where
         let mut collected = 0;
         let mut non_empty_headers = 0;
         let headers = self.provider.sealed_headers_while(range.clone(), |header| {
-            let should_take = range.contains(&header.number) &&
+            let should_take = range.contains(&header.number()) &&
                 non_empty_headers < max_non_empty &&
                 collected < self.stream_batch_size;
 
@@ -125,7 +133,7 @@ where
     }
 
     /// Get the next expected block number for queueing.
-    fn next_expected_block_number(&self) -> BlockNumber {
+    const fn next_expected_block_number(&self) -> BlockNumber {
         match self.latest_queued_block_number {
             Some(num) => num + 1,
             None => *self.download_range.start(),
@@ -144,14 +152,14 @@ where
 
         // if we're only connected to a few peers, we keep it low
         if num_peers < *self.concurrent_requests_range.start() {
-            return max_requests;
+            return max_requests
         }
 
         max_requests.min(*self.concurrent_requests_range.end())
     }
 
     /// Returns true if the size of buffered blocks is lower than the configured maximum
-    fn has_buffer_capacity(&self) -> bool {
+    const fn has_buffer_capacity(&self) -> bool {
         self.buffered_blocks_size_bytes < self.max_buffered_blocks_size_bytes
     }
 
@@ -161,9 +169,7 @@ where
         let nothing_to_request = self.download_range.is_empty() ||
             // or all blocks have already been requested.
             self.in_progress_queue
-                .last_requested_block_number
-                .map(|last| last == *self.download_range.end())
-                .unwrap_or_default();
+                .last_requested_block_number.is_some_and(|last| last == *self.download_range.end());
 
         nothing_to_request &&
             self.in_progress_queue.is_empty() &&
@@ -191,14 +197,14 @@ where
     }
 
     /// Queues bodies and sets the latest queued block number
-    fn queue_bodies(&mut self, bodies: Vec<BlockResponse>) {
+    fn queue_bodies(&mut self, bodies: Vec<BlockResponse<B>>) {
         self.latest_queued_block_number = Some(bodies.last().expect("is not empty").block_number());
         self.queued_bodies.extend(bodies);
         self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
     }
 
     /// Removes the next response from the buffer.
-    fn pop_buffered_response(&mut self) -> Option<OrderedBodiesResponse> {
+    fn pop_buffered_response(&mut self) -> Option<OrderedBodiesResponse<B>> {
         let resp = self.buffered_responses.pop()?;
         self.metrics.buffered_responses.decrement(1.);
         self.buffered_blocks_size_bytes -= resp.size();
@@ -208,10 +214,10 @@ where
     }
 
     /// Adds a new response to the internal buffer
-    fn buffer_bodies_response(&mut self, response: Vec<BlockResponse>) {
+    fn buffer_bodies_response(&mut self, response: Vec<BlockResponse<B>>) {
         // take into account capacity
         let size = response.iter().map(BlockResponse::size).sum::<usize>() +
-            response.capacity() * mem::size_of::<BlockResponse>();
+            response.capacity() * mem::size_of::<BlockResponse<B>>();
 
         let response = OrderedBodiesResponse { resp: response, size };
         let response_len = response.len();
@@ -225,7 +231,7 @@ where
     }
 
     /// Returns a response if it's first block number matches the next expected.
-    fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse>> {
+    fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse<B>>> {
         if let Some(next) = self.buffered_responses.peek() {
             let expected = self.next_expected_block_number();
             let next_block_range = next.block_range();
@@ -238,7 +244,7 @@ where
                         .skip_while(|b| b.block_number() < expected)
                         .take_while(|b| self.download_range.contains(&b.block_number()))
                         .collect()
-                });
+                })
             }
 
             // Drop buffered response since we passed that range
@@ -251,13 +257,13 @@ where
 
     /// Returns the next batch of block bodies that can be returned if we have enough buffered
     /// bodies
-    fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse>> {
+    fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse<B>>> {
         if self.queued_bodies.len() >= self.stream_batch_size {
             let next_batch = self.queued_bodies.drain(..self.stream_batch_size).collect::<Vec<_>>();
             self.queued_bodies.shrink_to_fit();
             self.metrics.total_flushed.increment(next_batch.len() as u64);
             self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
-            return Some(next_batch);
+            return Some(next_batch)
         }
         None
     }
@@ -276,19 +282,19 @@ where
     }
 }
 
-impl<B, Provider> BodiesDownloader<B, Provider>
+impl<B, C, Provider> BodiesDownloader<B, C, Provider>
 where
-    B: BodiesClient + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
-    Self: BodyDownloader + 'static,
+    B: Block + 'static,
+    C: BodiesClient<Body = B::Body> + 'static,
+    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
-    /// Spawns the downloader task via [tokio::task::spawn]
-    pub fn into_task(self) -> TaskDownloader {
+    /// Spawns the downloader task via [`tokio::task::spawn`]
+    pub fn into_task(self) -> TaskDownloader<B> {
         self.into_task_with(&TokioTaskExecutor::default())
     }
 
     /// Convert the downloader into a [`TaskDownloader`] by spawning it via the given spawner.
-    pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader
+    pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader<B>
     where
         S: TaskSpawner,
     {
@@ -296,11 +302,14 @@ where
     }
 }
 
-impl<B, Provider> BodyDownloader for BodiesDownloader<B, Provider>
+impl<B, C, Provider> BodyDownloader for BodiesDownloader<B, C, Provider>
 where
-    B: BodiesClient + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
+    B: Block + 'static,
+    C: BodiesClient<Body = B::Body> + 'static,
+    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
+    type Block = B;
+
     /// Set a new download range (exclusive).
     ///
     /// This method will drain all queued bodies, filter out ones outside the range and put them
@@ -344,23 +353,24 @@ where
     }
 }
 
-impl<B, Provider> Stream for BodiesDownloader<B, Provider>
+impl<B, C, Provider> Stream for BodiesDownloader<B, C, Provider>
 where
-    B: BodiesClient + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
+    B: Block + 'static,
+    C: BodiesClient<Body = B::Body> + 'static,
+    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
-    type Item = BodyDownloaderResult;
+    type Item = BodyDownloaderResult<B>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         if this.is_terminated() {
-            return Poll::Ready(None);
+            return Poll::Ready(None)
         }
         // Submit new requests and poll any in progress
         loop {
             // Yield next batch if ready
             if let Some(next_batch) = this.try_split_next_batch() {
-                return Poll::Ready(Some(Ok(next_batch)));
+                return Poll::Ready(Some(Ok(next_batch)))
             }
 
             // Poll requests
@@ -373,7 +383,7 @@ where
                     Err(error) => {
                         tracing::debug!(target: "downloaders::bodies", %error, "Request failed");
                         this.clear();
-                        return Poll::Ready(Some(Err(error)));
+                        return Poll::Ready(Some(Err(error)))
                     }
                 };
             }
@@ -396,7 +406,7 @@ where
                     Err(error) => {
                         tracing::error!(target: "downloaders::bodies", %error, "Failed to download from next request");
                         this.clear();
-                        return Poll::Ready(Some(Err(error)));
+                        return Poll::Ready(Some(Err(error)))
                     }
                 };
             }
@@ -409,21 +419,21 @@ where
             this.buffered_responses.shrink_to_fit();
 
             if !new_request_submitted {
-                break;
+                break
             }
         }
 
         // All requests are handled, stream is finished
         if this.in_progress_queue.is_empty() {
             if this.queued_bodies.is_empty() {
-                return Poll::Ready(None);
+                return Poll::Ready(None)
             }
             let batch_size = this.stream_batch_size.min(this.queued_bodies.len());
             let next_batch = this.queued_bodies.drain(..batch_size).collect::<Vec<_>>();
             this.queued_bodies.shrink_to_fit();
             this.metrics.total_flushed.increment(next_batch.len() as u64);
             this.metrics.queued_blocks.set(this.queued_bodies.len() as f64);
-            return Poll::Ready(Some(Ok(next_batch)));
+            return Poll::Ready(Some(Ok(next_batch)))
         }
 
         Poll::Pending
@@ -431,13 +441,28 @@ where
 }
 
 #[derive(Debug)]
-struct OrderedBodiesResponse {
-    resp: Vec<BlockResponse>,
+struct OrderedBodiesResponse<B: Block> {
+    resp: Vec<BlockResponse<B>>,
     /// The total size of the response in bytes
     size: usize,
 }
 
-impl OrderedBodiesResponse {
+impl<B: Block> OrderedBodiesResponse<B> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.resp.len()
+    }
+
+    /// Returns the size of the response in bytes
+    ///
+    /// See [`BlockResponse::size`]
+    #[inline]
+    const fn size(&self) -> usize {
+        self.size
+    }
+}
+
+impl<B: Block> OrderedBodiesResponse<B> {
     /// Returns the block number of the first element
     ///
     /// # Panics
@@ -453,42 +478,29 @@ impl OrderedBodiesResponse {
     fn block_range(&self) -> RangeInclusive<u64> {
         self.first_block_number()..=self.resp.last().expect("is not empty").block_number()
     }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.resp.len()
-    }
-
-    /// Returns the size of the response in bytes
-    ///
-    /// See [BlockResponse::size]
-    #[inline]
-    fn size(&self) -> usize {
-        self.size
-    }
 }
 
-impl PartialEq for OrderedBodiesResponse {
+impl<B: Block> PartialEq for OrderedBodiesResponse<B> {
     fn eq(&self, other: &Self) -> bool {
         self.first_block_number() == other.first_block_number()
     }
 }
 
-impl Eq for OrderedBodiesResponse {}
+impl<B: Block> Eq for OrderedBodiesResponse<B> {}
 
-impl PartialOrd for OrderedBodiesResponse {
+impl<B: Block> PartialOrd for OrderedBodiesResponse<B> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for OrderedBodiesResponse {
+impl<B: Block> Ord for OrderedBodiesResponse<B> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.first_block_number().cmp(&other.first_block_number()).reverse()
     }
 }
 
-/// Builder for [BodiesDownloader].
+/// Builder for [`BodiesDownloader`].
 #[derive(Debug, Clone)]
 pub struct BodiesDownloaderBuilder {
     /// The batch size of non-empty blocks per one request
@@ -502,10 +514,10 @@ pub struct BodiesDownloaderBuilder {
 }
 
 impl BodiesDownloaderBuilder {
-    /// Creates a new [BodiesDownloaderBuilder] with configurations based on the provided
-    /// [BodiesConfig].
+    /// Creates a new [`BodiesDownloaderBuilder`] with configurations based on the provided
+    /// [`BodiesConfig`].
     pub fn new(config: BodiesConfig) -> Self {
-        BodiesDownloaderBuilder::default()
+        Self::default()
             .with_stream_batch_size(config.downloader_stream_batch_size)
             .with_request_limit(config.downloader_request_limit)
             .with_max_buffered_blocks_size_bytes(config.downloader_max_buffered_blocks_size_bytes)
@@ -529,19 +541,19 @@ impl Default for BodiesDownloaderBuilder {
 
 impl BodiesDownloaderBuilder {
     /// Set request batch size on the downloader.
-    pub fn with_request_limit(mut self, request_limit: u64) -> Self {
+    pub const fn with_request_limit(mut self, request_limit: u64) -> Self {
         self.request_limit = request_limit;
         self
     }
 
     /// Set stream batch size on the downloader.
-    pub fn with_stream_batch_size(mut self, stream_batch_size: usize) -> Self {
+    pub const fn with_stream_batch_size(mut self, stream_batch_size: usize) -> Self {
         self.stream_batch_size = stream_batch_size;
         self
     }
 
     /// Set concurrent requests range on the downloader.
-    pub fn with_concurrent_requests_range(
+    pub const fn with_concurrent_requests_range(
         mut self,
         concurrent_requests_range: RangeInclusive<usize>,
     ) -> Self {
@@ -550,7 +562,7 @@ impl BodiesDownloaderBuilder {
     }
 
     /// Set max buffered block bytes on the downloader.
-    pub fn with_max_buffered_blocks_size_bytes(
+    pub const fn with_max_buffered_blocks_size_bytes(
         mut self,
         max_buffered_blocks_size_bytes: usize,
     ) -> Self {
@@ -559,15 +571,16 @@ impl BodiesDownloaderBuilder {
     }
 
     /// Consume self and return the concurrent downloader.
-    pub fn build<B, Provider>(
+    pub fn build<B, C, Provider>(
         self,
-        client: B,
-        consensus: Arc<dyn Consensus>,
+        client: C,
+        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
         provider: Provider,
-    ) -> BodiesDownloader<B, Provider>
+    ) -> BodiesDownloader<B, C, Provider>
     where
-        B: BodiesClient + 'static,
-        Provider: HeaderProvider,
+        B: Block,
+        C: BodiesClient<Body = B::Body> + 'static,
+        Provider: HeaderProvider<Header = B::Header>,
     {
         let Self {
             request_limit,
@@ -603,12 +616,15 @@ mod tests {
         bodies::test_utils::{insert_headers, zip_blocks},
         test_utils::{generate_bodies, TestBodiesClient},
     };
+    use alloy_primitives::B256;
     use assert_matches::assert_matches;
+    use reth_chainspec::MAINNET;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_interfaces::test_utils::{generators, generators::random_block_range};
-    use reth_primitives::{BlockBody, B256, MAINNET};
-    use reth_provider::ProviderFactory;
+    use reth_provider::{
+        providers::StaticFileProvider, test_utils::MockNodeTypesWithDB, ProviderFactory,
+    };
+    use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::collections::HashMap;
 
     // Check that the blocks are emitted in order of block number, not in order of
@@ -626,11 +642,16 @@ mod tests {
         );
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
-        let mut downloader = BodiesDownloaderBuilder::default().build(
-            client.clone(),
-            Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
-        );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .build::<reth_ethereum_primitives::Block, _, _>(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    db,
+                    MAINNET.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
+            );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
@@ -647,17 +668,16 @@ mod tests {
         // Generate some random blocks
         let db = create_test_rw_db();
         let mut rng = generators::rng();
-        let blocks = random_block_range(&mut rng, 0..=199, B256::ZERO, 1..2);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=199,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..2, ..Default::default() },
+        );
 
-        let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
+        let headers = blocks.iter().map(|block| block.clone_sealed_header()).collect::<Vec<_>>();
         let bodies = blocks
             .into_iter()
-            .map(|block| {
-                (
-                    block.hash(),
-                    BlockBody { transactions: block.body, ommers: block.ommers, withdrawals: None },
-                )
-            })
+            .map(|block| (block.hash(), block.into_body()))
             .collect::<HashMap<_, _>>();
 
         insert_headers(db.db(), &headers);
@@ -666,12 +686,17 @@ mod tests {
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
-        let mut downloader =
-            BodiesDownloaderBuilder::default().with_request_limit(request_limit).build(
-                client.clone(),
-                Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
-            );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_request_limit(request_limit)
+            .build::<reth_ethereum_primitives::Block, _, _>(
+            client.clone(),
+            Arc::new(TestConsensus::default()),
+            ProviderFactory::<MockNodeTypesWithDB>::new(
+                db,
+                MAINNET.clone(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            ),
+        );
         downloader.set_download_range(0..=199).expect("failed to set download range");
 
         let _ = downloader.collect::<Vec<_>>().await;
@@ -697,10 +722,14 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_stream_batch_size(stream_batch_size)
             .with_request_limit(request_limit)
-            .build(
+            .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    db,
+                    MAINNET.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
             );
 
         let mut range_start = 0;
@@ -729,10 +758,16 @@ mod tests {
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
-        let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_stream_batch_size(100)
+            .build::<reth_ethereum_primitives::Block, _, _>(
             client.clone(),
             Arc::new(TestConsensus::default()),
-            ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
+            ProviderFactory::<MockNodeTypesWithDB>::new(
+                db,
+                MAINNET.clone(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            ),
         );
 
         // Set and download the first range
@@ -771,10 +806,14 @@ mod tests {
             .with_stream_batch_size(10)
             .with_request_limit(1)
             .with_max_buffered_blocks_size_bytes(1)
-            .build(
+            .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    db,
+                    MAINNET.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
             );
 
         // Set and download the entire range
@@ -804,10 +843,14 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_request_limit(3)
             .with_stream_batch_size(100)
-            .build(
+            .build::<reth_ethereum_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
-                ProviderFactory::new(db, MAINNET.clone(), static_dir_path).unwrap(),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    db,
+                    MAINNET.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
             );
 
         // Download the requested range

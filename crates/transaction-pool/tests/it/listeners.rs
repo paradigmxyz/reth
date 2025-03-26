@@ -2,8 +2,8 @@ use assert_matches::assert_matches;
 use reth_transaction_pool::{
     noop::MockTransactionValidator,
     test_utils::{MockTransactionFactory, TestPoolBuilder},
-    FullTransactionEvent, TransactionEvent, TransactionListenerKind, TransactionOrigin,
-    TransactionPool,
+    FullTransactionEvent, PoolTransaction, TransactionEvent, TransactionListenerKind,
+    TransactionOrigin, TransactionPool,
 };
 use std::{future::poll_fn, task::Poll};
 use tokio_stream::StreamExt;
@@ -21,6 +21,11 @@ async fn txpool_listener_by_hash() {
 
     let mut events = result.unwrap();
     assert_matches!(events.next().await, Some(TransactionEvent::Pending));
+
+    let removed_txs = txpool.remove_transactions(vec![*transaction.transaction.hash()]);
+    assert_eq!(transaction.transaction.hash(), removed_txs[0].transaction.hash());
+
+    assert_matches!(events.next().await, Some(TransactionEvent::Discarded));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -33,12 +38,18 @@ async fn txpool_listener_all() {
 
     let added_result =
         txpool.add_transaction(TransactionOrigin::External, transaction.transaction.clone()).await;
-    assert_matches!(added_result, Ok(hash) if hash == transaction.transaction.get_hash());
+    assert_matches!(added_result, Ok(hash) if hash == *transaction.transaction.get_hash());
 
     assert_matches!(
         all_tx_events.next().await,
-        Some(FullTransactionEvent::Pending(hash)) if hash == transaction.transaction.get_hash()
+        Some(FullTransactionEvent::Pending(hash)) if hash == *transaction.transaction.get_hash()
     );
+
+    let removed_txs = txpool.remove_transactions(vec![*transaction.transaction.hash()]);
+
+    assert_eq!(transaction.transaction.hash(), removed_txs[0].transaction.hash());
+
+    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Discarded(hash)) if hash == *transaction.transaction.get_hash());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -88,4 +99,21 @@ async fn txpool_listener_new_propagate_only() {
         Poll::Ready(())
     })
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn txpool_listener_blob_sidecar() {
+    let txpool =
+        TestPoolBuilder::default().with_validator(MockTransactionValidator::no_propagate_local());
+    let mut mock_tx_factory = MockTransactionFactory::default();
+    let blob_transaction = mock_tx_factory.create_eip4844();
+    let expected = *blob_transaction.hash();
+    let mut listener_blob = txpool.blob_transaction_sidecars_listener();
+    let result = txpool
+        .add_transaction(TransactionOrigin::Local, blob_transaction.transaction.clone())
+        .await;
+    assert!(result.is_ok());
+
+    let inserted = listener_blob.recv().await.unwrap();
+    assert_eq!(*inserted.tx_hash, expected);
 }

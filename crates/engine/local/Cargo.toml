@@ -1,0 +1,54 @@
+[package]
+name = "reth-engine-local"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+# reth
+reth-chainspec.workspace = true
+reth-consensus.workspace = true
+reth-engine-primitives.workspace = true
+reth-engine-service.workspace = true
+reth-engine-tree.workspace = true
+reth-node-types.workspace = true
+reth-evm.workspace = true
+reth-ethereum-engine-primitives.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-provider.workspace = true
+reth-prune.workspace = true
+reth-transaction-pool.workspace = true
+reth-stages-api.workspace = true
+
+# alloy
+alloy-consensus.workspace = true
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+alloy-rpc-types-engine.workspace = true
+
+# async
+tokio.workspace = true
+tokio-stream.workspace = true
+futures-util.workspace = true
+
+# misc
+eyre.workspace = true
+tracing.workspace = true
+
+op-alloy-rpc-types-engine = { workspace = true, optional = true }
+reth-optimism-chainspec = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+
+[features]
+op = [
+    "dep:op-alloy-rpc-types-engine",
+    "dep:reth-optimism-chainspec",
+    "reth-payload-primitives/op",
+    "reth-evm/op",
+]

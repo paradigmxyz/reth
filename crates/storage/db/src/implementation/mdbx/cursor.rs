@@ -1,18 +1,20 @@
 //! Cursor wrapper for libmdbx-sys.
 
+use super::utils::*;
 use crate::{
+    metrics::{DatabaseEnvMetrics, Operation},
+    DatabaseError,
+};
+use reth_db_api::{
     common::{PairResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    metrics::{DatabaseEnvMetrics, Operation},
     table::{Compress, Decode, Decompress, DupSort, Encode, Table},
-    tables::utils::*,
-    DatabaseError,
 };
-use reth_interfaces::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
+use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use std::{borrow::Cow, collections::Bound, marker::PhantomData, ops::RangeBounds, sync::Arc};
 
 /// Read only Cursor.
@@ -34,7 +36,7 @@ pub struct Cursor<K: TransactionKind, T: Table> {
 }
 
 impl<K: TransactionKind, T: Table> Cursor<K, T> {
-    pub(crate) fn new_with_metrics(
+    pub(crate) const fn new_with_metrics(
         inner: reth_libmdbx::Cursor<K>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
@@ -51,8 +53,8 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         value_size: Option<usize>,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        if let Some(metrics) = self.metrics.as_ref().cloned() {
-            metrics.record_operation(T::TABLE, operation, value_size, || f(self))
+        if let Some(metrics) = self.metrics.clone() {
+            metrics.record_operation(T::NAME, operation, value_size, || f(self))
         } else {
             f(self)
         }
@@ -60,7 +62,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
 }
 
 /// Decodes a `(key, value)` pair from the database.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 pub fn decode<T>(
     res: Result<Option<(Cow<'_, [u8]>, Cow<'_, [u8]>)>, impl Into<DatabaseErrorInfo>>,
 ) -> PairResult<T>
@@ -79,7 +81,7 @@ macro_rules! compress_to_buf_or_ref {
         if let Some(value) = $value.uncompressable_ref() {
             Some(value)
         } else {
-            $self.buf.truncate(0);
+            $self.buf.clear();
             $value.compress_to_buf(&mut $self.buf);
             None
         }
@@ -191,8 +193,7 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
     /// - Some(key), Some(subkey): a `key` item whose data is >= than `subkey`
     /// - Some(key), None: first item of a specified `key`
     /// - None, Some(subkey): like first case, but in the first key
-    /// - None, None: first item in the table
-    /// of a DUPSORT table.
+    /// - None, None: first item in the table of a DUPSORT table.
     fn walk_dup(
         &mut self,
         key: Option<T::Key>,
@@ -240,7 +241,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// it will append the value to the subkey, even if the subkeys are the same. So if you want
     /// to properly upsert, you'll need to `seek_exact` & `delete_current` if the key+subkey was
     /// found, before calling `upsert`.
-    fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+    fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
         self.execute_with_operation_metric(
@@ -262,7 +263,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
         )
     }
 
-    fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+    fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
         self.execute_with_operation_metric(
@@ -286,7 +287,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 
     /// Appends the data to the end of the table. Consequently, the append operation
     /// will fail if the inserted key is less than the last table key
-    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+    fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
         self.execute_with_operation_metric(

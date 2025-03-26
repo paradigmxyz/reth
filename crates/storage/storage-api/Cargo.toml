@@ -1,0 +1,59 @@
+[package]
+name = "reth-storage-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Reth storage provider traits and types"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-db-models.workspace = true
+reth-chainspec.workspace = true
+reth-db-api = { workspace = true, optional = true }
+reth-execution-types.workspace = true
+reth-primitives-traits.workspace = true
+reth-prune-types.workspace = true
+reth-stages-types.workspace = true
+reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+reth-trie-db = { workspace = true, optional = true }
+revm-database.workspace = true
+reth-ethereum-primitives.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
+
+auto_impl.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-chainspec/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "reth-primitives-traits/std",
+    "reth-stages-types/std",
+    "revm-database/std",
+    "reth-ethereum-primitives/std",
+    "reth-execution-types/std",
+    "reth-prune-types/std",
+    "reth-storage-errors/std",
+    "reth-db-models/std",
+    "reth-trie-common/std",
+]
+
+db-api = [
+    "dep:reth-db-api",
+    "dep:reth-trie-db",
+]

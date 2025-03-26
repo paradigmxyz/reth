@@ -11,15 +11,32 @@
 //! Entrypoint for running commands.
 
 use reth_tasks::{TaskExecutor, TaskManager};
-use std::{future::Future, pin::pin};
+use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
 use tracing::{debug, error, trace};
 
 /// Executes CLI commands.
 ///
 /// Provides utilities for running a cli command to completion.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug)]
 #[non_exhaustive]
-pub struct CliRunner;
+pub struct CliRunner {
+    tokio_runtime: tokio::runtime::Runtime,
+}
+
+impl CliRunner {
+    /// Attempts to create a new [`CliRunner`] using the default tokio
+    /// [`Runtime`](tokio::runtime::Runtime).
+    ///
+    /// The default tokio runtime is multi-threaded, with both I/O and time drivers enabled.
+    pub fn try_default_runtime() -> Result<Self, std::io::Error> {
+        Ok(Self { tokio_runtime: tokio_runtime()? })
+    }
+
+    /// Create a new [`CliRunner`] from a provided tokio [`Runtime`](tokio::runtime::Runtime).
+    pub fn from_runtime(tokio_runtime: tokio::runtime::Runtime) -> Self {
+        Self { tokio_runtime }
+    }
+}
 
 // === impl CliRunner ===
 
@@ -27,8 +44,8 @@ impl CliRunner {
     /// Executes the given _async_ command on the tokio runtime until the command future resolves or
     /// until the process receives a `SIGINT` or `SIGTERM` signal.
     ///
-    /// Tasks spawned by the command via the [TaskExecutor] are shut down and an attempt is made to
-    /// drive their shutdown to completion after the command has finished.
+    /// Tasks spawned by the command via the [`TaskExecutor`] are shut down and an attempt is made
+    /// to drive their shutdown to completion after the command has finished.
     pub fn run_command_until_exit<F, E>(
         self,
         command: impl FnOnce(CliContext) -> F,
@@ -37,7 +54,8 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
-        let AsyncCliRunner { context, mut task_manager, tokio_runtime } = AsyncCliRunner::new()?;
+        let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
+            AsyncCliRunner::new(self.tokio_runtime);
 
         // Executes the command until it finished or ctrl-c was fired
         let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
@@ -52,13 +70,25 @@ impl CliRunner {
             // after the command has finished or exit signal was received we shutdown the task
             // manager which fires the shutdown signal to all tasks spawned via the task
             // executor and awaiting on tasks spawned with graceful shutdown
-            task_manager.graceful_shutdown_with_timeout(std::time::Duration::from_secs(10));
+            task_manager.graceful_shutdown_with_timeout(Duration::from_secs(5));
         }
 
-        // drop the tokio runtime on a separate thread because drop blocks until its pools
-        // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
-        // the current thread but we want to exit right away.
-        std::thread::spawn(move || drop(tokio_runtime));
+        // `drop(tokio_runtime)` would block the current thread until its pools
+        // (including blocking pool) are shutdown. Since we want to exit as soon as possible, drop
+        // it on a separate thread and wait for up to 5 seconds for this operation to
+        // complete.
+        let (tx, rx) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("tokio-runtime-shutdown".to_string())
+            .spawn(move || {
+                drop(tokio_runtime);
+                let _ = tx.send(());
+            })
+            .unwrap();
+
+        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
+            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
+        });
 
         command_res
     }
@@ -77,7 +107,7 @@ impl CliRunner {
     /// Executes a regular future as a spawned blocking task until completion or until external
     /// signal received.
     ///
-    /// See [Runtime::spawn_blocking](tokio::runtime::Runtime::spawn_blocking) .
+    /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking) .
     pub fn run_blocking_until_ctrl_c<F, E>(self, fut: F) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>> + Send + 'static,
@@ -92,13 +122,16 @@ impl CliRunner {
         // drop the tokio runtime on a separate thread because drop blocks until its pools
         // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
         // the current thread but we want to exit right away.
-        std::thread::spawn(move || drop(tokio_runtime));
+        std::thread::Builder::new()
+            .name("tokio-runtime-shutdown".to_string())
+            .spawn(move || drop(tokio_runtime))
+            .unwrap();
 
         Ok(())
     }
 }
 
-/// [CliRunner] configuration when executing commands asynchronously
+/// [`CliRunner`] configuration when executing commands asynchronously
 struct AsyncCliRunner {
     context: CliContext,
     task_manager: TaskManager,
@@ -108,17 +141,16 @@ struct AsyncCliRunner {
 // === impl AsyncCliRunner ===
 
 impl AsyncCliRunner {
-    /// Attempts to create a tokio Runtime and additional context required to execute commands
-    /// asynchronously.
-    fn new() -> Result<Self, std::io::Error> {
-        let tokio_runtime = tokio_runtime()?;
+    /// Given a tokio [`Runtime`](tokio::runtime::Runtime), creates additional context required to
+    /// execute commands asynchronously.
+    fn new(tokio_runtime: tokio::runtime::Runtime) -> Self {
         let task_manager = TaskManager::new(tokio_runtime.handle().clone());
         let task_executor = task_manager.executor();
-        Ok(Self { context: CliContext { task_executor }, task_manager, tokio_runtime })
+        Self { context: CliContext { task_executor }, task_manager, tokio_runtime }
     }
 }
 
-/// Additional context provided by the [CliRunner] when executing commands
+/// Additional context provided by the [`CliRunner`] when executing commands
 #[derive(Debug)]
 pub struct CliContext {
     /// Used to execute/spawn tasks

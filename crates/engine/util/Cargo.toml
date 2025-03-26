@@ -1,0 +1,44 @@
+[package]
+name = "reth-engine-util"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives-traits.workspace = true
+reth-errors.workspace = true
+reth-chainspec.workspace = true
+reth-fs-util.workspace = true
+reth-engine-primitives.workspace = true
+reth-evm.workspace = true
+reth-revm.workspace = true
+reth-storage-api.workspace = true
+reth-payload-primitives.workspace = true
+
+# alloy
+alloy-rpc-types-engine.workspace = true
+alloy-consensus.workspace = true
+
+# async
+tokio = { workspace = true, default-features = false }
+tokio-util.workspace = true
+pin-project.workspace = true
+futures.workspace = true
+
+# io
+serde.workspace = true
+serde_json.workspace = true
+
+# misc
+eyre.workspace = true
+itertools.workspace = true
+
+# tracing
+tracing.workspace = true

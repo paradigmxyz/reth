@@ -4,31 +4,41 @@ use crate::{
     blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
     error::PoolError,
     metrics::MaintainPoolMetrics,
-    traits::{CanonicalStateUpdate, ChangedAccount, TransactionPool, TransactionPoolExt},
-    BlockInfo,
+    traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
+    BlockInfo, PoolTransaction, PoolUpdateKind,
 };
+use alloy_consensus::{BlockHeader, Typed2718};
+use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::{Address, BlockHash, BlockNumber};
+use alloy_rlp::Encodable;
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
-use reth_primitives::{
-    fs::FsPathError, Address, BlockHash, BlockNumber, BlockNumberOrTag,
-    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    TransactionSigned, TryFromRecoveredTransaction,
+use reth_chain_state::CanonStateNotification;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_execution_types::ChangedAccount;
+use reth_fs_util::FsPathError;
+use reth_primitives_traits::{
+    transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
 };
-use reth_provider::{
-    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
-    ProviderError, StateProviderFactory,
-};
+use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     borrow::Borrow,
     collections::HashSet,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    sync::Arc,
 };
-use tokio::sync::oneshot;
+use tokio::{
+    sync::oneshot,
+    time::{self, Duration},
+};
 use tracing::{debug, error, info, trace, warn};
+
+/// Maximum amount of time non-executable transaction are queued.
+pub const MAX_QUEUED_TRANSACTION_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
 
 /// Additional settings for maintaining the transaction pool
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,11 +52,19 @@ pub struct MaintainPoolConfig {
     ///
     /// Default: 100
     pub max_reload_accounts: usize,
+
+    /// Maximum amount of time non-executable, non local transactions are queued.
+    /// Default: 3 hours
+    pub max_tx_lifetime: Duration,
 }
 
 impl Default for MaintainPoolConfig {
     fn default() -> Self {
-        Self { max_update_depth: 64, max_reload_accounts: 100 }
+        Self {
+            max_update_depth: 64,
+            max_reload_accounts: 100,
+            max_tx_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+        }
     }
 }
 
@@ -65,7 +83,7 @@ impl LocalTransactionBackupConfig {
 }
 
 /// Returns a spawnable future for maintaining the state of the transaction pool.
-pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
+pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
     client: Client,
     pool: P,
     events: St,
@@ -73,9 +91,10 @@ pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
-    P: TransactionPoolExt + 'static,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    N: NodePrimitives,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
     async move {
@@ -87,31 +106,34 @@ where
 /// Maintains the state of the transaction pool by handling new blocks and reorgs.
 ///
 /// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
-pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
+pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     client: Client,
     pool: P,
     mut events: St,
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
-    P: TransactionPoolExt + 'static,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    N: NodePrimitives,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
     let metrics = MaintainPoolMetrics::default();
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
-        let latest = latest.seal_slow();
+        let latest = SealedHeader::seal_slow(latest);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
+            block_gas_limit: latest.gas_limit(),
             last_seen_block_hash: latest.hash(),
-            last_seen_block_number: latest.number,
+            last_seen_block_number: latest.number(),
             pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp + 12))
+                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp()))
                 .unwrap_or_default(),
-            pending_blob_fee: latest.next_block_blob_fee(),
+            pending_blob_fee: latest
+                .maybe_next_block_blob_fee(chain_spec.blob_params_at_timestamp(latest.timestamp())),
         };
         pool.set_block_info(info);
     }
@@ -124,13 +146,19 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         FinalizedBlockTracker::new(client.finalized_block_number().ok().flatten());
 
     // keeps track of any dirty accounts that we know of are out of sync with the pool
-    let mut dirty_addresses = HashSet::new();
+    let mut dirty_addresses = HashSet::default();
 
     // keeps track of the state of the pool wrt to blocks
     let mut maintained_state = MaintainedPoolState::InSync;
 
     // the future that reloads accounts from state
     let mut reload_accounts_fut = Fuse::terminated();
+
+    // eviction interval for stale non local txs
+    let mut stale_eviction_interval = time::interval(config.max_tx_lifetime);
+
+    // toggle for the first notification
+    let mut first_event = true;
 
     // The update loop that waits for new blocks and reorgs and performs pool updated
     // Listen for new chain events and derive the update action for the pool
@@ -186,20 +214,19 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         if let Some(finalized) =
             last_finalized_block.update(client.finalized_block_number().ok().flatten())
         {
-            match blob_store_tracker.on_finalized_block(finalized) {
-                BlobStoreUpdates::None => {}
-                BlobStoreUpdates::Finalized(blobs) => {
-                    metrics.inc_deleted_tracked_blobs(blobs.len());
-                    // remove all finalized blobs from the blob store
-                    pool.delete_blobs(blobs);
-                }
+            if let BlobStoreUpdates::Finalized(blobs) =
+                blob_store_tracker.on_finalized_block(finalized)
+            {
+                metrics.inc_deleted_tracked_blobs(blobs.len());
+                // remove all finalized blobs from the blob store
+                pool.delete_blobs(blobs);
+                // and also do periodic cleanup
+                let pool = pool.clone();
+                task_spawner.spawn_blocking(Box::pin(async move {
+                    debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
+                    pool.cleanup_blobs();
+                }));
             }
-            // also do periodic cleanup of the blob store
-            let pool = pool.clone();
-            task_spawner.spawn_blocking(Box::pin(async move {
-                debug!(target: "txpool", finalized_block = %finalized, "cleaning up blob store");
-                pool.cleanup_blobs();
-            }));
         }
 
         // outcomes of the futures we are waiting on
@@ -207,7 +234,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
         let mut reloaded = None;
 
         // select of account reloads and new canonical state updates which should arrive at the rate
-        // of the block time (12s)
+        // of the block time
         tokio::select! {
             res = &mut reload_accounts_fut =>  {
                 reloaded = Some(res);
@@ -218,9 +245,27 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     break;
                 }
                 event = ev;
+                // on receiving the first event on start up, mark the pool as drifted to explicitly
+                // trigger revalidation and clear out outdated txs.
+                if first_event {
+                    maintained_state = MaintainedPoolState::Drifted;
+                    first_event = false
+                }
+            }
+            _ = stale_eviction_interval.tick() => {
+                let stale_txs: Vec<_> = pool
+                    .queued_transactions()
+                    .into_iter()
+                    .filter(|tx| {
+                        // filter stale external txs
+                        tx.origin.is_external() && tx.timestamp.elapsed() > config.max_tx_lifetime
+                    })
+                    .map(|tx| *tx.hash())
+                    .collect();
+                debug!(target: "txpool", count=%stale_txs.len(), "removing stale transactions");
+                pool.remove_transactions(stale_txs);
             }
         }
-
         // handle the result of the account reload
         match reloaded {
             Some(Ok(Ok(LoadedAccounts { accounts, failed_to_load }))) => {
@@ -254,8 +299,8 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let old_first = old_blocks.first();
 
                 // check if the reorg is not canonical with the pool's block
-                if !(old_first.parent_hash == pool_info.last_seen_block_hash ||
-                    new_first.parent_hash == pool_info.last_seen_block_hash)
+                if !(old_first.parent_hash() == pool_info.last_seen_block_hash ||
+                    new_first.parent_hash() == pool_info.last_seen_block_hash)
                 {
                     // the new block points to a higher block than the oldest block in the old chain
                     maintained_state = MaintainedPoolState::Drifted;
@@ -265,15 +310,18 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // fees for the next block: `new_tip+1`
                 let pending_block_base_fee = new_tip
+                    .header()
                     .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp + 12),
+                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp()),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee = new_tip.next_block_blob_fee();
+                let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
+                    chain_spec.blob_params_at_timestamp(new_tip.timestamp()),
+                );
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
-                    changed_accounts_iter(new_state).map(ChangedAccountEntry).collect();
+                    new_state.changed_accounts().map(ChangedAccountEntry).collect();
 
                 // find all accounts that were changed in the old chain but _not_ in the new chain
                 let missing_changed_acc = old_state
@@ -314,7 +362,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
                     .transactions_ecrecovered()
-                    .filter(|tx| !new_mined_transactions.contains(&tx.hash))
+                    .filter(|tx| !new_mined_transactions.contains(tx.tx_hash()))
                     .filter_map(|tx| {
                         if tx.is_eip4844() {
                             // reorged blobs no longer include the blob, which is necessary for
@@ -322,34 +370,30 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                             // been validated previously, we still need the blob in order to
                             // accurately set the transaction's
                             // encoded-length which is propagated over the network.
-                            pool.get_blob(tx.hash)
+                            pool.get_blob(*tx.tx_hash())
                                 .ok()
                                 .flatten()
+                                .map(Arc::unwrap_or_clone)
                                 .and_then(|sidecar| {
-                                    PooledTransactionsElementEcRecovered::try_from_blob_transaction(
+                                    <P as TransactionPool>::Transaction::try_from_eip4844(
                                         tx, sidecar,
                                     )
-                                    .ok()
                                 })
-                                .map(
-                                    <P as TransactionPool>::Transaction::from_recovered_pooled_transaction,
-                                )
                         } else {
-                            <P as TransactionPool>::Transaction::try_from_recovered_transaction(
-                                tx,
-                            ).ok()
+                            <P as TransactionPool>::Transaction::try_from_consensus(tx).ok()
                         }
                     })
                     .collect::<Vec<_>>();
 
                 // update the pool first
                 let update = CanonicalStateUpdate {
-                    new_tip: &new_tip.block,
+                    new_tip: new_tip.sealed_block(),
                     pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
                     // all transactions mined in the new chain need to be removed from the pool
                     mined_transactions: new_blocks.transaction_hashes().collect(),
+                    update_kind: PoolUpdateKind::Reorg,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -372,30 +416,32 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // fees for the next block: `tip+1`
                 let pending_block_base_fee = tip
-                    .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(tip.timestamp + 12),
-                    )
+                    .header()
+                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(tip.timestamp()))
                     .unwrap_or_default();
-                let pending_block_blob_fee = tip.next_block_blob_fee();
+                let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(
+                    chain_spec.blob_params_at_timestamp(tip.timestamp()),
+                );
 
                 let first_block = blocks.first();
                 trace!(
                     target: "txpool",
-                    first = first_block.number,
-                    tip = tip.number,
+                    first = first_block.number(),
+                    tip = tip.number(),
                     pool_block = pool_info.last_seen_block_number,
                     "update pool on new commit"
                 );
 
                 // check if the depth is too large and should be skipped, this could happen after
                 // initial sync or long re-sync
-                let depth = tip.number.abs_diff(pool_info.last_seen_block_number);
+                let depth = tip.number().abs_diff(pool_info.last_seen_block_number);
                 if depth > max_update_depth {
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
+                        block_gas_limit: tip.header().gas_limit(),
                         last_seen_block_hash: tip.hash(),
-                        last_seen_block_number: tip.number,
+                        last_seen_block_number: tip.number(),
                         pending_basefee: pending_block_base_fee,
                         pending_blob_fee: pending_block_blob_fee,
                     };
@@ -408,7 +454,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 }
 
                 let mut changed_accounts = Vec::with_capacity(state.state().len());
-                for acc in changed_accounts_iter(state) {
+                for acc in state.changed_accounts() {
                     // we can always clear the dirty flag for this account
                     dirty_addresses.remove(&acc.address);
                     changed_accounts.push(acc);
@@ -417,7 +463,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let mined_transactions = blocks.transaction_hashes().collect();
 
                 // check if the range of the commit is canonical with the pool's block
-                if first_block.parent_hash != pool_info.last_seen_block_hash {
+                if first_block.parent_hash() != pool_info.last_seen_block_hash {
                     // we received a new canonical chain commit but the commit is not canonical with
                     // the pool's block, this could happen after initial sync or
                     // long re-sync
@@ -426,11 +472,12 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
 
                 // Canonical update
                 let update = CanonicalStateUpdate {
-                    new_tip: &tip.block,
+                    new_tip: tip.sealed_block(),
                     pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
                     mined_transactions,
+                    update_kind: PoolUpdateKind::Commit,
                 };
                 pool.on_canonical_state_change(update);
 
@@ -452,21 +499,11 @@ impl FinalizedBlockTracker {
 
     /// Updates the tracked finalized block and returns the new finalized block if it changed
     fn update(&mut self, finalized_block: Option<BlockNumber>) -> Option<BlockNumber> {
-        match (self.last_finalized_block, finalized_block) {
-            (Some(last), Some(finalized)) => {
-                self.last_finalized_block = Some(finalized);
-                if last < finalized {
-                    Some(finalized)
-                } else {
-                    None
-                }
-            }
-            (None, Some(finalized)) => {
-                self.last_finalized_block = Some(finalized);
-                Some(finalized)
-            }
-            _ => None,
-        }
+        let finalized = finalized_block?;
+        self.last_finalized_block
+            .replace(finalized)
+            .is_none_or(|last| last < finalized)
+            .then_some(finalized)
     }
 }
 
@@ -484,11 +521,11 @@ impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
     #[inline]
     const fn is_drifted(&self) -> bool {
-        matches!(self, MaintainedPoolState::Drifted)
+        matches!(self, Self::Drifted)
     }
 }
 
-/// A unique ChangedAccount identified by its address that can be used for deduplication
+/// A unique [`ChangedAccount`] identified by its address that can be used for deduplication
 #[derive(Eq)]
 struct ChangedAccountEntry(ChangedAccount);
 
@@ -540,7 +577,7 @@ where
         Err(err) => return Err(Box::new((addresses.collect(), err))),
     };
     for addr in addresses {
-        if let Ok(maybe_acc) = state.basic_account(addr) {
+        if let Ok(maybe_acc) = state.basic_account(&addr) {
             let acc = maybe_acc
                 .map(|acc| ChangedAccount { address: addr, nonce: acc.nonce, balance: acc.balance })
                 .unwrap_or_else(|| ChangedAccount::empty(addr));
@@ -553,16 +590,6 @@ where
     Ok(res)
 }
 
-/// Extracts all changed accounts from the BundleState
-fn changed_accounts_iter(
-    state: &BundleStateWithReceipts,
-) -> impl Iterator<Item = ChangedAccount> + '_ {
-    state
-        .accounts_iter()
-        .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))
-        .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
-}
-
 /// Loads transactions from a file, decodes them from the RLP format, and inserts them
 /// into the transaction pool on node boot up.
 /// The file is removed after the transactions have been successfully processed.
@@ -571,40 +598,41 @@ async fn load_and_reinsert_transactions<P>(
     file_path: &Path,
 ) -> Result<(), TransactionsBackupError>
 where
-    P: TransactionPool,
+    P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>>,
 {
     if !file_path.exists() {
         return Ok(())
     }
 
     debug!(target: "txpool", txs_file =?file_path, "Check local persistent storage for saved transactions");
-    let data = reth_primitives::fs::read(file_path)?;
+    let data = reth_fs_util::read(file_path)?;
 
     if data.is_empty() {
         return Ok(())
     }
 
-    let txs_signed: Vec<TransactionSigned> = alloy_rlp::Decodable::decode(&mut data.as_slice())?;
+    let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
+        alloy_rlp::Decodable::decode(&mut data.as_slice())?;
 
     let pool_transactions = txs_signed
         .into_iter()
-        .filter_map(|tx| tx.try_ecrecovered())
+        .filter_map(|tx| tx.try_clone_into_recovered().ok())
         .filter_map(|tx| {
             // Filter out errors
-            <P as TransactionPool>::Transaction::try_from_recovered_transaction(tx).ok()
+            <P::Transaction as PoolTransaction>::try_from_consensus(tx).ok()
         })
-        .collect::<Vec<_>>();
+        .collect();
 
     let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 
     info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");
-    reth_primitives::fs::remove_file(file_path)?;
+    reth_fs_util::remove_file(file_path)?;
     Ok(())
 }
 
 fn save_local_txs_backup<P>(pool: P, file_path: &Path)
 where
-    P: TransactionPool,
+    P: TransactionPool<Transaction: PoolTransaction<Consensus: Encodable>>,
 {
     let local_transactions = pool.get_local_transactions();
     if local_transactions.is_empty() {
@@ -614,7 +642,7 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| tx.to_recovered_transaction().into_signed())
+        .map(|tx| tx.transaction.clone_into_consensus().into_inner())
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();
@@ -623,7 +651,7 @@ where
     info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
 
-    match parent_dir.map(|_| reth_primitives::fs::write(file_path, buf)) {
+    match parent_dir.map(|_| reth_fs_util::write(file_path, buf)) {
         Ok(_) => {
             info!(target: "txpool", txs_file=?file_path, "Wrote local transactions to file");
         }
@@ -654,7 +682,7 @@ pub async fn backup_local_transactions_task<P>(
     pool: P,
     config: LocalTransactionBackupConfig,
 ) where
-    P: TransactionPool + Clone,
+    P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>> + Clone,
 {
     let Some(transactions_path) = config.transactions_path else {
         // nothing to do
@@ -678,9 +706,13 @@ mod tests {
     use super::*;
     use crate::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
-        CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
-    use reth_primitives::{fs, hex, PooledTransactionsElement, MAINNET, U256};
+    use alloy_consensus::transaction::PooledTransaction;
+    use alloy_eips::eip2718::Decodable2718;
+    use alloy_primitives::{hex, U256};
+    use reth_ethereum_primitives::TransactionSigned;
+    use reth_fs_util as fs;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 
@@ -700,17 +732,14 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let transactions_path = temp_dir.path().join(FILENAME).with_extension(EXTENSION);
         let tx_bytes = hex!("02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507");
-        let tx = PooledTransactionsElement::decode_enveloped(&mut &tx_bytes[..]).unwrap();
+        let tx = PooledTransaction::decode_2718(&mut &tx_bytes[..]).unwrap();
         let provider = MockEthProvider::default();
-        let transaction = EthPooledTransaction::from_recovered_pooled_transaction(
-            tx.try_into_ecrecovered().unwrap(),
-        );
+        let transaction = EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap());
         let tx_to_cmp = transaction.clone();
         let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
-            .build(provider, blob_store.clone());
+        let validator = EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
 
         let txpool = Pool::new(
             validator.clone(),
@@ -743,5 +772,47 @@ mod tests {
         assert_eq!(txs.len(), 1);
 
         temp_dir.close().unwrap();
+    }
+
+    #[test]
+    fn test_update_with_higher_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(Some(10));
+        assert_eq!(tracker.update(Some(15)), Some(15));
+        assert_eq!(tracker.last_finalized_block, Some(15));
+    }
+
+    #[test]
+    fn test_update_with_lower_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(Some(20));
+        assert_eq!(tracker.update(Some(15)), None);
+        assert_eq!(tracker.last_finalized_block, Some(15));
+    }
+
+    #[test]
+    fn test_update_with_equal_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(Some(20));
+        assert_eq!(tracker.update(Some(20)), None);
+        assert_eq!(tracker.last_finalized_block, Some(20));
+    }
+
+    #[test]
+    fn test_update_with_no_last_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(None);
+        assert_eq!(tracker.update(Some(10)), Some(10));
+        assert_eq!(tracker.last_finalized_block, Some(10));
+    }
+
+    #[test]
+    fn test_update_with_no_new_finalized_block() {
+        let mut tracker = FinalizedBlockTracker::new(Some(10));
+        assert_eq!(tracker.update(None), None);
+        assert_eq!(tracker.last_finalized_block, Some(10));
+    }
+
+    #[test]
+    fn test_update_with_no_finalized_blocks() {
+        let mut tracker = FinalizedBlockTracker::new(None);
+        assert_eq!(tracker.update(None), None);
+        assert_eq!(tracker.last_finalized_block, None);
     }
 }

@@ -1,0 +1,69 @@
+[package]
+name = "reth-stages-types"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used types for stages usage in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-codecs = { workspace = true, optional = true }
+reth-trie-common.workspace = true
+alloy-primitives.workspace = true
+
+serde = { workspace = true, optional = true }
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+
+bytes = { workspace = true, optional = true }
+modular-bitfield = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-codecs.workspace = true
+alloy-primitives = { workspace = true, features = ["arbitrary", "rand"] }
+arbitrary = { workspace = true, features = ["derive"] }
+modular-bitfield.workspace = true
+proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
+test-fuzz.workspace = true
+rand.workspace = true
+bytes.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "bytes?/std",
+    "reth-trie-common/std",
+    "serde?/std",
+]
+reth-codec = [
+    "dep:reth-codecs",
+    "dep:bytes",
+    "dep:modular-bitfield",
+    "reth-trie-common/reth-codec",
+]
+test-utils = [
+    "arbitrary",
+    "reth-codecs?/test-utils",
+    "reth-trie-common/test-utils",
+]
+arbitrary = [
+    "std",
+    "dep:arbitrary",
+    "alloy-primitives/arbitrary",
+    "reth-codecs?/arbitrary",
+    "reth-trie-common/arbitrary",
+]
+serde = [
+    "dep:serde",
+    "alloy-primitives/serde",
+    "bytes?/serde",
+    "rand/serde",
+    "reth-codecs?/serde",
+    "reth-trie-common/serde",
+]

@@ -1,0 +1,66 @@
+[package]
+name = "reth-network-p2p"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "traits and commonly used types for p2p and network communication"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-ethereum-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-eth-wire-types.workspace = true
+reth-consensus.workspace = true
+reth-network-peers.workspace = true
+reth-network-types.workspace = true
+reth-storage-errors.workspace = true
+
+# ethereum
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+
+# async
+futures.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+# misc
+auto_impl.workspace = true
+tracing.workspace = true
+derive_more.workspace = true
+parking_lot = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-consensus = { workspace = true, features = ["test-utils"] }
+
+parking_lot.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
+[features]
+default = ["std"]
+test-utils = [
+    "reth-consensus/test-utils",
+    "parking_lot",
+    "reth-network-types/test-utils",
+    "reth-ethereum-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "alloy-primitives/rand",
+]
+std = [
+    "reth-consensus/std",
+    "reth-ethereum-primitives/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "derive_more/std",
+    "reth-network-peers/std",
+    "reth-storage-errors/std",
+    "tracing/std",
+]

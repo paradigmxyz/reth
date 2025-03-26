@@ -17,13 +17,14 @@ use std::{
 };
 
 use ::enr::Enr;
+use alloy_primitives::bytes::Bytes;
 use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
-use reth_network_types::PeerId;
-use reth_primitives::{bytes::Bytes, EnrForkIdEntry, ForkId, NodeRecord};
+use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_network_peers::{NodeRecord, PeerId};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task};
 use tracing::{debug, error, trace};
@@ -39,7 +40,7 @@ pub use discv5::{self, IpMode};
 
 pub use config::{
     BootNode, Config, ConfigBuilder, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_ADDR,
-    DEFAULT_DISCOVERY_V5_ADDR_IPV6, DEFAULT_DISCOVERY_V5_PORT,
+    DEFAULT_DISCOVERY_V5_ADDR_IPV6, DEFAULT_DISCOVERY_V5_LISTEN_CONFIG, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 pub use enr::enr_to_discv4_id;
@@ -66,7 +67,7 @@ pub const DEFAULT_MIN_TARGET_KBUCKET_INDEX: usize = 0;
 pub struct Discv5 {
     /// sigp/discv5 node.
     discv5: Arc<discv5::Discv5>,
-    /// [`IpMode`] of the the RLPx network.
+    /// [`IpMode`] of the `RLPx` network.
     rlpx_ip_mode: IpMode,
     /// Key used in kv-pair to ID chain, e.g. 'opstack' or 'eth'.
     fork_key: Option<&'static [u8]>,
@@ -94,14 +95,14 @@ impl Discv5 {
     /// CAUTION: The value **must** be rlp encoded
     pub fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
         let Ok(key_str) = std::str::from_utf8(&key) else {
-            error!(target: "discv5",
+            error!(target: "net::discv5",
                 err="key not utf-8",
                 "failed to update local enr"
             );
             return
         };
         if let Err(err) = self.discv5.enr_insert(key_str, &rlp) {
-            error!(target: "discv5",
+            error!(target: "net::discv5",
                 %err,
                 "failed to update local enr"
             );
@@ -130,7 +131,7 @@ impl Discv5 {
                 self.discv5.ban_node(&node_id, None);
                 self.ban_ip(ip);
             }
-            Err(err) => error!(target: "discv5",
+            Err(err) => error!(target: "net::discv5",
                 %err,
                 "failed to ban peer"
             ),
@@ -147,9 +148,11 @@ impl Discv5 {
     /// Returns the [`NodeRecord`] of the local node.
     ///
     /// This includes the currently tracked external IP address of the node.
-    pub fn node_record(&self) -> NodeRecord {
+    ///
+    /// Returns `None` if the local ENR does not contain the required fields.
+    pub fn node_record(&self) -> Option<NodeRecord> {
         let enr: Enr<_> = EnrCombinedKeyWrapper(self.discv5.local_enr()).into();
-        (&enr).try_into().unwrap()
+        enr.try_into().ok()
     }
 
     /// Spawns [`discv5::Discv5`]. Returns [`discv5::Discv5`] handle in reth compatible wrapper type
@@ -222,6 +225,7 @@ impl Discv5 {
 
     /// Process an event from the underlying [`discv5::Discv5`] node.
     pub fn on_discv5_update(&self, update: discv5::Event) -> Option<DiscoveredPeer> {
+        #[expect(clippy::match_same_arms)]
         match update {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
@@ -237,7 +241,7 @@ impl Discv5 {
                 None
             }
             discv5::Event::SessionEstablished(enr, remote_socket) => {
-                // this branch is semantically similar to branches of 
+                // this branch is semantically similar to branches of
                 // `reth_discv4::DiscoveryUpdate`: `DiscoveryUpdate::Added(_)` and
                 // `DiscoveryUpdate::DiscoveredAtCapacity(_)
 
@@ -253,11 +257,11 @@ impl Discv5 {
                 socket,
                 node_id: _,
             } => {
-                // this branch is semantically similar to branches of 
+                // this branch is semantically similar to branches of
                 // `reth_discv4::DiscoveryUpdate`: `DiscoveryUpdate::Added(_)` and
                 // `DiscoveryUpdate::DiscoveredAtCapacity(_)
 
-                // peer has been discovered as part of query, or, by an outgoing session (but peer 
+                // peer has been discovered as part of query, or, by an outgoing session (but peer
                 // is behind NAT and responds from a different socket)
 
                 // NOTE: `discv5::Discv5` won't initiate a session with any peer with an
@@ -330,7 +334,7 @@ impl Discv5 {
     }
 
     /// Tries to convert an [`Enr`](discv5::Enr) into the backwards compatible type [`NodeRecord`],
-    /// w.r.t. local RLPx [`IpMode`]. Uses source socket as udp socket.
+    /// w.r.t. local `RLPx` [`IpMode`]. Uses source socket as udp socket.
     pub fn try_into_reachable(
         &self,
         enr: &discv5::Enr,
@@ -389,13 +393,13 @@ impl Discv5 {
     // Complementary
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
-    /// Returns the RLPx [`IpMode`] of the local node.
-    pub fn ip_mode(&self) -> IpMode {
+    /// Returns the `RLPx` [`IpMode`] of the local node.
+    pub const fn ip_mode(&self) -> IpMode {
         self.rlpx_ip_mode
     }
 
     /// Returns the key to use to identify the [`ForkId`] kv-pair on the [`Enr`](discv5::Enr).
-    pub fn fork_key(&self) -> Option<&[u8]> {
+    pub const fn fork_key(&self) -> Option<&[u8]> {
         self.fork_key
     }
 }
@@ -651,8 +655,8 @@ pub async fn lookup(
 mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
-    use reth_primitives::MAINNET;
-    use secp256k1::rand::thread_rng;
+    use rand::thread_rng;
+    use reth_chainspec::MAINNET;
     use tracing::trace;
 
     fn discv5_noop() -> Discv5 {
@@ -662,7 +666,7 @@ mod test {
                 discv5::Discv5::new(
                     Enr::empty(&sk).unwrap(),
                     sk,
-                    discv5::ConfigBuilder::new(ListenConfig::default()).build(),
+                    discv5::ConfigBuilder::new(DEFAULT_DISCOVERY_V5_LISTEN_CONFIG).build(),
                 )
                 .unwrap(),
             ),
@@ -725,15 +729,11 @@ mod test {
         node_1.with_discv5(|discv5| discv5.send_ping(node_2_enr.clone())).await.unwrap();
 
         // verify node_1:discv5 is connected to node_2:discv5 and vv
-        let event_2_v5 = stream_2.recv().await.unwrap();
         let event_1_v5 = stream_1.recv().await.unwrap();
+
         assert!(matches!(
             event_1_v5,
             discv5::Event::SessionEstablished(node, socket) if node == node_2_enr && socket == node_2_enr.udp4_socket().unwrap().into()
-        ));
-        assert!(matches!(
-            event_2_v5,
-            discv5::Event::SessionEstablished(node, socket) if node == node_1_enr && socket == node_1_enr.udp4_socket().unwrap().into()
         ));
 
         // verify node_1 is in KBuckets of node_2:discv5
@@ -772,15 +772,15 @@ mod test {
 
     // Copied from sigp/discv5 with slight modification (U256 type)
     // <https://github.com/sigp/discv5/blob/master/src/kbucket/key.rs#L89-L101>
-    #[allow(unreachable_pub)]
-    #[allow(unused)]
+    #[expect(unreachable_pub)]
+    #[expect(unused)]
     #[allow(clippy::assign_op_pattern)]
     mod sigp {
+        use alloy_primitives::U256;
         use enr::{
             k256::sha2::digest::generic_array::{typenum::U32, GenericArray},
             NodeId,
         };
-        use reth_primitives::U256;
 
         /// A `Key` is a cryptographic hash, identifying both the nodes participating in
         /// the Kademlia DHT, as well as records stored in the DHT.
@@ -798,27 +798,27 @@ mod test {
         }
 
         impl<T> PartialEq for Key<T> {
-            fn eq(&self, other: &Key<T>) -> bool {
+            fn eq(&self, other: &Self) -> bool {
                 self.hash == other.hash
             }
         }
 
         impl<T> Eq for Key<T> {}
 
-        impl<TPeerId> AsRef<Key<TPeerId>> for Key<TPeerId> {
-            fn as_ref(&self) -> &Key<TPeerId> {
+        impl<TPeerId> AsRef<Self> for Key<TPeerId> {
+            fn as_ref(&self) -> &Self {
                 self
             }
         }
 
         impl<T> Key<T> {
             /// Construct a new `Key` by providing the raw 32 byte hash.
-            pub fn new_raw(preimage: T, hash: GenericArray<u8, U32>) -> Key<T> {
-                Key { preimage, hash }
+            pub const fn new_raw(preimage: T, hash: GenericArray<u8, U32>) -> Self {
+                Self { preimage, hash }
             }
 
             /// Borrows the preimage of the key.
-            pub fn preimage(&self) -> &T {
+            pub const fn preimage(&self) -> &T {
                 &self.preimage
             }
 
@@ -846,7 +846,7 @@ mod test {
 
         impl From<NodeId> for Key<NodeId> {
             fn from(node_id: NodeId) -> Self {
-                Key { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
+                Self { preimage: node_id, hash: *GenericArray::from_slice(&node_id.raw()) }
             }
         }
 

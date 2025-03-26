@@ -6,18 +6,22 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 mod status;
-pub use status::{Status, StatusBuilder};
+pub use status::{Status, StatusBuilder, StatusEth69};
 
 pub mod version;
-pub use version::EthVersion;
+pub use version::{EthVersion, ProtocolVersion};
 
 pub mod message;
 pub use message::{EthMessage, EthMessageID, ProtocolMessage};
+
+pub mod header;
+pub use header::*;
 
 pub mod blocks;
 pub use blocks::*;
@@ -33,3 +37,19 @@ pub use state::*;
 
 pub mod receipts;
 pub use receipts::*;
+
+pub mod disconnect_reason;
+pub use disconnect_reason::*;
+
+pub mod capability;
+pub use capability::*;
+
+pub mod primitives;
+pub use primitives::*;
+
+mod snap;
+pub use snap::*;
+
+/// re-export for convenience
+pub use alloy_eips::eip1898::{BlockHashOrNumber, HashOrNumber};
+pub use alloy_eips::eip2718::Encodable2718;

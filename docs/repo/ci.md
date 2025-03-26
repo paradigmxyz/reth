@@ -4,29 +4,47 @@ The CI runs a couple of workflows:
 
 ### Code
 
-- **[ci]**: A catch-all for small jobs. Currently only runs lints (rustfmt, clippy etc.)
 - **[unit]**: Runs unit tests (tests in `src/`) and doc tests
 - **[integration]**: Runs integration tests (tests in `tests/` and sync tests)
-- **[fuzz]**: Runs fuzz tests
 - **[bench]**: Runs benchmarks
+- **[sync]**: Runs sync tests
+- **[stage]**: Runs all `stage run` commands
 
 ### Docs
 
 - **[book]**: Builds, tests, and deploys the book.
 
 ### Meta
-
-- **[deny]**: Runs `cargo deny` to check for license conflicts and security advisories in our dependencies
-- **[sanity]**: Runs a couple of sanity checks on the code every night, such as checking for unused dependencies
 - **[release]**: Runs the release workflow
+- **[release-dist]**: Publishes Reth to external package managers
+- **[dependencies]**: Runs `cargo update` periodically to keep dependencies current
+- **[stale]**: Marks issues as stale if there has been no activity
+- **[docker]**: Publishes the Docker image.
 
-[ci]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/ci.yml
+### Integration Testing
+
+- **[kurtosis]**: Spins up a Kurtosis testnet and runs Assertoor tests on Reth pairs.
+- **[hive]**: Runs `ethereum/hive` tests.
+
+### Linting and Checks
+
+- **[lint]**: Lints code using `cargo clippy` and other checks
+- **[lint-actions]**: Lints GitHub Actions workflows
+- **[label-pr]**: Automatically labels PRs
+
 [unit]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/unit.yml
 [integration]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/integration.yml
-[fuzz]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/fuzz.yml
 [bench]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/bench.yml
+[sync]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/sync.yml
+[stage]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/stage.yml
 [book]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/book.yml
-[deny]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/deny.yml
-[sanity]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/sanity.yml
 [release]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/release.yml
-[gh-projects]: https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/automating-projects-using-actions
+[release-dist]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/release-dist.yml
+[dependencies]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/dependencies.yml
+[stale]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/stale.yml
+[docker]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/docker.yml
+[kurtosis]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/kurtosis.yml
+[hive]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/hive.yml
+[lint]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/lint.yml
+[lint-actions]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/lint-actions.yml
+[label-pr]: https://github.com/paradigmxyz/reth/blob/main/.github/workflows/label-pr.yml

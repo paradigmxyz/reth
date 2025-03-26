@@ -1,7 +1,6 @@
-#[cfg(feature = "optimism")]
+#![allow(missing_docs)]
+
 mod p2p;
+mod testsuite;
 
-#[cfg(feature = "optimism")]
-mod utils;
-
-fn main() {}
+const fn main() {}

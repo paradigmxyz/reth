@@ -1,13 +1,15 @@
 use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
+use alloy_consensus::BlockHeader;
+use alloy_primitives::B256;
 use futures::{Future, FutureExt};
-use reth_consensus::Consensus;
-use reth_interfaces::p2p::{
+use reth_consensus::{Consensus, ConsensusError};
+use reth_network_p2p::{
     bodies::{client::BodiesClient, response::BlockResponse},
     error::{DownloadError, DownloadResult},
     priority::Priority,
 };
-use reth_network_types::{PeerId, WithPeerId};
-use reth_primitives::{BlockBody, GotExpected, SealedBlock, SealedHeader, B256};
+use reth_network_peers::{PeerId, WithPeerId};
+use reth_primitives_traits::{Block, GotExpected, InMemorySize, SealedBlock, SealedHeader};
 use std::{
     collections::VecDeque,
     mem,
@@ -22,12 +24,12 @@ use std::{
 /// If the response arrived with insufficient number of bodies, the future
 /// will issue another request until all bodies are collected.
 ///
-/// It then proceeds to verify the downloaded bodies. In case of an validation error,
+/// It then proceeds to verify the downloaded bodies. In case of a validation error,
 /// the future will start over.
 ///
-/// The future will filter out any empty headers (see [reth_primitives::Header::is_empty]) from the
-/// request. If [BodiesRequestFuture] was initialized with all empty headers, no request will be
-/// dispatched and they will be immediately returned upon polling.
+/// The future will filter out any empty headers (see [`alloy_consensus::Header::is_empty`]) from
+/// the request. If [`BodiesRequestFuture`] was initialized with all empty headers, no request will
+/// be dispatched and they will be immediately returned upon polling.
 ///
 /// NB: This assumes that peers respond with bodies in the order that they were requested.
 /// This is a reasonable assumption to make as that's [what Geth
@@ -35,30 +37,31 @@ use std::{
 /// All errors regarding the response cause the peer to get penalized, meaning that adversaries
 /// that try to give us bodies that do not match the requested order are going to be penalized
 /// and eventually disconnected.
-pub(crate) struct BodiesRequestFuture<B: BodiesClient> {
-    client: Arc<B>,
-    consensus: Arc<dyn Consensus>,
+pub(crate) struct BodiesRequestFuture<B: Block, C: BodiesClient<Body = B::Body>> {
+    client: Arc<C>,
+    consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
     metrics: BodyDownloaderMetrics,
     /// Metrics for individual responses. This can be used to observe how the size (in bytes) of
     /// responses change while bodies are being downloaded.
     response_metrics: ResponseMetrics,
     // Headers to download. The collection is shrunk as responses are buffered.
-    pending_headers: VecDeque<SealedHeader>,
+    pending_headers: VecDeque<SealedHeader<B::Header>>,
     /// Internal buffer for all blocks
-    buffer: Vec<BlockResponse>,
-    fut: Option<B::Output>,
+    buffer: Vec<BlockResponse<B>>,
+    fut: Option<C::Output>,
     /// Tracks how many bodies we requested in the last request.
     last_request_len: Option<usize>,
 }
 
-impl<B> BodiesRequestFuture<B>
+impl<B, C> BodiesRequestFuture<B, C>
 where
-    B: BodiesClient + 'static,
+    B: Block,
+    C: BodiesClient<Body = B::Body> + 'static,
 {
-    /// Returns an empty future. Use [BodiesRequestFuture::with_headers] to set the request.
+    /// Returns an empty future. Use [`BodiesRequestFuture::with_headers`] to set the request.
     pub(crate) fn new(
-        client: Arc<B>,
-        consensus: Arc<dyn Consensus>,
+        client: Arc<C>,
+        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
         metrics: BodyDownloaderMetrics,
     ) -> Self {
         Self {
@@ -73,7 +76,7 @@ where
         }
     }
 
-    pub(crate) fn with_headers(mut self, headers: Vec<SealedHeader>) -> Self {
+    pub(crate) fn with_headers(mut self, headers: Vec<SealedHeader<B::Header>>) -> Self {
         self.buffer.reserve_exact(headers.len());
         self.pending_headers = VecDeque::from(headers);
         // Submit the request only if there are any headers to download.
@@ -113,7 +116,10 @@ where
 
     /// Process block response.
     /// Returns an error if the response is invalid.
-    fn on_block_response(&mut self, response: WithPeerId<Vec<BlockBody>>) -> DownloadResult<()> {
+    fn on_block_response(&mut self, response: WithPeerId<Vec<B::Body>>) -> DownloadResult<()>
+    where
+        B::Body: InMemorySize,
+    {
         let (peer_id, bodies) = response.split();
         let request_len = self.last_request_len.unwrap_or_default();
         let response_len = bodies.len();
@@ -156,12 +162,15 @@ where
     ///
     /// This method removes headers from the internal collection.
     /// If the response fails validation, then the header will be put back.
-    fn try_buffer_blocks(&mut self, bodies: Vec<BlockBody>) -> DownloadResult<()> {
+    fn try_buffer_blocks(&mut self, bodies: Vec<C::Body>) -> DownloadResult<()>
+    where
+        C::Body: InMemorySize,
+    {
         let bodies_capacity = bodies.capacity();
         let bodies_len = bodies.len();
         let mut bodies = bodies.into_iter().peekable();
 
-        let mut total_size = bodies_capacity * mem::size_of::<BlockBody>();
+        let mut total_size = bodies_capacity * mem::size_of::<C::Body>();
         while bodies.peek().is_some() {
             let next_header = match self.pending_headers.pop_front() {
                 Some(header) => header,
@@ -170,7 +179,7 @@ where
 
             if next_header.is_empty() {
                 // increment empty block body metric
-                total_size += mem::size_of::<BlockBody>();
+                total_size += mem::size_of::<C::Body>();
                 self.buffer.push(BlockResponse::Empty(next_header));
             } else {
                 let next_body = bodies.next().unwrap();
@@ -178,13 +187,13 @@ where
                 // increment full block body metric
                 total_size += next_body.size();
 
-                let block = SealedBlock::new(next_header, next_body);
+                let block = SealedBlock::from_sealed_parts(next_header, next_body);
 
-                if let Err(error) = self.consensus.validate_block(&block) {
+                if let Err(error) = self.consensus.validate_block_pre_execution(&block) {
                     // Body is invalid, put the header back and return an error
                     let hash = block.hash();
-                    let number = block.number;
-                    self.pending_headers.push_front(block.header);
+                    let number = block.number();
+                    self.pending_headers.push_front(block.into_sealed_header());
                     return Err(DownloadError::BodyValidation {
                         hash,
                         number,
@@ -204,11 +213,12 @@ where
     }
 }
 
-impl<B> Future for BodiesRequestFuture<B>
+impl<B, C> Future for BodiesRequestFuture<B, C>
 where
-    B: BodiesClient + 'static,
+    B: Block + 'static,
+    C: BodiesClient<Body = B::Body> + 'static,
 {
-    type Output = DownloadResult<Vec<BlockResponse>>;
+    type Output = DownloadResult<Vec<BlockResponse<B>>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -239,7 +249,7 @@ where
             }
 
             // Buffer any empty headers
-            while this.pending_headers.front().map(|h| h.is_empty()).unwrap_or_default() {
+            while this.pending_headers.front().is_some_and(|h| h.is_empty()) {
                 let header = this.pending_headers.pop_front().unwrap();
                 this.buffer.push(BlockResponse::Empty(header));
             }
@@ -255,7 +265,8 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::test_utils::{generators, generators::random_header_range};
+    use reth_ethereum_primitives::Block;
+    use reth_testing_utils::{generators, generators::random_header_range};
 
     /// Check if future returns empty bodies without dispatching any requests.
     #[tokio::test]
@@ -264,7 +275,7 @@ mod tests {
         let headers = random_header_range(&mut rng, 0..20, B256::ZERO);
 
         let client = Arc::new(TestBodiesClient::default());
-        let fut = BodiesRequestFuture::new(
+        let fut = BodiesRequestFuture::<Block, _>::new(
             client.clone(),
             Arc::new(TestConsensus::default()),
             BodyDownloaderMetrics::default(),
@@ -288,7 +299,7 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_max_batch_size(batch_size),
         );
-        let fut = BodiesRequestFuture::new(
+        let fut = BodiesRequestFuture::<Block, _>::new(
             client.clone(),
             Arc::new(TestConsensus::default()),
             BodyDownloaderMetrics::default(),
@@ -299,7 +310,7 @@ mod tests {
         assert_eq!(
             client.times_requested(),
             // div_ceild
-            (headers.into_iter().filter(|h| !h.is_empty()).count() as u64 + 1) / 2
+            (headers.into_iter().filter(|h| !h.is_empty()).count() as u64).div_ceil(2)
         );
     }
 }

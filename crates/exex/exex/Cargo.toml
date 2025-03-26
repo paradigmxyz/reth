@@ -1,0 +1,84 @@
+[package]
+name = "reth-exex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Execution extensions for Reth"
+
+[lints]
+workspace = true
+
+[dependencies]
+## reth
+reth-chain-state.workspace = true
+reth-chainspec.workspace = true
+reth-config.workspace = true
+reth-evm.workspace = true
+reth-exex-types = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-fs-util.workspace = true
+reth-metrics.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-primitives-traits.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-provider.workspace = true
+reth-prune-types.workspace = true
+reth-revm.workspace = true
+reth-stages-api.workspace = true
+reth-tasks.workspace = true
+reth-tracing.workspace = true
+reth-payload-builder.workspace = true
+
+# alloy
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
+## async
+futures.workspace = true
+tokio-util.workspace = true
+tokio.workspace = true
+
+## misc
+eyre.workspace = true
+itertools = { workspace = true, features = ["use_std"] }
+metrics.workspace = true
+parking_lot.workspace = true
+rmp-serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+reth-db-common.workspace = true
+reth-evm-ethereum.workspace = true
+reth-node-api.workspace = true
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-testing-utils.workspace = true
+
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true
+
+rand.workspace = true
+secp256k1.workspace = true
+tempfile.workspace = true
+
+[features]
+default = []
+serde = [
+    "reth-exex-types/serde",
+    "reth-revm/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "parking_lot/serde",
+    "rand/serde",
+    "secp256k1/serde",
+    "reth-primitives-traits/serde",
+    "reth-prune-types/serde",
+    "reth-config/serde",
+    "reth-ethereum-primitives/serde",
+]

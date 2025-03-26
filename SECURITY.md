@@ -1,5 +1,5 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Report a Vulnerability
 
-Contact georgios at paradigm.xyz.
+Contact [security@ithaca.xyz](mailto:security@ithaca.xyz).

@@ -3,17 +3,15 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run -p node-event-hooks -- node
 //! ```
 //!
-//! This launch the regular reth node and also print:
-//!
-//! > "All components initialized"
-//! once all components have been initialized and
-//!
-//! > "Node started"
-//! once the node has been started.
+//! This launches a regular reth node and also print:
+//! > "All components initialized" – once all components have been initialized
+//! > "Node started" – once the node has been started.
+
+#![warn(unused_crate_dependencies)]
 
 use reth::cli::Cli;
 use reth_node_ethereum::EthereumNode;

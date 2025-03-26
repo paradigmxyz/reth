@@ -2,8 +2,15 @@
 # More documentation for the advisories section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
-version = 2
 yanked = "warn"
+ignore = [
+    # https://rustsec.org/advisories/RUSTSEC-2024-0384 used by sse example
+    "RUSTSEC-2024-0384",
+    # https://rustsec.org/advisories/RUSTSEC-2024-0436 paste! is unmaintained
+    "RUSTSEC-2024-0436",
+    # https://rustsec.org/advisories/RUSTSEC-2025-0014 humantime is unmaintained
+    "RUSTSEC-2025-0014",
+]
 
 # This section is considered when running `cargo deny check bans`.
 # More documentation about the 'bans' section can be found here:
@@ -38,12 +45,12 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "0BSD",
+    "CC0-1.0",
     "ISC",
-    "Unicode-DFS-2016",
     "Unlicense",
     "Unicode-3.0",
-    # https://github.com/briansmith/ring/issues/902
-    "LicenseRef-ring",
+    "Zlib",
     # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
     "LicenseRef-rustls-webpki",
 ]
@@ -51,26 +58,12 @@ allow = [
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # aren't accepted for every possible crate as with the normal allow list
 exceptions = [
-    # CC0 is a permissive license but somewhat unclear status for source code
-    # so we prefer to not have dependencies using it
-    # https://tldrlegal.com/license/creative-commons-cc0-1.0-universal
-    { allow = ["CC0-1.0"], name = "secp256k1" },
-    { allow = ["CC0-1.0"], name = "secp256k1-sys" },
-    { allow = ["CC0-1.0"], name = "tiny-keccak" },
-    { allow = ["CC0-1.0"], name = "more-asserts" },
-    { allow = ["CC0-1.0"], name = "to_method" },
-    { allow = ["CC0-1.0"], name = "aurora-engine-modexp" },
     # TODO: decide on MPL-2.0 handling
-    # These dependencies are grandfathered in in https://github.com/paradigmxyz/reth/pull/6980
-    { allow = ["MPL-2.0"], name = "attohttpc" },
+    # These dependencies are grandfathered in https://github.com/paradigmxyz/reth/pull/6980
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-roots" },
+    { allow = ["MPL-2.0"], name = "webpki-root-certs" },
 ]
-
-[[licenses.clarify]]
-name = "ring"
-expression = "LicenseRef-ring"
-license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [[licenses.clarify]]
 name = "rustls-webpki"
@@ -88,9 +81,11 @@ unknown-registry = "warn"
 # in the allow list is encountered
 unknown-git = "deny"
 allow-git = [
-    # TODO: remove, see ./Cargo.toml
+    # TODO: Please avoid adding new entries to this list.
     "https://github.com/alloy-rs/alloy",
     "https://github.com/foundry-rs/block-explorers",
-    "https://github.com/paradigmxyz/evm-inspectors",
-    "https://github.com/sigp/discv5",
+    "https://github.com/bluealloy/revm",
+    "https://github.com/paradigmxyz/revm-inspectors",
+    "https://github.com/alloy-rs/evm",
+    "https://github.com/alloy-rs/hardforks",
 ]

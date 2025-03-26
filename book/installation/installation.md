@@ -44,13 +44,13 @@ As of April 2024 at block number 19.6M:
 * Archive Node: At least 2.14TB is required
 * Full Node: At least 1.13TB is required
 
-NVMe drives are recommended for the best performance, with SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
+NVMe based SSD drives are recommended for the best performance, with SATA SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
 
 As of February 2024, syncing an Ethereum mainnet node to block 19.3M on NVMe drives takes about 50 hours, while on a GCP "Persistent SSD" it takes around 5 days.
 
 > **Note**
 >
-> It is highly recommended to choose a TLC drive when using NVMe, and not a QLC drive. See [the note](#qlc-and-tlc) above. A list of recommended drives can be found [here]( https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038).
+> It is highly recommended to choose a TLC drive when using an NVMe drive, and not a QLC drive. See [the note](#qlc-and-tlc) above. A list of recommended drives can be found [here]( https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038).
 
 ### CPU
 
@@ -78,4 +78,4 @@ Once you're synced to the tip you will need a reliable connection, especially if
 
 If you are buying your own NVMe SSD, please consult [this hardware comparison](https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038) which is being actively maintained. We recommend against buying DRAM-less or QLC devices as these are noticeably slower.
 
-All our benchmarks have been produced on [Latitude.sh](https://www.latitude.sh/), a bare metal provider. We use `c3.large.x86` boxes, and also recommend trying the `s2.small.x86` box for pruned/full nodes. So far our experience has been smooth with some users reporting that the NVMEs there outperform AWS NVMEs by 3x or more. We're excited for more Reth nodes on Latitude.sh, so for a limited time you can use `RETH400` for a $250 discount. [Run a node now!](https://metal.new/reth)
+All our benchmarks have been produced on [Latitude.sh](https://www.latitude.sh/), a bare metal provider. We use `c3.large.x86` boxes, and also recommend trying the `c3.small.x86` box for pruned/full nodes. So far our experience has been smooth with some users reporting that the NVMEs there outperform AWS NVMEs by 3x or more. We're excited for more Reth nodes on Latitude.sh, so for a limited time you can use `RETH400` for a $250 discount. [Run a node now!](https://metal.new/reth)

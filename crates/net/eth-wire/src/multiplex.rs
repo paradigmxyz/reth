@@ -1,6 +1,6 @@
 //! Rlpx protocol multiplexer and satellite stream
 //!
-//! A Satellite is a Stream that primarily drives a single RLPx subprotocol but can also handle
+//! A Satellite is a Stream that primarily drives a single `RLPx` subprotocol but can also handle
 //! additional subprotocols.
 //!
 //! Most of other subprotocols are "dependent satellite" protocols of "eth" and not a fully standalone protocol, for example "snap", See also [snap protocol](https://github.com/ethereum/devp2p/blob/298d7a77c3bf833641579ecbbb5b13f0311eeeea/caps/snap.md?plain=1#L71)
@@ -17,18 +17,19 @@ use std::{
 };
 
 use crate::{
-    capability::{Capability, SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
+    capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
     p2pstream::DisconnectP2P,
-    CanDisconnect, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
+    CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
 use futures::{Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
-use reth_primitives::ForkFilter;
+use reth_eth_wire_types::NetworkPrimitives;
+use reth_ethereum_forks::ForkFilter;
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-/// A Stream and Sink type that wraps a raw rlpx stream [P2PStream] and handles message ID
+/// A Stream and Sink type that wraps a raw rlpx stream [`P2PStream`] and handles message ID
 /// multiplexing.
 #[derive(Debug)]
 pub struct RlpxProtocolMultiplexer<St> {
@@ -49,8 +50,8 @@ impl<St> RlpxProtocolMultiplexer<St> {
 
     /// Installs a new protocol on top of the raw p2p stream.
     ///
-    /// This accepts a closure that receives a [ProtocolConnection] that will yield messages for the
-    /// given capability.
+    /// This accepts a closure that receives a [`ProtocolConnection`] that will yield messages for
+    /// the given capability.
     pub fn install_protocol<F, Proto>(
         &mut self,
         cap: &Capability,
@@ -63,12 +64,12 @@ impl<St> RlpxProtocolMultiplexer<St> {
         self.inner.install_protocol(cap, f)
     }
 
-    /// Returns the [SharedCapabilities] of the underlying raw p2p stream
-    pub fn shared_capabilities(&self) -> &SharedCapabilities {
+    /// Returns the [`SharedCapabilities`] of the underlying raw p2p stream
+    pub const fn shared_capabilities(&self) -> &SharedCapabilities {
         self.inner.shared_capabilities()
     }
 
-    /// Converts this multiplexer into a [RlpxSatelliteStream] with the given primary protocol.
+    /// Converts this multiplexer into a [`RlpxSatelliteStream`] with the given primary protocol.
     pub fn into_satellite_stream<F, Primary>(
         self,
         cap: &Capability,
@@ -102,7 +103,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         })
     }
 
-    /// Converts this multiplexer into a [RlpxSatelliteStream] with the given primary protocol.
+    /// Converts this multiplexer into a [`RlpxSatelliteStream`] with the given primary protocol.
     ///
     /// Returns an error if the primary protocol is not supported by the remote or the handshake
     /// failed.
@@ -125,7 +126,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
         .map(|(st, _)| st)
     }
 
-    /// Converts this multiplexer into a [RlpxSatelliteStream] with the given primary protocol.
+    /// Converts this multiplexer into a [`RlpxSatelliteStream`] with the given primary protocol.
     ///
     /// Returns an error if the primary protocol is not supported by the remote or the handshake
     /// failed.
@@ -133,7 +134,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
     /// This accepts a closure that does a handshake with the remote peer and returns a tuple of the
     /// primary stream and extra data.
     ///
-    /// See also [UnauthedEthStream::handshake]
+    /// See also [`UnauthedEthStream::handshake`]
     pub async fn into_satellite_stream_with_tuple_handshake<F, Fut, Err, Primary, Extra>(
         mut self,
         cap: &Capability,
@@ -202,13 +203,13 @@ impl<St> RlpxProtocolMultiplexer<St> {
         }
     }
 
-    /// Converts this multiplexer into a [RlpxSatelliteStream] with eth protocol as the given
+    /// Converts this multiplexer into a [`RlpxSatelliteStream`] with eth protocol as the given
     /// primary protocol.
-    pub async fn into_eth_satellite_stream(
+    pub async fn into_eth_satellite_stream<N: NetworkPrimitives>(
         self,
         status: Status,
         fork_filter: ForkFilter,
-    ) -> Result<(RlpxSatelliteStream<St, EthStream<ProtocolProxy>>, Status), EthStreamError>
+    ) -> Result<(RlpxSatelliteStream<St, EthStream<ProtocolProxy, N>>, Status), EthStreamError>
     where
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {
@@ -234,7 +235,7 @@ struct MultiplexInner<St> {
 }
 
 impl<St> MultiplexInner<St> {
-    fn shared_capabilities(&self) -> &SharedCapabilities {
+    const fn shared_capabilities(&self) -> &SharedCapabilities {
         self.conn.shared_capabilities()
     }
 
@@ -282,7 +283,7 @@ struct PrimaryProtocol<Primary> {
     st: Primary,
 }
 
-/// A Stream and Sink type that acts as a wrapper around a primary RLPx subprotocol (e.g. "eth")
+/// A Stream and Sink type that acts as a wrapper around a primary `RLPx` subprotocol (e.g. "eth")
 ///
 /// Only emits and sends _non-empty_ messages
 #[derive(Debug)]
@@ -312,13 +313,14 @@ impl ProtocolProxy {
             return Err(io::ErrorKind::InvalidInput.into())
         }
 
-        let mut masked_bytes = BytesMut::zeroed(msg.len());
-        masked_bytes[0] = msg[0]
-            .checked_add(self.shared_cap.relative_message_id_offset())
-            .ok_or(io::ErrorKind::InvalidInput)?;
+        let offset = self.shared_cap.relative_message_id_offset();
+        if offset == 0 {
+            return Ok(msg);
+        }
 
-        masked_bytes[1..].copy_from_slice(&msg[1..]);
-        Ok(masked_bytes.freeze())
+        let mut masked = Vec::from(msg);
+        masked[0] = masked[0].checked_add(offset).ok_or(io::ErrorKind::InvalidInput)?;
+        Ok(masked.into())
     }
 
     /// Unmasks the message ID of a message received from the wire.
@@ -365,16 +367,16 @@ impl Sink<Bytes> for ProtocolProxy {
 }
 
 impl CanDisconnect<Bytes> for ProtocolProxy {
-    async fn disconnect(
+    fn disconnect(
         &mut self,
         _reason: DisconnectReason,
-    ) -> Result<(), <Self as Sink<Bytes>>::Error> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), <Self as Sink<Bytes>>::Error>> + Send + '_>> {
         // TODO handle disconnects
-        Ok(())
+        Box::pin(async move { Ok(()) })
     }
 }
 
-/// A connection channel to receive _non_empty_ messages for the negotiated protocol.
+/// A connection channel to receive _`non_empty`_ messages for the negotiated protocol.
 ///
 /// This is a [Stream] that returns raw bytes of the received messages for this protocol.
 #[derive(Debug)]
@@ -390,8 +392,8 @@ impl Stream for ProtocolConnection {
     }
 }
 
-/// A Stream and Sink type that acts as a wrapper around a primary RLPx subprotocol (e.g. "eth")
-/// [EthStream] and can also handle additional subprotocols.
+/// A Stream and Sink type that acts as a wrapper around a primary `RLPx` subprotocol (e.g. "eth")
+/// [`EthStream`] and can also handle additional subprotocols.
 #[derive(Debug)]
 pub struct RlpxSatelliteStream<St, Primary> {
     inner: MultiplexInner<St>,
@@ -401,8 +403,8 @@ pub struct RlpxSatelliteStream<St, Primary> {
 impl<St, Primary> RlpxSatelliteStream<St, Primary> {
     /// Installs a new protocol on top of the raw p2p stream.
     ///
-    /// This accepts a closure that receives a [ProtocolConnection] that will yield messages for the
-    /// given capability.
+    /// This accepts a closure that receives a [`ProtocolConnection`] that will yield messages for
+    /// the given capability.
     pub fn install_protocol<F, Proto>(
         &mut self,
         cap: &Capability,
@@ -417,7 +419,7 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
 
     /// Returns the primary protocol.
     #[inline]
-    pub fn primary(&self) -> &Primary {
+    pub const fn primary(&self) -> &Primary {
         &self.primary.st
     }
 
@@ -427,19 +429,19 @@ impl<St, Primary> RlpxSatelliteStream<St, Primary> {
         &mut self.primary.st
     }
 
-    /// Returns the underlying [P2PStream].
+    /// Returns the underlying [`P2PStream`].
     #[inline]
-    pub fn inner(&self) -> &P2PStream<St> {
+    pub const fn inner(&self) -> &P2PStream<St> {
         &self.inner.conn
     }
 
-    /// Returns mutable access to the underlying [P2PStream].
+    /// Returns mutable access to the underlying [`P2PStream`].
     #[inline]
     pub fn inner_mut(&mut self) -> &mut P2PStream<St> {
         &mut self.inner.conn
     }
 
-    /// Consumes this type and returns the wrapped [P2PStream].
+    /// Consumes this type and returns the wrapped [`P2PStream`].
     #[inline]
     pub fn into_inner(self) -> P2PStream<St> {
         self.inner.conn
@@ -479,9 +481,9 @@ where
                         if let Err(disconnect_err) =
                             this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
                         {
-                            return Poll::Ready(Some(Err(disconnect_err.into())));
+                            return Poll::Ready(Some(Err(disconnect_err.into())))
                         }
-                        return Poll::Ready(Some(Err(err.into())));
+                        return Poll::Ready(Some(Err(err.into())))
                     }
                     Poll::Pending => {
                         conn_ready = false;
@@ -606,7 +608,7 @@ where
     }
 }
 
-/// Wraps a RLPx subprotocol and handles message ID multiplexing.
+/// Wraps a `RLPx` subprotocol and handles message ID multiplexing.
 struct ProtocolStream {
     shared_cap: SharedCapability,
     /// the channel shared with the satellite stream
@@ -673,6 +675,7 @@ mod tests {
         },
         UnauthedP2PStream,
     };
+    use reth_eth_wire_types::EthNetworkPrimitives;
     use tokio::{net::TcpListener, sync::oneshot};
     use tokio_util::codec::Decoder;
 
@@ -692,7 +695,7 @@ mod tests {
                 UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
             let (_eth_stream, _) = UnauthedEthStream::new(p2p_stream)
-                .handshake(other_status, other_fork_filter)
+                .handshake::<EthNetworkPrimitives>(other_status, other_fork_filter)
                 .await
                 .unwrap();
 
@@ -707,7 +710,9 @@ mod tests {
             .into_satellite_stream_with_handshake(
                 eth.capability().as_ref(),
                 move |proxy| async move {
-                    UnauthedEthStream::new(proxy).handshake(status, fork_filter).await
+                    UnauthedEthStream::new(proxy)
+                        .handshake::<EthNetworkPrimitives>(status, fork_filter)
+                        .await
                 },
             )
             .await
@@ -730,7 +735,7 @@ mod tests {
             let (conn, _) = UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
 
             let (mut st, _their_status) = RlpxProtocolMultiplexer::new(conn)
-                .into_eth_satellite_stream(other_status, other_fork_filter)
+                .into_eth_satellite_stream::<EthNetworkPrimitives>(other_status, other_fork_filter)
                 .await
                 .unwrap();
 
@@ -761,7 +766,7 @@ mod tests {
 
         let conn = connect_passthrough(local_addr, test_hello().0).await;
         let (mut st, _their_status) = RlpxProtocolMultiplexer::new(conn)
-            .into_eth_satellite_stream(status, fork_filter)
+            .into_eth_satellite_stream::<EthNetworkPrimitives>(status, fork_filter)
             .await
             .unwrap();
 

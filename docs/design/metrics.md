@@ -1,6 +1,8 @@
 ## Metrics
 
-### Metrics or traces?
+Reth exposes a number of metrics, which can be served from an HTTP endpoint by adding the `--metrics` flag.
+
+### Metrics vs traces
 
 A **metric** is a numeric representation of data measured over intervals of time. Metrics are malleable to statistical transformations such as sampling, aggregation and correlation, which make them suited to report the overall health of a system.
 
@@ -18,7 +20,7 @@ The main difference between metrics and traces is therefore that metrics are sys
 To add metrics use the [`metrics`][metrics] crate.
 
 1. Add the code emitting the metric.
-2. Add the metrics description in the crate's metrics describer module, e.g.: [stages metrics describer](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/metrics.rs).
+2. Add the metrics description in the crate's metrics describer module, e.g.: [network metrics describer](https://github.com/paradigmxyz/reth/blob/main/crates/net/network/src/metrics.rs).
 3. Document the metric in this file.
 
 #### Metric anatomy
@@ -42,7 +44,7 @@ There will only ever exist one description per metric `KeyName`; it is not possi
 The `metrics` crate provides three macros per metric variant: `register_<metric>!`, `<metric>!`, and `describe_<metric>!`. Prefer to use these where possible, since they generate the code necessary to register and update metrics under various conditions.
 
 - The `register_<metric>!` macro simply creates the metric and returns a handle to it (e.g. a `Counter`). These metric structs are thread-safe and cheap to clone.
-- The `<metric>!` macro registers the metric if it does not exist, and updates it's value.
+- The `<metric>!` macro registers the metric if it does not exist, and updates its value.
 - The `describe_<metric>!` macro adds an end-user description for the metric.
 
 How the metrics are exposed to the end-user is determined by the CLI.
@@ -61,44 +63,13 @@ How the metrics are exposed to the end-user is determined by the CLI.
 
 [^1]: The top-level namespace is added by the CLI using [`metrics_util::layers::PrefixLayer`][metrics_util.PrefixLayer].
 
-### Current metrics
+### Example metrics
+- [Transaction Pool Metrics](../../crates/transaction-pool/src/metrics.rs)
+- [Network Metrics](../../crates/net/network/src/metrics.rs)
+- [Header Downloader Metrics](../../crates/net/downloaders/src/metrics.rs)
 
-This list may be non-exhaustive.
-
-#### Stage: Headers
-
-- `stages.headers.counter`: Number of headers successfully retrieved
-- `stages.headers.timeout_error`: Number of timeout errors while requesting headers
-- `stages.headers.validation_errors`: Number of validation errors while requesting headers
-- `stages.headers.unexpected_errors`: Number of unexpected errors while requesting headers
-- `stages.headers.request_time`: Elapsed time of successful header requests
-
-#### Component: Transaction Pool
-
-- `transaction_pool.inserted_transactions`: Number of transactions inserted in the pool
-- `transaction_pool.invalid_transactions`: Number of invalid transactions
-- `transaction_pool.removed_transactions`: Number of removed transactions from the pool
-- `transaction_pool.pending_pool_transactions`: Number of transactions in the pending sub-pool
-- `transaction_pool.pending_pool_size_bytes`: Total amount of memory used by the transactions in the pending sub-pool in bytes
-- `transaction_pool.basefee_pool_transactions`: Number of transactions in the basefee sub-pool
-- `transaction_pool.basefee_pool_size_bytes`: Total amount of memory used by the transactions in the basefee sub-pool in bytes
-- `transaction_pool.queued_pool_transactions`: Number of transactions in the queued sub-pool
-- `transaction_pool.queued_pool_size_bytes`: Total amount of memory used by the transactions in the queued sub-pool in bytes
-- `transaction_pool.blob_pool_transactions`: Number of transactions in the blob sub-pool
-- `transaction_pool.blob_pool_size_bytes`: Total amount of memory used by the transactions in the blob sub-pool in bytes
-
-#### Component: Network
-
-- `network.connected_peers`: Number of currently connected peers
-- `network.tracked_peers`: Number of peers known to the node
-- `network.pending_session_failures`: Cumulative number of failures of pending sessions
-- `network.closed_sessions`: Total number of sessions closed
-- `network.incoming_connections`: Number of active incoming connections
-- `network.outgoing_connections`: Number of active outgoing connections
-- `network.total_incoming_connections`: Total number of incoming connections handled
-- `network.total_outgoing_connections`: Total number of outgoing connections established
-- `network.invalid_messages_received`: Number of invalid/malformed messages received from peers
-- `network.propagated_transactions`: Total number of propagated transactions
+### Metrics Dashboards 
+- [Grafana Dashboards](../../etc/grafana/dashboards)
 
 [metrics]: https://docs.rs/metrics
 [metrics.Key]: https://docs.rs/metrics/latest/metrics/struct.Key.html

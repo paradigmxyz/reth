@@ -1,6 +1,6 @@
 # Observability with Prometheus & Grafana
 
-Reth exposes a number of metrics, which are listed [here][metrics]. We can serve them from an HTTP endpoint by adding the `--metrics` flag:
+Reth exposes a number of metrics which can be enabled by adding the `--metrics` flag:
 
 ```bash
 reth node --metrics 127.0.0.1:9001
@@ -24,7 +24,7 @@ We're finally getting somewhere! As a final step, though, wouldn't it be great t
 
 ## Prometheus & Grafana
 
-We're going to be using Prometheus to collect metrics off of the endpoint we set up, and use Grafana to scrape the metrics from Prometheus and define a dashboard with them.
+We're going to use Prometheus to scrape the metrics from our node, and use Grafana to on a dashboard.
 
 Let's begin by installing both Prometheus and Grafana, which one can do with e.g. Homebrew:
 
@@ -55,7 +55,7 @@ Depending on your installation you may find the config for your Prometheus servi
 
 Next, open up "localhost:3000" in your browser, which is the default URL for Grafana. Here, "admin" is the default for both the username and password.
 
-Once you've logged in, click on the gear icon in the lower left, and select "Data Sources". Click on "Add data source", and select "Prometheus" as the type. In the HTTP URL field, enter `http://localhost:9090`. Finally, click "Save & Test".
+Once you've logged in, click on "Connections" in the left side panel and select "Data Sources". Click on "Add data source", and select "Prometheus" as the type. In the HTTP URL field, enter http://localhost:9090. Finally, click "Save & Test".
 
 As this might be a point of confusion, `localhost:9001`, which we supplied to `--metrics`, is the endpoint that Reth exposes, from which Prometheus collects metrics. Prometheus then exposes `localhost:9090` (by default) for other services (such as Grafana) to consume Prometheus metrics.
 
