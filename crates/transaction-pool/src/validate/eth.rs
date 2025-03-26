@@ -309,29 +309,10 @@ where
                 )
             }
 
-            if transaction.to().is_none() {
-                return TransactionValidationOutcome::Invalid(
-                    transaction,
-                    Eip7702PoolTransactionError::MissingEip7702To.into(),
-                )
-            }
-
             if transaction.authorization_list().is_none_or(|l| l.is_empty()) {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
-                )
-            }
-
-            let has_invalid_auth = transaction
-                .authorization_list()
-                .unwrap()
-                .iter()
-                .any(|auth| auth.recover_authority().is_err());
-            if has_invalid_auth {
-                return TransactionValidationOutcome::Invalid(
-                    transaction,
-                    Eip7702PoolTransactionError::AuthorizationRecoverFailed.into(),
                 )
             }
         }
@@ -501,6 +482,7 @@ where
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
+            bytecode_hash: account.bytecode_hash,
             transaction: ValidTransaction::new(transaction, maybe_blob_sidecar),
             // by this point assume all external transactions should be propagated
             propagate: match origin {

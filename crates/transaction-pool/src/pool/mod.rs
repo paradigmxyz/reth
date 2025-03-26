@@ -68,7 +68,7 @@
 use crate::{
     blobstore::BlobStore,
     error::{PoolError, PoolErrorKind, PoolResult},
-    identifier::{SenderId, SenderIdentifiers, TransactionId},
+    identifier::{SenderId, TransactionId},
     metrics::BlobStoreMetrics,
     pool::{
         listener::{
@@ -131,8 +131,6 @@ pub struct PoolInner<V, T, S>
 where
     T: TransactionOrdering,
 {
-    /// Internal mapping of addresses to plain ints.
-    identifiers: RwLock<SenderIdentifiers>,
     /// Transaction validator.
     validator: V,
     /// Storage for blob transactions
@@ -164,7 +162,6 @@ where
     /// Create a new transaction pool instance.
     pub fn new(validator: V, ordering: T, blob_store: S, config: PoolConfig) -> Self {
         Self {
-            identifiers: Default::default(),
             validator,
             event_listener: Default::default(),
             pool: RwLock::new(TxPool::new(ordering, config.clone())),
@@ -198,7 +195,7 @@ where
 
     /// Returns the internal [`SenderId`] for this address
     pub fn get_sender_id(&self, addr: Address) -> SenderId {
-        self.identifiers.write().sender_id_or_create(addr)
+        self.pool.write().get_sender_id(addr)
     }
 
     /// Returns all senders in the pool
@@ -212,14 +209,7 @@ where
         &self,
         accs: impl Iterator<Item = ChangedAccount>,
     ) -> FxHashMap<SenderId, SenderInfo> {
-        let mut identifiers = self.identifiers.write();
-        accs.into_iter()
-            .map(|acc| {
-                let ChangedAccount { address, nonce, balance } = acc;
-                let sender_id = identifiers.sender_id_or_create(address);
-                (sender_id, SenderInfo { state_nonce: nonce, balance })
-            })
-            .collect()
+        self.pool.write().changed_senders(accs)
     }
 
     /// Get the config the pool was configured with.
@@ -439,8 +429,9 @@ where
                 state_nonce,
                 transaction,
                 propagate,
+                bytecode_hash,
             } => {
-                let sender_id = self.get_sender_id(transaction.sender());
+                let sender_id = pool.get_sender_id(transaction.sender());
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
 
                 // split the valid transaction and the blob sidecar if it has any
@@ -463,7 +454,7 @@ where
                     origin,
                 };
 
-                let added = pool.add_transaction(tx, balance, state_nonce)?;
+                let added = pool.add_transaction(tx, balance, state_nonce, bytecode_hash)?;
                 let hash = *added.hash();
 
                 // transaction was successfully inserted into the pool
@@ -1249,6 +1240,7 @@ mod tests {
                 [TransactionValidationOutcome::Valid {
                     balance: U256::from(1_000),
                     state_nonce: 0,
+                    bytecode_hash: None,
                     transaction: ValidTransaction::ValidWithSidecar {
                         transaction: tx,
                         sidecar: sidecar.clone(),
