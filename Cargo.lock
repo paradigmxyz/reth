@@ -8558,6 +8558,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-node-ethstats"
+version = "1.3.4"
+
+[[package]]
 name = "reth-node-events"
 version = "1.3.4"
 dependencies = [
