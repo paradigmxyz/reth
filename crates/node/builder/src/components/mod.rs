@@ -22,6 +22,7 @@ pub use payload::*;
 pub use pool::*;
 use reth_network_p2p::BlockClient;
 use reth_payload_builder::PayloadBuilderHandle;
+use std::fmt::Debug;
 
 use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::{ConsensusError, FullConsensus};
@@ -38,7 +39,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 ///  - transaction pool
 ///  - network
 ///  - payload builder.
-pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'static {
+pub trait NodeComponents<T: FullNodeTypes>: Clone + Debug + Unpin + Send + Sync + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<T::Types>>> + Unpin;
 

@@ -6,6 +6,7 @@ use alloy_consensus::{BlockHeader, Header};
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{Evm, EvmEnv, EvmFactory};
 use alloy_primitives::B256;
+use core::fmt::Debug;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
@@ -128,7 +129,7 @@ pub trait Executor<DB: Database>: Sized {
 }
 
 /// A type that can create a new executor for block execution.
-pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
+pub trait BlockExecutorProvider: Clone + Debug + Send + Sync + Unpin + 'static {
     /// Receipt type.
     type Primitives: NodePrimitives;
 
@@ -370,7 +371,7 @@ where
 }
 
 /// A generic block executor provider that can create executors using a strategy factory.
-#[expect(missing_debug_implementations)]
+#[derive(Debug)]
 pub struct BasicBlockExecutorProvider<F> {
     strategy_factory: F,
 }
@@ -490,7 +491,7 @@ mod tests {
         state::AccountInfo,
     };
 
-    #[derive(Clone, Default)]
+    #[derive(Clone, Debug, Default)]
     struct TestExecutorProvider;
 
     impl BlockExecutorProvider for TestExecutorProvider {

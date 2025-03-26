@@ -2,12 +2,6 @@
 pub use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
-
 use reth_node_api::{EngineTypes, FullNodeComponents, PayloadTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -17,6 +11,12 @@ use reth_provider::ChainSpecProvider;
 use reth_rpc_api::EngineApiClient;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
+use std::{
+    fmt::Debug,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
 
@@ -63,8 +63,8 @@ impl<N, C, AO> AnyNode<N, C, AO> {
 impl<N, C, AO> NodeTypes for AnyNode<N, C, AO>
 where
     N: FullNodeTypes,
-    C: Clone + Send + Sync + Unpin + 'static,
-    AO: Send + Sync + Unpin + Clone + 'static,
+    C: Clone + Debug + Send + Sync + Unpin + 'static,
+    AO: Clone + Debug + Send + Sync + Unpin + 'static,
 {
     type Primitives = <N::Types as NodeTypes>::Primitives;
 
@@ -78,8 +78,8 @@ where
 impl<N, C, AO> NodeTypesWithEngine for AnyNode<N, C, AO>
 where
     N: FullNodeTypes,
-    C: Clone + Send + Sync + Unpin + 'static,
-    AO: Send + Sync + Unpin + Clone + 'static,
+    C: Clone + Debug + Send + Sync + Unpin + 'static,
+    AO: Clone + Debug + Send + Sync + Unpin + 'static,
 {
     type Payload = <N::Types as NodeTypesWithEngine>::Payload;
 }
@@ -87,8 +87,8 @@ where
 impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
 where
     N: FullNodeTypes + Clone,
-    C: NodeComponentsBuilder<N> + Clone + Sync + Unpin + 'static,
-    AO: NodeAddOns<NodeAdapter<N, C::Components>> + Clone + Sync + Unpin + 'static,
+    C: NodeComponentsBuilder<N> + Clone + Debug + Sync + Unpin + 'static,
+    AO: NodeAddOns<NodeAdapter<N, C::Components>> + Clone + Debug + Sync + Unpin + 'static,
 {
     type ComponentsBuilder = C;
     type AddOns = AO;

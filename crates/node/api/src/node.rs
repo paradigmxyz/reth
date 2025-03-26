@@ -15,13 +15,13 @@ use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{future::Future, marker::PhantomData};
+use std::{fmt::Debug, future::Future, marker::PhantomData};
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds stateful
 /// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: Clone + Send + Sync + Unpin + 'static {
+pub trait FullNodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     /// Node's types with the database.
     type Types: NodeTypesWithEngine;
     /// Underlying database type used by the node to store and retrieve data.
