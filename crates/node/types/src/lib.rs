@@ -68,7 +68,7 @@ impl<Types, DB> NodeTypesWithDBAdapter<Types, DB> {
 impl<Types, DB> NodeTypes for NodeTypesWithDBAdapter<Types, DB>
 where
     Types: NodeTypes,
-    DB: Send + Sync + Unpin + 'static,
+    DB: Clone + Send + Sync + Unpin + 'static,
 {
     type Primitives = Types::Primitives;
     type ChainSpec = Types::ChainSpec;
@@ -79,7 +79,7 @@ where
 impl<Types, DB> NodeTypesWithEngine for NodeTypesWithDBAdapter<Types, DB>
 where
     Types: NodeTypesWithEngine,
-    DB: Send + Sync + Unpin + 'static,
+    DB: Clone + Send + Sync + Unpin + 'static,
 {
     type Payload = Types::Payload;
 }
