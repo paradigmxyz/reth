@@ -10,8 +10,8 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
-    EthPoolTransaction, EthTransactionValidator, TransactionOrigin, TransactionValidationOutcome,
-    TransactionValidator,
+    EthPoolTransaction, EthTransactionValidator, PoolTransaction, TransactionOrigin,
+    TransactionValidationOutcome, TransactionValidator,
 };
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -27,6 +27,14 @@ pub struct OpL1BlockInfo {
     timestamp: AtomicU64,
     /// Current block number.
     number: AtomicU64,
+}
+
+/// Intermediary outcome for transaction validation.
+enum IntermediaryTxValidationOutcome<Tx: PoolTransaction> {
+    /// Represents an invalid EIP-4844 transaction.
+    InvalidEip4844(TransactionValidationOutcome<Tx>),
+    /// Represents a transaction pending further validation.
+    Pending { origin: TransactionOrigin, tx: Tx },
 }
 
 /// Validator for Optimism transactions.
@@ -159,7 +167,40 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let outcomes = self.inner.validate_all(transactions);
+        let mut intermediaries = Vec::with_capacity(transactions.len());
+
+        for (origin, tx) in transactions {
+            if tx.is_eip4844() {
+                intermediaries.push(IntermediaryTxValidationOutcome::InvalidEip4844(
+                    TransactionValidationOutcome::Invalid(
+                        tx,
+                        InvalidTransactionError::TxTypeNotSupported.into(),
+                    ),
+                ));
+            } else {
+                intermediaries.push(IntermediaryTxValidationOutcome::Pending { origin, tx });
+            }
+        }
+
+        let pending_transactions: Vec<_> = intermediaries
+            .iter()
+            .filter_map(|intermediary| {
+                if let IntermediaryTxValidationOutcome::Pending { origin, tx } = intermediary {
+                    Some((*origin, tx.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut outcomes = self.inner.validate_all(pending_transactions);
+
+        for intermediary in intermediaries {
+            if let IntermediaryTxValidationOutcome::InvalidEip4844(invalid_outcome) = intermediary {
+                outcomes.push(invalid_outcome);
+            }
+        }
+
         outcomes.into_iter().map(|outcome| self.apply_op_checks(outcome)).collect()
     }
 
