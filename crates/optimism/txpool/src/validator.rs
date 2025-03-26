@@ -162,6 +162,7 @@ where
         transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
     }
 
+    /// Performs the necessary opstack specific checks based on top of the regular eth outcome.
     fn apply_op_checks(
         &self,
         outcome: TransactionValidationOutcome<Tx>,
