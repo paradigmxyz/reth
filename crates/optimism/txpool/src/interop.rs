@@ -21,10 +21,9 @@ pub trait MaybeInteropTransaction {
 /// Helper to keep track of cross transaction interop validity
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct TransactionInterop {
-    /// Time until tx if validated successfully.
-    /// If None - tx is not validated, tx should be automatically revalidated by interop tracker
-    /// if timeout - current block timestamp < 1min
-    // TODO: we should choose some concrete timing for revalidation, but 1min sound reasonable
+    /// Unix timestamp until which tx if considered valid by supervisor.
+    ///
+    /// If None - tx is not validated, it should be automatically revalidated by interop tracker.
     pub timeout: Option<u64>,
 }
 
