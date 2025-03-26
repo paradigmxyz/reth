@@ -317,6 +317,19 @@ mod tests {
             (Nibbles::unpack(account_5), empty_account),
         ]);
 
+        let branch_node_1 = (
+            Nibbles::from_nibbles([0; 62]),
+            BranchNodeCompact::new(
+                TrieMask::new(0b11),
+                TrieMask::new(0b00),
+                TrieMask::new(0b11),
+                vec![
+                    empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
+                    empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
+                ],
+                None,
+            ),
+        );
         let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
             vec![
                 empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
@@ -325,6 +338,19 @@ mod tests {
             TrieMask::new(0b11),
         )));
 
+        let branch_node_3 = (
+            Nibbles::from_nibbles([vec![0; 61], vec![1, 0]].concat()),
+            BranchNodeCompact::new(
+                TrieMask::new(0b11),
+                TrieMask::new(0b00),
+                TrieMask::new(0b11),
+                vec![
+                    empty_leaf_rlp_for_key(Nibbles::default()),
+                    empty_leaf_rlp_for_key(Nibbles::default()),
+                ],
+                None,
+            ),
+        );
         let branch_node_3_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
             vec![
                 empty_leaf_rlp_for_key(Nibbles::default()),
@@ -337,9 +363,9 @@ mod tests {
             Nibbles::from_nibbles([vec![0; 61], vec![1]].concat()),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
-                TrieMask::new(0b00),
                 TrieMask::new(0b01),
-                vec![branch_node_3_rlp.clone()],
+                TrieMask::new(0b11),
+                vec![branch_node_3_rlp.clone(), empty_leaf_rlp_for_key(Nibbles::from_nibbles([0]))],
                 None,
             ),
         );
@@ -351,14 +377,19 @@ mod tests {
             Nibbles::from_nibbles([0; 61]),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
-                TrieMask::new(0b10),
+                TrieMask::new(0b11),
                 TrieMask::new(0b11),
                 vec![branch_node_1_rlp, branch_node_2_rlp],
                 None,
             ),
         );
 
-        let mock_trie_nodes = vec![branch_node_0.clone(), branch_node_2.clone()];
+        let mock_trie_nodes = vec![
+            branch_node_0.clone(),
+            branch_node_1,
+            branch_node_2.clone(),
+            branch_node_3.clone(),
+        ];
         pretty_assertions::assert_eq!(
             hash_builder_branch_nodes.into_iter().sorted().collect::<Vec<_>>(),
             mock_trie_nodes,
@@ -411,6 +442,10 @@ mod tests {
                     visited_key: Some(branch_node_2.0)
                 },
                 KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(branch_node_3.0.clone()),
+                    visited_key: Some(branch_node_3.0)
+                },
+                KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
                     visited_key: None
                 }
@@ -419,17 +454,10 @@ mod tests {
         pretty_assertions::assert_eq!(
             *hashed_cursor_factory.visited_account_keys(),
             vec![
-                // Why do we always seek this key first?
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_1),
                     visited_key: Some(account_1)
                 },
-                // Seek to the modified account.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                // Why do we seek the modified account two more times?
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_3),
                     visited_key: Some(account_3)
@@ -438,16 +466,29 @@ mod tests {
                     visit_type: KeyVisitType::SeekNonExact(account_3),
                     visited_key: Some(account_3)
                 },
-                // Collect the siblings of the modified account
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_3),
+                    visited_key: Some(account_3)
+                },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_3),
+                    visited_key: Some(account_3)
+                },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                // We seek the account 5 because its hash is not in the branch node, but we already
-                // walked it before, so there should be no need for it.
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_5),
+                    visit_type: KeyVisitType::SeekNonExact(b256!(
+                        "0x0000000000000000000000000000000000000000000000000000000000000102"
+                    )),
                     visited_key: Some(account_5)
                 },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(b256!(
+                        "0x0000000000000000000000000000000000000000000000000000000000000120"
+                    )),
+                    visited_key: None
+                },
             ],
         );
     }
