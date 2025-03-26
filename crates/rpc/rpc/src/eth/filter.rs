@@ -65,10 +65,10 @@ where
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
-/// reorg default nothing
+/// Reorgs do not occur
 const REORG_DEFAULT: u8 = 0;
-/// reorg blockchain happened need to calc
-const REORG_HAPPEN: u8 = 1;
+/// Reorgs occur.
+const REORG_OCCUR: u8 = 1;
 
 /// `Eth` filter RPC implementation.
 ///
@@ -207,7 +207,8 @@ where
                 match filter.block_option {
                     FilterBlockOption::AtBlockHash(block_hash) => {
                         if let Some(block) = reorg_blocks.get(&block_hash) {
-                            // lazy calculate Vec<Log>, if block_hash exist, we only calculate once
+                            // Lazy evaluation of Vec<Log>: calculations occur only once, skipping
+                            // if block_hash exists.
                             active_filter
                                 .reorg_old_blocks
                                 .write()
@@ -215,7 +216,7 @@ where
                                 .or_insert_with(|| {
                                     ReorgOldBlockInfo::new(vec![], block.header().number())
                                 });
-                            active_filter.reorg_status.store(REORG_HAPPEN, Ordering::Relaxed);
+                            active_filter.reorg_status.store(REORG_OCCUR, Ordering::Relaxed);
                         };
                     }
 
@@ -231,7 +232,8 @@ where
                             for block_number in from..=to {
                                 if let Some(block) = old_blocks.get(&block_number) {
                                     let block_hash = block.hash();
-                                    // lazy calculate Vec<Log>, only calculate once
+                                    // Lazy evaluation of Vec<Log>: calculations occur only once,
+                                    // skipping if block_hash exists.
                                     active_filter
                                         .reorg_old_blocks
                                         .write()
@@ -241,7 +243,7 @@ where
                                         });
                                 }
                             }
-                            active_filter.reorg_status.store(REORG_HAPPEN, Ordering::Relaxed);
+                            active_filter.reorg_status.store(REORG_OCCUR, Ordering::Relaxed);
                         }
                     }
                 }
@@ -292,10 +294,9 @@ where
 
             if let FilterKind::Log(filter) = &active_filter.kind {
                 // calc active_filter reorg_old_blocks
-                if active_filter.reorg_status.load(Ordering::Relaxed) == REORG_HAPPEN {
+                if active_filter.reorg_status.load(Ordering::Relaxed) == REORG_OCCUR {
                     let filter = *filter.clone();
                     self.calc_reorg_old_blocks_once(active_filter, &filter).await?;
-                    active_filter.reorg_status.store(REORG_DEFAULT, Ordering::Relaxed);
                 }
             }
             let mut removed_logs = vec![];
@@ -382,7 +383,7 @@ where
         active_filter: &ActiveFilter<T>,
         filter: &Filter,
     ) -> Result<(), EthFilterError> {
-        if active_filter.reorg_status.load(Ordering::Relaxed) != REORG_HAPPEN {
+        if active_filter.reorg_status.load(Ordering::Relaxed) != REORG_OCCUR {
             return Ok(());
         }
         let mut block_num_hashs = vec![];
@@ -394,8 +395,7 @@ where
         }
         let info = self.provider().chain_info()?;
         for num_hash in block_num_hashs {
-            // confirm check get_logs_in_block_range hash == outside num_hash.hash
-            let logs = self
+            let mut logs = self
                 .inner
                 .get_logs_in_block_range(
                     filter,
@@ -405,6 +405,10 @@ where
                     QueryLimits::no_limits(),
                 )
                 .await?;
+            // set removed log
+            for log in &mut logs {
+                log.removed = true;
+            }
             if let Some(x) = active_filter.reorg_old_blocks.write().get_mut(&num_hash.hash) {
                 x.logs = logs;
             }
