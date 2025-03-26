@@ -3,12 +3,12 @@
 /// Helper trait that allows attaching a [`TransactionInterop`].
 pub trait MaybeInteropTransaction {
     /// Attach a [`TransactionInterop`].
-    fn set_interop(&self, conditional: TransactionInterop);
+    fn set_interop(&self, interop: TransactionInterop);
 
     /// Get attached [`TransactionInterop`] if any.
     fn interop(&self) -> Option<TransactionInterop>;
 
-    /// Helper that sets the conditional and returns the instance again
+    /// Helper that sets the interop and returns the instance again
     fn with_interop(self, interop: TransactionInterop) -> Self
     where
         Self: Sized,
