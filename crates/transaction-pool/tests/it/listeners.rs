@@ -2,8 +2,8 @@ use assert_matches::assert_matches;
 use reth_transaction_pool::{
     noop::MockTransactionValidator,
     test_utils::{MockTransactionFactory, TestPoolBuilder},
-    FullTransactionEvent, TransactionEvent, TransactionListenerKind, TransactionOrigin,
-    TransactionPool,
+    FullTransactionEvent, PoolTransaction, TransactionEvent, TransactionListenerKind,
+    TransactionOrigin, TransactionPool,
 };
 use std::{future::poll_fn, task::Poll};
 use tokio_stream::StreamExt;
@@ -21,6 +21,11 @@ async fn txpool_listener_by_hash() {
 
     let mut events = result.unwrap();
     assert_matches!(events.next().await, Some(TransactionEvent::Pending));
+
+    let removed_txs = txpool.remove_transactions(vec![*transaction.transaction.hash()]);
+    assert_eq!(transaction.transaction.hash(), removed_txs[0].transaction.hash());
+
+    assert_matches!(events.next().await, Some(TransactionEvent::Discarded));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -39,6 +44,12 @@ async fn txpool_listener_all() {
         all_tx_events.next().await,
         Some(FullTransactionEvent::Pending(hash)) if hash == *transaction.transaction.get_hash()
     );
+
+    let removed_txs = txpool.remove_transactions(vec![*transaction.transaction.hash()]);
+
+    assert_eq!(transaction.transaction.hash(), removed_txs[0].transaction.hash());
+
+    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Discarded(hash)) if hash == *transaction.transaction.get_hash());
 }
 
 #[tokio::test(flavor = "multi_thread")]
