@@ -91,7 +91,7 @@ impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Poo
 }
 
 impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled> {
-    fn set_interop(&mut self, interop: TransactionInterop) {
+    fn set_interop(&self, interop: TransactionInterop) {
         *self.interop.write() = Some(interop);
     }
 
