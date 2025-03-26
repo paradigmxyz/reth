@@ -48,16 +48,16 @@ where
 /// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
 pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
     PayloadBuilder<
-    Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
-    BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+    Attributes = <N::Payload as PayloadTypes>::PayloadBuilderAttributes,
+    BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
 >
 {
 }
 
 impl<T, N: NodeTypesWithEngine> PayloadBuilderFor<N> for T where
     T: PayloadBuilder<
-        Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
-        BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+        Attributes = <N::Payload as PayloadTypes>::PayloadBuilderAttributes,
+        BuiltPayload = <N::Payload as PayloadTypes>::BuiltPayload,
     >
 {
 }
@@ -101,7 +101,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// the engine.
     fn payload_builder_handle(
         &self,
-    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
+    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Payload>;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
@@ -119,7 +119,7 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle:
-        BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
+        BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Payload>,
     /// Notification channel for engine API events
     pub engine_events: EventSender<BeaconConsensusEngineEvent<<N::Types as NodeTypes>::Primitives>>,
     /// JWT secret for the node.

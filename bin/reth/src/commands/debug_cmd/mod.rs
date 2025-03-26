@@ -36,7 +36,11 @@ pub enum Subcommands<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `debug` command
     pub async fn execute<
-        N: CliNodeTypes<Engine = EthEngineTypes, Primitives = EthPrimitives, ChainSpec = C::ChainSpec>,
+        N: CliNodeTypes<
+            Payload = EthEngineTypes,
+            Primitives = EthPrimitives,
+            ChainSpec = C::ChainSpec,
+        >,
     >(
         self,
         ctx: CliContext,

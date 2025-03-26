@@ -61,7 +61,7 @@ impl EthereumNode {
     >
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
-        <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
+        <Node::Types as NodeTypesWithEngine>::Payload: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -120,7 +120,7 @@ impl NodeTypes for EthereumNode {
 }
 
 impl NodeTypesWithEngine for EthereumNode {
-    type Engine = EthEngineTypes;
+    type Payload = EthEngineTypes;
 }
 
 /// Builds [`EthApi`](reth_rpc::EthApi) for Ethereum.
@@ -176,7 +176,7 @@ where
         Types: NodeTypesWithEngine<
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
-            Engine = EthEngineTypes,
+            Payload = EthEngineTypes,
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
@@ -217,7 +217,7 @@ where
         Types: NodeTypesWithEngine<
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
-            Engine = EthEngineTypes,
+            Payload = EthEngineTypes,
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
@@ -237,7 +237,7 @@ where
         Types: NodeTypesWithEngine<
             ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
-            Engine = EthEngineTypes,
+            Payload = EthEngineTypes,
         >,
     >,
     EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
@@ -466,7 +466,7 @@ impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilde
 where
     Types: NodeTypesWithEngine<
         ChainSpec = ChainSpec,
-        Engine = EthEngineTypes,
+        Payload = EthEngineTypes,
         Primitives = EthPrimitives,
     >,
     Node: FullNodeComponents<Types = Types>,
