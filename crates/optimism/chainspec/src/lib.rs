@@ -228,27 +228,12 @@ impl EthChainSpec for OpChainSpec {
     }
 
     fn display_hardforks(&self) -> Box<dyn core::fmt::Display> {
-        let ethereum_forks = [
-            alloy_hardforks::EthereumHardfork::Frontier.name(),
-            alloy_hardforks::EthereumHardfork::Homestead.name(),
-            alloy_hardforks::EthereumHardfork::Byzantium.name(),
-            alloy_hardforks::EthereumHardfork::Constantinople.name(),
-            alloy_hardforks::EthereumHardfork::Petersburg.name(),
-            alloy_hardforks::EthereumHardfork::Istanbul.name(),
-            alloy_hardforks::EthereumHardfork::Berlin.name(),
-            alloy_hardforks::EthereumHardfork::London.name(),
-            alloy_hardforks::EthereumHardfork::Paris.name(),
-            alloy_hardforks::EthereumHardfork::Shanghai.name(),
-        ];
+        // filter only op hardforks
+        let op_forks = self.inner.hardforks.forks_iter().filter(|(fork, _)| {
+            !EthereumHardfork::VARIANTS.iter().any(|h| h.name() == (*fork).name())
+        });
 
-        let mut filtered_forks = vec![];
-        for (fork, cond) in self.inner.hardforks.forks_iter() {
-            if ethereum_forks.contains(&fork.name()) {
-                filtered_forks.push((fork, cond));
-            }
-        }
-
-        Box::new(DisplayHardforks::new(filtered_forks))
+        Box::new(DisplayHardforks::new(op_forks))
     }
 
     fn genesis_header(&self) -> &Self::Header {
@@ -1075,5 +1060,13 @@ mod tests {
         let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
         let chainspec = OpChainSpec::from_genesis(genesis);
         assert!(chainspec.is_holocene_active_at_timestamp(1732633200));
+    }
+
+    #[test]
+    fn display_hardorks() {
+        let content = BASE_MAINNET.display_hardforks().to_string();
+        for eth_hf in EthereumHardfork::VARIANTS.iter() {
+            assert!(!content.contains(eth_hf.name()));
+        }
     }
 }
