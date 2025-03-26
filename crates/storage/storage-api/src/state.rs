@@ -66,10 +66,8 @@ pub trait StateProvider:
     fn account_balance(&self, addr: &Address) -> ProviderResult<Option<U256>> {
         // Get basic account information
         // Returns None if acc doesn't exist
-        match self.basic_account(addr)? {
-            Some(acc) => Ok(Some(acc.balance)),
-            None => Ok(None),
-        }
+
+        self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.balance)))
     }
 
     /// Get account nonce by its address.
@@ -78,10 +76,7 @@ pub trait StateProvider:
     fn account_nonce(&self, addr: &Address) -> ProviderResult<Option<u64>> {
         // Get basic account information
         // Returns None if acc doesn't exist
-        match self.basic_account(addr)? {
-            Some(acc) => Ok(Some(acc.nonce)),
-            None => Ok(None),
-        }
+        self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
     }
 }
 
