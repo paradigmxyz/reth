@@ -3279,6 +3279,7 @@ dependencies = [
  "reth-optimism-node",
  "reth-optimism-primitives",
  "reth-primitives-traits",
+ "reth-provider",
  "revm-primitives",
  "serde",
 ]

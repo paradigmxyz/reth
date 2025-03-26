@@ -18,6 +18,7 @@ reth-optimism-forks.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
 reth-primitives-traits.workspace = true
+reth-provider.workspace = true
 
 # revm
 revm-primitives.workspace = true

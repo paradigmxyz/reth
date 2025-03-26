@@ -13,9 +13,11 @@ use primitives::{CustomNodePrimitives, CustomTransaction};
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
 use reth_optimism_node::{
-    node::{OpConsensusBuilder, OpPoolBuilder, OpStorage},
+    node::{OpConsensusBuilder, OpPoolBuilder},
+    txpool::OpPooledTransaction,
     OpNode,
 };
+use reth_provider::EthStorage;
 
 pub mod chainspec;
 pub mod engine;
@@ -23,6 +25,8 @@ pub mod primitives;
 
 #[derive(Debug, Clone)]
 pub struct CustomNode {}
+
+type CustomStorage = EthStorage<CustomTransaction>;
 
 impl NodeTypes for CustomNode {
     type Primitives = CustomNodePrimitives;
@@ -42,7 +46,7 @@ where
             Payload = CustomEngineTypes,
             ChainSpec = CustomChainSpec,
             Primitives = CustomNodePrimitives,
-            Storage = OpStorage,
+            Storage = CustomStorage,
         >,
     >,
     ComponentsBuilder<N, OpPoolBuilder, (), (), (), OpConsensusBuilder>: NodeComponentsBuilder<N>,
@@ -54,7 +58,7 @@ where
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
-            .pool(OpPoolBuilder::<CustomTransaction>::default())
+            .pool(OpPoolBuilder::<OpPooledTransaction<CustomTransaction>>::default())
             .consensus(OpConsensusBuilder::default())
     }
 
