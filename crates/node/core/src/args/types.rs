@@ -95,13 +95,11 @@ macro_rules! max_values {
 max_values!(MaxU32, u32);
 max_values!(MaxU64, u64);
 
-/// A helper type that supports parsing "max" or delegates to another parser
+/// A helper type that supports parsing max or delegates to another parser
 #[derive(Debug, Clone)]
 pub struct MaxOr<T> {
     /// The inner parser
     inner: T,
-    /// The parsed value
-    value: u64,
 }
 
 impl<T> MaxOr<T>
@@ -111,12 +109,7 @@ where
 {
     /// Creates a new instance with the given inner parser
     pub fn new(inner: T) -> Self {
-        Self { inner, value: 0 }
-    }
-
-    /// Returns the parsed value
-    pub fn get(&self) -> u64 {
-        self.value
+        Self { inner }
     }
 }
 
@@ -140,9 +133,17 @@ where
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[derive(Parser, Debug)]
+    struct NodeCommand {
+        #[arg(long)]
+        max_value: u64,
+    }
 
     #[test]
     fn test_zero_parse() {
@@ -160,5 +161,17 @@ mod tests {
         let original = 0u64;
         let expected = ZeroAsNoneU64(None);
         assert_eq!(ZeroAsNoneU64::from(original), expected);
+    }
+
+    #[test]
+    fn parse_max_value() {
+        let cmd: NodeCommand = NodeCommand::try_parse_from(["reth", "--max-value", "max"]).unwrap();
+        assert_eq!(cmd.max_value, u64::MAX);
+
+        let cmd: NodeCommand = NodeCommand::try_parse_from(["reth", "--max-value", "42"]).unwrap();
+        assert_eq!(cmd.max_value, 42);
+
+        let result = NodeCommand::try_parse_from(["reth", "--max-value", "invalid"]);
+        assert!(result.is_err());
     }
 }
