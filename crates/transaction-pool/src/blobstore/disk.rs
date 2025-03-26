@@ -7,7 +7,6 @@ use parking_lot::{Mutex, RwLock};
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
-use crate::TransactionPool;
 
 /// How many [`BlobTransactionSidecar`] to cache in memory.
 pub const DEFAULT_MAX_CACHED_BLOBS: u32 = 100;
@@ -199,7 +198,9 @@ impl DiskFileBlobStoreInner {
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
         {
             let mut map = self.versioned_hashes_to_txhash.lock();
-            map.insert(tx, data.versioned_hashes());
+            if let Some(first_hash) = data.versioned_hashes().next() {
+                map.insert(tx, first_hash);
+            }
         }
 
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
@@ -217,7 +218,9 @@ impl DiskFileBlobStoreInner {
         {
             let mut map = self.versioned_hashes_to_txhash.lock();
             for (tx, data) in &txs {
-                map.insert(*tx, data.versioned_hashes());
+                if let Some(first_hash) = data.versioned_hashes().next() {
+                    map.insert(*tx, first_hash);
+                }
             }
         }
 
