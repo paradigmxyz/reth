@@ -63,7 +63,7 @@ impl<N, C, AO> AnyNode<N, C, AO> {
 impl<N, C, AO> NodeTypes for AnyNode<N, C, AO>
 where
     N: FullNodeTypes,
-    C: Send + Sync + Unpin + 'static,
+    C: Clone + Send + Sync + Unpin + 'static,
     AO: Send + Sync + Unpin + Clone + 'static,
 {
     type Primitives = <N::Types as NodeTypes>::Primitives;
@@ -78,7 +78,7 @@ where
 impl<N, C, AO> NodeTypesWithEngine for AnyNode<N, C, AO>
 where
     N: FullNodeTypes,
-    C: Send + Sync + Unpin + 'static,
+    C: Clone + Send + Sync + Unpin + 'static,
     AO: Send + Sync + Unpin + Clone + 'static,
 {
     type Payload = <N::Types as NodeTypesWithEngine>::Payload;
