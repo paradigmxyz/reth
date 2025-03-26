@@ -236,9 +236,7 @@ mod op {
                 Self::Eip2930(tx) => tx.hash(),
                 Self::Eip1559(tx) => tx.hash(),
                 Self::Eip7702(tx) => tx.hash(),
-                // TODO: update Deposit variant's matched response to tx.hash_ref() once implemented
-                // in alloys-rs since tx.hash() returns value instead of reference
-                Self::Deposit(tx) => tx.hash(),
+                Self::Deposit(tx) => tx.hash_ref(),
             }
         }
 
@@ -253,18 +251,29 @@ mod op {
         }
 
         fn recover_signer(&self) -> Result<Address, RecoveryError> {
-            if let Self::Deposit(tx) = self {
-                return Ok(tx.from);
-            }
-
             let signature_hash = match self {
                 Self::Legacy(tx) => tx.signature_hash(),
                 Self::Eip2930(tx) => tx.signature_hash(),
                 Self::Eip1559(tx) => tx.signature_hash(),
                 Self::Eip7702(tx) => tx.signature_hash(),
-                Self::Deposit(_) => unreachable!(),
+                // Optimism's Deposit transaction does not have a signature. Directly return the
+                // `from` address.
+                Self::Deposit(tx) => return Ok(tx.from),
             };
             recover_signer(self.signature(), signature_hash)
+        }
+
+        fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
+            let signature_hash = match self {
+                Self::Legacy(tx) => tx.signature_hash(),
+                Self::Eip2930(tx) => tx.signature_hash(),
+                Self::Eip1559(tx) => tx.signature_hash(),
+                Self::Eip7702(tx) => tx.signature_hash(),
+                // Optimism's Deposit transaction does not have a signature. Directly return the
+                // `from` address.
+                Self::Deposit(tx) => return Ok(tx.from),
+            };
+            recover_signer_unchecked(self.signature(), signature_hash)
         }
 
         fn recover_signer_unchecked_with_buf(
