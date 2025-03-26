@@ -24,17 +24,12 @@ pub struct TransactionInterop {
     /// Unix timestamp until which tx if considered valid by supervisor.
     ///
     /// If None - tx is not validated, it should be automatically revalidated by interop tracker.
-    pub timeout: Option<u64>,
+    pub timeout: u64,
 }
 
 impl TransactionInterop {
     /// Checks if provided timestamp fits into tx validation window
     pub fn is_valid(&self, timestamp: u64) -> bool {
-        if let Some(timeout) = self.timeout {
-            if timestamp > timeout {
-                return true;
-            }
-        }
-        false
+        timestamp < self.timeout
     }
 }
