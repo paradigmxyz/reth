@@ -21,6 +21,8 @@ use crate::args::{
     GasPriceOracleArgs, RpcStateCacheArgs,
 };
 
+use super::types::MaxOr;
+
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
 
@@ -162,7 +164,7 @@ pub struct RpcServerArgs {
         long = "rpc.gascap",
         alias = "rpc-gascap",
         value_name = "GAS_CAP",
-        value_parser = RangedU64ValueParser::<u64>::new().range(1..),
+        value_parser = MaxOr::new(RangedU64ValueParser::<u64>::new().range(1..)),
         default_value_t = constants::gas_oracle::RPC_DEFAULT_GAS_CAP
     )]
     pub rpc_gas_cap: u64,
