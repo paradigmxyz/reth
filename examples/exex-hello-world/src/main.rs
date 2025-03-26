@@ -6,6 +6,7 @@
 //! cargo run -p example-exex-hello-world -- node --dev --dev.block-time 5s
 //! ```
 
+use clap::Parser;
 use futures::TryStreamExt;
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
@@ -16,10 +17,16 @@ use reth_ethereum::{
     EthPrimitives,
 };
 use reth_tracing::tracing::info;
+use reth_node_ethereum::EthereumNode;
+use reth_optimism_node::OpNode;
 
-async fn my_exex<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>>(
-    mut ctx: ExExContext<Node>,
-) -> eyre::Result<()> {
+#[derive(Parser)]
+struct ExExArgs {
+    #[arg(long)]
+    optimism: bool,
+}
+
+async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>)-> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.try_next().await? {
         match &notification {
             ExExNotification::ChainCommitted { new } => {
@@ -42,13 +49,24 @@ async fn my_exex<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimi
 }
 
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(async move |builder, _| {
-        let handle = builder
-            .node(EthereumNode::default())
-            .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
-            .launch()
-            .await?;
+    let args = ExExArgs::parse();
+
+    reth::cli::Cli::parse_args().run(move |builder, _| async move {
+        let handle = if args.optimism {
+            builder
+                .node(OpNode::default())
+                .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
+                .launch()
+                .await?
+        } else {
+            builder
+                .node(EthereumNode::default())
+                .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
+                .launch()
+            .await?
+        };
 
         handle.wait_for_node_exit().await
     })
 }
+
