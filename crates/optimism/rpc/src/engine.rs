@@ -19,6 +19,7 @@ use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApi;
 use reth_transaction_pool::TransactionPool;
 use tracing::trace;
+use reth_rpc_server_types::result::internal_rpc_err;
 
 /// The list of all supported Engine capabilities available over the engine endpoint.
 ///
@@ -334,6 +335,11 @@ where
         Ok(self.inner.get_payload_bodies_by_range_v1_metered(start.to(), count.to()).await?)
     }
 
+    async fn signal_superchain_v1(&self, _signal: SuperchainSignal) -> RpcResult<ProtocolVersion> {
+        trace!(target: "rpc::engine", "Serving signal_superchain_v1");
+        Err(internal_rpc_err("unimplemented"))
+    }
+
     async fn get_client_version_v1(
         &self,
         client: ClientVersionV1,
@@ -344,11 +350,6 @@ where
 
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
         Ok(self.inner.capabilities().list())
-    }
-
-    async fn signal_superchain_v1(&self, _signal: SuperchainSignal) -> RpcResult<ProtocolVersion> {
-        trace!(target: "rpc::engine", "Serving signal_superchain_v1");
-        unimplemented!("signal superchain v1 is not supported yet")
     }
 }
 
