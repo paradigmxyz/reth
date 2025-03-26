@@ -16,9 +16,9 @@ use reth_ethereum::{
     },
     EthPrimitives,
 };
-use reth_tracing::tracing::info;
 use reth_node_ethereum::EthereumNode;
 use reth_optimism_node::OpNode;
+use reth_tracing::tracing::info;
 
 #[derive(Parser)]
 struct ExExArgs {
@@ -26,7 +26,7 @@ struct ExExArgs {
     optimism: bool,
 }
 
-async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>)-> eyre::Result<()> {
+async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.try_next().await? {
         match &notification {
             ExExNotification::ChainCommitted { new } => {
@@ -63,7 +63,7 @@ fn main() -> eyre::Result<()> {
                 .node(EthereumNode::default())
                 .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
                 .launch()
-            .await?
+                .await?
         };
 
         handle.wait_for_node_exit().await
