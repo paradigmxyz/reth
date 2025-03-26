@@ -1,7 +1,7 @@
 //! This example shows how implement a custom node.
 //!
 //! A node consists of:
-//! - primtives: block,header,transactions
+//! - primitives: block,header,transactions
 //! - components: network,pool,evm
 //! - engine: advances the node
 
