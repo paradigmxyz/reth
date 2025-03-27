@@ -51,9 +51,10 @@ fn main() -> eyre::Result<()> {
     let args = ExExArgs::parse();
 
     if args.optimism {
-         reth_optimism_node::cli::Cli::parse_args().run(|builder, _| {
+         reth::cli::Cli::parse_args().run(|builder, _| {
             Box::pin(async move {
                 let handle = builder
+                    .with_types::<reth_optimism_node::OpChainSpec>()
                     .node(OpNode::default())
                     .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
                     .launch()
