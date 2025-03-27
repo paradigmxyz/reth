@@ -273,6 +273,15 @@ impl<T> OpPooledTx for T where
 {
 }
 
+// Helper for tests to use [`MockTransaction`] with interop txpool tests
+impl MaybeInteropTransaction for reth_transaction_pool::test_utils::MockTransaction {
+    fn set_interop(&self, _interop: TransactionInterop) {}
+
+    fn interop(&self) -> Option<TransactionInterop> {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{OpPooledTransaction, OpTransactionValidator};

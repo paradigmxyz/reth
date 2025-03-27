@@ -27,12 +27,9 @@ use reth_optimism_node::{
     utils::optimism_payload_attributes,
     OpEngineTypes, OpNode,
 };
-use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_optimism_payload_builder::{builder::OpPayloadTransactions, BestPayloadTransactions};
 use reth_optimism_primitives::OpPrimitives;
-use reth_payload_util::{
-    BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
-    PayloadTransactionsFixed,
-};
+use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::PoolTransaction;

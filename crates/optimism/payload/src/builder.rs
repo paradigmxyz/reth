@@ -4,7 +4,7 @@ use crate::{
     config::{OpBuilderConfig, OpDAConfig},
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
-    OpPayloadPrimitives,
+    BestPayloadTransactions, OpPayloadPrimitives,
 };
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_primitives::{Bytes, B256, U256};
@@ -25,10 +25,10 @@ use reth_execution_types::ExecutionOutcome;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::transaction::signed::OpTransaction;
-use reth_optimism_txpool::OpPooledTx;
+use reth_optimism_txpool::{interop::MaybeInteropTransaction, OpPooledTx};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
+use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives_traits::{NodePrimitives, SealedHeader, SignedTransaction, TxTy};
 use reth_revm::{
     cancelled::CancelOnDrop, database::StateProviderDatabase, db::State,
@@ -392,7 +392,7 @@ pub trait OpPayloadTransactions<Transaction>: Clone + Send + Sync + Unpin + 'sta
     ) -> impl PayloadTransactions<Transaction = Transaction>;
 }
 
-impl<T: PoolTransaction> OpPayloadTransactions<T> for () {
+impl<T: PoolTransaction + MaybeInteropTransaction> OpPayloadTransactions<T> for () {
     fn best_transactions<Pool: TransactionPool<Transaction = T>>(
         &self,
         pool: Pool,
