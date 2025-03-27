@@ -198,9 +198,8 @@ impl DiskFileBlobStoreInner {
     fn insert_one(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError> {
         {
             let mut map = self.versioned_hashes_to_txhash.lock();
-            if let Some(first_hash) = data.versioned_hashes().next() {
-                map.insert(tx, first_hash);
-            }
+            data.versioned_hashes()
+                .for_each(|hash| { map.insert(hash, tx); })
         }
 
         let mut buf = Vec::with_capacity(data.rlp_encoded_fields_length());
@@ -217,10 +216,9 @@ impl DiskFileBlobStoreInner {
     fn insert_many(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         {
             let mut map = self.versioned_hashes_to_txhash.lock();
-            for (tx, data) in &txs {
-                if let Some(first_hash) = data.versioned_hashes().next() {
-                    map.insert(*tx, first_hash);
-                }
+            for (tx, data) in txs.iter() {
+                data.versioned_hashes()
+                    .for_each(|hash| { map.insert(hash, *tx); })
             }
         }
 
