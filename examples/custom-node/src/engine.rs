@@ -1,4 +1,4 @@
-use crate::primitives::{CustomNodePrimitives, CustomTransaction};
+use crate::primitives::CustomNodePrimitives;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
@@ -12,6 +12,7 @@ use reth_node_api::{
     PayloadBuilderAttributes, PayloadTypes,
 };
 use reth_optimism_node::{OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes};
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::SealedBlock;
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
@@ -79,7 +80,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
 
 #[derive(Debug, Clone)]
 pub struct CustomPayloadBuilderAttributes {
-    inner: OpPayloadBuilderAttributes<CustomTransaction>,
+    inner: OpPayloadBuilderAttributes<OpTransactionSigned>,
     _extension: u64,
 }
 

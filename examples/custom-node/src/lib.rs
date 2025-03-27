@@ -9,12 +9,11 @@
 
 use chainspec::CustomChainSpec;
 use engine::CustomEngineTypes;
-use primitives::{CustomNodePrimitives, CustomTransaction};
+use primitives::CustomNodePrimitives;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
 use reth_optimism_node::{
     node::{OpConsensusBuilder, OpPoolBuilder, OpStorage},
-    txpool::OpPooledTransaction,
     OpNode,
 };
 
@@ -55,7 +54,7 @@ where
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
-            .pool(OpPoolBuilder::<OpPooledTransaction<CustomTransaction>>::default())
+            .pool(OpPoolBuilder::default())
             .consensus(OpConsensusBuilder::default())
     }
 

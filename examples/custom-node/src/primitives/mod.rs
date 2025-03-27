@@ -7,7 +7,7 @@ pub use block::*;
 pub mod tx;
 pub use tx::*;
 
-use reth_optimism_primitives::OpReceipt;
+use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::NodePrimitives;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -17,6 +17,6 @@ impl NodePrimitives for CustomNodePrimitives {
     type Block = Block;
     type BlockHeader = CustomHeader;
     type BlockBody = BlockBody;
-    type SignedTx = CustomTransaction;
+    type SignedTx = OpTransactionSigned;
     type Receipt = OpReceipt;
 }
