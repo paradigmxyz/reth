@@ -217,9 +217,9 @@ impl DiskFileBlobStoreInner {
     fn insert_many(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         {
             let mut map = self.versioned_hashes_to_txhash.lock();
-            for (tx, data) in txs {
+            for (tx, data) in &txs {
                 data.versioned_hashes().for_each(|hash| {
-                    map.insert(hash, tx);
+                    map.insert(hash, *tx);
                 })
             }
         }
