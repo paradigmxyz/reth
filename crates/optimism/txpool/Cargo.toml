@@ -23,7 +23,9 @@ reth-chainspec.workspace = true
 reth-primitives-traits.workspace = true
 reth-chain-state.workspace = true
 reth-storage-api.workspace = true
-reth-transaction-pool.workspace = true
+
+# TODO: figure out what to do with test-urls in here
+reth-transaction-pool = {workspace = true, features = ["test-utils"]}
 
 # revm
 op-revm.workspace = true
