@@ -471,7 +471,8 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     }
 }
 
-pub trait Policy {
+/// decides which peers get transactions in a flexible and configurable way
+pub trait PeersPolicy {
     /// Determines whether a transaction should be propagated to a given peer.
     fn should_propagate(&self, peer: &PeerId) -> bool;
 
@@ -482,6 +483,61 @@ pub trait Policy {
     fn on_peer_removed(&mut self, peer: &PeerId);
 }
 
+pub struct AllPeersPolicy;
+pub struct NoPeersPolicy;
+pub struct SubsetPeersPolicy {
+    allowed_peers: HashSet<PeerId>,
+}
+
+impl PeersPolicy for AllPeersPolicy {
+    fn should_propagate(&self, peer: &PeerId) -> bool {
+        true
+    }
+
+    fn on_peer_added(&mut self, peer: PeerId) {
+
+    }
+
+    fn on_peer_removed(&mut self, peer: &PeerId) {
+
+    }
+}
+
+impl PeersPolicy for NoPeersPolicy {
+    fn should_propagate(&self, peer: &PeerId) -> bool {
+        false
+    }
+
+    fn on_peer_added(&mut self, peer: PeerId) {
+
+    }
+
+    fn on_peer_removed(&mut self, peer: &PeerId) {
+
+    }
+}
+
+impl SubsetPeersPolicy {
+    pub fn new() -> Self {
+        Self {
+            allowed_peers: HashSet::new(),
+        }
+    }
+}
+
+impl PeersPolicy for SubsetPeersPolicy {
+    fn should_propagate(&self, peer: &PeerId) -> bool {
+        self.allowed_peers.contains(peer)
+    }
+
+    fn on_peer_added(&mut self, peer: PeerId) {
+
+    }
+
+    fn on_peer_removed(&mut self, peer: &PeerId) {
+
+    }
+}
 
 impl<Pool, N> TransactionsManager<Pool, N>
 where
