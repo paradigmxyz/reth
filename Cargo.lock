@@ -3348,6 +3348,7 @@ dependencies = [
  "futures",
  "reth",
  "reth-ethereum",
+ "reth-op",
  "reth-tracing",
 ]
 
@@ -8626,6 +8627,7 @@ dependencies = [
  "reth-network",
  "reth-node-api",
  "reth-optimism-chainspec",
+ "reth-optimism-cli",
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-node",

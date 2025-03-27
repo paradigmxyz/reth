@@ -11,12 +11,10 @@ use futures::TryStreamExt;
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{
-        api::{FullNodeComponents, NodeTypes},
+        api::{FullNodeComponents},
         EthereumNode,
     },
-    EthPrimitives,
 };
-use reth_optimism_node::OpNode;
 use reth_tracing::tracing::info;
 
 #[derive(Parser)]
@@ -51,11 +49,10 @@ fn main() -> eyre::Result<()> {
     let args = ExExArgs::parse();
 
     if args.optimism {
-         reth::cli::Cli::parse_args().run(|builder, _| {
+        reth_op::cli::Cli::parse_args().run(|builder, _| {
             Box::pin(async move {
                 let handle = builder
-                    .with_types::<reth_optimism_node::OpChainSpec>()
-                    .node(OpNode::default())
+                    .node(reth_op::node::OpNode::default())
                     .install_exex("my-exex", async move |ctx| Ok(my_exex(ctx)))
                     .launch()
                     .await?;
