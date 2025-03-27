@@ -17,7 +17,7 @@ use reth_primitives_traits::{
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
-pub enum ExtendedOpTxEnvelope {
+pub enum ExtendedOpTxEnvelope<T> {
     BuiltIn(OpTxEnvelope),
     Other(T),
 }
