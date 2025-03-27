@@ -115,6 +115,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![allow(unreachable_pub)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -174,3 +175,5 @@ pub use reth_network_p2p as p2p;
 
 /// re-export types crate
 pub use reth_eth_wire_types as types;
+
+use aquamarine as _;
