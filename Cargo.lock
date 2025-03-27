@@ -9007,6 +9007,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rpc-client",
  "alloy-rpc-types-eth",
  "c-kzg",
  "derive_more 2.0.1",
@@ -9027,6 +9028,10 @@ dependencies = [
  "reth-provider",
  "reth-storage-api",
  "reth-transaction-pool",
+ "serde",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
