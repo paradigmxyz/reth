@@ -887,9 +887,6 @@ impl SignedTransaction for TransactionSigned {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
 
-    // fn signature(&self) -> &Signature {
-    //     &self.signature
-    // }
 
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         let signature_hash = self.signature_hash();
