@@ -10,10 +10,7 @@ use clap::Parser;
 use futures::TryStreamExt;
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
-    node::{
-        api::{FullNodeComponents},
-        EthereumNode,
-    },
+    node::{api::FullNodeComponents, EthereumNode},
 };
 use reth_tracing::tracing::info;
 
