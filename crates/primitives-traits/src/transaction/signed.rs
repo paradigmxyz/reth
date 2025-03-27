@@ -40,9 +40,6 @@ pub trait SignedTransaction:
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;
 
-    /// Returns reference to signature.
-    fn signature(&self) -> &Signature;
-
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.
     ///
@@ -152,19 +149,16 @@ where
         }
     }
 
-    fn signature(&self) -> &Signature {
-        match self {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
+        let signature_hash = self.signature_hash();
+        let signature = match self {
             Self::Legacy(tx) => tx.signature(),
             Self::Eip2930(tx) => tx.signature(),
             Self::Eip1559(tx) => tx.signature(),
             Self::Eip7702(tx) => tx.signature(),
             Self::Eip4844(tx) => tx.signature(),
-        }
-    }
-
-    fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        let signature_hash = self.signature_hash();
-        recover_signer(self.signature(), signature_hash)
+        };
+        recover_signer(signature, signature_hash)
     }
 
     fn recover_signer_unchecked_with_buf(
@@ -179,7 +173,14 @@ where
             Self::Eip4844(tx) => tx.tx().encode_for_signing(buf),
         }
         let signature_hash = keccak256(buf);
-        recover_signer_unchecked(self.signature(), signature_hash)
+        let signature = match self {
+            Self::Legacy(tx) => tx.signature(),
+            Self::Eip2930(tx) => tx.signature(),
+            Self::Eip1559(tx) => tx.signature(),
+            Self::Eip7702(tx) => tx.signature(),
+            Self::Eip4844(tx) => tx.signature(),
+        };
+        recover_signer_unchecked(signature, signature_hash)
     }
 }
 
@@ -201,18 +202,15 @@ mod op {
             }
         }
 
-        fn signature(&self) -> &Signature {
-            match self {
+        fn recover_signer(&self) -> Result<Address, RecoveryError> {
+            let signature_hash = self.signature_hash();
+            let signature = match self {
                 Self::Legacy(tx) => tx.signature(),
                 Self::Eip2930(tx) => tx.signature(),
                 Self::Eip1559(tx) => tx.signature(),
                 Self::Eip7702(tx) => tx.signature(),
-            }
-        }
-
-        fn recover_signer(&self) -> Result<Address, RecoveryError> {
-            let signature_hash = self.signature_hash();
-            recover_signer(self.signature(), signature_hash)
+            };
+            recover_signer(signature, signature_hash)
         }
 
         fn recover_signer_unchecked_with_buf(
@@ -226,7 +224,13 @@ mod op {
                 Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
             }
             let signature_hash = keccak256(buf);
-            recover_signer_unchecked(self.signature(), signature_hash)
+            let signature = match self {
+                Self::Legacy(tx) => tx.signature(),
+                Self::Eip2930(tx) => tx.signature(),
+                Self::Eip1559(tx) => tx.signature(),
+                Self::Eip7702(tx) => tx.signature(),
+            };
+            recover_signer_unchecked(signature, signature_hash)
         }
     }
 
@@ -241,16 +245,6 @@ mod op {
             }
         }
 
-        fn signature(&self) -> &Signature {
-            match self {
-                Self::Legacy(tx) => tx.signature(),
-                Self::Eip2930(tx) => tx.signature(),
-                Self::Eip1559(tx) => tx.signature(),
-                Self::Eip7702(tx) => tx.signature(),
-                Self::Deposit(_tx) => &DEPOSIT_SIGNATURE,
-            }
-        }
-
         fn recover_signer(&self) -> Result<Address, RecoveryError> {
             let signature_hash = match self {
                 Self::Legacy(tx) => tx.signature_hash(),
@@ -261,7 +255,14 @@ mod op {
                 // `from` address.
                 Self::Deposit(tx) => return Ok(tx.from),
             };
-            recover_signer(self.signature(), signature_hash)
+            let signature = match self {
+                Self::Legacy(tx) => tx.signature(),
+                Self::Eip2930(tx) => tx.signature(),
+                Self::Eip1559(tx) => tx.signature(),
+                Self::Eip7702(tx) => tx.signature(),
+                Self::Deposit(_) => &DEPOSIT_SIGNATURE,
+            };
+            recover_signer(signature, signature_hash)
         }
 
         fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
@@ -274,7 +275,14 @@ mod op {
                 // `from` address.
                 Self::Deposit(tx) => return Ok(tx.from),
             };
-            recover_signer_unchecked(self.signature(), signature_hash)
+            let signature = match self {
+                Self::Legacy(tx) => tx.signature(),
+                Self::Eip2930(tx) => tx.signature(),
+                Self::Eip1559(tx) => tx.signature(),
+                Self::Eip7702(tx) => tx.signature(),
+                Self::Deposit(_) => &DEPOSIT_SIGNATURE,
+            };
+            recover_signer_unchecked(signature, signature_hash)
         }
 
         fn recover_signer_unchecked_with_buf(
@@ -289,7 +297,14 @@ mod op {
                 Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
             }
             let signature_hash = keccak256(buf);
-            recover_signer_unchecked(self.signature(), signature_hash)
+            let signature = match self {
+                Self::Legacy(tx) => tx.signature(),
+                Self::Eip2930(tx) => tx.signature(),
+                Self::Eip1559(tx) => tx.signature(),
+                Self::Eip7702(tx) => tx.signature(),
+                Self::Deposit(_) => &DEPOSIT_SIGNATURE,
+            };
+            recover_signer_unchecked(signature, signature_hash)
         }
     }
 }
