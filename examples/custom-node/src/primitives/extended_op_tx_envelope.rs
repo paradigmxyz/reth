@@ -18,11 +18,11 @@ use revm_primitives::{Address, Bytes, TxKind, B256, U256};
 
 pub enum ExtendedOpTxEnvelope {
     BuiltIn(OpTxEnvelope),
-    Other(OpTransactionSigned),
+    Other(T),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
-impl Transaction for ExtendedOpTxEnvelope {
+impl Transaction for ExtendedOpTxEnvelope<T> where T:Transaction {
     fn chain_id(&self) -> Option<ChainId> {
         match self {
             Self::BuiltIn(tx) => tx.chain_id(),
@@ -130,7 +130,7 @@ impl Transaction for ExtendedOpTxEnvelope {
     }
 }
 
-impl SignedTransaction for ExtendedOpTxEnvelope {
+impl SignedTransaction for ExtendedOpTxEnvelope<T> where T:SignedTransaction {
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         match self {
             Self::BuiltIn(tx) => tx.recover_signer(),
@@ -170,7 +170,7 @@ impl SignedTransaction for ExtendedOpTxEnvelope {
     }
 }
 
-impl Typed2718 for ExtendedOpTxEnvelope {
+impl Typed2718 for ExtendedOpTxEnvelope<T> where T:Typed2718 {
     fn ty(&self) -> u8 {
         match self {
             Self::BuiltIn(tx) => tx.ty(),
@@ -179,7 +179,7 @@ impl Typed2718 for ExtendedOpTxEnvelope {
     }
 }
 
-impl Decodable2718 for ExtendedOpTxEnvelope {
+impl Decodable2718 for ExtendedOpTxEnvelope<T> where T:Decodable2718 {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
         OpTxEnvelope::typed_decode(ty, buf)
             .map(Self::BuiltIn)
@@ -193,7 +193,7 @@ impl Decodable2718 for ExtendedOpTxEnvelope {
     }
 }
 
-impl Encodable2718 for ExtendedOpTxEnvelope {
+impl Encodable2718 for ExtendedOpTxEnvelope<T> where T:Encodable2718 {
     fn encode_2718(&self, out: &mut dyn BufMut) {
         match self {
             Self::BuiltIn(tx) => tx.encode_2718(out),
@@ -209,7 +209,7 @@ impl Encodable2718 for ExtendedOpTxEnvelope {
     }
 }
 
-impl Decodable for ExtendedOpTxEnvelope {
+impl Decodable for ExtendedOpTxEnvelope<T> where T:Decodable {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
         OpTxEnvelope::decode(buf)
             .map(Self::BuiltIn)
@@ -217,7 +217,7 @@ impl Decodable for ExtendedOpTxEnvelope {
     }
 }
 
-impl Encodable for ExtendedOpTxEnvelope {
+impl Encodable for ExtendedOpTxEnvelope<T> where T:Encodable {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::BuiltIn(tx) => tx.encode(out),
@@ -226,7 +226,7 @@ impl Encodable for ExtendedOpTxEnvelope {
     }
 }
 
-impl InMemorySize for ExtendedOpTxEnvelope {
+impl InMemorySize for ExtendedOpTxEnvelope<T> where T:InMemorySize  {
     fn size(&self) -> usize {
         match self {
             Self::BuiltIn(tx) => tx.size(),
@@ -235,7 +235,7 @@ impl InMemorySize for ExtendedOpTxEnvelope {
     }
 }
 
-impl SerdeBincodeCompat for ExtendedOpTxEnvelope {
+impl SerdeBincodeCompat for ExtendedOpTxEnvelope<T> where T:SerdeBincodeCompat  {
     type BincodeRepr<'a> = BincodeCompatOpTransactionSigned<'a>;
 
     fn as_repr(&self) -> Self::BincodeRepr<'_> {
@@ -250,7 +250,7 @@ impl SerdeBincodeCompat for ExtendedOpTxEnvelope {
     }
 }
 
-impl Compact for ExtendedOpTxEnvelope {
+impl Compact for ExtendedOpTxEnvelope<T> where T:Compact  {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
