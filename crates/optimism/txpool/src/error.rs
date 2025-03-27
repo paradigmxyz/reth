@@ -1,6 +1,5 @@
-use reth_optimism_primitives::supervisor::{
-    InteropTxValidatorError, InvalidInboxEntry, SafetyLevel,
-};
+use crate::supervisor::{InteropTxValidatorError, InvalidInboxEntry};
+use op_alloy_consensus::interop::SafetyLevel;
 use reth_transaction_pool::error::PoolTransactionError;
 use std::any::Any;
 

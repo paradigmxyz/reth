@@ -8905,11 +8905,9 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-rpc-client",
  "alloy-rpc-types-eth",
  "alloy-serde",
  "arbitrary",
- "async-trait",
  "bincode",
  "bytes",
  "derive_more 2.0.1",
@@ -8928,8 +8926,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 2.0.12",
- "tokio",
 ]
 
 [[package]]
@@ -9011,6 +9007,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
+ "alloy-rpc-client",
  "alloy-rpc-types-eth",
  "c-kzg",
  "derive_more 2.0.1",
@@ -9031,6 +9028,7 @@ dependencies = [
  "reth-provider",
  "reth-storage-api",
  "reth-transaction-pool",
+ "serde",
  "thiserror 2.0.12",
  "tokio",
  "tracing",

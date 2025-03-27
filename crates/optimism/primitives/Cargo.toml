@@ -32,7 +32,6 @@ op-alloy-consensus.workspace = true
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-network = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
-alloy-rpc-client = { workspace = true, optional = true, features = ["reqwest", "default"] }
 
 # codec
 bytes = { workspace = true, optional = true }
@@ -43,9 +42,6 @@ serde_with = { workspace = true, optional = true }
 # misc
 derive_more = { workspace = true, features = ["deref", "from", "into", "constructor"] }
 rand = { workspace = true, optional = true }
-async-trait = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
 
 # test
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -84,7 +80,6 @@ std = [
     "serde_json/std",
     "alloy-evm/std",
     "serde_with?/std",
-    "thiserror/std",
 ]
 alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types-eth", "op-alloy-consensus/alloy-compat"]
 reth-codec = [
@@ -134,11 +129,4 @@ arbitrary = [
     "rand",
     "alloy-rpc-types-eth?/arbitrary",
     "alloy-serde?/arbitrary",
-]
-supervisor = [
-    "dep:serde",
-    "dep:thiserror",
-    "dep:tokio",
-    "dep:async-trait",
-    "dep:alloy-rpc-client",
 ]

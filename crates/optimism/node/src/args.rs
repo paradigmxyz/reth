@@ -2,7 +2,8 @@
 
 //! clap [Args](clap::Args) for optimism rollup configuration
 
-use reth_optimism_primitives::supervisor::{SafetyLevel, DEFAULT_SUPERVISOR_URL};
+use op_alloy_consensus::interop::SafetyLevel;
+use reth_optimism_txpool::supervisor::DEFAULT_SUPERVISOR_URL;
 
 /// Parameters for rollup configuration
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]

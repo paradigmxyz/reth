@@ -16,10 +16,8 @@
 // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-use crate::supervisor::SafetyLevel;
-use alloc::boxed::Box;
 use core::error;
-use thiserror::Error;
+use op_alloy_consensus::interop::SafetyLevel;
 
 /// Derived from op-supervisor
 // todo: rm once resolved <https://github.com/ethereum-optimism/optimism/issues/14603>
@@ -29,7 +27,7 @@ const UNKNOWN_CHAIN_MSG: &str = "unknown chain: ";
 const MINIMUM_SAFETY_MSG: &str = "does not meet the minimum safety";
 
 /// Invalid inbox entry
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum InvalidInboxEntry {
     /// Message does not meet minimum safety level
     #[error("message does not meet min safety level, got: {got}, expected: {expected}")]

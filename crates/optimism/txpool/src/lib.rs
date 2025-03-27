@@ -12,6 +12,7 @@ mod validator;
 pub use validator::{OpL1BlockInfo, OpTransactionValidator};
 
 pub mod conditional;
+pub mod supervisor;
 mod transaction;
 pub use transaction::{OpPooledTransaction, OpPooledTx};
 mod error;

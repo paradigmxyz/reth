@@ -1,4 +1,7 @@
-use crate::InvalidCrossTx;
+use crate::{
+    supervisor::{parse_access_list_items_to_inbox_entries, ExecutingDescriptor, SupervisorClient},
+    InvalidCrossTx,
+};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::Encodable2718;
 use op_revm::L1BlockInfo;
@@ -6,9 +9,6 @@ use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::supervisor::{
-    ExecutingDescriptor, InteropTxValidator, SupervisorClient,
-};
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
@@ -24,7 +24,7 @@ use std::sync::{
 use tracing::trace;
 
 /// The interval for which we check transaction against supervisor, 1 day.
-const TRANSACTION_VALIDITY_WINDOW: u64 = 86400;
+const TRANSACTION_VALIDITY_WINDOW_SECS: u64 = 86400;
 
 /// Tracks additional infos for the current block.
 #[derive(Debug, Default)]
@@ -35,6 +35,13 @@ pub struct OpL1BlockInfo {
     timestamp: AtomicU64,
     /// Current block number.
     number: AtomicU64,
+}
+
+impl OpL1BlockInfo {
+    /// Returns the most recent timestamp
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp.load(Ordering::Relaxed)
+    }
 }
 
 /// Validator for Optimism transactions.
@@ -175,16 +182,13 @@ where
 
         // Interop cross tx validation
         if let Some(Err(err)) = self.is_valid_cross_tx(&transaction).await {
-            if matches!(err, InvalidCrossTx::CrossChainTxPreInterop) {
-                return TransactionValidationOutcome::Invalid(
-                    transaction,
-                    InvalidTransactionError::TxTypeNotSupported.into(),
-                );
-            }
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidPoolTransactionError::Other(Box::new(err)),
-            );
+            let err = match err {
+                InvalidCrossTx::CrossChainTxPreInterop => {
+                    InvalidTransactionError::TxTypeNotSupported.into()
+                }
+                err => InvalidPoolTransactionError::Other(Box::new(err)),
+            };
+            return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
         let outcome = self.inner.validate_one(origin, transaction);
@@ -278,27 +282,31 @@ where
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
         let access_list = tx.access_list()?;
-        let inbox_entries =
-            SupervisorClient::parse_access_list(access_list).copied().collect::<Vec<_>>();
+        let inbox_entries = parse_access_list_items_to_inbox_entries(access_list.iter())
+            .copied()
+            .collect::<Vec<_>>();
         if inbox_entries.is_empty() {
             return None;
         }
-        let timestamp = self.block_info.timestamp.load(Ordering::Relaxed);
-        // Interop check
+
+        // Ensure interop is activated
         if !self.fork_tracker.is_interop_activated() {
             // No cross chain tx allowed before interop
             return Some(Err(InvalidCrossTx::CrossChainTxPreInterop))
         }
+
         let client = self
             .supervisor_client
             .as_ref()
             .expect("supervisor client should be always set after interop is active");
-        let safety_level = client.safety();
+
         if let Err(err) = client
-            .validate_messages(
+            .check_access_list(
                 inbox_entries.as_slice(),
-                safety_level,
-                ExecutingDescriptor::new(timestamp, Some(TRANSACTION_VALIDITY_WINDOW)),
+                ExecutingDescriptor::new(
+                    self.block_info.timestamp(),
+                    Some(TRANSACTION_VALIDITY_WINDOW_SECS),
+                ),
             )
             .await
         {

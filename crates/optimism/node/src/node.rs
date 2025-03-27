@@ -6,7 +6,7 @@ use crate::{
     txpool::{OpTransactionPool, OpTransactionValidator},
     OpEngineApiBuilder, OpEngineTypes,
 };
-use op_alloy_consensus::OpPooledTransaction;
+use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
@@ -33,10 +33,7 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
 };
-use reth_optimism_primitives::{
-    supervisor::{SafetyLevel, DEFAULT_SUPERVISOR_URL},
-    DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned, SupervisorClient,
-};
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -44,7 +41,10 @@ use reth_optimism_rpc::{
     OpEthApi, OpEthApiError, SequencerClient,
 };
 use reth_optimism_txpool::{
-    conditional::MaybeConditionalTransaction, interop::MaybeInteropTransaction, OpPooledTx,
+    conditional::MaybeConditionalTransaction,
+    interop::MaybeInteropTransaction,
+    supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
+    OpPooledTx,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc_api::DebugApiServer;
@@ -574,7 +574,6 @@ where
                     // In --dev mode we can't require gas fees because we're unable to decode
                     // the L1 block info
                     .require_l1_data_gas_fee(!ctx.config().dev.dev)
-                    // TODO: fix this clone
                     .with_supervisor(supervisor_client.clone())
             });
 
