@@ -118,16 +118,14 @@ pub enum InteropTxValidatorError {
 
 impl InteropTxValidatorError {
     /// Returns a new instance of [`RpcClientError`](Self::RpcClientError) variant.
-    pub fn client(err: impl error::Error + Send + Sync + 'static) -> Self {
-        // trying to downcast to RpcError
-        if let Some(rpc_err) = err.downcast_ref::<RpcError>(){
-            let err_msg  = rpc_err.to_string();
-
-            // Trying to parse the InvalidInboxEntry
-            if let Some(invalid_entry) = InvalidInboxEntry::parse_err_msg(&err_msg){
-                return Self::InvalidInboxEntry(invalid_entry);
-            }
+    pub fn client<T>(err: alloy_rpc_client::RpcError<T>) -> Self {
+        let err_msg = err.to_string();
+        
+        // Trying to parse the InvalidInboxEntry
+        if let Some(invalid_entry) = InvalidInboxEntry::parse_err_msg(&err_msg) {
+            return Self::InvalidInboxEntry(invalid_entry);
         }
+        
         Self::RpcClientError(Box::new(err))
     }
 
@@ -194,8 +192,8 @@ mod tests {
                 got: SafetyLevel::Unsafe
             })
         ));
-
-        // Testing with Unknown message.
+    
+        // Testing with Unknown message
         let rpc_err = RpcError::Custom("unknown error".to_string());
         let error = InteropTxValidatorError::client(rpc_err);
         assert!(matches!(error, InteropTxValidatorError::RpcClientError(_)));
