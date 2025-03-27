@@ -471,6 +471,18 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     }
 }
 
+pub trait Policy {
+    /// Determines whether a transaction should be propagated to a given peer.
+    fn should_propagate(&self, peer: &PeerId) -> bool;
+
+    /// Called when a new peer is added to the network.
+    fn on_peer_added(&mut self, peer: PeerId);
+
+    /// Called when a peer is removed from the network.
+    fn on_peer_removed(&mut self, peer: &PeerId);
+}
+
+
 impl<Pool, N> TransactionsManager<Pool, N>
 where
     Pool: TransactionPool,
