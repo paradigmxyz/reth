@@ -12,6 +12,8 @@ impl<Provider, Pool, Network, EvmConfig> BitfinityEvmRpc
 where
     Provider: BlockReader + ChainSpecProvider<ChainSpec = reth_chainspec::ChainSpec>,
 {
+    type Transaction = Provider::Transaction;
+
     fn chain_spec(&self) -> Arc<reth_chainspec::ChainSpec> {
         self.inner.provider().chain_spec()
     }

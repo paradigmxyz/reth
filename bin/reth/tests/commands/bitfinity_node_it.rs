@@ -16,6 +16,7 @@ use reth::{
 };
 use reth_consensus::FullConsensus;
 use reth_db::{init_db, test_utils::tempdir_path, DatabaseEnv};
+use reth_discv5::discv5::enr::secp256k1::{Keypair, Secp256k1};
 use reth_network::NetworkHandle;
 use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth_node_builder::{
@@ -25,21 +26,24 @@ use reth_node_ethereum::{
     node::EthereumEngineValidatorBuilder, BasicBlockExecutorProvider, EthEvmConfig,
     EthExecutionStrategyFactory, EthereumNode,
 };
+use reth_primitives::{Transaction, TransactionSigned};
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
+use reth_transaction_pool::blobstore::DiskFileBlobStore;
+use reth_transaction_pool::test_utils::MockTransaction;
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
-    EthTransactionValidator, Pool, TransactionValidationTaskExecutor,
+    CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool,
+    TransactionValidationTaskExecutor,
 };
-use revm_primitives::{hex, Address, U256};
+use revm_primitives::{hex, Address, B256, U256};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 
 #[tokio::test]
 async fn bitfinity_test_should_start_local_reth_node() {
     // Arrange
     let _log = init_logs();
-    let (reth_client, _reth_node) = start_reth_node(None, None).await;
+    let (reth_client, _reth_node, _tasks) = start_reth_node(None, None).await;
 
     // Act & Assert
     assert!(reth_client.get_chain_id().await.is_ok());
@@ -53,7 +57,7 @@ async fn bitfinity_test_lb_lag_check() {
     let eth_server = EthImpl::new();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) =
+    let (reth_client, _reth_node, _tasks) =
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Try `eth_lbLagCheck`
@@ -107,7 +111,7 @@ async fn bitfinity_test_lb_lag_check() {
 
 #[tokio::test]
 async fn bitfinity_test_lb_lag_check_fail_safe() {
-    let (reth_client, _reth_node) =
+    let (reth_client, _reth_node, _tasks) =
         start_reth_node(Some("http://local_host:11".to_string()), None).await;
 
     let message: String = reth_client
@@ -132,7 +136,7 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     let eth_server = EthImpl::new();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) =
+    let (reth_client, _reth_node, _tasks) =
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Act
@@ -163,7 +167,7 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
     let gas_price = eth_server.gas_price;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) =
+    let (reth_client, _reth_node, _tasks) =
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Act
@@ -182,7 +186,7 @@ async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
     let max_priority_fee_per_gas = eth_server.max_priority_fee_per_gas;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) =
+    let (reth_client, _reth_node, _tasks) =
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Act
@@ -204,7 +208,7 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
     ]);
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) =
+    let (reth_client, _reth_node, _tasks) =
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Act
@@ -242,7 +246,7 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
     ]);
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) =
+    let (reth_client, _reth_node, _tasks) =
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Act
@@ -269,7 +273,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     let eth_server = EthImpl::new();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-    let (reth_client, _reth_node) =
+    let (reth_client, _reth_node, _tasks) =
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Create a random transaction
@@ -282,6 +286,44 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
 
     // Assert
     assert_eq!(result.unwrap(), expected_tx_hash);
+}
+
+#[tokio::test]
+async fn bitfinity_test_node_forward_get_transaction_by_hash() {
+    // Arrange
+    let _log = init_logs();
+
+    let eth_server = EthImpl::new();
+    let last_get_tx_hash = eth_server.last_get_tx_by_hash.clone();
+
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node, _tasks) =
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+
+    let hash = B256::random();
+
+    // Act
+    let tx_result = reth_client.get_transaction_by_hash(hash.into()).await;
+
+    // Assert
+    assert!(matches!(tx_result, Ok(Some(_))));
+    assert_eq!(last_get_tx_hash.read().await.unwrap(), hash);
+}
+
+fn sign_tx_with_random_key_pair(tx: Transaction) -> TransactionSigned {
+    let secp = Secp256k1::new();
+    let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
+    sign_tx_with_key_pair(key_pair, tx)
+}
+
+fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
+    let signature = reth_primitives::sign_message(
+        B256::from_slice(&key_pair.secret_bytes()[..]),
+        tx.signature_hash(),
+    )
+    .unwrap();
+    TransactionSigned::new(tx, signature, Default::default())
 }
 
 /// Start a local reth node
@@ -372,6 +414,7 @@ pub async fn start_reth_node(
             EthereumEngineValidatorBuilder,
         >,
     >,
+    TaskManager,
 ) {
     let tasks = TaskManager::current();
 
@@ -416,7 +459,7 @@ pub async fn start_reth_node(
     let client: EthJsonRpcClient<ReqwestClient> =
         EthJsonRpcClient::new(ReqwestClient::new(format!("http://{}", reth_address)));
 
-    (client, node_handle)
+    (client, node_handle, tasks)
 }
 
 /// Start a local Eth server.
@@ -454,9 +497,13 @@ pub mod eth_server {
     use did::{keccak, BlockConfirmationData, BlockConfirmationResult, BlockNumber, H256, U64};
     use ethereum_json_rpc_client::CertifiedResult;
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+    use reth_transaction_pool::test_utils::MockTransaction;
 
     use reth_trie::EMPTY_ROOT_HASH;
     use revm_primitives::{Address, B256, U256};
+    use tokio::sync::RwLock;
+
+    use super::sign_tx_with_random_key_pair;
 
     #[rpc(server, namespace = "eth")]
     pub trait Eth {
@@ -471,6 +518,10 @@ pub mod eth_server {
         /// Sends a raw transaction.
         #[method(name = "sendRawTransaction")]
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256>;
+
+        /// Gets transaction by hash.
+        #[method(name = "getTransactionByHash")]
+        async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<did::Transaction>>;
 
         /// Returns the genesis balances.
         #[method(name = "getGenesisBalances", aliases = ["ic_getGenesisBalances"])]
@@ -519,6 +570,9 @@ pub mod eth_server {
         pub gas_price: u128,
         /// Current max priority fee per gas
         pub max_priority_fee_per_gas: u128,
+
+        /// Hash of last
+        pub last_get_tx_by_hash: Arc<RwLock<Option<B256>>>,
         /// Current block number (atomic for thread safety)
         pub current_block: Arc<std::sync::atomic::AtomicU64>,
         /// Chain ID
@@ -564,6 +618,7 @@ pub mod eth_server {
             Self {
                 gas_price: rand::random(),
                 max_priority_fee_per_gas: rand::random(),
+                last_get_tx_by_hash: Default::default(),
                 current_block,
                 chain_id: 1,
                 state: did::evm_state::EvmGlobalState::Staging { max_block_number: None },
@@ -682,6 +737,22 @@ pub mod eth_server {
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
             let hash = keccak::keccak_hash(&tx);
             Ok(hash.into())
+        }
+
+        async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<did::Transaction>> {
+            *self.last_get_tx_by_hash.write().await = Some(hash);
+
+            // return transaction, initialized enough to pass reth checks.
+            let tx = sign_tx_with_random_key_pair(MockTransaction::legacy().with_hash(hash).into());
+            let did_tx = did::Transaction {
+                hash: hash.into(),
+                r: tx.signature.r().into(),
+                s: tx.signature.s().into(),
+                v: (tx.signature.recid().to_byte() as u64).into(),
+                ..Default::default()
+            };
+
+            Ok(Some(did_tx))
         }
 
         async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>> {

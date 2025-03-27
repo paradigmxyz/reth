@@ -551,10 +551,23 @@ where
         hash: B256,
     ) -> RpcResult<Option<RpcTransaction<T::NetworkTypes>>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
-        Ok(EthTransactions::transaction_by_hash(self, hash)
+        // Ok(EthTransactions::transaction_by_hash(self, hash)
+        //     .await?
+        //     .map(|tx| tx.into_transaction(self.tx_resp_builder()))
+        //     .transpose()?)
+
+        let mut tx_opt = EthTransactions::transaction_by_hash(self, hash)
             .await?
             .map(|tx| tx.into_transaction(self.tx_resp_builder()))
-            .transpose()?)
+            .transpose()?;
+        if tx_opt.is_none() {
+            tx_opt = BitfinityEvmRpc::btf_transaction_by_hash(self, hash)
+                .await?
+                .map(|tx| tx.into_transaction(self.tx_resp_builder()))
+                .transpose()?;
+        }
+
+        Ok(tx_opt)
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
@@ -743,7 +756,7 @@ where
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        Ok(BitfinityEvmRpc::gas_price(self).await?)
+        Ok(BitfinityEvmRpc::btf_gas_price(self).await?)
     }
 
     /// Handler for: `eth_getAccount`
@@ -759,7 +772,7 @@ where
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        Ok(BitfinityEvmRpc::max_priority_fee_per_gas(self).await?)
+        Ok(BitfinityEvmRpc::btf_max_priority_fee_per_gas(self).await?)
     }
 
     /// Handler for: `eth_blobBaseFee`
@@ -827,7 +840,7 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
         // Ok(EthTransactions::send_raw_transaction(self, tx).await?)
-        BitfinityEvmRpc::send_raw_transaction(self, tx).await
+        BitfinityEvmRpc::btf_send_raw_transaction(self, tx).await
     }
 
     /// Handler for: `eth_sign`
