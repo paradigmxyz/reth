@@ -113,8 +113,13 @@ where
                 }
 
                 // Set the next hashed entry as a leaf node and return
-                trace!(target: "trie::node_iter", ?hashed_key, "next hashed entry");
                 self.current_hashed_entry = self.hashed_cursor.next()?;
+                trace!(
+                    target: "trie::node_iter",
+                    seek_from = ?hashed_key,
+                    seek_to = ?self.current_hashed_entry.as_ref().map(|(k, _)| k),
+                    "seeking to the next hashed entry"
+                );
                 return Ok(Some(TrieElement::Leaf(hashed_key, value)))
             }
 
