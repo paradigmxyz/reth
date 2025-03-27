@@ -171,7 +171,7 @@ impl SignedTransaction for ExtendedOpTxEnvelope {
 }
 
 
-impl Typed2718 for pub mod ExtendedOpTxEnvelope {
+impl Typed2718 for ExtendedOpTxEnvelope {
     fn ty(&self) -> u8 {
         match self {
             Self::BuiltIn(tx) => tx.ty(),
