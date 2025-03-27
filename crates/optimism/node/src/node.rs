@@ -629,6 +629,7 @@ where
                     reth_optimism_txpool::maintain::maintain_transaction_pool_future(
                         pool,
                         chain_events,
+                        supervisor_client,
                     ),
                 );
                 debug!(target: "reth::cli", "Spawned Op txpool maintenance task");

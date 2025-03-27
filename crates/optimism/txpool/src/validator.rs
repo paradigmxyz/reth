@@ -1,9 +1,11 @@
 use crate::{
+    interop::{MaybeInteropTransaction, TransactionInterop},
     supervisor::{parse_access_list_items_to_inbox_entries, ExecutingDescriptor, SupervisorClient},
     InvalidCrossTx,
 };
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::Encodable2718;
+use alloy_eips::{eip2930::AccessList, Encodable2718};
+use alloy_primitives::TxHash;
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
@@ -23,8 +25,8 @@ use std::sync::{
 };
 use tracing::trace;
 
-/// The interval for which we check transaction against supervisor, 1 day.
-const TRANSACTION_VALIDITY_WINDOW_SECS: u64 = 86400;
+/// The interval for which we check transaction against supervisor, 1 hour.
+const TRANSACTION_VALIDITY_WINDOW_SECS: u64 = 3600;
 
 /// Tracks additional infos for the current block.
 #[derive(Debug, Default)]
@@ -101,7 +103,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction,
+    Tx: EthPoolTransaction + MaybeInteropTransaction,
 {
     /// Create a new [`OpTransactionValidator`].
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
@@ -190,6 +192,9 @@ where
             };
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
+        transaction.set_interop(TransactionInterop {
+            timeout: self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
+        });
 
         let outcome = self.inner.validate_one(origin, transaction);
 
@@ -269,58 +274,26 @@ where
         outcome
     }
 
-    /// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
-    /// against supervisor.
-    ///
-    /// If commitment present pre-interop tx rejected.
-    ///
-    /// Returns:
-    /// None - if tx is not cross chain,
-    /// Some(Ok(()) - if tx is valid cross chain,
-    /// Some(Err(e)) - if tx is not valid or interop is not active
+    /// Wrapper for [`is_valid_cross_tx`]
     pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
-        let access_list = tx.access_list()?;
-        let inbox_entries = parse_access_list_items_to_inbox_entries(access_list.iter())
-            .copied()
-            .collect::<Vec<_>>();
-        if inbox_entries.is_empty() {
-            return None;
-        }
-
-        // Ensure interop is activated
-        if !self.fork_tracker.is_interop_activated() {
-            // No cross chain tx allowed before interop
-            return Some(Err(InvalidCrossTx::CrossChainTxPreInterop))
-        }
-
-        let client = self
-            .supervisor_client
-            .as_ref()
-            .expect("supervisor client should be always set after interop is active");
-
-        if let Err(err) = client
-            .check_access_list(
-                inbox_entries.as_slice(),
-                ExecutingDescriptor::new(
-                    self.block_info.timestamp(),
-                    Some(TRANSACTION_VALIDITY_WINDOW_SECS),
-                ),
-            )
-            .await
-        {
-            trace!(target: "txpool", hash=%tx.hash(), err=%err, "Cross chain transaction invalid");
-            return Some(Err(InvalidCrossTx::ValidationError(err)));
-        }
-        Some(Ok(()))
+        is_valid_cross_tx(
+            tx.access_list(),
+            tx.hash(),
+            self.block_info.timestamp.load(Ordering::Relaxed),
+            Some(TRANSACTION_VALIDITY_WINDOW),
+            self.fork_tracker.is_interop_activated(),
+            self.supervisor_client.as_ref(),
+        )
+        .await
     }
 }
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction,
+    Tx: EthPoolTransaction + MaybeInteropTransaction,
 {
     type Transaction = Tx;
 
@@ -363,4 +336,87 @@ impl OpForkTracker {
     pub(crate) fn is_interop_activated(&self) -> bool {
         self.interop.load(Ordering::Relaxed)
     }
+}
+
+//    pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
+//         // We don't need to check for deposit transaction in here, because they won't come from
+//         // txpool
+//         let access_list = tx.access_list()?;
+//         let inbox_entries = parse_access_list_items_to_inbox_entries(access_list.iter())
+//             .copied()
+//             .collect::<Vec<_>>();
+//         if inbox_entries.is_empty() {
+//             return None;
+//         }
+//
+//         // Ensure interop is activated
+//         if !self.fork_tracker.is_interop_activated() {
+//             // No cross chain tx allowed before interop
+//             return Some(Err(InvalidCrossTx::CrossChainTxPreInterop))
+//         }
+//
+//         let client = self
+//             .supervisor_client
+//             .as_ref()
+//             .expect("supervisor client should be always set after interop is active");
+//
+//         if let Err(err) = client
+//             .check_access_list(
+//                 inbox_entries.as_slice(),
+//                 ExecutingDescriptor::new(
+//                     self.block_info.timestamp(),
+//                     Some(TRANSACTION_VALIDITY_WINDOW_SECS),
+//                 ),
+//             )
+//             .await
+//         {
+//             trace!(target: "txpool", hash=%tx.hash(), err=%err, "Cross chain transaction invalid");
+//             return Some(Err(InvalidCrossTx::ValidationError(err)));
+//         }
+//         Some(Ok(()))
+//     }
+/// Extracts commitment from access list entries, pointing to 0x420..022 and validates them
+/// against supervisor.
+///
+/// If commitment present pre-interop tx rejected.
+///
+/// Returns:
+/// None - if tx is not cross chain,
+/// Some(Ok(()) - if tx is valid cross chain,
+/// Some(Err(e)) - if tx is not valid or interop is not active
+pub async fn is_valid_cross_tx(
+    access_list: Option<&AccessList>,
+    hash: &TxHash,
+    timestamp: u64,
+    timeout: Option<u64>,
+    is_interop_active: bool,
+    client: Option<&SupervisorClient>,
+) -> Option<Result<(), InvalidCrossTx>> {
+    // We don't need to check for deposit transaction in here, because they won't come from
+    // txpool
+    let access_list = access_list?;
+    let inbox_entries =
+        SupervisorClient::parse_access_list(access_list).copied().collect::<Vec<_>>();
+    if inbox_entries.is_empty() {
+        return None;
+    }
+    // Interop check
+    if !is_interop_active {
+        // No cross chain tx allowed before interop
+        return Some(Err(InvalidCrossTx::CrossChainTxPreInterop))
+    }
+    let client = client.expect("supervisor client should be always set after interop is active");
+    let safety_level = client.safety();
+    if let Err(err) = client
+        .validate_messages(
+            inbox_entries.as_slice(),
+            safety_level,
+            ExecutingDescriptor::new(timestamp, timeout),
+        )
+        .await
+    {
+        trace!(target: "txpool", hash=%hash, err=%err, "Cross chain transaction invalid");
+        return Some(Err(InvalidCrossTx::ValidationError(err)));
+    }
+    Some(Ok(()))
 }
