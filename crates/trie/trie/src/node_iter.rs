@@ -151,8 +151,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use alloy_primitives::{
         b256,
         map::{B256Map, HashMap},
@@ -242,70 +240,119 @@ mod tests {
         // └── Branch (`branch_node_0`)
         //     ├── 0 -> Branch (`branch_node_1`)
         //     │      ├── 0 -> Leaf (`account_1`, Key = 0x0)
-        //     │      └── 1 -> Leaf (`account_2`, Key = 0x0)
-        //     ├── 1 -> Branch (`branch_node_2`)
-        //     │      ├── 0 -> Branch (`branch_node_3`)
-        //     │      │      ├── 0 -> Leaf (`account_3`, marked as changed)
-        //     │      │      └── 1 -> Leaf (`account_4`)
-        //     │      └── 1 -> Leaf (`account_5`, Key = 0x0)
+        //     │      ├── 1 -> Branch (`branch_node_2`)
+        //     │      │      ├── 0 -> Leaf (`account_2`)
+        //     │      │      ├── 1 -> Leaf (`account_3`)
+        //     │      │      └── 2 -> Leaf (`account_4`)
+        //     │      └── 2 -> Leaf (`account_5`, Key = 0x0)
+        //     ├── 1 -> Branch (`branch_node_3`)
+        //     │      ├── 0 -> Leaf (`account_6`, Key = 0x0)
+        //     │      ├── 1 -> Branch (`branch_node_2`)
+        //     │      │      ├── 0 -> Leaf (`account_7`)
+        //     │      │      ├── 1 -> Leaf (`account_8`)
+        //     │      │      └── 2 -> Leaf (`account_9`)
+        //     │      └── 2 -> Leaf (`account_10`, Key = 0x0)
+        //     └── 2 -> Branch (`branch_node_4`)
+        //            ├── 0 -> Leaf (`account_11`, Key = 0x0)
+        //            ├── 1 -> Branch (`branch_node_2`)
+        //            │      ├── 0 -> Leaf (`account_12`)
+        //            │      ├── 1 -> Leaf (`account_13`, marked as changed)
+        //            │      └── 2 -> Leaf (`account_14`)
+        //            └── 2 -> Leaf (`account_15`, Key = 0x0)
 
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
         let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000010");
-        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
-        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000101");
-        let account_5 = b256!("0x0000000000000000000000000000000000000000000000000000000000000110");
+        let account_3 = b256!("0x0000000000000000000000000000000000000000000000000000000000000011");
+        let account_4 = b256!("0x0000000000000000000000000000000000000000000000000000000000000012");
+        let account_5 = b256!("0x0000000000000000000000000000000000000000000000000000000000000020");
+        let account_6 = b256!("0x0000000000000000000000000000000000000000000000000000000000000100");
+        let account_7 = b256!("0x0000000000000000000000000000000000000000000000000000000000000110");
+        let account_8 = b256!("0x0000000000000000000000000000000000000000000000000000000000000111");
+        let account_9 = b256!("0x0000000000000000000000000000000000000000000000000000000000000112");
+        let account_10 =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000120");
+        let account_11 =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000200");
+        let account_12 =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000210");
+        let account_13 =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000211");
+        let account_14 =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000212");
+        let account_15 =
+            b256!("0x0000000000000000000000000000000000000000000000000000000000000220");
         let empty_account = Account::default();
 
-        let hash_builder_branch_nodes = get_hash_builder_branch_nodes(vec![
-            (Nibbles::unpack(account_1), empty_account),
-            (Nibbles::unpack(account_2), empty_account),
-            (Nibbles::unpack(account_3), empty_account),
-            (Nibbles::unpack(account_4), empty_account),
-            (Nibbles::unpack(account_5), empty_account),
-        ]);
+        let accounts = vec![
+            (account_1, empty_account),
+            (account_2, empty_account),
+            (account_3, empty_account),
+            (account_4, empty_account),
+            (account_5, empty_account),
+            (account_6, empty_account),
+            (account_7, empty_account),
+            (account_8, empty_account),
+            (account_9, empty_account),
+            (account_10, empty_account),
+            (account_11, empty_account),
+            (account_12, empty_account),
+            (account_13, empty_account),
+            (account_14, empty_account),
+            (account_15, empty_account),
+        ];
 
-        let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![
-                empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
-                empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
-            ],
-            TrieMask::new(0b11),
-        )));
+        let hash_builder_branch_nodes =
+            get_hash_builder_branch_nodes(accounts.iter().map(|(k, v)| (Nibbles::unpack(*k), *v)));
 
-        let branch_node_3_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![
-                empty_leaf_rlp_for_key(Nibbles::default()),
-                empty_leaf_rlp_for_key(Nibbles::default()),
-            ],
-            TrieMask::new(0b11),
-        )));
-
-        let branch_node_2 = (
-            Nibbles::from_nibbles([vec![0; 61], vec![1]].concat()),
-            BranchNodeCompact::new(
-                TrieMask::new(0b11),
-                TrieMask::new(0b00),
-                TrieMask::new(0b01),
-                vec![branch_node_3_rlp.as_hash().unwrap()],
-                None,
-            ),
-        );
         let branch_node_2_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
-            vec![branch_node_3_rlp, empty_leaf_rlp_for_key(Nibbles::from_nibbles([0]))],
-            TrieMask::new(0b11),
+            vec![
+                empty_leaf_rlp_for_key(Nibbles::default()),
+                empty_leaf_rlp_for_key(Nibbles::default()),
+                empty_leaf_rlp_for_key(Nibbles::default()),
+            ],
+            TrieMask::new(0b111),
         )));
+
+        let branch_node_1_3_4 = BranchNodeCompact::new(
+            TrieMask::new(0b111),
+            TrieMask::new(0b000),
+            TrieMask::new(0b010),
+            vec![branch_node_2_rlp.as_hash().unwrap()],
+            None,
+        );
+        let branch_node_1_3_4_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
+            vec![
+                empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
+                branch_node_2_rlp,
+                empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
+            ],
+            TrieMask::new(0b111),
+        )));
+
+        let branch_node_1 =
+            (Nibbles::from_nibbles([vec![0; 61], vec![0]].concat()), branch_node_1_3_4.clone());
+        let branch_node_3 =
+            (Nibbles::from_nibbles([vec![0; 61], vec![1]].concat()), branch_node_1_3_4.clone());
+        let branch_node_4 =
+            (Nibbles::from_nibbles([vec![0; 61], vec![2]].concat()), branch_node_1_3_4);
+
         let branch_node_0 = (
             Nibbles::from_nibbles([0; 61]),
             BranchNodeCompact::new(
-                TrieMask::new(0b11),
-                TrieMask::new(0b10),
-                TrieMask::new(0b11),
-                vec![branch_node_1_rlp.as_hash().unwrap(), branch_node_2_rlp.as_hash().unwrap()],
+                TrieMask::new(0b111),
+                TrieMask::new(0b111),
+                TrieMask::new(0b111),
+                vec![
+                    branch_node_1_3_4_rlp.as_hash().unwrap(),
+                    branch_node_1_3_4_rlp.as_hash().unwrap(),
+                    branch_node_1_3_4_rlp.as_hash().unwrap(),
+                ],
                 None,
             ),
         );
 
-        let mock_trie_nodes = vec![branch_node_0.clone(), branch_node_2.clone()];
+        let mock_trie_nodes =
+            vec![branch_node_0.clone(), branch_node_1, branch_node_3, branch_node_4.clone()];
         pretty_assertions::assert_eq!(
             hash_builder_branch_nodes.into_iter().sorted().collect::<Vec<_>>(),
             mock_trie_nodes,
@@ -314,24 +361,16 @@ mod tests {
         let trie_cursor_factory =
             MockTrieCursorFactory::new(mock_trie_nodes.into_iter().collect(), B256Map::default());
 
-        // Mark the account 3 as changed.
+        // Mark the account 13 as changed.
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::unpack(account_3));
+        prefix_set.insert(Nibbles::unpack(account_13));
         let prefix_set = prefix_set.freeze();
 
         let walker =
             TrieWalker::new(trie_cursor_factory.account_trie_cursor().unwrap(), prefix_set);
 
-        let hashed_cursor_factory = MockHashedCursorFactory::new(
-            BTreeMap::from([
-                (account_1, empty_account),
-                (account_2, empty_account),
-                (account_3, empty_account),
-                (account_4, empty_account),
-                (account_5, empty_account),
-            ]),
-            B256Map::default(),
-        );
+        let hashed_cursor_factory =
+            MockHashedCursorFactory::new(accounts.into_iter().collect(), B256Map::default());
 
         let mut iter =
             TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
@@ -351,8 +390,8 @@ mod tests {
                     visited_key: Some(branch_node_0.0)
                 },
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0.clone()),
-                    visited_key: Some(branch_node_2.0)
+                    visit_type: KeyVisitType::SeekNonExact(branch_node_4.0.clone()),
+                    visited_key: Some(branch_node_4.0)
                 },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
@@ -363,34 +402,45 @@ mod tests {
         pretty_assertions::assert_eq!(
             *hashed_cursor_factory.visited_account_keys(),
             vec![
-                // Why do we always seek this key first?
+                // We should not seek to account 1, we already have the hash for its branch node.
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_1),
                     visited_key: Some(account_1)
                 },
-                // Seek to the modified account.
+                // We should not seek to account 6, we already have the hash for its branch node.
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                // Why do we seek the modified account two more times?
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
+                    visit_type: KeyVisitType::SeekNonExact(account_6),
+                    visited_key: Some(account_6)
                 },
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
+                    visit_type: KeyVisitType::SeekNonExact(account_11),
+                    visited_key: Some(account_11)
                 },
-                // Collect the siblings of the modified account
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                // We seek the account 5 because its hash is not in the branch node, but we already
-                // walked it before, so there should be no need for it.
+                // We should not seek to account 11 two additional times, we're already at it.
                 KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_5),
-                    visited_key: Some(account_5)
+                    visit_type: KeyVisitType::SeekNonExact(account_11),
+                    visited_key: Some(account_11)
                 },
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_11),
+                    visited_key: Some(account_11)
+                },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_12) },
+                // We should not seek to account 12, we're already at it.
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_12),
+                    visited_key: Some(account_12)
+                },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_13) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_14) },
+                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_15) },
+                // We should not seek to account 15, we're already at it.
+                KeyVisit {
+                    visit_type: KeyVisitType::SeekNonExact(account_15),
+                    visited_key: Some(account_15)
+                },
+                // We should not advance the cursor, we know that there's no more children left,
+                // because we visited the branch nodes 0 and 4.
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
             ],
         );
