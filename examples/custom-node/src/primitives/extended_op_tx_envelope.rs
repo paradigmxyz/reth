@@ -1,21 +1,22 @@
-use op_alloy_consensus::OpTxEnvelope;
+use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization,Typed2718,
+    Encodable2718,
+    Decodable2718,
+    eip2718::Eip2718Result,};
+use alloy_primitives::{ChainId, PrimitiveSignature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use alloy_consensus::Transaction;
-use alloy_primitives::{ChainId, TxHash, PrimitiveSignature};
+use op_alloy_consensus::OpTxEnvelope;
+use reth_codecs::Compact;
+use reth_optimism_primitives::{
+    serde_bincode_compat::OpTransactionSigned as BincodeCompatOpTransactionSigned,
+    OpTransactionSigned,
+};
 use reth_primitives_traits::{
     serde_bincode_compat::SerdeBincodeCompat, transaction::signed::RecoveryError, InMemorySize,
     SignedTransaction,
 };
-use reth_codecs::Compact;
-use reth_optimism_primitives::{
-    serde_bincode_compat::OpTransactionSigned as BincodeCompatOpTransactionSigned,
-    OpTransactionSigned, OpTxEnvelope,
-};
-use revm_primitives::{Address, Bytes, TxKind, U256};
-use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
-use revm_primitives::B256;
+use revm_primitives::{Address, Bytes, TxKind, B256, U256};
 
-pub enum ExtendedOpTxEnvelope<T> {
+pub enum ExtendedOpTxEnvelope {
     BuiltIn(OpTxEnvelope),
     Other(OpTransactionSigned),
 }
@@ -70,7 +71,7 @@ impl Transaction for ExtendedOpTxEnvelope {
             Self::Other(tx) => tx.priority_fee_or_price(),
         }
     }
-    fn effective_gas_price(&self,  base_fee: Option<u64>) -> u128 {
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match self {
             Self::BuiltIn(tx) => tx.effective_gas_price(base_fee),
             Self::Other(tx) => tx.effective_gas_price(base_fee),
@@ -82,7 +83,7 @@ impl Transaction for ExtendedOpTxEnvelope {
             Self::Other(tx) => tx.is_dynamic_fee(),
         }
     }
-    fn kind(&self) -> TxKind{
+    fn kind(&self) -> TxKind {
         match self {
             Self::BuiltIn(tx) => tx.kind(),
             Self::Other(tx) => tx.kind(),
@@ -127,7 +128,6 @@ impl Transaction for ExtendedOpTxEnvelope {
             Self::Other(tx) => tx.authorization_list(),
         }
     }
-
 }
 
 impl SignedTransaction for ExtendedOpTxEnvelope {
@@ -170,7 +170,6 @@ impl SignedTransaction for ExtendedOpTxEnvelope {
     }
 }
 
-
 impl Typed2718 for ExtendedOpTxEnvelope {
     fn ty(&self) -> u8 {
         match self {
@@ -179,7 +178,6 @@ impl Typed2718 for ExtendedOpTxEnvelope {
         }
     }
 }
-
 
 impl Decodable2718 for ExtendedOpTxEnvelope {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
@@ -194,7 +192,6 @@ impl Decodable2718 for ExtendedOpTxEnvelope {
             .or_else(|_| OpTransactionSigned::fallback_decode(buf).map(Self::Other))
     }
 }
-
 
 impl Encodable2718 for ExtendedOpTxEnvelope {
     fn encode_2718(&self, out: &mut dyn BufMut) {
@@ -211,7 +208,6 @@ impl Encodable2718 for ExtendedOpTxEnvelope {
         }
     }
 }
-
 
 impl Decodable for ExtendedOpTxEnvelope {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
