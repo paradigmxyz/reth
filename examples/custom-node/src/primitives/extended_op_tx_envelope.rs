@@ -1,10 +1,11 @@
-use alloy_consensus::{OpTxEnvelope, Transaction};
+use alloy_consensus::Transaction;
 use alloy_eips::{
     eip2718::Eip2718Result, eip2930::AccessList, eip7702::SignedAuthorization, Decodable2718,
     Encodable2718, Typed2718,
 };
 use alloy_primitives::{ChainId, PrimitiveSignature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
+use op_alloy_consensus::OpTxEnvelope;
 use reth_codecs::Compact;
 use reth_optimism_primitives::{
     serde_bincode_compat::OpTransactionSigned as BincodeCompatOpTransactionSigned,
