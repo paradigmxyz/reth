@@ -4,6 +4,8 @@ pub mod header;
 pub use header::*;
 pub mod block;
 pub use block::*;
+pub mod tx;
+pub use tx::*;
 
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::NodePrimitives;
