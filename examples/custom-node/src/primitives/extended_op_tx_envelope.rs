@@ -1,10 +1,10 @@
-use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization,Typed2718,
-    Encodable2718,
-    Decodable2718,
-    eip2718::Eip2718Result,};
+use alloy_consensus::{OpTxEnvelope, Transaction};
+use alloy_eips::{
+    eip2718::Eip2718Result, eip2930::AccessList, eip7702::SignedAuthorization, Decodable2718,
+    Encodable2718, Typed2718,
+};
 use alloy_primitives::{ChainId, PrimitiveSignature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use alloy_consensus::{Transaction,OpTxEnvelope};
 use reth_codecs::Compact;
 use reth_optimism_primitives::{
     serde_bincode_compat::OpTransactionSigned as BincodeCompatOpTransactionSigned,
@@ -22,7 +22,10 @@ pub enum ExtendedOpTxEnvelope<T> {
     Other(T),
 }
 
-impl<T> Transaction for ExtendedOpTxEnvelope<T> where T:Transaction {
+impl<T> Transaction for ExtendedOpTxEnvelope<T>
+where
+    T: Transaction,
+{
     fn chain_id(&self) -> Option<ChainId> {
         match self {
             Self::BuiltIn(tx) => tx.chain_id(),
@@ -130,7 +133,10 @@ impl<T> Transaction for ExtendedOpTxEnvelope<T> where T:Transaction {
     }
 }
 
-impl<T> SignedTransaction for ExtendedOpTxEnvelope<T> where T:SignedTransaction {
+impl<T> SignedTransaction for ExtendedOpTxEnvelope<T>
+where
+    T: SignedTransaction,
+{
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         match self {
             Self::BuiltIn(tx) => tx.recover_signer(),
@@ -170,7 +176,10 @@ impl<T> SignedTransaction for ExtendedOpTxEnvelope<T> where T:SignedTransaction 
     }
 }
 
-impl<T> Typed2718 for ExtendedOpTxEnvelope<T> where T:Typed2718 {
+impl<T> Typed2718 for ExtendedOpTxEnvelope<T>
+where
+    T: Typed2718,
+{
     fn ty(&self) -> u8 {
         match self {
             Self::BuiltIn(tx) => tx.ty(),
@@ -179,7 +188,10 @@ impl<T> Typed2718 for ExtendedOpTxEnvelope<T> where T:Typed2718 {
     }
 }
 
-impl<T> Decodable2718 for ExtendedOpTxEnvelope<T> where T:Decodable2718 {
+impl<T> Decodable2718 for ExtendedOpTxEnvelope<T>
+where
+    T: Decodable2718,
+{
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
         OpTxEnvelope::typed_decode(ty, buf)
             .map(Self::BuiltIn)
@@ -193,7 +205,10 @@ impl<T> Decodable2718 for ExtendedOpTxEnvelope<T> where T:Decodable2718 {
     }
 }
 
-impl<T> Encodable2718 for ExtendedOpTxEnvelope<T> where T:Encodable2718 {
+impl<T> Decodable for ExtendedOpTxEnvelope<T>
+where
+    T: Decodable,
+{
     fn encode_2718(&self, out: &mut dyn BufMut) {
         match self {
             Self::BuiltIn(tx) => tx.encode_2718(out),
@@ -209,7 +224,10 @@ impl<T> Encodable2718 for ExtendedOpTxEnvelope<T> where T:Encodable2718 {
     }
 }
 
-impl<T> Decodable for ExtendedOpTxEnvelope<T> where T:Decodable {
+impl<T> Encodable for ExtendedOpTxEnvelope<T>
+where
+    T: Encodable,
+{
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
         OpTxEnvelope::decode(buf)
             .map(Self::BuiltIn)
@@ -217,7 +235,10 @@ impl<T> Decodable for ExtendedOpTxEnvelope<T> where T:Decodable {
     }
 }
 
-impl<T> Encodable for ExtendedOpTxEnvelope<T> where T:Encodable {
+impl<T> SerdeBincodeCompat for ExtendedOpTxEnvelope<T>
+where
+    T: SerdeBincodeCompat,
+{
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::BuiltIn(tx) => tx.encode(out),
@@ -226,7 +247,10 @@ impl<T> Encodable for ExtendedOpTxEnvelope<T> where T:Encodable {
     }
 }
 
-impl<T> InMemorySize for ExtendedOpTxEnvelope<T> where T:InMemorySize  {
+impl<T> Compact for ExtendedOpTxEnvelope<T>
+where
+    T: Compact,
+{
     fn size(&self) -> usize {
         match self {
             Self::BuiltIn(tx) => tx.size(),
@@ -235,7 +259,10 @@ impl<T> InMemorySize for ExtendedOpTxEnvelope<T> where T:InMemorySize  {
     }
 }
 
-impl<T> SerdeBincodeCompat for ExtendedOpTxEnvelope<T> where T:SerdeBincodeCompat  {
+impl<T> SerdeBincodeCompat for ExtendedOpTxEnvelope<T>
+where 
+    T:SerdeBincodeCompat
+{
     type BincodeRepr<'a> = BincodeCompatOpTransactionSigned<'a>;
 
     fn as_repr(&self) -> Self::BincodeRepr<'_> {
@@ -250,7 +277,10 @@ impl<T> SerdeBincodeCompat for ExtendedOpTxEnvelope<T> where T:SerdeBincodeCompa
     }
 }
 
-impl<T> Compact for ExtendedOpTxEnvelope<T> where T:Compact  {
+impl<T> Compact for ExtendedOpTxEnvelope<T>
+where
+    T:Compact
+{
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
