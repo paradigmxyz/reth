@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use super::{
     DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
     DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
@@ -7,7 +9,7 @@ use crate::transactions::constants::tx_fetcher::{
     DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
     DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
 };
-use derive_more::Constructor;
+use derive_more::{Constructor, Display};
 
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Clone)]
@@ -20,6 +22,9 @@ pub struct TransactionsManagerConfig {
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
+    /// The transaction propagation policy.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub propogation_policy: TransactionPropagationPolicy,
 }
 
 impl Default for TransactionsManagerConfig {
@@ -28,6 +33,33 @@ impl Default for TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             propagation_mode: TransactionPropagationMode::default(),
+            propogation_policy: TransactionPropagationPolicy::default(),
+        }
+    }
+}
+
+/// Determines which peers pending transactions are propagated to.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Display)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum TransactionPropagationPolicy {
+    /// Propagate transactions to all peers.
+    #[default]
+    All,
+    /// Propagate transactions to only trusted peers.
+    ///
+    /// Can be used to keep the mempool private on networks like op mainnet
+    /// while still gossiping the transaction pool to trusted peers.
+    Trusted,
+}
+
+impl FromStr for TransactionPropagationPolicy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "all" => Ok(Self::All),
+            "trusted" => Ok(Self::Trusted),
+            _ => Err(format!("Invalid transaction propagation policy: {}", s)),
         }
     }
 }
