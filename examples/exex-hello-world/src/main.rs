@@ -51,7 +51,7 @@ fn main() -> eyre::Result<()> {
     let args = ExExArgs::parse();
 
     if args.optimism {
-        reth::cli::Cli::parse_args().run(|builder, _| {
+         reth_optimism_node::cli::Cli::parse_args().run(|builder, _| {
             Box::pin(async move {
                 let handle = builder
                     .node(OpNode::default())
