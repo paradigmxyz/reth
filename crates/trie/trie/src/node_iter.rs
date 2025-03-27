@@ -234,8 +234,6 @@ mod tests {
             )))
         }
 
-        reth_tracing::init_test_tracing();
-
         // Extension (Key = 0x0000000000000000000000000000000000000000000000000000000000000)
         // └── Branch (`branch_node_0`)
         //     ├── 0 -> Branch (`branch_node_1`)
@@ -374,6 +372,9 @@ mod tests {
 
         let mut iter =
             TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
+
+        // We initialize the tracing only here to not pollute the logs with hash builder above.
+        reth_tracing::init_test_tracing();
 
         // Walk the iterator until it's exhausted.
         while iter.try_next().unwrap().is_some() {}
