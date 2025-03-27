@@ -18,6 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 use core::error;
 use op_alloy_consensus::interop::SafetyLevel;
+use alloy_rpc_client::RpcError;
+use std::error::Error as StdError;
 
 /// Derived from op-supervisor
 // todo: rm once resolved <https://github.com/ethereum-optimism/optimism/issues/14603>
@@ -117,6 +119,15 @@ pub enum InteropTxValidatorError {
 impl InteropTxValidatorError {
     /// Returns a new instance of [`RpcClientError`](Self::RpcClientError) variant.
     pub fn client(err: impl error::Error + Send + Sync + 'static) -> Self {
+        // trying to downcast to RpcError
+        if let Some(rpc_err) = err.downcast_ref::<RpcError>(){
+            let err_msg  = rpc_err.to_string();
+
+            // Trying to parse the InvalidInboxEntry
+            if let Some(invalid_entry) = InvalidInboxEntry::parse_err_msg(&err_msg){
+                return Self::InvalidInboxEntry(invalid_entry);
+            }
+        }
         Self::RpcClientError(Box::new(err))
     }
 
@@ -169,5 +180,24 @@ mod tests {
         ));
 
         assert!(InvalidInboxEntry::parse_err_msg(RANDOM_ERROR).is_none());
+    }
+
+    #[test]
+    fn test_client_error_parsing() {
+        let rpc_err = RpcError::Custom(MIN_SAFETY_CROSS_UNSAFE_ERROR.to_string());
+        let error = InteropTxValidatorError::client(rpc_err);
+        
+        assert!(matches!(
+            error,
+            InteropTxValidatorError::InvalidInboxEntry(InvalidInboxEntry::MinimumSafety {
+                expected: SafetyLevel::CrossUnsafe,
+                got: SafetyLevel::Unsafe
+            })
+        ));
+
+        // Testing with Unknown message.
+        let rpc_err = RpcError::Custom("unknown error".to_string());
+        let error = InteropTxValidatorError::client(rpc_err);
+        assert!(matches!(error, InteropTxValidatorError::RpcClientError(_)));
     }
 }
