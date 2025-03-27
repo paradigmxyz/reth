@@ -41,6 +41,7 @@ pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
 ];
 
 /// OP Stack protocol version
+/// See also: <https://github.com/ethereum-optimism/op-geth/blob/c3a989eb882d150a936df27bcfa791838b474d55/params/superchain.go#L13-L13>
 pub const OP_STACK_SUPPORT: ProtocolVersion = ProtocolVersion::V0(ProtocolVersionFormatV0 {
     build: B64::ZERO,
     major: 9,
