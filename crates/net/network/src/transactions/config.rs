@@ -57,8 +57,8 @@ impl FromStr for TransactionPropagationPolicy {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "All" => Ok(Self::All),
-            "Trusted" => Ok(Self::Trusted),
+            "All" | "all" => Ok(Self::All),
+            "Trusted" | "trusted" => Ok(Self::Trusted),
             _ => Err(format!("Invalid transaction propagation policy: {}", s)),
         }
     }
