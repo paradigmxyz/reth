@@ -17,7 +17,6 @@ use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, EngineValidator};
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApi;
-use reth_rpc_server_types::result::internal_rpc_err;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use tracing::{info, trace};
