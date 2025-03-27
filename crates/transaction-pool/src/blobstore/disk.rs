@@ -141,6 +141,14 @@ impl BlobStore for DiskFileBlobStore {
                 break;
             }
         }
+
+        for (idx, blob_and_proof) in result.iter_mut().enumerate() {
+            if blob_and_proof.is_none() {
+                let versioned_hash = versioned_hashes[idx];
+                let _tx_hash = self.inner.versioned_hashes_to_txhash.lock().get(&versioned_hash);
+            }
+        }
+
         Ok(result)
     }
 
