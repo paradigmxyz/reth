@@ -43,6 +43,26 @@ pub enum InvalidInboxEntry {
 }
 
 impl InvalidInboxEntry {
+    /// Returns `true` if message is unsafe.
+    pub fn is_msg_unsafe(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::Unsafe, .. })
+    }
+
+    /// Returns `true` if message is cross-unsafe.
+    pub fn is_msg_cross_unsafe(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::CrossUnsafe, .. })
+    }
+
+    /// Returns `true` if message is local-safe.
+    pub fn is_msg_local_safe(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::LocalSafe, .. })
+    }
+
+    /// Returns `true` if message is safe.
+    pub fn is_msg_safe(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::Safe, .. })
+    }
+
     /// Parses error message. Returns `None`, if message is not recognized.
     // todo: match on error code instead of message string once resolved <https://github.com/ethereum-optimism/optimism/issues/14603>
     pub fn parse_err_msg(err_msg: &str) -> Option<Self> {
