@@ -38,7 +38,7 @@ use tokio::{
 };
 use tracing::{debug, error};
 use tracing_futures::Instrument;
-///Global [TaskExecutor] instance that can be accessed from anywhere.
+///Global [`TaskExecutor`] instance that can be accessed from anywhere.
 static GLOBAL_EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
 pub mod metrics;
 pub mod shutdown;
@@ -331,7 +331,7 @@ impl TaskExecutor {
             let handle = Handle::try_current().unwrap_or_else(|_| {
                 static RT: OnceLock<Runtime> = OnceLock::new();
                 let rt = RT.get_or_init(|| {
-                    tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()
+                    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
                 });
                 rt.handle().clone()
             });
