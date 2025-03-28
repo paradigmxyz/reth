@@ -170,6 +170,7 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
         blob_params: HardforkBlobParams::default(),
+        bitfinity_evm_url: Default::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()

@@ -65,6 +65,7 @@ ic-certificate-verification.workspace = true
 ic-certification.workspace = true
 reth-chainspec.workspace = true
 reth-cli.workspace = true
+reth-primitives.workspace = true
 serde_json.workspace = true
 backon.workspace = true
 

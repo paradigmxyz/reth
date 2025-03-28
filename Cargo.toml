@@ -726,18 +726,17 @@ vergen-git2 = "1.0.5"
 async-channel = "2"
 bitfinity-block-confirmation = { path = "crates/bitfinity-block-confirmation" }
 candid = "0.10"
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.46.0" }
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", branch = "alloy_0_12" }
 dirs = "5.0.1"
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.46.0", features = [
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", branch = "alloy_0_12", features = [
     "reqwest",
 ] }
 evm-canister-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "evm-canister-client", features = [
     "ic-agent-client",
-], tag = "v0.46.0" }
+], branch = "alloy_0_12" }
 ic-cbor = "3"
 ic-certificate-verification = "3"
 ic-certification = "3"
 hex = "0.4"
 lightspeed_scheduler = { version = "0.60.0", features = ["tracing"] }
-anyhow = "1"
 jsonrpc-core = "18.0.0"

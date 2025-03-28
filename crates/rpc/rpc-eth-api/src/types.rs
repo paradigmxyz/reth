@@ -1,6 +1,6 @@
 //! Trait for specifying `eth` network dependent API types.
 
-use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
+use crate::{helpers::bitfinity_evm_rpc::BitfinityEvmRpc, AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;

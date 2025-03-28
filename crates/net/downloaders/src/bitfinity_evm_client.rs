@@ -11,8 +11,7 @@ use ic_certification::{Certificate, HashTree, LookupResult};
 use itertools::Either;
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use reth_chainspec::{
-    once_cell_set, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec,
-    EthereumHardfork,
+    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec, EthereumHardfork, Hardfork
 };
 
 use alloy_rlp::Decodable;
@@ -25,9 +24,10 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{Block, BlockBody, ForkCondition, Header, TransactionSigned};
+use reth_primitives_traits::SealedHeader;
 use serde_json::json;
 
-use std::{self, collections::HashMap, sync::OnceLock, time::Duration};
+use std::{self, collections::HashMap, time::Duration};
 use thiserror::Error;
 
 use backon::{ExponentialBuilder, Retryable};
@@ -394,33 +394,37 @@ impl BitfinityEvmClient {
 
         genesis.alloc = genesis_accounts.collect();
 
+        let hardforks = ChainHardforks::new(vec![
+            (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+            (
+                EthereumHardfork::Paris.boxed(),
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::from(0),
+                },
+            ),
+        ]);
+
         let spec = ChainSpec {
             chain,
-            genesis_hash: once_cell_set(genesis_block.hash.0),
-            genesis_header: OnceLock::new(),
+            genesis_header: SealedHeader::new(
+                make_genesis_header(&genesis, &hardforks),
+                genesis_block.hash.0,
+            ),
             genesis,
             paris_block_and_final_difficulty: Some((0, U256::ZERO)),
-            hardforks: ChainHardforks::new(vec![
-                (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
-                (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
-                (
-                    EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD {
-                        activation_block_number: 0,
-                        fork_block: Some(0),
-                        total_difficulty: U256::from(0),
-                    },
-                ),
-            ]),
+            hardforks,
             deposit_contract: None,
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: 0,
