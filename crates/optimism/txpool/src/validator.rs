@@ -166,34 +166,14 @@ where
     ///
     /// See also [`TransactionValidator::validate_transaction`]
     ///
-    /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
-    /// that the account has enough balance to cover the L1 gas cost.
+    /// This behaves the same as [`OpTransactionValidator::validate_one_with_state`], but creates
+    /// a new state provider internally.
     pub async fn validate_one(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        if transaction.is_eip4844() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::TxTypeNotSupported.into(),
-            )
-        }
-
-        // Interop cross tx validation
-        if let Some(Err(err)) = self.is_valid_cross_tx(&transaction).await {
-            let err = match err {
-                InvalidCrossTx::CrossChainTxPreInterop => {
-                    InvalidTransactionError::TxTypeNotSupported.into()
-                }
-                err => InvalidPoolTransactionError::Other(Box::new(err)),
-            };
-            return TransactionValidationOutcome::Invalid(transaction, err)
-        }
-
-        let outcome = self.inner.validate_one(origin, transaction);
-
-        self.apply_op_checks(outcome)
+        self.validate_one_with_state(origin, transaction, &mut None).await
     }
 
     /// Validates a single transaction with a provided state provider.
@@ -203,7 +183,10 @@ where
     /// See also [`TransactionValidator::validate_transaction`]
     ///
     /// This behaves the same as [`EthTransactionValidator::validate_one_with_state`], but in
-    /// addition, ensures that the account has enough balance to cover the L1 gas cost.
+    /// addition applies OP validity checks:
+    /// - ensures tx is not eip4844
+    /// - ensures cross chain transactions are valid wrt locally configured safety level
+    /// - ensures that the account has enough balance to cover the L1 gas cost
     pub async fn validate_one_with_state(
         &self,
         origin: TransactionOrigin,
