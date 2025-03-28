@@ -122,10 +122,7 @@ where
     T: InMemorySize,
 {
     fn size(&self) -> usize {
-        match self {
-            Self::BuiltIn(tx) => tx.size(),
-            Self::Other(tx) => tx.size(),
-        }
+        delegate!(self => tx.size())
     }
 }
 
