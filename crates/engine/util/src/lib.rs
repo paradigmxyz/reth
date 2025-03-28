@@ -1,8 +1,15 @@
 //! Collection of various stream utilities for consensus engine.
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use futures::Stream;
 use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
-use reth_payload_validator::ExecutionPayloadValidator;
 use std::path::PathBuf;
 use tokio_util::either::Either;
 
@@ -94,14 +101,14 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
     }
 
     /// Creates reorgs with specified frequency.
-    fn reorg<Provider, Evm, Spec>(
+    fn reorg<Provider, Evm, Validator>(
         self,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator<Spec>,
+        payload_validator: Validator,
         frequency: usize,
         depth: Option<usize>,
-    ) -> EngineReorg<Self, Engine, Provider, Evm, Spec>
+    ) -> EngineReorg<Self, Engine, Provider, Evm, Validator>
     where
         Self: Sized,
     {
@@ -117,14 +124,14 @@ pub trait EngineMessageStreamExt<Engine: EngineTypes>:
 
     /// If frequency is [Some], returns the stream that creates reorgs with
     /// specified frequency. Otherwise, returns `Self`.
-    fn maybe_reorg<Provider, Evm, Spec>(
+    fn maybe_reorg<Provider, Evm, Validator>(
         self,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: ExecutionPayloadValidator<Spec>,
+        payload_validator: Validator,
         frequency: Option<usize>,
         depth: Option<usize>,
-    ) -> Either<EngineReorg<Self, Engine, Provider, Evm, Spec>, Self>
+    ) -> Either<EngineReorg<Self, Engine, Provider, Evm, Validator>, Self>
     where
         Self: Sized,
     {

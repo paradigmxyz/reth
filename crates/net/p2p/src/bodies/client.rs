@@ -9,7 +9,7 @@ use futures::{Future, FutureExt};
 use reth_primitives_traits::BlockBody;
 
 /// The bodies future type
-pub type BodiesFut<B = reth_primitives::BlockBody> =
+pub type BodiesFut<B = reth_ethereum_primitives::BlockBody> =
     Pin<Box<dyn Future<Output = PeerRequestResult<Vec<B>>> + Send + Sync>>;
 
 /// A client capable of downloading block bodies.

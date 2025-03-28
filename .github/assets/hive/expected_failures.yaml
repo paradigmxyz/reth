@@ -1,18 +1,20 @@
-# https://github.com/paradigmxyz/reth/issues/7015
-# https://github.com/paradigmxyz/reth/issues/6332
+# https://github.com/paradigmxyz/reth/issues/13879
 rpc-compat:
   - debug_getRawBlock/get-invalid-number (reth)
   - debug_getRawHeader/get-invalid-number (reth)
   - debug_getRawReceipts/get-invalid-number (reth)
+  - debug_getRawReceipts/get-block-n (reth)
   - debug_getRawTransaction/get-invalid-hash (reth)
 
   - eth_call/call-callenv (reth)
-  - eth_feeHistory/fee-history (reth)
   - eth_getStorageAt/get-storage-invalid-key-too-large (reth)
   - eth_getStorageAt/get-storage-invalid-key (reth)
   - eth_getTransactionReceipt/get-access-list (reth)
   - eth_getTransactionReceipt/get-blob-tx (reth)
   - eth_getTransactionReceipt/get-dynamic-fee (reth)
+  - eth_getTransactionReceipt/get-legacy-contract (reth)
+  - eth_getTransactionReceipt/get-legacy-input (reth)
+  - eth_getTransactionReceipt/get-legacy-receipt (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
@@ -45,9 +47,11 @@ engine-cancun:
   - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
   - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, VersionedHashes Version, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, Incomplete VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, Extra VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
 
 sync: []
+
+# no fix: it’s too expensive to check whether the storage is empty on each creation
+eest/consume-engine:
+  - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test_engine-zero_nonce]-reth
+eest/consume-rlp:
+  - tests/prague/eip7702_set_code_tx/test_set_code_txs.py::test_set_code_to_non_empty_storage[fork_Prague-blockchain_test-zero_nonce]-reth

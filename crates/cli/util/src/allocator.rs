@@ -1,11 +1,24 @@
 //! Custom allocator implementation.
+//!
+//! We provide support for jemalloc and snmalloc on unix systems, and prefer jemalloc if both are
+//! enabled.
 
-// We use jemalloc for performance reasons.
+// We provide jemalloc allocator support, alongside snmalloc. If both features are enabled, jemalloc
+// is prioritized.
 cfg_if::cfg_if! {
     if #[cfg(all(feature = "jemalloc", unix))] {
         type AllocatorInner = tikv_jemallocator::Jemalloc;
+    } else if #[cfg(all(feature = "snmalloc", unix))] {
+        type AllocatorInner = snmalloc_rs::SnMalloc;
     } else {
         type AllocatorInner = std::alloc::System;
+    }
+}
+
+// This is to prevent clippy unused warnings when we do `--all-features`
+cfg_if::cfg_if! {
+    if #[cfg(all(feature = "snmalloc", feature = "jemalloc", unix))] {
+        use snmalloc_rs as _;
     }
 }
 

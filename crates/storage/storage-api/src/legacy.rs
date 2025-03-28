@@ -2,6 +2,7 @@
 //!
 //! This module is scheduled for removal in the future.
 
+use alloc::boxed::Box;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{BlockHash, BlockNumber};
 use auto_impl::auto_impl;

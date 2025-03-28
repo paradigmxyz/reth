@@ -157,9 +157,10 @@ pub(crate) type IngressReceiver = mpsc::Receiver<IngressEvent>;
 
 type NodeRecordSender = OneshotSender<Vec<NodeRecord>>;
 
-/// The Discv4 frontend
+/// The Discv4 frontend.
 ///
-/// This communicates with the [`Discv4Service`] by sending commands over a channel.
+/// This is a cloneable type that communicates with the [`Discv4Service`] by sending commands over a
+/// shared channel.
 ///
 /// See also [`Discv4::spawn`]
 #[derive(Debug, Clone)]
@@ -174,11 +175,10 @@ pub struct Discv4 {
     node_record: Arc<Mutex<NodeRecord>>,
 }
 
-// === impl Discv4 ===
-
 impl Discv4 {
-    /// Same as [`Self::bind`] but also spawns the service onto a new task,
-    /// [`Discv4Service::spawn()`]
+    /// Same as [`Self::bind`] but also spawns the service onto a new task.
+    ///
+    /// See also: [`Discv4Service::spawn()`]
     pub async fn spawn(
         local_address: SocketAddr,
         local_enr: NodeRecord,
@@ -420,6 +420,15 @@ impl Discv4 {
 /// Manages discv4 peer discovery over UDP.
 ///
 /// This is a [Stream] to handles incoming and outgoing discv4 messages and emits updates via:
+/// [`Discv4Service::update_stream`].
+///
+/// This type maintains the discv Kademlia routing table and is responsible for performing lookups.
+///
+/// ## Lookups
+///
+/// See also [Recursive Lookups](https://github.com/ethereum/devp2p/blob/master/discv4.md#recursive-lookup).
+/// Lookups are either triggered periodically or performaned on demand: [`Discv4::lookup`]
+/// Newly discovered nodes are emitted as [`DiscoveryUpdate::Added`] event to all subscribers:
 /// [`Discv4Service::update_stream`].
 #[must_use = "Stream does nothing unless polled"]
 pub struct Discv4Service {
@@ -694,7 +703,7 @@ impl Discv4Service {
 
     /// Spawns this services onto a new task
     ///
-    /// Note: requires a running runtime
+    /// Note: requires a running tokio runtime
     pub fn spawn(mut self) -> JoinHandle<()> {
         tokio::task::spawn(async move {
             self.bootstrap();
@@ -3002,5 +3011,43 @@ mod tests {
                 unreachable!()
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_bootnode_not_in_update_stream() {
+        reth_tracing::init_test_tracing();
+        let (_, service_1) = create_discv4().await;
+        let peerid_1 = *service_1.local_peer_id();
+
+        let config = Discv4Config::builder().add_boot_node(service_1.local_node_record).build();
+        service_1.spawn();
+
+        let (_, mut service_2) = create_discv4_with_config(config).await;
+
+        let mut updates = service_2.update_stream();
+
+        service_2.spawn();
+
+        // Poll for events for a reasonable time
+        let mut bootnode_appeared = false;
+        let timeout = tokio::time::sleep(Duration::from_secs(1));
+        tokio::pin!(timeout);
+
+        loop {
+            tokio::select! {
+                Some(update) = updates.next() => {
+                    if let DiscoveryUpdate::Added(record) = update {
+                        if record.id == peerid_1 {
+                            bootnode_appeared = true;
+                            break;
+                        }
+                    }
+                }
+                _ = &mut timeout => break,
+            }
+        }
+
+        // Assert bootnode did not appear in update stream
+        assert!(bootnode_appeared, "Bootnode should appear in update stream");
     }
 }

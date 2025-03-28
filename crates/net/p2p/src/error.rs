@@ -8,7 +8,7 @@ use derive_more::{Display, Error};
 use reth_consensus::ConsensusError;
 use reth_network_peers::WithPeerId;
 use reth_network_types::ReputationChangeKind;
-use reth_primitives::{GotExpected, GotExpectedBoxed};
+use reth_primitives_traits::{GotExpected, GotExpectedBoxed};
 use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use tokio::sync::{mpsc, oneshot};
 

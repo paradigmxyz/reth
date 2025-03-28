@@ -8,14 +8,14 @@ use reth_e2e_test_utils::{
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
 pub(crate) type OpNode =
-    NodeHelperType<OtherOpNode, BlockchainProvider2<NodeTypesWithDBAdapter<OtherOpNode, TmpDB>>>;
+    NodeHelperType<OtherOpNode, BlockchainProvider<NodeTypesWithDBAdapter<OtherOpNode, TmpDB>>>;
 
 /// Creates the initial setup with `num_nodes` of the node config, started and connected.
 pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
@@ -35,7 +35,7 @@ pub async fn advance_chain(
     length: usize,
     node: &mut OpNode,
     wallet: Arc<Mutex<Wallet>>,
-) -> eyre::Result<Vec<(OpBuiltPayload, OpPayloadBuilderAttributes)>> {
+) -> eyre::Result<Vec<OpBuiltPayload>> {
     node.advance(length as u64, |_| {
         let wallet = wallet.clone();
         Box::pin(async move {
@@ -53,7 +53,7 @@ pub async fn advance_chain(
 }
 
 /// Helper function to create a new eth payload attributes
-pub fn optimism_payload_attributes(timestamp: u64) -> OpPayloadBuilderAttributes {
+pub fn optimism_payload_attributes<T>(timestamp: u64) -> OpPayloadBuilderAttributes<T> {
     let attributes = PayloadAttributes {
         timestamp,
         prev_randao: B256::ZERO,

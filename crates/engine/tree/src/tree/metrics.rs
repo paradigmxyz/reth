@@ -1,4 +1,3 @@
-use reth_blockchain_tree::metrics::TreeMetrics;
 use reth_evm::metrics::ExecutorMetrics;
 use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
@@ -17,6 +16,18 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) block_validation: BlockValidationMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
     pub(crate) tree: TreeMetrics,
+}
+
+/// Metrics for the entire blockchain tree
+#[derive(Metrics)]
+#[metrics(scope = "blockchain_tree")]
+pub(super) struct TreeMetrics {
+    /// The highest block number in the canonical chain
+    pub canonical_chain_height: Gauge,
+    /// The number of reorgs
+    pub reorgs: Counter,
+    /// The latest reorg depth
+    pub latest_reorg_depth: Gauge,
 }
 
 /// Metrics for the `EngineApi`.
@@ -56,6 +67,8 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_histogram: Histogram,
     /// Latest state root duration
     pub(crate) state_root_duration: Gauge,
+    /// Trie input computation duration
+    pub(crate) trie_input_duration: Histogram,
 }
 
 impl BlockValidationMetrics {
@@ -66,4 +79,12 @@ impl BlockValidationMetrics {
         self.state_root_duration.set(elapsed_as_secs);
         self.state_root_histogram.record(elapsed_as_secs);
     }
+}
+
+/// Metrics for the blockchain tree block buffer
+#[derive(Metrics)]
+#[metrics(scope = "blockchain_tree.block_buffer")]
+pub(crate) struct BlockBufferMetrics {
+    /// Total blocks in the block buffer
+    pub blocks: Gauge,
 }

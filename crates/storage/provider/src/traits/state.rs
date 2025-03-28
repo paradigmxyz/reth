@@ -2,7 +2,7 @@ use alloy_primitives::BlockNumber;
 use reth_execution_types::ExecutionOutcome;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostStateSorted;
-use revm::db::{
+use revm_database::{
     states::{PlainStateReverts, StateChangeset},
     OriginalValuesKnown,
 };
@@ -18,7 +18,7 @@ pub trait StateWriter {
     /// `Some`. It should be `None` if there is any kind of pruning/filtering over the receipts.
     fn write_state(
         &self,
-        execution_outcome: ExecutionOutcome<Self::Receipt>,
+        execution_outcome: &ExecutionOutcome<Self::Receipt>,
         is_value_known: OriginalValuesKnown,
         write_receipts_to: StorageLocation,
     ) -> ProviderResult<()>;

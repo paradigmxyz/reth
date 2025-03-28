@@ -3,7 +3,7 @@ use alloy_primitives::B256;
 use derive_more::{Deref, DerefMut};
 use reth_db_api::table::Decompress;
 use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
-use reth_primitives::static_file::SegmentHeader;
+use reth_static_file_types::SegmentHeader;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::sync::Arc;
 
@@ -17,10 +17,7 @@ type ColumnResult<T> = ProviderResult<Option<T>>;
 impl<'a> StaticFileCursor<'a> {
     /// Returns a new [`StaticFileCursor`].
     pub fn new(jar: &'a NippyJar<SegmentHeader>, reader: Arc<DataReader>) -> ProviderResult<Self> {
-        Ok(Self(
-            NippyJarCursor::with_reader(jar, reader)
-                .map_err(|err| ProviderError::NippyJar(err.to_string()))?,
-        ))
+        Ok(Self(NippyJarCursor::with_reader(jar, reader).map_err(ProviderError::other)?))
     }
 
     /// Returns the current `BlockNumber` or `TxNumber` of the cursor depending on the kind of

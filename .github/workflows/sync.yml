@@ -38,6 +38,7 @@ jobs:
             unwind-target: "0x118a6e922a8c6cab221fc5adfe5056d2b72d58c6580e9c5629de55299e2cf8de"
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

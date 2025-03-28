@@ -6,7 +6,11 @@ use std::{
 
 use alloy_primitives::BlockNumber;
 use futures_util::{FutureExt, TryStreamExt};
-use reth::{api::FullNodeComponents, builder::NodeTypes, primitives::EthPrimitives};
+use reth::{
+    api::{BlockBody, FullNodeComponents},
+    builder::NodeTypes,
+    primitives::EthPrimitives,
+};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
@@ -36,7 +40,7 @@ impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Fut
         while let Some(notification) = ready!(this.ctx.notifications.try_next().poll_unpin(cx))? {
             if let Some(reverted_chain) = notification.reverted_chain() {
                 this.transactions = this.transactions.saturating_sub(
-                    reverted_chain.blocks_iter().map(|b| b.body().transactions.len() as u64).sum(),
+                    reverted_chain.blocks_iter().map(|b| b.body().transaction_count() as u64).sum(),
                 );
             }
 
@@ -45,7 +49,7 @@ impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Fut
 
                 this.transactions += committed_chain
                     .blocks_iter()
-                    .map(|b| b.body().transactions.len() as u64)
+                    .map(|b| b.body().transaction_count() as u64)
                     .sum::<u64>();
 
                 this.ctx
@@ -63,10 +67,10 @@ impl<Node: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Fut
 }
 
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _| async move {
+    reth::cli::Cli::parse_args().run(async move |builder, _| {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("my-exex", |ctx| async move { Ok(MyExEx::new(ctx)) })
+            .install_exex("my-exex", async move |ctx| Ok(MyExEx::new(ctx)))
             .launch()
             .await?;
 

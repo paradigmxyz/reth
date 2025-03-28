@@ -8,18 +8,16 @@ use crate::{
     Capability, EthMessageID, EthVersion,
 };
 use alloy_primitives::bytes::Bytes;
+use alloy_rlp::{BufMut, Decodable, Encodable};
 use derive_more::{Deref, DerefMut};
-use reth_eth_wire_types::{EthMessage, EthNetworkPrimitives, NetworkPrimitives};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
 };
 
-/// A Capability message consisting of the message-id and the payload
+/// A Capability message consisting of the message-id and the payload.
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RawCapabilityMessage {
     /// Identifier of the message.
     pub id: usize,
@@ -37,25 +35,34 @@ impl RawCapabilityMessage {
     ///
     /// Caller must ensure that the rlp encoded `payload` matches the given `id`.
     ///
-    /// See also  [`EthMessage`]
+    /// See also  [`EthMessage`](crate::EthMessage)
     pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
         Self::new(id as usize, payload)
     }
 }
 
-/// Various protocol related event types bubbled up from a session that need to be handled by the
-/// network.
-#[derive(Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CapabilityMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
-    /// Eth sub-protocol message.
-    #[cfg_attr(
-        feature = "serde",
-        serde(bound = "EthMessage<N>: Serialize + serde::de::DeserializeOwned")
-    )]
-    Eth(EthMessage<N>),
-    /// Any other or manually crafted eth message.
-    Other(RawCapabilityMessage),
+impl Encodable for RawCapabilityMessage {
+    /// Encodes the `RawCapabilityMessage` into an RLP byte stream.
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.id.encode(out);
+        out.put_slice(&self.payload);
+    }
+
+    /// Returns the total length of the encoded message.
+    fn length(&self) -> usize {
+        self.id.length() + self.payload.len()
+    }
+}
+
+impl Decodable for RawCapabilityMessage {
+    /// Decodes a `RawCapabilityMessage` from an RLP byte stream.
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let id = usize::decode(buf)?;
+        let payload = Bytes::copy_from_slice(buf);
+        *buf = &buf[buf.len()..];
+
+        Ok(Self { id, payload })
+    }
 }
 
 /// This represents a shared capability, its version, and its message id offset.
@@ -397,10 +404,19 @@ pub struct UnsupportedCapabilityError {
     capability: Capability,
 }
 
+impl UnsupportedCapabilityError {
+    /// Creates a new error with the given capability
+    pub const fn new(capability: Capability) -> Self {
+        Self { capability }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Capabilities, Capability};
+    use alloy_primitives::bytes::Bytes;
+    use alloy_rlp::{Decodable, Encodable};
 
     #[test]
     fn from_eth_68() {
@@ -559,5 +575,20 @@ mod tests {
         // the 6th shared message is the first message of the eth capability
         let shared_eth = shared.find_by_relative_offset(1 + proto.messages()).unwrap();
         assert_eq!(shared_eth.name(), "eth");
+    }
+
+    #[test]
+    fn test_raw_capability_rlp() {
+        let msg = RawCapabilityMessage { id: 1, payload: Bytes::from(vec![0x01, 0x02, 0x03]) };
+
+        // Encode the message into bytes
+        let mut encoded = Vec::new();
+        msg.encode(&mut encoded);
+
+        // Decode the bytes back into RawCapbailitMessage
+        let decoded = RawCapabilityMessage::decode(&mut &encoded[..]).unwrap();
+
+        // Verify that the decoded message matches the original
+        assert_eq!(msg, decoded);
     }
 }

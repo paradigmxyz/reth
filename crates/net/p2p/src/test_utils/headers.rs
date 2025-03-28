@@ -12,10 +12,10 @@ use crate::{
 };
 use alloy_consensus::Header;
 use futures::{Future, FutureExt, Stream, StreamExt};
-use reth_consensus::{test_utils::TestConsensus, Consensus};
+use reth_consensus::{test_utils::TestConsensus, HeaderValidator};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use std::{
     fmt,
     pin::Pin,
@@ -146,9 +146,7 @@ impl Stream for TestDownload {
             }
 
             let empty: SealedHeader = SealedHeader::default();
-            if let Err(error) =
-                <dyn Consensus<_>>::validate_header_against_parent(&this.consensus, &empty, &empty)
-            {
+            if let Err(error) = this.consensus.validate_header_against_parent(&empty, &empty) {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
                     hash: empty.hash(),
@@ -161,11 +159,10 @@ impl Stream for TestDownload {
                 Ok(resp) => {
                     // Skip head and seal headers
                     let mut headers =
-                        resp.1.into_iter().skip(1).map(SealedHeader::seal).collect::<Vec<_>>();
+                        resp.1.into_iter().skip(1).map(SealedHeader::seal_slow).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;
-                    continue
                 }
                 Err(err) => {
                     this.done = true;

@@ -7,6 +7,7 @@ use alloy_consensus::{Header, TxEip2930};
 use alloy_primitives::{Bytes, PrimitiveSignature as Signature, TxKind, U256};
 use rand::Rng;
 use reth_eth_wire::HeadersDirection;
+use reth_ethereum_primitives::{Block, Transaction, TransactionSigned};
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
     BlockDownloaderProvider, NetworkEventListenerProvider,
@@ -16,7 +17,6 @@ use reth_network_p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
 };
-use reth_primitives::{Block, Transaction, TransactionSigned};
 use reth_provider::test_utils::MockEthProvider;
 
 /// Returns a new [`TransactionSigned`] with some random parameters
@@ -64,7 +64,7 @@ async fn test_get_body() {
     for _ in 0..100 {
         // Set a new random block to the mock storage and request it via the network
         let block_hash = rng.gen();
-        let mut block = Block::default();
+        let mut block: Block = Block::default();
         block.body.transactions.push(rng_transaction(&mut rng));
 
         mock_provider.add_block(block_hash, block.clone());

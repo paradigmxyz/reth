@@ -1,4 +1,5 @@
 use crate::{PruneCheckpoint, PruneMode, PruneSegment};
+use alloc::vec::Vec;
 use alloy_primitives::{BlockNumber, TxNumber};
 use derive_more::Display;
 

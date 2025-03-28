@@ -4,16 +4,16 @@ use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use futures_util::StreamExt;
 use reth_config::config::EtlConfig;
 use reth_consensus::HeaderValidator;
-use reth_db::{table::Value, tables, transaction::DbTx, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    transaction::DbTxMut,
-    DbTxUnwindExt,
+    table::Value,
+    tables,
+    transaction::{DbTx, DbTxMut},
+    DbTxUnwindExt, RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
-use reth_primitives::{NodePrimitives, SealedHeader, StaticFileSegment};
-use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader};
+use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderProvider, HeaderSyncGap,
     HeaderSyncGapProvider, StaticFileProviderFactory,
@@ -22,6 +22,7 @@ use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     HeadersCheckpoint, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderError;
 use std::{
     sync::Arc,
@@ -36,7 +37,7 @@ use tracing::*;
 /// the perceived highest block on the network.
 ///
 /// The headers are processed and data is inserted into static files, as well as into the
-/// [`HeaderNumbers`][reth_db::tables::HeaderNumbers] table.
+/// [`HeaderNumbers`][reth_db_api::tables::HeaderNumbers] table.
 ///
 /// NOTE: This stage downloads headers in reverse and pushes them to the ETL [`Collector`]. It then
 /// proceeds to push them sequentially to static files. The stage checkpoint is not updated until
@@ -184,12 +185,12 @@ where
             if first_sync {
                 cursor_header_numbers.append(
                     RawKey::<BlockHash>::from_vec(hash),
-                    RawValue::<BlockNumber>::from_vec(number),
+                    &RawValue::<BlockNumber>::from_vec(number),
                 )?;
             } else {
-                cursor_header_numbers.insert(
+                cursor_header_numbers.upsert(
                     RawKey::<BlockHash>::from_vec(hash),
-                    RawValue::<BlockNumber>::from_vec(number),
+                    &RawValue::<BlockNumber>::from_vec(number),
                 )?;
             }
         }
@@ -406,8 +407,9 @@ mod tests {
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
+    use reth_ethereum_primitives::BlockBody;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders};
+    use reth_primitives_traits::{RecoveredBlock, SealedBlock};
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
@@ -521,7 +523,7 @@ mod tests {
                             // validate the header
                             let header = provider.header_by_number(block_num)?;
                             assert!(header.is_some());
-                            let header = SealedHeader::seal(header.unwrap());
+                            let header = SealedHeader::seal_slow(header.unwrap());
                             assert_eq!(header.hash(), hash);
 
                             // validate the header total difficulty
@@ -535,7 +537,7 @@ mod tests {
             }
 
             async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
-                self.client.extend(headers.iter().map(|h| h.clone().unseal())).await;
+                self.client.extend(headers.iter().map(|h| h.clone_header())).await;
                 let tip = if headers.is_empty() {
                     let tip = random_header(&mut generators::rng(), 0, None);
                     self.db.insert_headers(std::iter::once(&tip))?;
@@ -610,7 +612,7 @@ mod tests {
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
 
-        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+        runner.client.extend(headers.iter().rev().map(|h| h.clone_header())).await;
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
@@ -647,11 +649,10 @@ mod tests {
         let sealed_blocks = sealed_headers
             .iter()
             .map(|header| {
-                SealedBlockWithSenders::new(
-                    SealedBlock::new(header.clone(), BlockBody::default()),
+                RecoveredBlock::new_sealed(
+                    SealedBlock::from_sealed_parts(header.clone(), BlockBody::default()),
                     vec![],
                 )
-                .unwrap()
             })
             .collect();
 
@@ -660,7 +661,7 @@ mod tests {
         provider
             .append_blocks_with_state(
                 sealed_blocks,
-                ExecutionOutcome::default(),
+                &ExecutionOutcome::default(),
                 HashedPostStateSorted::default(),
                 TrieUpdates::default(),
             )
@@ -693,7 +694,7 @@ mod tests {
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
 
-        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+        runner.client.extend(headers.iter().rev().map(|h| h.clone_header())).await;
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();

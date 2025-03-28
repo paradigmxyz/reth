@@ -2,10 +2,11 @@ use super::response::BlockResponse;
 use crate::error::DownloadResult;
 use alloy_primitives::BlockNumber;
 use futures::Stream;
-use std::{fmt::Debug, ops::RangeInclusive};
+use reth_primitives_traits::Block;
+use std::ops::RangeInclusive;
 
 /// Body downloader return type.
-pub type BodyDownloaderResult<H, B> = DownloadResult<Vec<BlockResponse<H, B>>>;
+pub type BodyDownloaderResult<B> = DownloadResult<Vec<BlockResponse<B>>>;
 
 /// A downloader capable of fetching and yielding block bodies from block headers.
 ///
@@ -13,13 +14,10 @@ pub type BodyDownloaderResult<H, B> = DownloadResult<Vec<BlockResponse<H, B>>>;
 /// while a [`BodiesClient`][crate::bodies::client::BodiesClient] represents a client capable of
 /// fulfilling these requests.
 pub trait BodyDownloader:
-    Send + Sync + Stream<Item = BodyDownloaderResult<Self::Header, Self::Body>> + Unpin
+    Send + Sync + Stream<Item = BodyDownloaderResult<Self::Block>> + Unpin
 {
-    /// The type of header that is being used
-    type Header: Debug + Send + Sync + Unpin + 'static;
-
-    /// The type of the body that is being downloaded.
-    type Body: Debug + Send + Sync + Unpin + 'static;
+    /// The Block type this downloader supports
+    type Block: Block + 'static;
 
     /// Method for setting the download range.
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()>;

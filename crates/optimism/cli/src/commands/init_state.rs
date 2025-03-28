@@ -9,7 +9,7 @@ use reth_optimism_primitives::{
     bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD},
     OpPrimitives,
 };
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, DatabaseProviderFactory, StaticFileProviderFactory,
     StaticFileWriter,
@@ -61,7 +61,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
                 )?;
 
                 // SAFETY: it's safe to commit static files, since in the event of a crash, they
-                // will be unwinded according to database checkpoints.
+                // will be unwound according to database checkpoints.
                 //
                 // Necessary to commit, so the BEDROCK_HEADER is accessible to provider_rw and
                 // init_state_dump

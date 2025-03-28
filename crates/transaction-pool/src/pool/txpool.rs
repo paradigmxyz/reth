@@ -11,7 +11,7 @@ use crate::{
         parked::{BasefeeOrd, ParkedPool, QueuedOrd},
         pending::PendingPool,
         state::{SubPool, TxState},
-        update::{Destination, PoolUpdate},
+        update::{Destination, PoolUpdate, UpdateOutcome},
         AddedPendingTransaction, AddedTransaction, OnNewCanonicalStateOutcome,
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
@@ -23,8 +23,9 @@ use alloy_consensus::constants::{
     LEGACY_TX_TYPE_ID,
 };
 use alloy_eips::{
-    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE},
     eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
+    Typed2718,
 };
 use alloy_primitives::{Address, TxHash, B256};
 use rustc_hash::FxHashMap;
@@ -123,7 +124,10 @@ impl<T: TransactionOrdering> TxPool<T> {
     pub fn new(ordering: T, config: PoolConfig) -> Self {
         Self {
             sender_info: Default::default(),
-            pending_pool: PendingPool::new(ordering),
+            pending_pool: PendingPool::with_buffer(
+                ordering,
+                config.max_new_pending_txs_notifications,
+            ),
             queued_pool: Default::default(),
             basefee_pool: Default::default(),
             blob_pool: Default::default(),
@@ -571,7 +575,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let mut eip7702_count = 0;
 
         for tx in self.all_transactions.transactions_iter() {
-            match tx.transaction.tx_type() {
+            match tx.transaction.ty() {
                 LEGACY_TX_TYPE_ID => legacy_count += 1,
                 EIP2930_TX_TYPE_ID => eip2930_count += 1,
                 EIP1559_TX_TYPE_ID => eip1559_count += 1,
@@ -960,7 +964,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         // Helper macro that discards the worst transactions for the pools
         macro_rules! discard_worst {
-            ($this:ident, $removed:ident, [$($limit:ident => $pool:ident),* $(,)*]) => {
+            ($this:ident, $removed:ident, [$($limit:ident => ($pool:ident, $metric:ident)),* $(,)*]) => {
                 $ (
                 while $this.$pool.exceeds(&$this.config.$limit)
                     {
@@ -985,6 +989,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                             $this.$pool.size(),
                             $this.$pool.len()
                         );
+                        $this.metrics.$metric.increment(removed_from_subpool.len() as u64);
 
                         // 2. remove all transactions from the total set
                         for tx in removed_from_subpool {
@@ -1006,10 +1011,10 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         discard_worst!(
             self, removed, [
-                pending_limit => pending_pool,
-                basefee_limit => basefee_pool,
-                blob_limit    => blob_pool,
-                queued_limit  => queued_pool,
+                pending_limit => (pending_pool, pending_transactions_evicted),
+                basefee_limit => (basefee_pool, basefee_transactions_evicted),
+                blob_limit    => (blob_pool, blob_transactions_evicted),
+                queued_limit  => (queued_pool, queued_transactions_evicted),
             ]
         );
 
@@ -1831,7 +1836,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
         Self {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
@@ -1937,21 +1942,6 @@ impl<T: PoolTransaction> PoolInternalTransaction<T> {
     }
 }
 
-/// Tracks the result after updating the pool
-#[derive(Debug)]
-pub(crate) struct UpdateOutcome<T: PoolTransaction> {
-    /// transactions promoted to the pending pool
-    pub(crate) promoted: Vec<Arc<ValidPoolTransaction<T>>>,
-    /// transaction that failed and were discarded
-    pub(crate) discarded: Vec<Arc<ValidPoolTransaction<T>>>,
-}
-
-impl<T: PoolTransaction> Default for UpdateOutcome<T> {
-    fn default() -> Self {
-        Self { promoted: vec![], discarded: vec![] }
-    }
-}
-
 /// Stores relevant context about a sender.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SenderInfo {
@@ -1978,8 +1968,8 @@ mod tests {
         traits::TransactionOrigin,
         SubPoolLimit,
     };
+    use alloy_consensus::{Transaction, TxType};
     use alloy_primitives::address;
-    use reth_primitives::TxType;
 
     #[test]
     fn test_insert_blob() {
@@ -2889,7 +2879,7 @@ mod tests {
 
         // create a chain of transactions by sender A
         // make sure they are all one over half the limit
-        let a_sender = address!("000000000000000000000000000000000000000a");
+        let a_sender = address!("0x000000000000000000000000000000000000000a");
 
         // set the base fee of the pool
         let mut block_info = pool.block_info();
@@ -2931,7 +2921,7 @@ mod tests {
 
         // create a chain of transactions by sender A
         // make sure they are all one over half the limit
-        let a_sender = address!("000000000000000000000000000000000000000a");
+        let a_sender = address!("0x000000000000000000000000000000000000000a");
 
         // set the base fee of the pool
         let pool_base_fee = 100;

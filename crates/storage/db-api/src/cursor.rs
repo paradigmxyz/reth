@@ -104,17 +104,17 @@ pub trait DbDupCursorRO<T: DupSort> {
 pub trait DbCursorRW<T: Table> {
     /// Database operation that will update an existing row if a specified value already
     /// exists in a table, and insert a new row if the specified value doesn't already exist
-    fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
+    fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
 
     /// Database operation that will insert a row at a given key. If the key is already
     /// present, the operation will result in an error.
-    fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
+    fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
 
     /// Append value to next cursor item.
     ///
     /// This is efficient for pre-sorted data. If the data is not pre-sorted, use
     /// [`DbCursorRW::insert`].
-    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
+    fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
 
     /// Delete current value that cursor points to
     fn delete_current(&mut self) -> Result<(), DatabaseError>;

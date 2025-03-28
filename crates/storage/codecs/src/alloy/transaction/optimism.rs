@@ -107,7 +107,7 @@ impl crate::Compact for OpTxType {
                     match extended_identifier {
                         EIP7702_TX_TYPE_ID => Self::Eip7702,
                         op_alloy_consensus::DEPOSIT_TX_TYPE_ID => Self::Deposit,
-                        _ => panic!("Unsupported TxType identifier: {extended_identifier}"),
+                        _ => panic!("Unsupported OpTxType identifier: {extended_identifier}"),
                     }
                 }
                 _ => panic!("Unknown identifier for TxType: {identifier}"),

@@ -1,39 +1,42 @@
 //! Example for how to modify a block post-execution step. It credits beacon withdrawals with a
 //! custom mechanism instead of minting native tokens
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
-use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
+use alloy_eips::eip4895::Withdrawal;
+use alloy_evm::{
+    block::{BlockExecutorFactory, BlockExecutorFor},
+    eth::{EthBlockExecutionCtx, EthBlockExecutor},
+    EthEvm, EthEvmFactory,
+};
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
-#[cfg(feature = "optimism")]
-use reth::revm::primitives::OptimismFields;
 use reth::{
-    api::{ConfigureEvm, ConfigureEvmEnv, NodeTypesWithEngine},
+    api::{ConfigureEvm, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
-    providers::ProviderError,
+    providers::BlockExecutionResult,
     revm::{
-        interpreter::Host,
-        primitives::{address, Address, Bytes, Env, EnvWithHandlerCfg, TransactTo, TxEnv, U256},
-        Database, DatabaseCommit, Evm, State,
+        context::{result::ExecutionResult, TxEnv},
+        db::State,
+        primitives::{address, hardfork::SpecId, Address},
+        DatabaseCommit,
     },
 };
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::ChainSpec;
 use reth_evm::{
-    env::EvmEnv,
-    execute::{
-        BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
-        InternalBlockExecutionError,
-    },
+    execute::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
+    Database, Evm, EvmEnv, InspectorFor, NextBlockEnvAttributes, OnStateHook,
 };
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
+use reth_primitives::{
+    EthPrimitives, Header, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
+};
 use std::{fmt::Display, sync::Arc};
 
-pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
-pub const WITHDRAWALS_ADDRESS: Address = address!("4200000000000000000000000000000000000000");
+pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
+pub const WITHDRAWALS_ADDRESS: Address = address!("0x4200000000000000000000000000000000000000");
 
 fn main() {
     Cli::parse_args()
@@ -65,122 +68,136 @@ where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
-    type EVM = EthEvmConfig;
-    type Executor = BasicBlockExecutorProvider<CustomExecutorStrategyFactory>;
+    type EVM = CustomEvmConfig;
+    type Executor = BasicBlockExecutorProvider<Self::EVM>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        let chain_spec = ctx.chain_spec();
-        let evm_config = EthEvmConfig::new(ctx.chain_spec());
-        let strategy_factory =
-            CustomExecutorStrategyFactory { chain_spec, evm_config: evm_config.clone() };
-        let executor = BasicBlockExecutorProvider::new(strategy_factory);
+        let evm_config = CustomEvmConfig { inner: EthEvmConfig::new(ctx.chain_spec()) };
+        let executor = BasicBlockExecutorProvider::new(evm_config.clone());
 
         Ok((evm_config, executor))
     }
 }
 
-#[derive(Clone)]
-pub struct CustomExecutorStrategyFactory {
-    /// The chainspec
-    chain_spec: Arc<ChainSpec>,
-    /// How to create an EVM.
-    evm_config: EthEvmConfig,
+#[derive(Debug, Clone)]
+pub struct CustomEvmConfig {
+    inner: EthEvmConfig,
 }
 
-impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
-    type Primitives = EthPrimitives;
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> = CustomExecutorStrategy<DB>;
+impl BlockExecutorFactory for CustomEvmConfig {
+    type EvmFactory = EthEvmFactory;
+    type ExecutionCtx<'a> = EthBlockExecutionCtx<'a>;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
 
-    fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        self.inner.evm_factory()
+    }
+
+    fn create_executor<'a, DB, I>(
+        &'a self,
+        evm: EthEvm<&'a mut State<DB>, I>,
+        ctx: EthBlockExecutionCtx<'a>,
+    ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database + 'a,
+        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
     {
-        let state =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
-        CustomExecutorStrategy {
-            state,
-            chain_spec: self.chain_spec.clone(),
-            evm_config: self.evm_config.clone(),
+        CustomBlockExecutor {
+            inner: EthBlockExecutor::new(
+                evm,
+                ctx,
+                self.inner.chain_spec(),
+                self.inner.executor_factory.receipt_builder(),
+            ),
         }
     }
 }
 
-pub struct CustomExecutorStrategy<DB>
-where
-    DB: Database<Error: Into<ProviderError> + Display>,
-{
-    /// The chainspec
-    chain_spec: Arc<ChainSpec>,
-    /// How to create an EVM.
-    evm_config: EthEvmConfig,
-    /// Current state for block execution.
-    state: State<DB>,
-}
+impl ConfigureEvm for CustomEvmConfig {
+    type Primitives = <EthEvmConfig as ConfigureEvm>::Primitives;
+    type Error = <EthEvmConfig as ConfigureEvm>::Error;
+    type NextBlockEnvCtx = <EthEvmConfig as ConfigureEvm>::NextBlockEnvCtx;
+    type BlockExecutorFactory = Self;
+    type BlockAssembler = EthBlockAssembler<ChainSpec>;
 
-impl<DB> CustomExecutorStrategy<DB>
-where
-    DB: Database<Error: Into<ProviderError> + Display>,
-{
-    /// Configures a new evm configuration and block environment for the given block.
-    ///
-    /// # Caution
-    ///
-    /// This does not initialize the tx environment.
-    fn evm_env_for_block(&self, header: &alloy_consensus::Header) -> EnvWithHandlerCfg {
-        let evm_env = self.evm_config.cfg_and_block_env(header);
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
-        EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
+    fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {
+        self
+    }
+
+    fn block_assembler(&self) -> &Self::BlockAssembler {
+        self.inner.block_assembler()
+    }
+
+    fn evm_env(&self, header: &Header) -> EvmEnv<SpecId> {
+        self.inner.evm_env(header)
+    }
+
+    fn next_evm_env(
+        &self,
+        parent: &Header,
+        attributes: &NextBlockEnvAttributes,
+    ) -> Result<EvmEnv<SpecId>, Self::Error> {
+        self.inner.next_evm_env(parent, attributes)
+    }
+
+    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> EthBlockExecutionCtx<'a> {
+        self.inner.context_for_block(block)
+    }
+
+    fn context_for_next_block(
+        &self,
+        parent: &SealedHeader,
+        attributes: Self::NextBlockEnvCtx,
+    ) -> EthBlockExecutionCtx<'_> {
+        self.inner.context_for_next_block(parent, attributes)
     }
 }
 
-impl<DB> BlockExecutionStrategy for CustomExecutorStrategy<DB>
+pub struct CustomBlockExecutor<'a, Evm> {
+    /// Inner Ethereum execution strategy.
+    inner: EthBlockExecutor<'a, Evm, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
+}
+
+impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<'_, E>
 where
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database + 'db,
+    E: Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
 {
-    type DB = DB;
-    type Primitives = EthPrimitives;
-    type Error = BlockExecutionError;
+    type Transaction = TransactionSigned;
+    type Receipt = Receipt;
+    type Evm = E;
 
-    fn apply_pre_execution_changes(&mut self, block: &BlockWithSenders) -> Result<(), Self::Error> {
-        // Set state clear flag if the block is after the Spurious Dragon hardfork.
-        let state_clear_flag =
-            (*self.chain_spec).is_spurious_dragon_active_at_block(block.header.number);
-        self.state.set_state_clear_flag(state_clear_flag);
-
-        Ok(())
+    fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        self.inner.apply_pre_execution_changes()
     }
 
-    fn execute_transactions(
+    fn execute_transaction_with_result_closure(
         &mut self,
-        _block: &BlockWithSenders,
-    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
-        Ok(ExecuteOutput { receipts: vec![], gas_used: 0 })
+        tx: Recovered<&TransactionSigned>,
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
+    ) -> Result<u64, BlockExecutionError> {
+        self.inner.execute_transaction_with_result_closure(tx, f)
     }
 
-    fn apply_post_execution_changes(
-        &mut self,
-        block: &BlockWithSenders,
-        _receipts: &[Receipt],
-    ) -> Result<Requests, Self::Error> {
-        let env = self.evm_env_for_block(&block.header);
-        let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
-
-        if let Some(withdrawals) = block.body.withdrawals.as_ref() {
-            apply_withdrawals_contract_call(withdrawals, &mut evm)?;
+    fn finish(mut self) -> Result<(Self::Evm, BlockExecutionResult<Receipt>), BlockExecutionError> {
+        if let Some(withdrawals) = self.inner.ctx.withdrawals.clone() {
+            apply_withdrawals_contract_call(withdrawals.as_ref(), self.inner.evm_mut())?;
         }
 
-        Ok(Requests::default())
+        // Invoke inner finish method to apply Ethereum post-execution changes
+        self.inner.finish()
     }
 
-    fn state_ref(&self) -> &State<DB> {
-        &self.state
+    fn set_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {
+        self.inner.set_state_hook(_hook)
     }
 
-    fn state_mut(&mut self) -> &mut State<DB> {
-        &mut self.state
+    fn evm_mut(&mut self) -> &mut Self::Evm {
+        self.inner.evm_mut()
     }
 }
 
@@ -193,19 +210,11 @@ sol!(
 
 /// Applies the post-block call to the withdrawal / deposit contract, using the given block,
 /// [`ChainSpec`], EVM.
-pub fn apply_withdrawals_contract_call<EXT, DB: Database + DatabaseCommit>(
+pub fn apply_withdrawals_contract_call(
     withdrawals: &[Withdrawal],
-    evm: &mut Evm<'_, EXT, DB>,
-) -> Result<(), BlockExecutionError>
-where
-    DB::Error: std::fmt::Display,
-{
-    // get previous env
-    let previous_env = Box::new(evm.context.env().clone());
-
-    // modify env for pre block call
-    fill_tx_env_with_system_contract_call(
-        &mut evm.context.evm.env,
+    evm: &mut impl Evm<Error: Display, DB: DatabaseCommit>,
+) -> Result<(), BlockExecutionError> {
+    let mut state = match evm.transact_system_call(
         SYSTEM_ADDRESS,
         WITHDRAWALS_ADDRESS,
         withdrawalsCall {
@@ -214,12 +223,9 @@ where
         }
         .abi_encode()
         .into(),
-    );
-
-    let mut state = match evm.transact() {
+    ) {
         Ok(res) => res.state,
         Err(e) => {
-            evm.context.evm.env = previous_env;
             return Err(BlockExecutionError::Internal(InternalBlockExecutionError::Other(
                 format!("withdrawal contract system call revert: {}", e).into(),
             )))
@@ -228,48 +234,9 @@ where
 
     // Clean-up post system tx context
     state.remove(&SYSTEM_ADDRESS);
-    state.remove(&evm.block().coinbase);
-    evm.context.evm.db.commit(state);
-    // re-set the previous env
-    evm.context.evm.env = previous_env;
+    state.remove(&evm.block().beneficiary);
+
+    evm.db_mut().commit(state);
 
     Ok(())
-}
-
-fn fill_tx_env_with_system_contract_call(
-    env: &mut Env,
-    caller: Address,
-    contract: Address,
-    data: Bytes,
-) {
-    env.tx = TxEnv {
-        caller,
-        transact_to: TransactTo::Call(contract),
-        // Explicitly set nonce to None so revm does not do any nonce checks
-        nonce: None,
-        gas_limit: 30_000_000,
-        value: U256::ZERO,
-        data,
-        // Setting the gas price to zero enforces that no value is transferred as part of the call,
-        // and that the call will not count against the block's gas limit
-        gas_price: U256::ZERO,
-        // The chain ID check is not relevant here and is disabled if set to None
-        chain_id: None,
-        // Setting the gas priority fee to None ensures the effective gas price is derived from the
-        // `gas_price` field, which we need to be zero
-        gas_priority_fee: None,
-        access_list: Vec::new(),
-        // blob fields can be None for this tx
-        blob_hashes: Vec::new(),
-        max_fee_per_blob_gas: None,
-        authorization_list: None,
-        #[cfg(feature = "optimism")]
-        optimism: OptimismFields::default(),
-    };
-
-    // ensure the block gas limit is >= the tx
-    env.block.gas_limit = U256::from(env.tx.gas_limit);
-
-    // disable the base fee check for this call by setting the base fee to zero
-    env.block.basefee = U256::ZERO;
 }

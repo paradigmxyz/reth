@@ -16,6 +16,51 @@
 //! - `serde`: Adds serde support for all types.
 //! - `secp256k1`: Adds secp256k1 support for transaction signing/recovery. (By default the no-std
 //!   friendly `k256` is used)
+//! - `rayon`: Uses `rayon` for parallel transaction sender recovery in [`BlockBody`] by default.
+//! - `serde-bincode-compat` provides helpers for dealing with the `bincode` crate.
+//!
+//! ## Overview
+//!
+//! This crate defines various traits and types that form the foundation of the reth stack.
+//! The top-level trait is [`Block`] which represents a block in the blockchain. A [`Block`] is
+//! composed of a [`Header`] and a [`BlockBody`]. A [`BlockBody`] contains the transactions in the
+//! block any additional data that is part of the block. A [`Header`] contains the metadata of the
+//! block.
+//!
+//! ### Sealing (Hashing)
+//!
+//! The block hash is derived from the [`Header`] and is used to uniquely identify the block. This
+//! operation is referred to as sealing in the context of this crate. Sealing is an expensive
+//! operation. This crate provides various wrapper types that cache the hash of the block to avoid
+//! recomputing it: [`SealedHeader`] and [`SealedBlock`]. All sealed types can be downgraded to
+//! their unsealed counterparts.
+//!
+//! ### Recovery
+//!
+//! The raw consensus transactions that make up a block don't include the sender's address. This
+//! information is recovered from the transaction signature. This operation is referred to as
+//! recovery in the context of this crate and is an expensive operation. The [`RecoveredBlock`]
+//! represents a [`SealedBlock`] with the sender addresses recovered. A [`SealedBlock`] can be
+//! upgraded to a [`RecoveredBlock`] by recovering the sender addresses:
+//! [`SealedBlock::try_recover`]. A [`RecoveredBlock`] can be downgraded to a [`SealedBlock`] by
+//! removing the sender addresses: [`RecoveredBlock::into_sealed_block`].
+//!
+//! #### Naming
+//!
+//! The types in this crate support multiple recovery functions, e.g.
+//! [`SealedBlock::try_recover_unchecked`] and [`SealedBlock::try_recover_unchecked`]. The `_unchecked` suffix indicates that this function recovers the signer _without ensuring that the signature has a low `s` value_, in other words this rule introduced in [EIP-2](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md) is ignored.
+//! Hence this function is necessary when dealing with pre EIP-2 transactions on the ethereum
+//! mainnet. Newer transactions must always be recovered with the regular `recover` functions, see
+//! also [`recover_signer`](crypto::secp256k1::recover_signer).
+//!
+//! ## Bincode serde compatibility
+//!
+//! The [bincode-crate](https://github.com/bincode-org/bincode) is often used by additional tools when sending data over the network.
+//! `bincode` crate doesn't work well with optionally serializable serde fields, but some of the consensus types require optional serialization for RPC compatibility. Read more: <https://github.com/bincode-org/bincode/issues/326>
+//!
+//! As a workaround this crate introduces the
+//! [`SerdeBincodeCompat`](serde_bincode_compat::SerdeBincodeCompat) trait used to a bincode
+//! compatible serde representation.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -41,6 +86,10 @@ pub mod receipt;
 pub use receipt::{FullReceipt, Receipt};
 
 pub mod transaction;
+pub use alloy_consensus::{
+    transaction::{Recovered, TransactionMeta},
+    ReceiptWithBloom,
+};
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
@@ -50,13 +99,12 @@ pub use transaction::{
 pub mod block;
 pub use block::{
     body::{BlockBody, FullBlockBody},
-    header::{BlockHeader, FullBlockHeader},
-    Block, FullBlock,
+    header::{AlloyBlockHeader, BlockHeader, FullBlockHeader},
+    Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
-mod encoded;
 mod withdrawal;
-pub use encoded::WithEncoded;
+pub use alloy_eips::eip2718::WithEncoded;
 
 pub mod crypto;
 
@@ -66,14 +114,16 @@ pub use error::{GotExpected, GotExpectedBoxed};
 mod log;
 pub use alloy_primitives::{logs_bloom, Log, LogData};
 
+pub mod proofs;
+
 mod storage;
 pub use storage::StorageEntry;
 
+pub mod sync;
+
 /// Common header types
 pub mod header;
-#[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
-pub use header::test_utils;
-pub use header::{Header, HeaderError, SealedHeader};
+pub use header::{Header, HeaderError, SealedHeader, SealedHeaderFor};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
@@ -91,7 +141,7 @@ pub use size::InMemorySize;
 
 /// Node traits
 pub mod node;
-pub use node::{BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy};
+pub use node::{BlockTy, BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy, TxTy};
 
 /// Helper trait that requires de-/serialize implementation since `serde` feature is enabled.
 #[cfg(feature = "serde")]
@@ -132,3 +182,11 @@ pub trait MaybeSerdeBincodeCompat {}
 impl<T> MaybeSerdeBincodeCompat for T where T: crate::serde_bincode_compat::SerdeBincodeCompat {}
 #[cfg(not(feature = "serde-bincode-compat"))]
 impl<T> MaybeSerdeBincodeCompat for T {}
+
+/// Utilities for testing.
+#[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
+pub mod test_utils {
+    pub use crate::header::test_utils::{generate_valid_header, valid_header_strategy};
+    #[cfg(any(test, feature = "test-utils"))]
+    pub use crate::{block::TestBlock, header::test_utils::TestHeader};
+}

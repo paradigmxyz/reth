@@ -22,7 +22,7 @@ reth-tokio-util.workspace = true
 reth-ethereum-forks.workspace = true
 
 # ethereum
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["getrandom"] }
 
 # eth
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
@@ -41,10 +41,10 @@ derive_more.workspace = true
 [features]
 default = ["serde"]
 serde = [
-	"dep:serde",
-	"reth-eth-wire-types/serde",
-	"reth-network-types/serde",
-	"alloy-primitives/serde",
-	"enr/serde",
-	"reth-ethereum-forks/serde"
+    "dep:serde",
+    "reth-eth-wire-types/serde",
+    "reth-network-types/serde",
+    "alloy-primitives/serde",
+    "enr/serde",
+    "reth-ethereum-forks/serde",
 ]

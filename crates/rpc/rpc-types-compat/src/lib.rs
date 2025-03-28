@@ -11,6 +11,5 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod block;
-pub mod engine;
 pub mod transaction;
 pub use transaction::TransactionCompat;

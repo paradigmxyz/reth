@@ -1,5 +1,6 @@
 //! Consensus component for the node builder.
-use reth_node_api::NodeTypes;
+use reth_consensus::{ConsensusError, FullConsensus};
+use reth_node_api::PrimitivesTy;
 
 use crate::{BuilderContext, FullNodeTypes};
 use std::future::Future;
@@ -7,7 +8,7 @@ use std::future::Future;
 /// A type that knows how to build the consensus implementation.
 pub trait ConsensusBuilder<Node: FullNodeTypes>: Send {
     /// The consensus implementation to build.
-    type Consensus: reth_consensus::FullConsensus<<Node::Types as NodeTypes>::Primitives>
+    type Consensus: FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError>
         + Clone
         + Unpin
         + 'static;
@@ -22,10 +23,8 @@ pub trait ConsensusBuilder<Node: FullNodeTypes>: Send {
 impl<Node, F, Fut, Consensus> ConsensusBuilder<Node> for F
 where
     Node: FullNodeTypes,
-    Consensus: reth_consensus::FullConsensus<<Node::Types as NodeTypes>::Primitives>
-        + Clone
-        + Unpin
-        + 'static,
+    Consensus:
+        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Consensus>> + Send,
 {

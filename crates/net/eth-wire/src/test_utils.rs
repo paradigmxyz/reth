@@ -60,7 +60,7 @@ pub async fn connect_passthrough(
     p2p_stream
 }
 
-/// A Rplx subprotocol for testing
+/// An Rplx subprotocol for testing
 pub mod proto {
     use super::*;
     use crate::{protocol::Protocol, Capability};

@@ -11,15 +11,9 @@
 
 extern crate alloc;
 
-use once_cell as _;
-#[cfg(not(feature = "std"))]
-pub(crate) use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
-#[cfg(feature = "std")]
-pub(crate) use std::sync::{LazyLock, OnceLock};
-
 /// Chain specific constants
-pub(crate) mod constants;
-pub use constants::MIN_TRANSACTION_GAS;
+mod constants;
+pub use constants::*;
 
 mod api;
 /// The chain info module.
@@ -36,9 +30,12 @@ pub use info::ChainInfo;
 #[cfg(any(test, feature = "test-utils"))]
 pub use spec::test_fork_ids;
 pub use spec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
-    DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
+    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
+    ChainSpecProvider, DepositContract, ForkBaseFeeParams, HardforkBlobParams, DEV, HOLESKY, HOODI,
+    MAINNET, SEPOLIA,
 };
+
+use reth_primitives_traits::sync::OnceLock;
 
 /// Simple utility to create a thread-safe sync cell with a value set.
 pub fn once_cell_set<T>(value: T) -> OnceLock<T> {

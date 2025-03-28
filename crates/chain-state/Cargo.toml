@@ -17,16 +17,17 @@ reth-chainspec.workspace = true
 reth-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics.workspace = true
-reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-trie.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["std"] }
 alloy-consensus.workspace = true
-revm.workspace = true
+revm-database.workspace = true
+revm-state = { workspace = true, optional = true }
 
 # async
 tokio = { workspace = true, default-features = false, features = ["sync", "macros"] }
@@ -47,6 +48,7 @@ alloy-signer-local = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
@@ -55,12 +57,13 @@ rand.workspace = true
 
 [features]
 test-utils = [
+    "alloy-primitives/getrandom",
     "alloy-signer",
     "alloy-signer-local",
     "rand",
+    "revm-state",
     "reth-chainspec/test-utils",
-    "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie/test-utils",
-    "revm/test-utils",
+    "reth-ethereum-primitives/test-utils",
 ]

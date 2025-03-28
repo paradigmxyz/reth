@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use clap::Parser;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
-use reth_db::tables;
+use reth_db_api::tables;
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
@@ -16,7 +16,7 @@ use reth_node_builder::ReceiptTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives, OpReceipt};
-use reth_primitives::{NodePrimitives, Receipts};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
     OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
@@ -26,7 +26,7 @@ use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, info, trace, warn};
 
-use crate::receipt_file_codec::HackReceiptFileCodec;
+use crate::receipt_file_codec::OpGethReceiptFileCodec;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
@@ -38,7 +38,7 @@ pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
 
-    /// The path to a receipts file for import. File must use `HackReceiptFileCodec` (used for
+    /// The path to a receipts file for import. File must use `OpGethReceiptFileCodec` (used for
     /// exporting OP chain segment below Bedrock block via testinprod/op-geth).
     ///
     /// <https://github.com/testinprod-io/op-geth/pull/1>
@@ -90,7 +90,7 @@ pub async fn import_receipts_from_file<N, P, F>(
 where
     N: ProviderNodeTypes<ChainSpec = OpChainSpec, Primitives: NodePrimitives<Receipt = OpReceipt>>,
     P: AsRef<Path>,
-    F: FnMut(u64, &mut Receipts<OpReceipt>) -> usize,
+    F: FnMut(u64, &mut Vec<Vec<OpReceipt>>) -> usize,
 {
     for stage in StageId::ALL {
         let checkpoint = provider_factory.database_provider_ro()?.get_stage_checkpoint(stage)?;
@@ -119,7 +119,7 @@ where
 ///
 /// Caution! Filter callback must replace completely filtered out receipts for a block, with empty
 /// vectors, rather than `vec!(None)`. This is since the code for writing to static files, expects
-/// indices in the [`Receipts`] list, to map to sequential block numbers.
+/// indices in the receipts list, to map to sequential block numbers.
 pub async fn import_receipts_from_reader<N, F>(
     provider_factory: &ProviderFactory<N>,
     mut reader: ChunkedFileReader,
@@ -127,7 +127,7 @@ pub async fn import_receipts_from_reader<N, F>(
 ) -> eyre::Result<ImportReceiptsResult>
 where
     N: ProviderNodeTypes<Primitives: NodePrimitives<Receipt = OpReceipt>>,
-    F: FnMut(u64, &mut Receipts<ReceiptTy<N>>) -> usize,
+    F: FnMut(u64, &mut Vec<Vec<ReceiptTy<N>>>) -> usize,
 {
     let static_file_provider = provider_factory.static_file_provider();
 
@@ -161,7 +161,7 @@ where
         .expect("transaction static files must exist before importing receipts");
 
     while let Some(file_client) =
-        reader.next_receipts_chunk::<ReceiptFileClient<HackReceiptFileCodec<OpReceipt>>>().await?
+        reader.next_receipts_chunk::<ReceiptFileClient<OpGethReceiptFileCodec<OpReceipt>>>().await?
     {
         if highest_block_receipts == highest_block_transactions {
             warn!(target: "reth::cli",  highest_block_receipts, highest_block_transactions, "Ignoring all other blocks in the file since we have reached the desired height");
@@ -207,7 +207,7 @@ where
             highest_block_receipts -= excess;
 
             // Remove the last `excess` blocks
-            receipts.receipt_vec.truncate(receipts.len() - excess as usize);
+            receipts.truncate(receipts.len() - excess as usize);
 
             warn!(target: "reth::cli", highest_block_receipts, "Too many decoded blocks, ignoring the last {excess}.");
         }
@@ -223,7 +223,7 @@ where
 
         // finally, write the receipts
         provider.write_state(
-            execution_outcome,
+            &execution_outcome,
             OriginalValuesKnown::Yes,
             StorageLocation::StaticFiles,
         )?;

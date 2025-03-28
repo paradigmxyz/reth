@@ -18,16 +18,14 @@ jobs:
       matrix:
         include:
           - type: ethereum
-            args: --bin reth --workspace --lib --examples --tests --benches --locked
+            args: --workspace --lib --examples --tests --benches --locked
             features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
-          - type: optimism
-            args: --bin op-reth --workspace --lib --examples --tests --benches --locked
-            features: "optimism asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: book
             args: --manifest-path book/sources/Cargo.toml --workspace --bins
             features: ""
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@clippy
         with:
           components: clippy
@@ -49,6 +47,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: clippy
@@ -64,6 +63,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: wasm32-wasip1
@@ -73,13 +73,16 @@ jobs:
           cache-on-failure: true
       - uses: dcarbone/install-jq-action@v3
       - name: Run Wasm checks
-        run: .github/assets/check_wasm.sh
+        run: |
+          sudo apt update && sudo apt install gcc-multilib
+          .github/assets/check_wasm.sh
 
   riscv:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: riscv32imac-unknown-none-elf
@@ -96,34 +99,33 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo hack check --workspace --exclude op-reth
-      - run: cargo check -p op-reth --features "optimism"
+      - run: cargo hack check --workspace
 
   msrv:
-    name: MSRV / ${{ matrix.network }}
+    name: MSRV
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
         include:
           - binary: reth
-            network: ethereum
           - binary: op-reth
-            network: optimism
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.82" # MSRV
+          toolchain: "1.85" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo build --bin "${{ matrix.binary }}" --workspace --features "${{ matrix.network }}"
+      - run: cargo build --bin "${{ matrix.binary }}" --workspace
         env:
           RUSTFLAGS: -D warnings
 
@@ -133,6 +135,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
         with:
@@ -149,6 +152,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
@@ -163,6 +167,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
         with:
@@ -176,10 +181,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.82" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -199,6 +202,17 @@ jobs:
         with:
           skip: "*.json"
 
+  check-toml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run dprint
+        uses: dprint/check@v2.2
+        with:
+          config-path: dprint.json
+
   grafana:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -214,6 +228,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Ensure no arbitrary or proptest dependency on default build
         run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
@@ -225,6 +240,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@clippy
       - uses: Swatinem/rust-cache@v2
         with:

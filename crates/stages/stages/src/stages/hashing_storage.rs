@@ -1,15 +1,15 @@
 use alloy_primitives::{bytes::BufMut, keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
-use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
     models::{BlockNumberAddress, CompactU256},
     table::Decompress,
+    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_primitives::StorageEntry;
+use reth_primitives_traits::StorageEntry;
 use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -219,7 +219,8 @@ mod tests {
         cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };
-    use reth_primitives::SealedBlock;
+    use reth_ethereum_primitives::Block;
+    use reth_primitives_traits::{SealedBlock, SignedTransaction};
     use reth_provider::providers::StaticFileWriter;
     use reth_testing_utils::generators::{
         self, random_block_range, random_contract_account_range, BlockRangeParams,
@@ -328,7 +329,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for StorageHashingTestRunner {
-        type Seed = Vec<SealedBlock>;
+        type Seed = Vec<SealedBlock<Block>>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.next_block();
@@ -344,7 +345,7 @@ mod tests {
                 BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
             );
 
-            self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
+            self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;
@@ -356,7 +357,7 @@ mod tests {
                     progress.body().transactions.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
                             tx.put::<tables::TransactionHashNumbers>(
-                                transaction.hash(),
+                                *transaction.tx_hash(),
                                 next_tx_num,
                             )?;
                             tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
@@ -373,7 +374,7 @@ mod tests {
                                     tx,
                                     (block_number, *addr).into(),
                                     new_entry,
-                                    progress.header.number == stage_progress,
+                                    progress.number == stage_progress,
                                 )?;
                             }
 
@@ -392,7 +393,7 @@ mod tests {
                                 key: keccak256("mining"),
                                 value: U256::from(rng.gen::<u32>()),
                             },
-                            progress.header.number == stage_progress,
+                            progress.number == stage_progress,
                         )?;
                     }
 
@@ -533,7 +534,7 @@ mod tests {
                     }
 
                     if !entry.value.is_zero() {
-                        storage_cursor.upsert(bn_address.address(), entry)?;
+                        storage_cursor.upsert(bn_address.address(), &entry)?;
                     }
                 }
                 Ok(())

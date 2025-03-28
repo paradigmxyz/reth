@@ -421,7 +421,7 @@ impl TraceBlockStream<'_> {
     pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
         loop {
             match self.next().await? {
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(err) => return Some(err),
             }
         }
@@ -453,7 +453,7 @@ impl TraceBlockOpcodeGasStream<'_> {
     pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
         loop {
             match self.next().await? {
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(err) => return Some(err),
             }
         }

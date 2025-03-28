@@ -13,7 +13,6 @@ Commands:
   merkle            Debug the clean & incremental state root calculations
   in-memory-merkle  Debug in-memory state root calculation
   build-block       Debug block building
-  replay-engine     Debug engine API by replaying stored messages
   help              Print this message or the help of the given subcommand(s)
 
 Options:
@@ -22,7 +21,7 @@ Options:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, holesky, dev
+              mainnet, sepolia, holesky, hoodi, dev
 
           [default: mainnet]
 

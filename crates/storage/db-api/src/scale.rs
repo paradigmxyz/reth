@@ -21,7 +21,7 @@ where
         parity_scale_codec::Encode::encode(&self)
     }
 
-    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
         parity_scale_codec::Encode::encode_to(&self, OutputCompat::wrap_mut(buf));
     }
 }

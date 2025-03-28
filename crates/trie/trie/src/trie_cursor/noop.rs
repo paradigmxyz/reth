@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 
 /// Noop trie cursor factory.
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 #[non_exhaustive]
 pub struct NoopTrieCursorFactory;
 

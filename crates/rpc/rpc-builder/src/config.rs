@@ -95,6 +95,7 @@ impl RethRpcServerConfig for RpcServerArgs {
     fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
+            .max_trace_filter_blocks(self.rpc_max_trace_filter_blocks)
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
             .eth_proof_window(self.rpc_eth_proof_window)
@@ -106,7 +107,10 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
-        ValidationApiConfig { disallow: self.builder_disallow.clone().unwrap_or_default() }
+        ValidationApiConfig {
+            disallow: self.builder_disallow.clone().unwrap_or_default(),
+            validation_window: self.rpc_eth_proof_window,
+        }
     }
 
     fn state_cache_config(&self) -> EthStateCacheConfig {

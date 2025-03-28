@@ -6,11 +6,12 @@ use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
-use reth_db::{tables::*, test_utils::create_test_rw_db_with_path};
+use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     table::{Compress, Decode, Decompress, DupSort, Encode, Table},
+    tables::*,
     transaction::{DbTx, DbTxMut},
 };
 use reth_fs_util as fs;
@@ -137,7 +138,7 @@ where
                 let tx = db.tx_mut().expect("tx");
                 let mut crsr = tx.cursor_write::<T>().expect("cursor");
                 for (k, _, v, _) in input {
-                    crsr.append(k, v).expect("submit");
+                    crsr.append(k, &v).expect("submit");
                 }
                 tx.inner.commit().unwrap()
             },
@@ -157,7 +158,7 @@ where
                 let mut crsr = tx.cursor_write::<T>().expect("cursor");
                 for index in RANDOM_INDEXES {
                     let (k, _, v, _) = input.get(index).unwrap().clone();
-                    crsr.insert(k, v).expect("submit");
+                    crsr.insert(k, &v).expect("submit");
                 }
 
                 tx.inner.commit().unwrap()

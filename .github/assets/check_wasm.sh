@@ -10,9 +10,7 @@ crates=($(cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name'
 exclude_crates=(
   # The following require investigation if they can be fixed
   reth-basic-payload-builder
-  reth-beacon-consensus
   reth-bench
-  reth-blockchain-tree
   reth-cli
   reth-cli-commands
   reth-cli-runner
@@ -45,7 +43,8 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
-  reth-optimism-primitives
+  reth-optimism-storage
+  reth-optimism-chain-registry
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -56,18 +55,23 @@ exclude_crates=(
   reth-rpc-layer
   reth-stages
   reth-engine-local
+  reth-ress-protocol
+  reth-ress-provider
   # The following are not supposed to be working
   reth # all of the crates below
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
+  reth-payload-builder # reth-metrics
   reth-provider # tokio
   reth-prune # tokio
   reth-stages-api # reth-provider, reth-prune
   reth-static-file # tokio
   reth-transaction-pool # c-kzg
+  reth-payload-util # reth-transaction-pool
   reth-trie-parallel # tokio
   reth-testing-utils
+  reth-optimism-txpool # reth-transaction-pool
 )
 
 # Array to hold the results

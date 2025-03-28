@@ -1,6 +1,6 @@
 use crate::Nibbles;
 use alloc::{sync::Arc, vec::Vec};
-use alloy_primitives::map::{B256HashMap, B256HashSet};
+use alloy_primitives::map::{B256Map, B256Set};
 
 /// Collection of mutable prefix sets.
 #[derive(Clone, Default, Debug)]
@@ -9,9 +9,9 @@ pub struct TriePrefixSetsMut {
     pub account_prefix_set: PrefixSetMut,
     /// A map containing storage changes with the hashed address as key and a set of storage key
     /// prefixes as the value.
-    pub storage_prefix_sets: B256HashMap<PrefixSetMut>,
+    pub storage_prefix_sets: B256Map<PrefixSetMut>,
     /// A set of hashed addresses of destroyed accounts.
-    pub destroyed_accounts: B256HashSet,
+    pub destroyed_accounts: B256Set,
 }
 
 impl TriePrefixSetsMut {
@@ -47,9 +47,9 @@ pub struct TriePrefixSets {
     pub account_prefix_set: PrefixSet,
     /// A map containing storage changes with the hashed address as key and a set of storage key
     /// prefixes as the value.
-    pub storage_prefix_sets: B256HashMap<PrefixSet>,
+    pub storage_prefix_sets: B256Map<PrefixSet>,
     /// A set of hashed addresses of destroyed accounts.
-    pub destroyed_accounts: B256HashSet,
+    pub destroyed_accounts: B256Set,
 }
 
 /// A container for efficiently storing and checking for the presence of key prefixes.

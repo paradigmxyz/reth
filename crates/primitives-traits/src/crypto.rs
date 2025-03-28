@@ -22,6 +22,7 @@ pub mod secp256k1 {
     #[cfg(feature = "secp256k1")]
     use super::impl_secp256k1 as imp;
 
+    use crate::transaction::signed::RecoveryError;
     pub use imp::{public_key_to_address, sign_message};
 
     /// Recover signer from message hash, _without ensuring that the signature has a low `s`
@@ -30,7 +31,10 @@ pub mod secp256k1 {
     /// Using this for signature validation will succeed, even if the signature is malleable or not
     /// compliant with EIP-2. This is provided for compatibility with old signatures which have
     /// large `s` values.
-    pub fn recover_signer_unchecked(signature: &Signature, hash: B256) -> Option<Address> {
+    pub fn recover_signer_unchecked(
+        signature: &Signature,
+        hash: B256,
+    ) -> Result<Address, RecoveryError> {
         let mut sig: [u8; 65] = [0; 65];
 
         sig[0..32].copy_from_slice(&signature.r().to_be_bytes::<32>());
@@ -39,7 +43,7 @@ pub mod secp256k1 {
 
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive
         // errors and we care only if recovery is passing or not.
-        imp::recover_signer_unchecked(&sig, &hash.0).ok()
+        imp::recover_signer_unchecked(&sig, &hash.0).map_err(|_| RecoveryError)
     }
 
     /// Recover signer address from message hash. This ensures that the signature S value is
@@ -47,11 +51,10 @@ pub mod secp256k1 {
     /// [EIP-2](https://eips.ethereum.org/EIPS/eip-2).
     ///
     /// If the S value is too large, then this will return `None`
-    pub fn recover_signer(signature: &Signature, hash: B256) -> Option<Address> {
+    pub fn recover_signer(signature: &Signature, hash: B256) -> Result<Address, RecoveryError> {
         if signature.s() > SECP256K1N_HALF {
-            return None
+            return Err(RecoveryError)
         }
-
         recover_signer_unchecked(signature, hash)
     }
 }
@@ -78,7 +81,7 @@ mod impl_secp256k1 {
         msg: &[u8; 32],
     ) -> Result<Address, Error> {
         let sig =
-            RecoverableSignature::from_compact(&sig[0..64], RecoveryId::from_i32(sig[64] as i32)?)?;
+            RecoverableSignature::from_compact(&sig[0..64], RecoveryId::try_from(sig[64] as i32)?)?;
 
         let public = SECP256K1.recover_ecdsa(&Message::from_digest(*msg), &sig)?;
         Ok(public_key_to_address(public))
@@ -94,7 +97,7 @@ mod impl_secp256k1 {
         let signature = Signature::new(
             U256::try_from_be_slice(&data[..32]).expect("The slice has at most 32 bytes"),
             U256::try_from_be_slice(&data[32..64]).expect("The slice has at most 32 bytes"),
-            rec_id.to_i32() != 0,
+            i32::from(rec_id) != 0,
         );
         Ok(signature)
     }

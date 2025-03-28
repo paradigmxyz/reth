@@ -6,14 +6,15 @@ use std::{
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
+use reth_ethereum_primitives::Receipt;
 use reth_evm::execute::{
-    BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
+    BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
-use reth_primitives::{BlockExt, BlockWithSenders, Receipt};
-use reth_primitives_traits::{format_gas_throughput, SignedTransaction};
+use reth_primitives_traits::{format_gas_throughput, RecoveredBlock, SignedTransaction};
 use reth_provider::{
-    BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
+    BlockReader, Chain, ExecutionOutcome, HeaderProvider, ProviderError, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -75,10 +76,11 @@ where
             "Executing block range"
         );
 
-        let mut executor = self.executor.batch_executor(StateProviderDatabase::new(
-            self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
+        let mut executor = self.executor.executor(StateProviderDatabase::new(
+            self.provider
+                .history_by_block_number(self.range.start().saturating_sub(1))
+                .map_err(BlockExecutionError::other)?,
         ));
-        executor.set_prune_modes(self.prune_modes.clone());
 
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
@@ -86,6 +88,7 @@ where
         let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
+        let mut results = Vec::new();
         for block_number in self.range.clone() {
             // Fetch the block
             let fetch_block_start = Instant::now();
@@ -93,8 +96,10 @@ where
             // we need the block's transactions along with their hashes
             let block = self
                 .provider
-                .sealed_block_with_senders(block_number.into(), TransactionVariant::WithHash)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+                .sealed_block_with_senders(block_number.into(), TransactionVariant::WithHash)
+                .map_err(BlockExecutionError::other)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))
+                .map_err(BlockExecutionError::other)?;
 
             fetch_block_duration += fetch_block_start.elapsed();
 
@@ -107,24 +112,21 @@ where
             let execute_start = Instant::now();
 
             // Unseal the block for execution
-            let (block, senders) = block.into_components();
-            let (header, body) = block.split_header_body();
-            let (unsealed_header, hash) = header.split();
-            let block = P::Block::new(unsealed_header, body).with_senders_unchecked(senders);
+            let (block, senders) = block.split_sealed();
+            let (header, body) = block.split_sealed_header_body();
+            let block = P::Block::new_sealed(header, body).with_senders(senders);
 
-            executor.execute_and_verify_one(&block)?;
+            results.push(executor.execute_one(&block)?);
             execution_duration += execute_start.elapsed();
 
             // TODO(alexey): report gas metrics using `block.header.gas_used`
 
             // Seal the block back and save it
-            blocks.push(block.seal_unchecked(hash));
-
+            blocks.push(block);
             // Check if we should commit now
-            let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
             if self.thresholds.is_end_of_batch(
                 block_number - *self.range.start(),
-                bundle_size_hint,
+                executor.size_hint() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
@@ -132,6 +134,7 @@ where
             }
         }
 
+        let first_block_number = blocks.first().expect("blocks should not be empty").number();
         let last_block_number = blocks.last().expect("blocks should not be empty").number();
         debug!(
             target: "exex::backfill",
@@ -143,7 +146,12 @@ where
         );
         self.range = last_block_number + 1..=*self.range.end();
 
-        let chain = Chain::new(blocks, executor.finalize(), None);
+        let outcome = ExecutionOutcome::from_blocks(
+            first_block_number,
+            executor.into_state().take_bundle(),
+            results,
+        );
+        let chain = Chain::new(blocks, outcome, None);
         Ok(chain)
     }
 }
@@ -151,7 +159,7 @@ where
 /// Single block Backfill job started for a specific range.
 ///
 /// It implements [`Iterator`] which executes a block each time the
-/// iterator is advanced and yields ([`BlockWithSenders`], [`BlockExecutionOutput`])
+/// iterator is advanced and yields ([`RecoveredBlock`], [`BlockExecutionOutput`])
 #[derive(Debug, Clone)]
 pub struct SingleBlockBackfillJob<E, P> {
     pub(crate) executor: E,
@@ -166,7 +174,7 @@ where
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<(
-        BlockWithSenders<P::Block>,
+        RecoveredBlock<P::Block>,
         BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
     )>;
 
@@ -183,7 +191,11 @@ where
     /// Converts the single block backfill job into a stream.
     pub fn into_stream(
         self,
-    ) -> StreamBackfillJob<E, P, (BlockWithSenders, BlockExecutionOutput<Receipt>)> {
+    ) -> StreamBackfillJob<
+        E,
+        P,
+        (RecoveredBlock<reth_ethereum_primitives::Block>, BlockExecutionOutput<Receipt>),
+    > {
         self.into()
     }
 
@@ -192,21 +204,25 @@ where
         &self,
         block_number: u64,
     ) -> BackfillJobResult<(
-        BlockWithSenders<P::Block>,
+        RecoveredBlock<P::Block>,
         BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
     )> {
         // Fetch the block with senders for execution.
         let block_with_senders = self
             .provider
-            .block_with_senders(block_number.into(), TransactionVariant::WithHash)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+            .recovered_block(block_number.into(), TransactionVariant::WithHash)
+            .map_err(BlockExecutionError::other)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))
+            .map_err(BlockExecutionError::other)?;
 
         // Configure the executor to use the previous block's state.
         let executor = self.executor.executor(StateProviderDatabase::new(
-            self.provider.history_by_block_number(block_number.saturating_sub(1))?,
+            self.provider
+                .history_by_block_number(block_number.saturating_sub(1))
+                .map_err(BlockExecutionError::other)?,
         ));
 
-        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body().transactions().len(), "Executing block");
+        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
         let block_execution_output = executor.execute(&block_with_senders)?;
 
@@ -231,7 +247,6 @@ mod tests {
         backfill::test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
         BackfillJobFactory,
     };
-    use reth_blockchain_tree::noop::NoopBlockchainTree;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
@@ -240,7 +255,6 @@ mod tests {
     };
     use reth_testing_utils::generators;
     use secp256k1::Keypair;
-    use std::sync::Arc;
 
     #[test]
     fn test_backfill() -> eyre::Result<()> {
@@ -255,10 +269,7 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(
-            provider_factory.clone(),
-            Arc::new(NoopBlockchainTree::default()),
-        )?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
 
         let blocks_and_execution_outputs =
             blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
@@ -294,10 +305,7 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(
-            provider_factory.clone(),
-            Arc::new(NoopBlockchainTree::default()),
-        )?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
 
         let blocks_and_execution_outcomes =
             blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
@@ -318,8 +326,7 @@ mod tests {
             let (block, mut execution_output) = res?;
             execution_output.state.reverts.sort();
 
-            let sealed_block_with_senders = blocks_and_execution_outcomes[i].0.clone();
-            let expected_block = sealed_block_with_senders.unseal();
+            let expected_block = blocks_and_execution_outcomes[i].0.clone();
             let expected_output = &blocks_and_execution_outcomes[i].1;
 
             assert_eq!(block, expected_block);

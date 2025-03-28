@@ -2,7 +2,7 @@ use crate::{
     DatabaseHashedCursorFactory, DatabaseProof, DatabaseStateRoot, DatabaseStorageRoot,
     DatabaseTrieCursorFactory, DatabaseTrieWitness,
 };
-use reth_db::transaction::DbTx;
+use reth_db_api::transaction::DbTx;
 use reth_trie::{
     proof::Proof, witness::TrieWitness, KeccakKeyHasher, KeyHasher, StateRoot, StorageRoot,
 };

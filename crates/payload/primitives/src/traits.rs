@@ -1,30 +1,33 @@
+use alloc::vec::Vec;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
 };
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
-use reth_chain_state::ExecutedBlock;
-use reth_primitives::{NodePrimitives, SealedBlockFor};
+use core::fmt;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
 /// Represents a built payload type that contains a built `SealedBlock` and can be converted into
 /// engine API execution payloads.
-pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
+#[auto_impl::auto_impl(&, Arc)]
+pub trait BuiltPayload: Send + Sync + fmt::Debug {
     /// The node's primitive types
     type Primitives: NodePrimitives;
 
     /// Returns the built block (sealed)
-    fn block(&self) -> &SealedBlockFor<<Self::Primitives as NodePrimitives>::Block>;
+    fn block(&self) -> &SealedBlock<<Self::Primitives as NodePrimitives>::Block>;
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
 
     /// Returns the entire execution data for the built block, if available.
-    fn executed_block(&self) -> Option<ExecutedBlock<Self::Primitives>> {
+    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<Self::Primitives>> {
         None
     }
 
-    /// Returns the EIP-7865 requests for the payload if any.
+    /// Returns the EIP-7685 requests for the payload if any.
     fn requests(&self) -> Option<Requests>;
 }
 
@@ -32,7 +35,7 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
 ///
 /// This is used as a conversion type, transforming a payload attributes type that the engine API
 /// receives, into a type that the payload builder can use.
-pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
+pub trait PayloadBuilderAttributes: Send + Sync + fmt::Debug {
     /// The payload attributes that can be used to construct this type. Used as the argument in
     /// [`PayloadBuilderAttributes::try_new`].
     type RpcPayloadAttributes;
@@ -77,7 +80,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
 ///
 /// This type is emitted as part of the forkchoiceUpdated call
 pub trait PayloadAttributes:
-    serde::de::DeserializeOwned + serde::Serialize + std::fmt::Debug + Clone + Send + Sync + 'static
+    serde::de::DeserializeOwned + serde::Serialize + fmt::Debug + Clone + Send + Sync + 'static
 {
     /// Returns the timestamp to be used in the payload job.
     fn timestamp(&self) -> u64;

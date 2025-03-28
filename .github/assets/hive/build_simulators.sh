@@ -11,7 +11,7 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-./hive -client reth --sim "pyspec" -sim.timelimit 1s || true &
+./hive -client reth --sim "ethereum/eest" --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/pectra-devnet-6%40v1.0.0/fixtures_pectra-devnet-6.tar.gz -sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
 ./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
 ./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &
@@ -26,7 +26,8 @@ docker save hive/hiveproxy:latest -o ../hive_assets/hiveproxy.tar &
 docker save hive/simulators/devp2p:latest -o ../hive_assets/devp2p.tar &
 docker save hive/simulators/ethereum/engine:latest -o ../hive_assets/engine.tar &
 docker save hive/simulators/ethereum/rpc-compat:latest -o ../hive_assets/rpc_compat.tar &
-docker save hive/simulators/ethereum/pyspec:latest -o ../hive_assets/pyspec.tar &
+docker save hive/simulators/ethereum/eest/consume-engine:latest -o ../hive_assets/eest_engine.tar &
+docker save hive/simulators/ethereum/eest/consume-rlp:latest -o ../hive_assets/eest_rlp.tar &
 docker save hive/simulators/smoke/genesis:latest -o ../hive_assets/smoke_genesis.tar &
 docker save hive/simulators/smoke/network:latest -o ../hive_assets/smoke_network.tar &
 docker save hive/simulators/ethereum/sync:latest -o ../hive_assets/ethereum_sync.tar &

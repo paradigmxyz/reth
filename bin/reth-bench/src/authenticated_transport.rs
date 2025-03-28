@@ -7,7 +7,7 @@ use alloy_json_rpc::{RequestPacket, ResponsePacket};
 use alloy_pubsub::{PubSubConnect, PubSubFrontend};
 use alloy_rpc_types_engine::{Claims, JwtSecret};
 use alloy_transport::{
-    utils::guess_local_url, Authorization, Pbf, TransportConnect, TransportError,
+    utils::guess_local_url, Authorization, BoxTransport, TransportConnect, TransportError,
     TransportErrorKind, TransportFut,
 };
 use alloy_transport_http::{reqwest::Url, Http, ReqwestTransport};
@@ -175,19 +175,9 @@ impl AuthenticatedTransport {
             }
 
             match inner_and_claims.0 {
-                InnerTransport::Http(ref http) => {
-                    let mut http = http;
-                    http.call(req)
-                }
-                InnerTransport::Ws(ref ws) => {
-                    let mut ws = ws;
-                    ws.call(req)
-                }
-                InnerTransport::Ipc(ref ipc) => {
-                    let mut ipc = ipc;
-                    // we don't need to recreate the client for IPC
-                    ipc.call(req)
-                }
+                InnerTransport::Http(ref mut http) => http.call(req),
+                InnerTransport::Ws(ref mut ws) => ws.call(req),
+                InnerTransport::Ipc(ref mut ipc) => ipc.call(req),
             }
             .await
         })
@@ -221,21 +211,21 @@ impl AuthenticatedTransportConnect {
 }
 
 impl TransportConnect for AuthenticatedTransportConnect {
-    type Transport = AuthenticatedTransport;
-
     fn is_local(&self) -> bool {
         guess_local_url(&self.url)
     }
 
-    fn get_transport<'a: 'b, 'b>(&'a self) -> Pbf<'b, Self::Transport, TransportError> {
-        AuthenticatedTransport::connect(self.url.clone(), self.jwt)
-            .map(|res| match res {
-                Ok(transport) => Ok(transport),
-                Err(err) => {
-                    Err(TransportError::Transport(TransportErrorKind::Custom(Box::new(err))))
-                }
-            })
-            .boxed()
+    async fn get_transport(&self) -> Result<BoxTransport, TransportError> {
+        Ok(BoxTransport::new(
+            AuthenticatedTransport::connect(self.url.clone(), self.jwt)
+                .map(|res| match res {
+                    Ok(transport) => Ok(transport),
+                    Err(err) => {
+                        Err(TransportError::Transport(TransportErrorKind::Custom(Box::new(err))))
+                    }
+                })
+                .await?,
+        ))
     }
 }
 

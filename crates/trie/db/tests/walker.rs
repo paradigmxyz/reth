@@ -1,8 +1,7 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::B256;
-use reth_db::tables;
-use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
+use reth_db_api::{cursor::DbCursorRW, tables, transaction::DbTxMut};
 use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
     prefix_set::PrefixSetMut, trie_cursor::TrieCursor, walker::TrieWalker, BranchNodeCompact,
@@ -38,7 +37,7 @@ fn walk_nodes_with_common_prefix() {
 
     let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
     for (k, v) in &inputs {
-        account_cursor.upsert(k.clone().into(), v.clone()).unwrap();
+        account_cursor.upsert(k.clone().into(), &v.clone()).unwrap();
     }
     let account_trie = DatabaseAccountTrieCursor::new(account_cursor);
     test_cursor(account_trie, &expected);
@@ -47,7 +46,10 @@ fn walk_nodes_with_common_prefix() {
     let mut storage_cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
     for (k, v) in &inputs {
         storage_cursor
-            .upsert(hashed_address, StorageTrieEntry { nibbles: k.clone().into(), node: v.clone() })
+            .upsert(
+                hashed_address,
+                &StorageTrieEntry { nibbles: k.clone().into(), node: v.clone() },
+            )
             .unwrap();
     }
     let storage_trie = DatabaseStorageTrieCursor::new(storage_cursor, hashed_address);
@@ -106,7 +108,7 @@ fn cursor_rootnode_with_changesets() {
 
     let hashed_address = B256::random();
     for (k, v) in nodes {
-        cursor.upsert(hashed_address, StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
+        cursor.upsert(hashed_address, &StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
     }
 
     let mut trie = DatabaseStorageTrieCursor::new(cursor, hashed_address);

@@ -1,27 +1,28 @@
 //! Command for debugging in-memory merkle trie calculation.
 
 use crate::{
+    api::BlockTy,
     args::NetworkArgs,
     utils::{get_single_body, get_single_header},
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
-use reth_errors::BlockValidationError;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BlockTy, NodePrimitives};
-use reth_node_ethereum::EthExecutorProvider;
-use reth_primitives::{BlockExt, EthPrimitives};
+use reth_node_api::NodePrimitives;
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
+use reth_primitives_traits::SealedBlock;
 use reth_provider::{
     providers::ProviderNodeTypes, AccountExtReader, ChainSpecProvider, DatabaseProviderFactory,
     HashedPostStateProvider, HashingWriter, LatestStateProviderRef, OriginalValuesKnown,
@@ -61,9 +62,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         N: ProviderNodeTypes<
             ChainSpec = C::ChainSpec,
             Primitives: NodePrimitives<
-                Block = reth_primitives::Block,
-                Receipt = reth_primitives::Receipt,
-                BlockHeader = reth_primitives::Header,
+                Block = reth_ethereum_primitives::Block,
+                Receipt = reth_ethereum_primitives::Receipt,
+                BlockHeader = alloy_consensus::Header,
             >,
         >,
     >(
@@ -136,25 +137,19 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let client = fetch_client.clone();
         let chain = provider_factory.chain_spec();
         let consensus = Arc::new(EthBeaconConsensus::new(chain.clone()));
-        let block = (move || get_single_body(client.clone(), header.clone(), consensus.clone()))
-            .retry(backoff)
-            .notify(
-                |err, _| warn!(target: "reth::cli", "Error requesting body: {err}. Retrying..."),
-            )
-            .await?;
+        let block: SealedBlock<BlockTy<N>> = (move || {
+            get_single_body(client.clone(), header.clone(), consensus.clone())
+        })
+        .retry(backoff)
+        .notify(|err, _| warn!(target: "reth::cli", "Error requesting body: {err}. Retrying..."))
+        .await?;
 
         let state_provider = LatestStateProviderRef::new(&provider);
         let db = StateProviderDatabase::new(&state_provider);
 
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
-        let block_execution_output = executor.execute(
-            &block
-                .clone()
-                .unseal::<BlockTy<N>>()
-                .with_recovered_senders()
-                .ok_or(BlockValidationError::SenderRecoveryError)?,
-        )?;
-        let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
+        let block_execution_output = executor.execute(&block.clone().try_recover()?)?;
+        let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number()));
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
@@ -162,7 +157,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             state_provider.hashed_post_state(execution_outcome.state()),
         )?;
 
-        if in_memory_state_root == block.state_root {
+        if in_memory_state_root == block.state_root() {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
             return Ok(())
         }
@@ -170,29 +165,26 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let provider_rw = provider_factory.database_provider_rw()?;
 
         // Insert block, state and hashes
-        provider_rw.insert_historical_block(
-            block
-                .clone()
-                .try_seal_with_senders()
-                .map_err(|_| BlockValidationError::SenderRecoveryError)?,
-        )?;
+        provider_rw.insert_historical_block(block.clone().try_recover()?)?;
         provider_rw.write_state(
-            execution_outcome,
+            &execution_outcome,
             OriginalValuesKnown::No,
             StorageLocation::Database,
         )?;
-        let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
+        let storage_lists =
+            provider_rw.changed_storages_with_range(block.number..=block.number())?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
-        let account_lists = provider_rw.changed_accounts_with_range(block.number..=block.number)?;
+        let account_lists =
+            provider_rw.changed_accounts_with_range(block.number..=block.number())?;
         let accounts = provider_rw.basic_accounts(account_lists)?;
         provider_rw.insert_account_for_hashing(accounts)?;
 
         let (state_root, incremental_trie_updates) = StateRoot::incremental_root_with_updates(
             provider_rw.tx_ref(),
-            block.number..=block.number,
+            block.number..=block.number(),
         )?;
-        if state_root != block.state_root {
+        if state_root != block.state_root() {
             eyre::bail!(
                 "Computed incremental state root mismatch. Expected: {:?}. Got: {:?}",
                 block.state_root,

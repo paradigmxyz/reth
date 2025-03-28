@@ -6,12 +6,9 @@ use alloy_primitives::{map::HashMap, Address, B256, U256};
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
-use reth_db::tables;
-use reth_db_api::{transaction::DbTxMut, DatabaseError};
+use reth_db_api::{tables, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
-use reth_primitives::{
-    Account, Bytecode, GotExpected, NodePrimitives, Receipts, StaticFileSegment, StorageEntry,
-};
+use reth_primitives_traits::{Account, Bytecode, GotExpected, NodePrimitives, StorageEntry};
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
     BlockHashReader, BlockNumReader, BundleStateInit, ChainSpecProvider, DBProvider,
@@ -20,6 +17,7 @@ use reth_provider::{
     StateWriter, StaticFileProviderFactory, StorageLocation, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_static_file_types::StaticFileSegment;
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
@@ -85,7 +83,6 @@ where
         + HistoryWriter
         + HeaderProvider
         + HashingWriter
-        + StateWriter
         + StateWriter
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
@@ -247,12 +244,16 @@ where
         state_init,
         all_reverts_init,
         contracts,
-        Receipts::default(),
+        Vec::default(),
         block,
         Vec::new(),
     );
 
-    provider.write_state(execution_outcome, OriginalValuesKnown::Yes, StorageLocation::Database)?;
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StorageLocation::Database,
+    )?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -721,7 +722,6 @@ mod tests {
                 ..Default::default()
             },
             hardforks: Default::default(),
-            genesis_hash: Default::default(),
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             ..Default::default()

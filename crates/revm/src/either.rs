@@ -1,8 +1,5 @@
 use alloy_primitives::{Address, B256, U256};
-use revm::{
-    primitives::{AccountInfo, Bytecode},
-    Database,
-};
+use revm::{bytecode::Bytecode, state::AccountInfo, Database};
 
 /// An enum type that can hold either of two different [`Database`] implementations.
 ///

@@ -429,7 +429,7 @@ impl Info {
     /// Return the mode of the database
     #[inline]
     pub const fn mode(&self) -> Mode {
-        let mode = self.0.mi_mode;
+        let mode = self.0.mi_mode as ffi::MDBX_env_flags_t;
         if (mode & ffi::MDBX_RDONLY) != 0 {
             Mode::ReadOnly
         } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
@@ -986,7 +986,7 @@ mod tests {
             let db = tx.open_db(None).unwrap();
             for i in 1_000usize..1_000_000 {
                 match tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
-                    Ok(_) => continue,
+                    Ok(_) => {}
                     Err(Error::MapFull) => break,
                     result @ Err(_) => result.unwrap(),
                 }

@@ -7,17 +7,13 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    BlockReaderFor, DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
+    BlockReaderFor, DebugNode, DebugNodeLauncher, EngineNodeLauncher, LaunchNode, Node,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
-use reth_blockchain_tree::externals::NodeTypesForTree;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
-use reth_db_api::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-};
+use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_exex::ExExContext;
 use reth_network::{
     transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
@@ -236,13 +232,13 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
 
 impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec>
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForTree,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         self.with_types_and_provider()
     }
@@ -266,7 +262,7 @@ where
         node: N,
     ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         self.with_types().with_components(node.components_builder()).with_add_ons(node.add_ons())
     }
@@ -297,13 +293,13 @@ impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>> {
 
 impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>>
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForTree,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
@@ -332,7 +328,7 @@ where
         NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
     >
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         self.with_types().with_components(node.components_builder()).with_add_ons(node.add_ons())
     }
@@ -341,28 +337,27 @@ where
     ///
     /// This bootstraps the node internals, creates all the components with the given [Node]
     ///
-    /// Returns a [`NodeHandle`] that can be used to interact with the node.
+    /// Returns a [`NodeHandle`](crate::NodeHandle) that can be used to interact with the node.
     pub async fn launch_node<N>(
         self,
         node: N,
     ) -> eyre::Result<
-        NodeHandle<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-            N::AddOns,
-        >,
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >>::Node,
     >
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
         N::AddOns: RethRpcAddOns<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         >,
-        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+        N::Primitives: FullNodePrimitives,
+        EngineNodeLauncher: LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >,
     {
         self.node(node).launch().await
     }
@@ -545,22 +540,43 @@ where
     pub const fn check_launch(self) -> Self {
         self
     }
-}
 
-impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
-where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    T: NodeTypesWithEngine + NodeTypesForTree,
-    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
-    AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-{
-    /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
+    /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
         self,
-    ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>, AO>> {
+    ) -> eyre::Result<<EngineNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Node>
+    where
+        EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
+    {
         let Self { builder, task_executor } = self;
 
-        let launcher = DefaultNodeLauncher::new(task_executor, builder.config.datadir());
+        let engine_tree_config = builder.config.engine.tree_config();
+
+        let launcher =
+            EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
+        builder.launch_with(launcher).await
+    }
+
+    /// Launches the node with the [`DebugNodeLauncher`].
+    ///
+    /// This is equivalent to [`WithLaunchContext::launch`], but will enable the debugging features,
+    /// if they are configured.
+    pub async fn launch_with_debug_capabilities(
+        self,
+    ) -> eyre::Result<<DebugNodeLauncher as LaunchNode<NodeBuilderWithComponents<T, CB, AO>>>::Node>
+    where
+        T::Types: DebugNode<NodeAdapter<T, CB::Components>>,
+        DebugNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
+    {
+        let Self { builder, task_executor } = self;
+
+        let engine_tree_config = builder.config.engine.tree_config();
+
+        let launcher = DebugNodeLauncher::new(EngineNodeLauncher::new(
+            task_executor,
+            builder.config.datadir(),
+            engine_tree_config,
+        ));
         builder.launch_with(launcher).await
     }
 }

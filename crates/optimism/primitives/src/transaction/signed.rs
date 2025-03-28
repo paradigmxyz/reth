@@ -1,16 +1,17 @@
 //! A signed Optimism transaction.
 
-use crate::OpTxType;
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930,
-    TxEip7702, TxLegacy, Typed2718,
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    Sealed, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
+    Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
+use alloy_evm::FromRecoveredTx;
 use alloy_primitives::{
     keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
 };
@@ -18,20 +19,20 @@ use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
     mem,
+    ops::Deref,
 };
 use derive_more::{AsRef, Deref};
-#[cfg(not(feature = "std"))]
-use once_cell::sync::OnceCell as OnceLock;
-use op_alloy_consensus::{OpPooledTransaction, OpTypedTransaction, TxDeposit};
+use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope, OpTypedTransaction, TxDeposit};
+use op_revm::transaction::deposit::DepositTransactionParts;
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
-    crypto::secp256k1::{recover_signer, recover_signer_unchecked, sign_message},
-    transaction::error::TransactionConversionError,
+    crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    sync::OnceLock,
+    transaction::{error::TransactionConversionError, signed::RecoveryError},
     InMemorySize, SignedTransaction,
 };
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
+use revm_context::TxEnv;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -40,24 +41,36 @@ use std::sync::OnceLock;
 pub struct OpTransactionSigned {
     /// Transaction hash
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub hash: OnceLock<TxHash>,
+    hash: OnceLock<TxHash>,
     /// The transaction signature values
-    pub signature: Signature,
+    signature: Signature,
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: OpTypedTransaction,
+    transaction: OpTypedTransaction,
 }
 
 impl OpTransactionSigned {
-    /// Calculates hash of given transaction and signature and returns new instance.
-    pub fn new(transaction: OpTypedTransaction, signature: Signature) -> Self {
-        let signed_tx = Self::new_unhashed(transaction, signature);
-        if signed_tx.ty() != OpTxType::Deposit {
-            signed_tx.hash.get_or_init(|| signed_tx.recalculate_hash());
-        }
+    /// Creates a new signed transaction from the given transaction, signature and hash.
+    pub fn new(transaction: OpTypedTransaction, signature: Signature, hash: B256) -> Self {
+        Self { hash: hash.into(), signature, transaction }
+    }
 
-        signed_tx
+    /// Consumes the type and returns the transaction.
+    #[inline]
+    pub fn into_transaction(self) -> OpTypedTransaction {
+        self.transaction
+    }
+
+    /// Returns the transaction.
+    #[inline]
+    pub const fn transaction(&self) -> &OpTypedTransaction {
+        &self.transaction
+    }
+
+    /// Splits the `OpTransactionSigned` into its transaction and signature.
+    pub fn split(self) -> (OpTypedTransaction, Signature) {
+        (self.transaction, self.signature)
     }
 
     /// Creates a new signed transaction from the given transaction and signature without the hash.
@@ -71,6 +84,12 @@ impl OpTransactionSigned {
     pub const fn is_deposit(&self) -> bool {
         matches!(self.transaction, OpTypedTransaction::Deposit(_))
     }
+
+    /// Splits the transaction into parts.
+    pub fn into_parts(self) -> (OpTypedTransaction, Signature, B256) {
+        let hash = *self.hash.get_or_init(|| self.recalculate_hash());
+        (self.transaction, self.signature, hash)
+    }
 }
 
 impl SignedTransaction for OpTransactionSigned {
@@ -82,11 +101,11 @@ impl SignedTransaction for OpTransactionSigned {
         &self.signature
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Ok(from)
         }
 
         let Self { transaction, signature, .. } = self;
@@ -94,11 +113,11 @@ impl SignedTransaction for OpTransactionSigned {
         recover_signer(signature, signature_hash)
     }
 
-    fn recover_signer_unchecked(&self) -> Option<Address> {
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = &self.transaction {
-            return Some(*from)
+            return Ok(*from)
         }
 
         let Self { transaction, signature, .. } = self;
@@ -106,11 +125,14 @@ impl SignedTransaction for OpTransactionSigned {
         recover_signer_unchecked(signature, signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         match &self.transaction {
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
-            OpTypedTransaction::Deposit(tx) => return Some(tx.from),
+            OpTypedTransaction::Deposit(tx) => return Ok(tx.from),
             OpTypedTransaction::Legacy(tx) => tx.encode_for_signing(buf),
             OpTypedTransaction::Eip2930(tx) => tx.encode_for_signing(buf),
             OpTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),
@@ -124,99 +146,176 @@ impl SignedTransaction for OpTransactionSigned {
     }
 }
 
-#[cfg(feature = "optimism")]
-impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut revm_primitives::TxEnv, sender: Address) {
-        let envelope = self.encoded_2718();
+macro_rules! impl_from_signed {
+    ($($tx:ident),*) => {
+        $(
+            impl From<Signed<$tx>> for OpTransactionSigned {
+                fn from(value: Signed<$tx>) -> Self {
+                    let(tx,sig,hash) = value.into_parts();
+                    Self::new(tx.into(), sig, hash)
+                }
+            }
+        )*
+    };
+}
 
-        tx_env.caller = sender;
-        match &self.transaction {
-            OpTypedTransaction::Legacy(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = tx.chain_id;
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clear();
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list = None;
-            }
-            OpTypedTransaction::Eip2930(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clone_from(&tx.access_list.0);
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list = None;
-            }
-            OpTypedTransaction::Eip1559(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee =
-                    Some(alloy_primitives::U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clone_from(&tx.access_list.0);
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list = None;
-            }
-            OpTypedTransaction::Eip7702(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee =
-                    Some(alloy_primitives::U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = tx.to.into();
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clone_from(&tx.access_list.0);
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list =
-                    Some(revm_primitives::AuthorizationList::Signed(tx.authorization_list.clone()));
-            }
-            OpTypedTransaction::Deposit(tx) => {
-                tx_env.access_list.clear();
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = alloy_primitives::U256::ZERO;
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = None;
-                tx_env.nonce = None;
-                tx_env.authorization_list = None;
+impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, OpTypedTransaction);
 
-                tx_env.optimism = revm_primitives::OptimismFields {
-                    source_hash: Some(tx.source_hash),
-                    mint: tx.mint,
-                    is_system_transaction: Some(tx.is_system_transaction),
-                    enveloped_tx: Some(envelope.into()),
-                };
-                return
-            }
+impl From<OpTxEnvelope> for OpTransactionSigned {
+    fn from(value: OpTxEnvelope) -> Self {
+        match value {
+            OpTxEnvelope::Legacy(tx) => tx.into(),
+            OpTxEnvelope::Eip2930(tx) => tx.into(),
+            OpTxEnvelope::Eip1559(tx) => tx.into(),
+            OpTxEnvelope::Eip7702(tx) => tx.into(),
+            OpTxEnvelope::Deposit(tx) => tx.into(),
         }
+    }
+}
 
-        tx_env.optimism = revm_primitives::OptimismFields {
-            source_hash: None,
-            mint: None,
-            is_system_transaction: Some(false),
+impl From<OpTransactionSigned> for OpTxEnvelope {
+    fn from(value: OpTransactionSigned) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        match tx {
+            OpTypedTransaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            OpTypedTransaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            OpTypedTransaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            OpTypedTransaction::Deposit(tx) => Sealed::new_unchecked(tx, hash).into(),
+            OpTypedTransaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+        }
+    }
+}
+
+impl From<OpTransactionSigned> for Signed<OpTypedTransaction> {
+    fn from(value: OpTransactionSigned) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new_unchecked(tx, sig, hash)
+    }
+}
+
+impl From<Sealed<TxDeposit>> for OpTransactionSigned {
+    fn from(value: Sealed<TxDeposit>) -> Self {
+        let (tx, hash) = value.into_parts();
+        Self::new(OpTypedTransaction::Deposit(tx), TxDeposit::signature(), hash)
+    }
+}
+
+/// A trait that represents an optimism transaction, mainly used to indicate whether or not the
+/// transaction is a deposit transaction.
+pub trait OpTransaction {
+    /// Whether or not the transaction is a dpeosit transaction.
+    fn is_deposit(&self) -> bool;
+}
+
+impl OpTransaction for OpTransactionSigned {
+    fn is_deposit(&self) -> bool {
+        self.is_deposit()
+    }
+}
+
+impl FromRecoveredTx<OpTransactionSigned> for op_revm::OpTransaction<TxEnv> {
+    fn from_recovered_tx(tx: &OpTransactionSigned, sender: Address) -> Self {
+        let envelope = tx.encoded_2718();
+
+        let base = match &tx.transaction {
+            OpTypedTransaction::Legacy(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.gas_price,
+                gas_priority_fee: None,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: tx.chain_id,
+                nonce: tx.nonce,
+                access_list: Default::default(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 0,
+                caller: sender,
+            },
+            OpTypedTransaction::Eip2930(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.gas_price,
+                gas_priority_fee: None,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx.access_list.clone(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 1,
+                caller: sender,
+            },
+            OpTypedTransaction::Eip1559(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.max_fee_per_gas,
+                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx.access_list.clone(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 2,
+                caller: sender,
+            },
+            OpTypedTransaction::Eip7702(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.max_fee_per_gas,
+                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                kind: TxKind::Call(tx.to),
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx.access_list.clone(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: tx.authorization_list.clone(),
+                tx_type: 4,
+                caller: sender,
+            },
+            OpTypedTransaction::Deposit(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: 0,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: None,
+                nonce: 0,
+                access_list: Default::default(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                gas_priority_fee: Default::default(),
+                tx_type: 126,
+                caller: sender,
+            },
+        };
+
+        Self {
+            base,
             enveloped_tx: Some(envelope.into()),
+            deposit: if let OpTypedTransaction::Deposit(tx) = &tx.transaction {
+                DepositTransactionParts {
+                    is_system_transaction: tx.is_system_transaction,
+                    source_hash: tx.source_hash,
+                    // For consistency with op-geth, we always return `0x0` for mint if it is
+                    // missing This is because op-geth does not distinguish
+                    // between null and 0, because this value is decoded from RLP where null is
+                    // represented as 0
+                    mint: Some(tx.mint.unwrap_or_default()),
+                }
+            } else {
+                Default::default()
+            },
         }
     }
 }
@@ -235,7 +334,7 @@ impl alloy_rlp::Encodable for OpTransactionSigned {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !Encodable2718::is_legacy(self) {
+        if !self.is_legacy() {
             payload_length += Header { list: false, payload_length }.length();
         }
 
@@ -366,6 +465,18 @@ impl Transaction for OpTransactionSigned {
         self.deref().priority_fee_or_price()
     }
 
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.deref().effective_gas_price(base_fee)
+    }
+
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.deref().effective_tip_per_gas(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
+    }
+
     fn kind(&self) -> TxKind {
         self.deref().kind()
     }
@@ -392,18 +503,6 @@ impl Transaction for OpTransactionSigned {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         self.deref().authorization_list()
-    }
-
-    fn is_dynamic_fee(&self) -> bool {
-        self.deref().is_dynamic_fee()
-    }
-
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        self.deref().effective_gas_price(base_fee)
-    }
-
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.deref().effective_tip_per_gas(base_fee)
     }
 }
 
@@ -519,7 +618,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let secp = secp256k1::Secp256k1::new();
         let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
-        let signature = sign_message(
+        let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             signature_hash(&transaction),
         )
@@ -536,7 +635,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
 
-        Ok(Self::new(transaction, signature))
+        Ok(Self::new_unhashed(transaction, signature))
     }
 }
 
@@ -564,15 +663,6 @@ impl From<OpPooledTransaction> for OpTransactionSigned {
             OpPooledTransaction::Eip1559(tx) => tx.into(),
             OpPooledTransaction::Eip7702(tx) => tx.into(),
         }
-    }
-}
-
-impl<T: Into<OpTypedTransaction>> From<Signed<T>> for OpTransactionSigned {
-    fn from(value: Signed<T>) -> Self {
-        let (tx, sig, hash) = value.into_parts();
-        let this = Self::new(tx.into(), sig);
-        this.hash.get_or_init(|| hash);
-        this
     }
 }
 
@@ -678,5 +768,13 @@ pub mod serde_bincode_compat {
 
     impl SerdeBincodeCompat for super::OpTransactionSigned {
         type BincodeRepr<'a> = OpTransactionSigned<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
     }
 }

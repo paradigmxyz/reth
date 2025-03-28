@@ -7,6 +7,7 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
@@ -28,5 +29,5 @@ pub use execution_outcome::*;
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
-    pub use super::chain::serde_bincode_compat::*;
+    pub use super::{chain::serde_bincode_compat::*, execution_outcome::serde_bincode_compat::*};
 }

@@ -54,6 +54,19 @@ const SAMPLE_IMPACT: f64 = 0.1;
 /// Amount of RTTs before timeout
 const TIMEOUT_SCALING: u32 = 3;
 
+/// Restricts the number of queued outgoing messages for larger responses:
+///  - Block Bodies
+///  - Receipts
+///  - Headers
+///  - `PooledTransactions`
+///
+/// With proper softlimits in place (2MB) this targets 10MB (4+1 * 2MB) of outgoing response data.
+///
+/// This parameter serves as backpressure for reading additional requests from the remote.
+/// Once we've queued up more responses than this, the session should prioritize message flushing
+/// before reading any more messages from the remote peer, throttling the peer.
+const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
+
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the
 /// [`SessionManager`](super::SessionManager).
@@ -84,7 +97,7 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// A message that needs to be delivered to the session manager
     pub(crate) pending_message_to_session: Option<ActiveSessionMessage<N>>,
     /// Incoming internal requests which are delegated to the remote peer.
-    pub(crate) internal_request_tx: Fuse<ReceiverStream<PeerRequest<N>>>,
+    pub(crate) internal_request_rx: Fuse<ReceiverStream<PeerRequest<N>>>,
     /// All requests sent to the remote peer we're waiting on a response
     pub(crate) inflight_requests: FxHashMap<u64, InflightRequest<PeerRequest<N>>>,
     /// All requests that were sent by the remote peer and we're waiting on an internal response
@@ -120,6 +133,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     pub fn shrink_to_fit(&mut self) {
         self.received_requests_from_remote.shrink_to_fit();
         self.queued_outgoing.shrink_to_fit();
+    }
+
+    /// Returns how many responses we've currently queued up.
+    fn queued_response_count(&self) -> usize {
+        self.queued_outgoing.messages.iter().filter(|m| m.is_response()).count()
     }
 
     /// Handle a message read from the connection.
@@ -278,7 +296,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 unreachable!("Not emitted by network")
             }
             PeerMessage::Other(other) => {
-                debug!(target: "net::session", message_id=%other.id, "Ignoring unsupported message");
                 self.queued_outgoing.push_back(OutgoingMessage::Raw(other));
             }
         }
@@ -530,7 +547,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
 
             let deadline = this.request_deadline();
 
-            while let Poll::Ready(Some(req)) = this.internal_request_tx.poll_next_unpin(cx) {
+            while let Poll::Ready(Some(req)) = this.internal_request_rx.poll_next_unpin(cx) {
                 progress = true;
                 this.on_internal_peer_request(req, deadline);
             }
@@ -596,6 +613,29 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     };
                 }
 
+                // check whether we should throttle incoming messages
+                if this.received_requests_from_remote.len() > MAX_QUEUED_OUTGOING_RESPONSES {
+                    // we're currently waiting for the responses to the peer's requests which aren't
+                    // queued as outgoing yet
+                    //
+                    // Note: we don't need to register the waker here because we polled the requests
+                    // above
+                    break 'receive
+                }
+
+                // we also need to check if we have multiple responses queued up
+                if this.queued_outgoing.messages.len() > MAX_QUEUED_OUTGOING_RESPONSES &&
+                    this.queued_response_count() > MAX_QUEUED_OUTGOING_RESPONSES
+                {
+                    // if we've queued up more responses than allowed, we don't poll for new
+                    // messages and break the receive loop early
+                    //
+                    // Note: we don't need to register the waker here because we still have
+                    // queued messages and the sink impl registered the waker because we've
+                    // already advanced it to `Pending` earlier
+                    break 'receive
+                }
+
                 match this.conn.poll_next_unpin(cx) {
                     Poll::Pending => break,
                     Poll::Ready(None) => {
@@ -622,7 +662,6 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                     OnIncomingMessageOutcome::NoCapacity(msg) => {
                                         // failed to send due to lack of capacity
                                         this.pending_message_to_session = Some(msg);
-                                        continue 'receive
                                     }
                                 }
                             }
@@ -741,6 +780,16 @@ pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     Raw(RawCapabilityMessage),
 }
 
+impl<N: NetworkPrimitives> OutgoingMessage<N> {
+    /// Returns true if this is a response.
+    const fn is_response(&self) -> bool {
+        match self {
+            Self::Eth(msg) => msg.is_response(),
+            _ => false,
+        }
+    }
+}
+
 impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
     fn from(value: EthMessage<N>) -> Self {
         Self::Eth(value)
@@ -793,15 +842,17 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
 mod tests {
     use super::*;
     use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
+    use alloy_eips::eip2124::ForkFilter;
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
-        EthNetworkPrimitives, EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream,
-        Status, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockBodies,
+        HelloMessageWithProtocols, P2PStream, Status, StatusBuilder, UnauthedEthStream,
+        UnauthedP2PStream,
     };
+    use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
-    use reth_primitives::{EthereumHardfork, ForkFilter};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::{
         net::{TcpListener, TcpStream},
@@ -870,6 +921,7 @@ mod tests {
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
 
             tokio::task::spawn(start_pending_incoming_session(
+                Arc::new(EthHandshake::default()),
                 disconnect_rx,
                 session_id,
                 stream,
@@ -911,7 +963,7 @@ mod tests {
                             "network_active_session",
                         ),
                         pending_message_to_session: None,
-                        internal_request_tx: ReceiverStream::new(messages_rx).fuse(),
+                        internal_request_rx: ReceiverStream::new(messages_rx).fuse(),
                         inflight_requests: Default::default(),
                         conn,
                         queued_outgoing: QueuedOutgoingMessages::new(Gauge::noop()),

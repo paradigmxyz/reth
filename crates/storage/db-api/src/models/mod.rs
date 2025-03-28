@@ -8,8 +8,8 @@ use alloy_consensus::Header;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, Bytes, Log, B256, U256};
 use reth_codecs::{add_arbitrary_tests, Compact};
-use reth_primitives::{Receipt, StorageEntry, TransactionSigned, TxType};
-use reth_primitives_traits::{Account, Bytecode};
+use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
+use reth_primitives_traits::{Account, Bytecode, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
@@ -25,7 +25,8 @@ pub use accounts::*;
 pub use blocks::*;
 pub use integer_list::IntegerList;
 pub use reth_db_models::{
-    AccountBeforeTx, ClientVersion, StoredBlockBodyIndices, StoredBlockWithdrawals,
+    AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StoredBlockBodyIndices,
+    StoredBlockWithdrawals,
 };
 pub use sharded_key::ShardedKey;
 
@@ -194,8 +195,8 @@ macro_rules! impl_compression_for_compact {
             impl$(<$($generic: core::fmt::Debug + Send + Sync + Compact),*>)? Compress for $name$(<$($generic),*>)? {
                 type Compressed = Vec<u8>;
 
-                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
-                    let _ = Compact::to_compact(&self, buf);
+                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+                    let _ = Compact::to_compact(self, buf);
                 }
             }
 
@@ -224,6 +225,7 @@ impl_compression_for_compact!(
     StoredBlockBodyIndices,
     StoredBlockOmmers<H>,
     StoredBlockWithdrawals,
+    StaticFileBlockWithdrawals,
     Bytecode,
     AccountBeforeTx,
     TransactionSigned,
@@ -253,8 +255,8 @@ macro_rules! impl_compression_fixed_compact {
                     Some(self.as_ref())
                 }
 
-                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
-                    let _  = Compact::to_compact(&self, buf);
+                fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+                    let _  = Compact::to_compact(self, buf);
                 }
             }
 
@@ -317,12 +319,11 @@ mod tests {
     //
     // this check is to ensure we do not inadvertently add too many fields to a struct which would
     // expand the flags field and break backwards compatibility
-    #[cfg(not(feature = "optimism"))]
     #[test]
     fn test_ensure_backwards_compatibility() {
         use super::*;
         use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
-        use reth_primitives::{Account, Receipt};
+        use reth_primitives_traits::Account;
         use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
         use reth_stages_types::{
             AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint,

@@ -1,8 +1,8 @@
 use crate::{segments::SegmentSet, Pruner};
 use alloy_eips::eip2718::Encodable2718;
-use reth_chainspec::MAINNET;
+use reth_chainspec::MAINNET_PRUNE_DELETE_LIMIT;
 use reth_config::PruneConfig;
-use reth_db::{table::Value, transaction::DbTxMut};
+use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_exex_types::FinishedExExHeight;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -129,7 +129,7 @@ impl Default for PrunerBuilder {
         Self {
             block_interval: 5,
             segments: PruneModes::none(),
-            delete_limit: MAINNET.prune_delete_limit,
+            delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
             timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }

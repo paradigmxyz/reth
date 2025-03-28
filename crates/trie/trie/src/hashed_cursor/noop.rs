@@ -1,10 +1,10 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{B256, U256};
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 
 /// Noop hashed cursor factory.
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 #[non_exhaustive]
 pub struct NoopHashedCursorFactory;
 

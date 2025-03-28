@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
+use crate::BlockTy;
 use alloy_primitives::{BlockNumber, B256};
 use reth_config::{config::StageConfig, PruneConfig};
-use reth_consensus::Consensus;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -14,7 +15,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
-use reth_node_api::{BodyTy, HeaderTy};
+use reth_node_api::HeaderTy;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -27,7 +28,7 @@ use tokio::sync::watch;
 pub fn build_networked_pipeline<N, Client, Executor>(
     config: &StageConfig,
     client: Client,
-    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
+    consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
     provider_factory: ProviderFactory<N>,
     task_executor: &TaskExecutor,
     metrics_tx: reth_stages::MetricEventsSender,
@@ -39,7 +40,7 @@ pub fn build_networked_pipeline<N, Client, Executor>(
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
-    Client: BlockClient<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
+    Client: BlockClient<Block = BlockTy<N>> + 'static,
     Executor: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     // building network downloaders using the fetch client
@@ -48,7 +49,7 @@ where
         .into_task_with(task_executor);
 
     let body_downloader = BodiesDownloaderBuilder::new(config.bodies)
-        .build(client, Arc::clone(&consensus), provider_factory.clone())
+        .build(client, consensus.clone().as_consensus(), provider_factory.clone())
         .into_task_with(task_executor);
 
     let pipeline = build_pipeline(
@@ -75,7 +76,7 @@ pub fn build_pipeline<N, H, B, Executor>(
     stage_config: &StageConfig,
     header_downloader: H,
     body_downloader: B,
-    consensus: Arc<dyn Consensus<H::Header, B::Body>>,
+    consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
     max_block: Option<u64>,
     metrics_tx: reth_stages::MetricEventsSender,
     prune_config: Option<PruneConfig>,
@@ -86,7 +87,7 @@ pub fn build_pipeline<N, H, B, Executor>(
 where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = HeaderTy<N>> + 'static,
-    B: BodyDownloader<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
+    B: BodyDownloader<Block = BlockTy<N>> + 'static,
     Executor: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     let mut builder = Pipeline::<N>::builder();
@@ -112,13 +113,13 @@ where
                 body_downloader,
                 executor.clone(),
                 stage_config.clone(),
-                prune_modes.clone(),
+                prune_modes,
             )
             .set(ExecutionStage::new(
                 executor,
+                consensus,
                 stage_config.execution.into(),
                 stage_config.execution_external_clean_threshold(),
-                prune_modes,
                 exex_manager_handle,
             )),
         )

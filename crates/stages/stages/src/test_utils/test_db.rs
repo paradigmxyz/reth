@@ -1,7 +1,6 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::MAINNET;
 use reth_db::{
-    tables,
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
 };
@@ -11,17 +10,18 @@ use reth_db_api::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
+    tables,
     transaction::{DbTx, DbTxMut},
     DatabaseError as DbError,
 };
-use reth_primitives::{
-    Account, EthPrimitives, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
-};
+use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
+use reth_primitives_traits::{Account, SealedBlock, SealedHeader, StorageEntry};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     test_utils::MockNodeTypesWithDB,
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use reth_testing_utils::generators::ChangeSet;
 use std::{collections::BTreeMap, fmt::Debug, path::Path};
@@ -153,7 +153,7 @@ impl TestStageDB {
             let segment_header = writer.user_header();
             if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
                 for block_number in 0..header.number {
-                    let mut prev = header.clone().unseal();
+                    let mut prev = header.clone_header();
                     prev.number = block_number;
                     writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
                 }
@@ -220,7 +220,7 @@ impl TestStageDB {
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
     pub fn insert_blocks<'a, I>(&self, blocks: I, storage_kind: StorageKind) -> ProviderResult<()>
     where
-        I: IntoIterator<Item = &'a SealedBlock>,
+        I: IntoIterator<Item = &'a SealedBlock<Block>>,
     {
         let provider = self.factory.static_file_provider();
 
@@ -235,7 +235,7 @@ impl TestStageDB {
                 .then(|| provider.latest_writer(StaticFileSegment::Headers).unwrap());
 
             blocks.iter().try_for_each(|block| {
-                Self::insert_header(headers_writer.as_mut(), &tx, &block.header, U256::ZERO)
+                Self::insert_header(headers_writer.as_mut(), &tx, block.sealed_header(), U256::ZERO)
             })?;
 
             if let Some(mut writer) = headers_writer {
@@ -396,7 +396,7 @@ impl TestStageDB {
                     {
                         cursor.delete_current()?;
                     }
-                    cursor.upsert(address, entry)?;
+                    cursor.upsert(address, &entry)?;
 
                     let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
                     if cursor
@@ -406,7 +406,7 @@ impl TestStageDB {
                     {
                         cursor.delete_current()?;
                     }
-                    cursor.upsert(hashed_address, hashed_entry)?;
+                    cursor.upsert(hashed_address, &hashed_entry)?;
 
                     Ok(())
                 })

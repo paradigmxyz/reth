@@ -62,7 +62,7 @@ pub struct InMemoryAccountTrieCursor<'a, C> {
 impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
     /// Create new account trie cursor from underlying cursor and reference to
     /// [`TrieUpdatesSorted`].
-    pub const fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
+    pub fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
         let in_memory_cursor = ForwardInMemoryCursor::new(&trie_updates.account_nodes);
         Self {
             cursor,
@@ -78,7 +78,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
         exact: bool,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.seek(&key);
-        if exact && in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
+        if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
             return Ok(in_memory)
         }
 
@@ -202,9 +202,7 @@ impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
         exact: bool,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
-        if self.storage_trie_cleared ||
-            (exact && in_memory.as_ref().is_some_and(|entry| entry.0 == key))
-        {
+        if self.storage_trie_cleared || in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
             return Ok(in_memory.filter(|(nibbles, _)| !exact || nibbles == &key))
         }
 

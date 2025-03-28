@@ -32,7 +32,7 @@ async fn can_sync() -> eyre::Result<()> {
     let tx_hash = first_node.rpc.inject_tx(raw_tx).await?;
 
     // make the node advance
-    let (payload, _) = first_node.advance_block().await?;
+    let payload = first_node.advance_block().await?;
 
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
@@ -41,7 +41,7 @@ async fn can_sync() -> eyre::Result<()> {
     first_node.assert_new_block(tx_hash, block_hash, block_number).await?;
 
     // only send forkchoice update to second node
-    second_node.engine_api.update_forkchoice(block_hash, block_hash).await?;
+    second_node.update_forkchoice(block_hash, block_hash).await?;
 
     // expect second node advanced via p2p gossip
     second_node.assert_new_block(tx_hash, block_hash, 1).await?;
@@ -69,18 +69,16 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
     let (mut nodes, _tasks, _) =
         setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new().with_recommended_fillers().on_http(node.rpc_url());
+    let provider = ProviderBuilder::new().on_http(node.rpc_url());
 
     advance_with_random_transactions(&mut node, 100, &mut rng, true).await?;
 
     let second_node = nodes.pop().unwrap();
-    let second_provider =
-        ProviderBuilder::new().with_recommended_fillers().on_http(second_node.rpc_url());
+    let second_provider = ProviderBuilder::new().on_http(second_node.rpc_url());
 
     assert_eq!(second_provider.get_block_number().await?, 0);
 
-    let head =
-        provider.get_block_by_number(Default::default(), false.into()).await?.unwrap().header.hash;
+    let head = provider.get_block_by_number(Default::default()).await?.unwrap().header.hash;
 
     second_node.sync_to(head).await?;
 
@@ -116,10 +114,10 @@ async fn test_long_reorg() -> eyre::Result<()> {
     advance_with_random_transactions(&mut first_node, 100, &mut rng, false).await?;
 
     // Sync second node to 20th block.
-    let head = first_provider.get_block_by_number(20.into(), false.into()).await?.unwrap();
+    let head = first_provider.get_block_by_number(20.into()).await?.unwrap();
     second_node.sync_to(head.header.hash).await?;
 
-    // Produce a fork chain with blocks 21.60
+    // Produce a fork chain with blocks 21..60
     second_node.payload.timestamp = head.header.timestamp;
     advance_with_random_transactions(&mut second_node, 40, &mut rng, true).await?;
 
@@ -133,6 +131,49 @@ async fn test_long_reorg() -> eyre::Result<()> {
     // Ensure that it works the other way around too.
     advance_with_random_transactions(&mut first_node, 20, &mut rng, true).await?;
     second_node.sync_to(first_node.block_hash(100)).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_reorg_through_backfill() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let seed: [u8; 32] = rand::thread_rng().gen();
+    let mut rng = StdRng::from_seed(seed);
+    println!("Seed: {:?}", seed);
+
+    let chain_spec = Arc::new(
+        ChainSpecBuilder::default()
+            .chain(MAINNET.chain)
+            .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+            .cancun_activated()
+            .prague_activated()
+            .build(),
+    );
+
+    let (mut nodes, _tasks, _) =
+        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
+
+    let mut first_node = nodes.pop().unwrap();
+    let mut second_node = nodes.pop().unwrap();
+
+    let first_provider = ProviderBuilder::new().on_http(first_node.rpc_url());
+
+    // Advance first node 100 blocks and finalize the chain.
+    advance_with_random_transactions(&mut first_node, 100, &mut rng, true).await?;
+
+    // Sync second node to 20th block.
+    let head = first_provider.get_block_by_number(20.into()).await?.unwrap();
+    second_node.sync_to(head.header.hash).await?;
+
+    // Produce an unfinalized fork chain with 5 blocks
+    second_node.payload.timestamp = head.header.timestamp;
+    advance_with_random_transactions(&mut second_node, 5, &mut rng, false).await?;
+
+    // Now reorg second node to the finalized canonical head
+    let head = first_provider.get_block_by_number(100.into()).await?.unwrap();
+    second_node.sync_to(head.header.hash).await?;
 
     Ok(())
 }

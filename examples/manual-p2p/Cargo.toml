@@ -16,7 +16,7 @@ reth-network-peers.workspace = true
 
 alloy-consensus.workspace = true
 
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 
 futures.workspace = true
 tokio.workspace = true

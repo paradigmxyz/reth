@@ -14,19 +14,18 @@ workspace = true
 # Reth
 reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
-reth-evm.workspace = true
-reth-primitives.workspace = true
+reth-evm = { workspace = true, features = ["op"] }
 reth-primitives-traits.workspace = true
-reth-revm.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
-reth-prune-types.workspace = true
 reth-consensus.workspace = true
 reth-consensus-common.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-evm.workspace = true
 alloy-primitives.workspace = true
+alloy-op-evm.workspace = true
 op-alloy-consensus.workspace = true
 alloy-consensus.workspace = true
 
@@ -38,7 +37,7 @@ reth-optimism-primitives.workspace = true
 
 # revm
 revm.workspace = true
-revm-primitives.workspace = true
+op-revm.workspace = true
 
 # misc
 derive_more.workspace = true
@@ -48,7 +47,6 @@ thiserror.workspace = true
 [dev-dependencies]
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
-reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-optimism-chainspec.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
@@ -57,30 +55,30 @@ reth-optimism-primitives = { workspace = true, features = ["arbitrary"] }
 [features]
 default = ["std"]
 std = [
-	"reth-consensus/std",
-	"reth-primitives/std",
-	"reth-revm/std",
-	"alloy-consensus/std",
-	"alloy-eips/std",
-	"alloy-genesis/std",
-	"alloy-primitives/std",
-	"revm-primitives/std",
-	"reth-primitives-traits/std",
-	"revm/std",
-	"reth-optimism-primitives/std",
-	"reth-ethereum-forks/std",
-	"derive_more/std",
-	"reth-optimism-forks/std",
-	"thiserror/std",
-	"op-alloy-consensus/std",
-	"reth-chainspec/std",
-	"reth-consensus-common/std"
+    "reth-consensus/std",
+    "reth-revm/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "reth-primitives-traits/std",
+    "revm/std",
+    "reth-optimism-primitives/std",
+    "reth-ethereum-forks/std",
+    "derive_more/std",
+    "reth-optimism-forks/std",
+    "thiserror/std",
+    "op-alloy-consensus/std",
+    "reth-chainspec/std",
+    "reth-optimism-consensus/std",
+    "reth-consensus-common/std",
+    "reth-optimism-chainspec/std",
+    "reth-execution-errors/std",
+    "reth-execution-types/std",
+    "alloy-evm/std",
+    "alloy-op-evm/std",
+    "op-revm/std",
+    "reth-evm/std",
+    "tracing/std",
 ]
-optimism = [
-	"reth-primitives/optimism",
-	"reth-execution-types/optimism",
-	"reth-optimism-consensus/optimism",
-	"revm/optimism",
-	"revm-primitives/optimism",
-	"reth-optimism-primitives/optimism",
-]
+portable = ["reth-revm/portable"]

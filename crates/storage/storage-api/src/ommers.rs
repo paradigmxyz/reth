@@ -1,4 +1,5 @@
 use crate::HeaderProvider;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::BlockHashOrNumber;
 use reth_storage_errors::provider::ProviderResult;
 
@@ -10,7 +11,7 @@ pub trait OmmersProvider: HeaderProvider + Send + Sync {
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>>;
 }
 
-impl<T: OmmersProvider> OmmersProvider for std::sync::Arc<T> {
+impl<T: OmmersProvider> OmmersProvider for Arc<T> {
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         T::ommers(self, id)
     }

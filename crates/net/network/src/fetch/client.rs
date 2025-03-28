@@ -11,6 +11,7 @@ use reth_network_p2p::{
     error::{PeerRequestResult, RequestError},
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
+    BlockClient,
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
@@ -95,4 +96,8 @@ impl<N: NetworkPrimitives> BodiesClient for FetchClient<N> {
             Box::pin(future::err(RequestError::ChannelClosed))
         }
     }
+}
+
+impl<N: NetworkPrimitives> BlockClient for FetchClient<N> {
+    type Block = N::Block;
 }

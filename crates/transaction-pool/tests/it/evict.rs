@@ -1,6 +1,7 @@
 //! Transaction pool eviction tests.
 
-use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
+use alloy_consensus::Transaction;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::{Address, B256};
 use rand::distributions::Uniform;
 use reth_transaction_pool::{
@@ -8,8 +9,7 @@ use reth_transaction_pool::{
     test_utils::{
         MockFeeRange, MockTransactionDistribution, MockTransactionRatio, TestPool, TestPoolBuilder,
     },
-    BlockInfo, PoolConfig, PoolTransaction, SubPoolLimit, TransactionOrigin, TransactionPool,
-    TransactionPoolExt,
+    BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionPool, TransactionPoolExt,
 };
 
 #[tokio::test(flavor = "multi_thread")]
@@ -28,7 +28,7 @@ async fn only_blobs_eviction() {
 
     let pool: TestPool = TestPoolBuilder::default().with_config(pool_config.clone()).into();
     let block_info = BlockInfo {
-        block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+        block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
         last_seen_block_hash: B256::ZERO,
         last_seen_block_number: 0,
         pending_basefee: 10,
@@ -141,7 +141,7 @@ async fn mixed_eviction() {
 
     let pool: TestPool = TestPoolBuilder::default().with_config(pool_config.clone()).into();
     let block_info = BlockInfo {
-        block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+        block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
         last_seen_block_hash: B256::ZERO,
         last_seen_block_number: 0,
         pending_basefee: 10,
@@ -243,7 +243,7 @@ async fn nonce_gaps_eviction() {
 
     let pool: TestPool = TestPoolBuilder::default().with_config(pool_config.clone()).into();
     let block_info = BlockInfo {
-        block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+        block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
         last_seen_block_hash: B256::ZERO,
         last_seen_block_number: 0,
         pending_basefee: 10,

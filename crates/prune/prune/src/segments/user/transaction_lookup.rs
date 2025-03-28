@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
-use reth_db::{tables, transaction::DbTxMut};
+use reth_db_api::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider};
 use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
 use tracing::{instrument, trace};
@@ -116,7 +116,8 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db::tables;
+    use reth_db_api::tables;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
@@ -141,7 +142,7 @@ mod tests {
         for block in &blocks {
             tx_hash_numbers.reserve_exact(block.transaction_count());
             for transaction in &block.body().transactions {
-                tx_hash_numbers.push((transaction.hash(), tx_hash_numbers.len() as u64));
+                tx_hash_numbers.push((*transaction.tx_hash(), tx_hash_numbers.len() as u64));
             }
         }
         let tx_hash_numbers_len = tx_hash_numbers.len();

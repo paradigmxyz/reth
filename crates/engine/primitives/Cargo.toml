@@ -15,10 +15,12 @@ workspace = true
 reth-execution-types.workspace = true
 reth-payload-primitives.workspace = true
 reth-payload-builder-primitives.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-chain-state.workspace = true
 reth-trie.workspace = true
 reth-errors.workspace = true
+reth-trie-common.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -30,5 +32,21 @@ tokio = { workspace = true, features = ["sync"] }
 futures.workspace = true
 
 # misc
+auto_impl.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-execution-types/std",
+    "reth-ethereum-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-trie-common/std",
+    "alloy-primitives/std",
+    "alloy-consensus/std",
+    "alloy-rpc-types-engine/std",
+    "futures/std",
+    "serde/std",
+    "thiserror/std",
+]

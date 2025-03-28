@@ -70,7 +70,6 @@
       - [`reth debug merkle`](./cli/reth/debug/merkle.md)
       - [`reth debug in-memory-merkle`](./cli/reth/debug/in-memory-merkle.md)
       - [`reth debug build-block`](./cli/reth/debug/build-block.md)
-      - [`reth debug replay-engine`](./cli/reth/debug/replay-engine.md)
     - [`reth recover`](./cli/reth/recover.md)
       - [`reth recover storage-tries`](./cli/reth/recover/storage-tries.md)
     - [`reth prune`](./cli/reth/prune.md)

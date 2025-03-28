@@ -4,12 +4,12 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
-use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
     StateCommitmentProvider,
 };
+use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
@@ -166,7 +166,7 @@ where
                     let (storage_root, _, updates) = match storage_roots.remove(&hashed_address) {
                         Some(rx) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                reth_db::DatabaseError::Other(format!(
+                                DatabaseError::Other(format!(
                                     "channel closed for {hashed_address}"
                                 )),
                             ))
@@ -217,7 +217,7 @@ where
             leaves_added = stats.leaves_added(),
             missed_leaves = stats.missed_leaves(),
             precomputed_storage_roots = stats.precomputed_storage_roots(),
-            "calculated state root"
+            "Calculated state root"
         );
 
         Ok((root, trie_updates))
@@ -255,7 +255,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{keccak256, Address, U256};
     use rand::Rng;
-    use reth_primitives::{Account, StorageEntry};
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 

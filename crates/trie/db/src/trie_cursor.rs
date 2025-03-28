@@ -1,13 +1,10 @@
 use alloy_primitives::B256;
-use reth_db::{
-    cursor::{DbCursorRW, DbDupCursorRW},
-    tables,
-};
 use reth_db_api::{
-    cursor::{DbCursorRO, DbDupCursorRO},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
+    tables,
     transaction::DbTx,
+    DatabaseError,
 };
-use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::StorageTrieUpdates,
@@ -158,7 +155,7 @@ where
             if let Some(node) = maybe_updated {
                 self.cursor.upsert(
                     self.hashed_address,
-                    StorageTrieEntry { nibbles, node: node.clone() },
+                    &StorageTrieEntry { nibbles, node: node.clone() },
                 )?;
             }
         }
@@ -229,7 +226,7 @@ mod tests {
             cursor
                 .upsert(
                     key.into(),
-                    BranchNodeCompact::new(
+                    &BranchNodeCompact::new(
                         0b0000_0010_0000_0001,
                         0b0000_0010_0000_0001,
                         0,
@@ -264,7 +261,7 @@ mod tests {
         let value = BranchNodeCompact::new(1, 1, 1, vec![B256::random()], None);
 
         cursor
-            .upsert(hashed_address, StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
+            .upsert(hashed_address, &StorageTrieEntry { nibbles: key.clone(), node: value.clone() })
             .unwrap();
 
         let mut cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);

@@ -9,7 +9,7 @@ use reth_db::{init_db, DatabaseEnv};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
@@ -109,6 +109,10 @@ pub struct NodeCommand<
     #[command(flatten)]
     pub pruning: PruningArgs,
 
+    /// Engine cli arguments
+    #[command(flatten, next_help_heading = "Engine")]
+    pub engine: EngineArgs,
+
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
@@ -166,6 +170,7 @@ impl<
             dev,
             pruning,
             ext,
+            engine,
             bitfinity,
         } = self;
 
@@ -192,6 +197,7 @@ impl<
             db,
             dev,
             pruning,
+            engine,
             bitfinity_import_arg: bitfinity,
         };
 

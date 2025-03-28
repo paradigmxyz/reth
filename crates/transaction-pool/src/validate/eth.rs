@@ -19,12 +19,13 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
-    eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK},
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
+    eip7840::BlobParams,
 };
-use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_primitives::{InvalidTransactionError, SealedBlock};
-use reth_primitives_traits::{BlockBody, GotExpected};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
+};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -37,6 +38,7 @@ use std::{
 use tokio::sync::Mutex;
 
 /// Validator for Ethereum transactions.
+/// It is a [`TransactionValidator`] implementation that validates ethereum transaction.
 #[derive(Debug, Clone)]
 pub struct EthTransactionValidator<Client, T> {
     /// The type that performs the actual validation.
@@ -45,8 +47,11 @@ pub struct EthTransactionValidator<Client, T> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     /// Returns the configured chain spec
-    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
-        &self.inner.chain_spec
+    pub fn chain_spec(&self) -> Arc<Client::ChainSpec>
+    where
+        Client: ChainSpecProvider,
+    {
+        self.client().chain_spec()
     }
 
     /// Returns the configured client
@@ -57,7 +62,7 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
     /// Validates a single transaction.
@@ -86,7 +91,7 @@ where
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
     type Transaction = Tx;
@@ -106,10 +111,9 @@ where
         self.validate_all(transactions)
     }
 
-    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
-        H: reth_primitives_traits::BlockHeader,
-        B: BlockBody,
+        B: Block,
     {
         self.inner.on_new_head_block(new_tip_block.header())
     }
@@ -131,8 +135,6 @@ where
 /// And adheres to the configured [`LocalTransactionConfig`].
 #[derive(Debug)]
 pub(crate) struct EthTransactionValidatorInner<Client, T> {
-    /// Spec of the chain
-    chain_spec: Arc<ChainSpec>,
     /// This type fetches account info from the db
     client: Client,
     /// Blobstore used for fetching re-injected blob transactions.
@@ -163,18 +165,23 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
 
 // === impl EthTransactionValidatorInner ===
 
-impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
+impl<Client: ChainSpecProvider, Tx> EthTransactionValidatorInner<Client, Tx> {
     /// Returns the configured chain id
     pub(crate) fn chain_id(&self) -> u64 {
-        self.chain_spec.chain().id()
+        self.client.chain_spec().chain().id()
     }
 }
 
 impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
 where
-    Client: StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
+    /// Returns the configured chain spec
+    fn chain_spec(&self) -> Arc<Client::ChainSpec> {
+        self.client.chain_spec()
+    }
+
     /// Validates a single transaction using an optional cached state provider.
     /// If no provider is passed, a new one will be created. This allows reusing
     /// the same provider across multiple txs.
@@ -185,7 +192,7 @@ where
         maybe_state: &mut Option<Box<dyn StateProvider>>,
     ) -> TransactionValidationOutcome<Tx> {
         // Checks for tx_type
-        match transaction.tx_type() {
+        match transaction.ty() {
             LEGACY_TX_TYPE_ID => {
                 // Accept legacy transactions
             }
@@ -274,7 +281,7 @@ where
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
         if !self.local_transactions_config.is_local(origin, transaction.sender_ref()) &&
-            transaction.is_eip1559() &&
+            transaction.is_dynamic_fee() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return TransactionValidationOutcome::Invalid(
@@ -294,7 +301,7 @@ where
         }
 
         if transaction.is_eip7702() {
-            // Cancun fork is required for 7702 txs
+            // Prague fork is required for 7702 txs
             if !self.fork_tracker.is_prague_activated() {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
@@ -302,7 +309,7 @@ where
                 )
             }
 
-            if transaction.authorization_count() == 0 {
+            if transaction.authorization_list().is_none_or(|l| l.is_empty()) {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
@@ -324,7 +331,8 @@ where
                 )
             }
 
-            let blob_count = transaction.blob_count();
+            let blob_count =
+                transaction.blob_versioned_hashes().map(|b| b.len() as u64).unwrap_or(0);
             if blob_count == 0 {
                 // no blobs
                 return TransactionValidationOutcome::Invalid(
@@ -335,14 +343,14 @@ where
                 )
             }
 
-            if blob_count > MAX_BLOBS_PER_BLOCK {
-                // too many blobs
+            let max_blob_count = self.fork_tracker.max_blob_count();
+            if blob_count > max_blob_count {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::TooManyEip4844Blobs {
                             have: blob_count,
-                            permitted: MAX_BLOBS_PER_BLOCK,
+                            permitted: max_blob_count,
                         },
                     ),
                 )
@@ -510,16 +518,24 @@ where
 
     fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
-        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
+        if self.chain_spec().is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
+        if self.chain_spec().is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_prague_active_at_timestamp(new_tip_block.timestamp()) {
+        if self.chain_spec().is_prague_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        if let Some(blob_params) =
+            self.chain_spec().blob_params_at_timestamp(new_tip_block.timestamp())
+        {
+            self.fork_tracker
+                .max_blob_count
+                .store(blob_params.max_blob_count, std::sync::atomic::Ordering::Relaxed);
         }
 
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
@@ -530,16 +546,18 @@ where
     }
 }
 
-/// A builder for [`TransactionValidationTaskExecutor`]
+/// A builder for [`EthTransactionValidator`] and [`TransactionValidationTaskExecutor`]
 #[derive(Debug)]
-pub struct EthTransactionValidatorBuilder {
-    chain_spec: Arc<ChainSpec>,
+pub struct EthTransactionValidatorBuilder<Client> {
+    client: Client,
     /// Fork indicator whether we are in the Shanghai stage.
     shanghai: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
     cancun: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
     prague: bool,
+    /// Max blob count at the block's timestamp.
+    max_blob_count: u64,
     /// Whether using EIP-2718 type transactions is allowed
     eip2718: bool,
     /// Whether using EIP-1559 type transactions is allowed
@@ -565,8 +583,8 @@ pub struct EthTransactionValidatorBuilder {
     max_tx_input_bytes: usize,
 }
 
-impl EthTransactionValidatorBuilder {
-    /// Creates a new builder for the given [`ChainSpec`]
+impl<Client> EthTransactionValidatorBuilder<Client> {
+    /// Creates a new builder for the given client
     ///
     /// By default this assumes the network is on the `Cancun` hardfork and the following
     /// transactions are allowed:
@@ -574,10 +592,10 @@ impl EthTransactionValidatorBuilder {
     ///  - EIP-2718
     ///  - EIP-1559
     ///  - EIP-4844
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub fn new(client: Client) -> Self {
         Self {
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT.into(),
-            chain_spec,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
+            client,
             minimum_priority_fee: None,
             additional_tasks: 1,
             kzg_settings: EnvKzgSettings::Default,
@@ -598,6 +616,9 @@ impl EthTransactionValidatorBuilder {
 
             // prague not yet activated
             prague: false,
+
+            // max blob count is cancun by default
+            max_blob_count: BlobParams::cancun().max_blob_count,
         }
     }
 
@@ -697,10 +718,19 @@ impl EthTransactionValidatorBuilder {
     /// Configures validation rules based on the head block's timestamp.
     ///
     /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
-    pub fn with_head_timestamp(mut self, timestamp: u64) -> Self {
-        self.cancun = self.chain_spec.is_cancun_active_at_timestamp(timestamp);
-        self.shanghai = self.chain_spec.is_shanghai_active_at_timestamp(timestamp);
-        self.prague = self.chain_spec.is_prague_active_at_timestamp(timestamp);
+    pub fn with_head_timestamp(mut self, timestamp: u64) -> Self
+    where
+        Client: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    {
+        self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
+        self.shanghai = self.client.chain_spec().is_shanghai_active_at_timestamp(timestamp);
+        self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
+        self.max_blob_count = self
+            .client
+            .chain_spec()
+            .blob_params_at_timestamp(timestamp)
+            .unwrap_or_else(BlobParams::cancun)
+            .max_blob_count;
         self
     }
 
@@ -719,16 +749,12 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
-    pub fn build<Client, Tx, S>(
-        self,
-        client: Client,
-        blob_store: S,
-    ) -> EthTransactionValidator<Client, Tx>
+    pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
         S: BlobStore,
     {
         let Self {
-            chain_spec,
+            client,
             shanghai,
             cancun,
             prague,
@@ -744,14 +770,20 @@ impl EthTransactionValidatorBuilder {
             ..
         } = self;
 
+        let max_blob_count = if prague {
+            BlobParams::prague().max_blob_count
+        } else {
+            BlobParams::cancun().max_blob_count
+        };
+
         let fork_tracker = ForkTracker {
             shanghai: AtomicBool::new(shanghai),
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
+            max_blob_count: AtomicU64::new(max_blob_count),
         };
 
         let inner = EthTransactionValidatorInner {
-            chain_spec,
             client,
             eip2718,
             eip1559,
@@ -776,9 +808,8 @@ impl EthTransactionValidatorBuilder {
     /// The validator will spawn `additional_tasks` additional tasks for validation.
     ///
     /// By default this will spawn 1 additional task.
-    pub fn build_with_tasks<Client, Tx, T, S>(
+    pub fn build_with_tasks<Tx, T, S>(
         self,
-        client: Client,
         tasks: T,
         blob_store: S,
     ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
@@ -787,7 +818,7 @@ impl EthTransactionValidatorBuilder {
         S: BlobStore,
     {
         let additional_tasks = self.additional_tasks;
-        let validator = self.build(client, blob_store);
+        let validator = self.build(blob_store);
 
         let (tx, task) = ValidationTask::new();
 
@@ -823,6 +854,8 @@ pub struct ForkTracker {
     pub cancun: AtomicBool,
     /// Tracks if prague is activated at the block's timestamp.
     pub prague: AtomicBool,
+    /// Tracks max blob count at the block's timestamp.
+    pub max_blob_count: AtomicU64,
 }
 
 impl ForkTracker {
@@ -840,6 +873,11 @@ impl ForkTracker {
     pub fn is_prague_activated(&self) -> bool {
         self.prague.load(std::sync::atomic::Ordering::Relaxed)
     }
+
+    /// Returns the max blob count.
+    pub fn max_blob_count(&self) -> u64 {
+        self.max_blob_count.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
@@ -849,7 +887,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
     fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
-    use revm_primitives::SpecId;
+    use revm_primitives::hardfork::SpecId;
     let spec_id = if fork_tracker.is_prague_activated() {
         SpecId::PRAGUE
     } else if fork_tracker.is_shanghai_activated() {
@@ -862,8 +900,12 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         spec_id,
         transaction.input(),
         transaction.is_create(),
-        transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
-        transaction.authorization_count() as u64,
+        transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
+        transaction
+            .access_list()
+            .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
+            .unwrap_or_default() as u64,
+        transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
     );
 
     let gas_limit = transaction.gas_limit();
@@ -881,10 +923,11 @@ mod tests {
         blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
+    use alloy_consensus::Transaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_chainspec::MAINNET;
-    use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, PooledTransaction};
+    use reth_ethereum_primitives::PooledTransaction;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {
@@ -893,15 +936,19 @@ mod tests {
         let data = hex::decode(raw).unwrap();
         let tx = PooledTransaction::decode_2718(&mut data.as_ref()).unwrap();
 
-        tx.try_into_ecrecovered().unwrap().into()
+        EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap())
     }
 
     // <https://github.com/paradigmxyz/reth/issues/5178>
     #[tokio::test]
     async fn validate_transaction() {
         let transaction = get_transaction();
-        let mut fork_tracker =
-            ForkTracker { shanghai: false.into(), cancun: false.into(), prague: false.into() };
+        let mut fork_tracker = ForkTracker {
+            shanghai: false.into(),
+            cancun: false.into(),
+            prague: false.into(),
+            max_blob_count: 0.into(),
+        };
 
         let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
@@ -916,8 +963,7 @@ mod tests {
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
         );
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
-            .build(provider, blob_store.clone());
+        let validator = EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
 
@@ -944,9 +990,9 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
+        let validator = EthTransactionValidatorBuilder::new(provider)
             .set_block_gas_limit(1_000_000) // tx gas limit is 1_015_288
-            .build(provider, blob_store.clone());
+            .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
 

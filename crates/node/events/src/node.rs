@@ -5,8 +5,9 @@ use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
-use reth_engine_primitives::ForkchoiceStatus;
+use reth_engine_primitives::{
+    BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
+};
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
 use reth_prune_types::PrunerEvent;
@@ -249,18 +250,19 @@ impl NodeState {
                     }
                 }
             }
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed) => {
+                let block = executed.sealed_block();
                 info!(
                     number=block.number(),
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
                     txs=block.body().transactions().len(),
-                    gas=%format_gas(block.header.gas_used()),
-                    gas_throughput=%format_gas_throughput(block.header.gas_used(), elapsed),
-                    full=%format!("{:.1}%", block.header.gas_used() as f64 * 100.0 / block.header.gas_limit() as f64),
-                    base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
-                    blobs=block.header.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
-                    excess_blobs=block.header.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
+                    gas=%format_gas(block.gas_used()),
+                    gas_throughput=%format_gas_throughput(block.gas_used(), elapsed),
+                    full=%format!("{:.1}%", block.gas_used() as f64 * 100.0 / block.gas_limit() as f64),
+                    base_fee=%format!("{:.2}gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
+                    blobs=block.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
+                    excess_blobs=block.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
                     "Block added to canonical chain"
                 );
@@ -271,8 +273,12 @@ impl NodeState {
 
                 info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
-            BeaconConsensusEngineEvent::ForkBlockAdded(block, elapsed) => {
+            BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
+                let block = executed.sealed_block();
                 info!(number=block.number(), hash=?block.hash(), ?elapsed, "Block added to fork chain");
+            }
+            BeaconConsensusEngineEvent::InvalidBlock(block) => {
+                warn!(number=block.number(), hash=?block.hash(), "Encountered invalid block");
             }
         }
     }

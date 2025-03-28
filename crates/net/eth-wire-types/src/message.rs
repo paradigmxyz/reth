@@ -254,6 +254,30 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::Receipts(_) => EthMessageID::Receipts,
         }
     }
+
+    /// Returns true if the message variant is a request.
+    pub const fn is_request(&self) -> bool {
+        matches!(
+            self,
+            Self::GetBlockBodies(_) |
+                Self::GetBlockHeaders(_) |
+                Self::GetReceipts(_) |
+                Self::GetPooledTransactions(_) |
+                Self::GetNodeData(_)
+        )
+    }
+
+    /// Returns true if the message variant is a response to a request.
+    pub const fn is_response(&self) -> bool {
+        matches!(
+            self,
+            Self::PooledTransactions(_) |
+                Self::Receipts(_) |
+                Self::BlockHeaders(_) |
+                Self::BlockBodies(_) |
+                Self::NodeData(_)
+        )
+    }
 }
 
 impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
@@ -450,6 +474,7 @@ impl TryFrom<usize> for EthMessageID {
 /// request id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct RequestPair<T> {
     /// id for the contained request or response message
     pub request_id: u64,
@@ -513,6 +538,7 @@ mod tests {
     };
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable, Error};
+    use reth_ethereum_primitives::BlockBody;
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
         let mut buf = vec![];
@@ -604,5 +630,35 @@ mod tests {
         let decoded =
             ProtocolMessage::decode_message(EthVersion::Eth68, &mut buf.as_slice()).unwrap();
         assert_eq!(empty_block_bodies, decoded);
+    }
+
+    #[test]
+    fn empty_block_body_protocol() {
+        let empty_block_bodies =
+            ProtocolMessage::from(EthMessage::<EthNetworkPrimitives>::BlockBodies(RequestPair {
+                request_id: 0,
+                message: vec![BlockBody {
+                    transactions: vec![],
+                    ommers: vec![],
+                    withdrawals: Some(Default::default()),
+                }]
+                .into(),
+            }));
+        let mut buf = Vec::new();
+        empty_block_bodies.encode(&mut buf);
+        let decoded =
+            ProtocolMessage::decode_message(EthVersion::Eth68, &mut buf.as_slice()).unwrap();
+        assert_eq!(empty_block_bodies, decoded);
+    }
+
+    #[test]
+    fn decode_block_bodies_message() {
+        let buf = hex!("06c48199c1c0");
+        let msg = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+            EthVersion::Eth68,
+            &mut &buf[..],
+        )
+        .unwrap_err();
+        assert!(matches!(msg, MessageError::RlpError(alloy_rlp::Error::InputTooShort)));
     }
 }

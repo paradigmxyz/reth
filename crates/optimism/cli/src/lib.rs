@@ -5,10 +5,8 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 /// Optimism chain specification parser.
 pub mod chainspec;
@@ -16,14 +14,14 @@ pub mod chainspec;
 pub mod commands;
 /// Module with a codec for reading and encoding receipts in files.
 ///
-/// Enables decoding and encoding `HackReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
+/// Enables decoding and encoding `OpGethReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
 ///
-/// Currently configured to use codec [`HackReceipt`](receipt_file_codec::HackReceipt) based on
+/// Currently configured to use codec [`OpGethReceipt`](receipt_file_codec::OpGethReceipt) based on
 /// export of below Bedrock data using <https://github.com/testinprod-io/op-geth/pull/1>. Codec can
 /// be replaced with regular encoding of receipts for export.
 ///
 /// NOTE: receipts can be exported using regular op-geth encoding for `Receipt` type, to fit
-/// reth's needs for importing. However, this would require patching the diff in <https://github.com/testinprod-io/op-geth/pull/1> to export the `Receipt` and not `HackReceipt` type (originally
+/// reth's needs for importing. However, this would require patching the diff in <https://github.com/testinprod-io/op-geth/pull/1> to export the `Receipt` and not `OpGethReceipt` type (originally
 /// made for op-erigon's import needs).
 pub mod receipt_file_codec;
 
@@ -51,6 +49,7 @@ use reth_node_core::{
     args::LogArgs,
     version::{LONG_VERSION, SHORT_VERSION},
 };
+use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::OpExecutorProvider;
 use reth_optimism_node::{OpNetworkPrimitives, OpNode};
 use reth_tracing::FileWorkerGuard;
@@ -69,7 +68,7 @@ use reth_node_metrics::recorder::install_prometheus_recorder;
 pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<Spec, Ext>,
+    pub command: Commands<Spec, Ext>,
 
     /// The chain this node is running.
     ///
@@ -82,7 +81,7 @@ pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt:
         value_parser = Spec::parser(),
         global = true,
     )]
-    chain: Arc<Spec::ChainSpec>,
+    pub chain: Arc<Spec::ChainSpec>,
 
     /// Add a new instance of a node.
     ///
@@ -98,10 +97,11 @@ pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt:
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
-    instance: u16,
+    pub instance: u16,
 
+    /// The logging configuration for the CLI.
     #[command(flatten)]
-    logs: LogArgs,
+    pub logs: LogArgs,
 }
 
 impl Cli {
@@ -129,7 +129,16 @@ where
     ///
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
-    pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
+    pub fn run<L, Fut>(self, launcher: L) -> eyre::Result<()>
+    where
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
+        self.with_runner(CliRunner::try_default_runtime()?, launcher)
+    }
+
+    /// Execute the configured cli command with the provided [`CliRunner`].
+    pub fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
@@ -144,7 +153,6 @@ where
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        let runner = CliRunner::default();
         match self.command {
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
@@ -164,8 +172,9 @@ where
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command
-                    .execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, OpExecutorProvider::optimism)
+                command.execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, |spec| {
+                    (OpExecutorProvider::optimism(spec.clone()), OpBeaconConsensus::new(spec))
+                })
             }),
             Commands::P2P(command) => {
                 runner.run_until_ctrl_c(command.execute::<OpNetworkPrimitives>())
@@ -190,28 +199,28 @@ where
     }
 }
 
-// #[cfg(test)]
-// mod test {
-//     use crate::chainspec::OpChainSpecParser;
-//     use clap::Parser;
-//     use reth_cli_commands::{node::NoArgs, NodeCommand};
-//     use reth_optimism_chainspec::OP_DEV;
+#[cfg(test)]
+mod test {
+    use crate::chainspec::OpChainSpecParser;
+    use clap::Parser;
+    use reth_cli_commands::{node::NoArgs, NodeCommand};
+    use reth_optimism_chainspec::OP_DEV;
 
-//     #[test]
-//     fn parse_dev() {
-//         let cmd = NodeCommand::<OpChainSpecParser, NoArgs>::parse_from(["op-reth", "--dev"]);
-//         let chain = OP_DEV.clone();
-//         assert_eq!(cmd.chain.chain, chain.chain);
-//         assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
-//         assert_eq!(
-//             cmd.chain.paris_block_and_final_difficulty,
-//             chain.paris_block_and_final_difficulty
-//         );
-//         assert_eq!(cmd.chain.hardforks, chain.hardforks);
+    #[test]
+    fn parse_dev() {
+        let cmd = NodeCommand::<OpChainSpecParser, NoArgs>::parse_from(["op-reth", "--dev"]);
+        let chain = OP_DEV.clone();
+        assert_eq!(cmd.chain.chain, chain.chain);
+        assert_eq!(cmd.chain.genesis_hash(), chain.genesis_hash());
+        assert_eq!(
+            cmd.chain.paris_block_and_final_difficulty,
+            chain.paris_block_and_final_difficulty
+        );
+        assert_eq!(cmd.chain.hardforks, chain.hardforks);
 
-//         assert!(cmd.rpc.http);
-//         assert!(cmd.network.discovery.disable_discovery);
+        assert!(cmd.rpc.http);
+        assert!(cmd.network.discovery.disable_discovery);
 
-//         assert!(cmd.dev.dev);
-//     }
-// }
+        assert!(cmd.dev.dev);
+    }
+}

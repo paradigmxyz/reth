@@ -86,7 +86,7 @@ impl StorageLockInner {
     fn new(file_path: PathBuf) -> Result<Self, StorageLockError> {
         // Create the directory if it doesn't exist
         if let Some(parent) = file_path.parent() {
-            reth_fs_util::create_dir_all(parent)?;
+            reth_fs_util::create_dir_all(parent).map_err(StorageLockError::other)?;
         }
 
         // Write this process unique identifier (pid & start_time) to file
@@ -112,7 +112,7 @@ impl ProcessUID {
         system.refresh_processes_specifics(
             sysinfo::ProcessesToUpdate::Some(&[pid2]),
             true,
-            ProcessRefreshKind::new(),
+            ProcessRefreshKind::nothing(),
         );
         system.process(pid2).map(|process| Self { pid, start_time: process.start_time() })
     }
@@ -141,14 +141,17 @@ impl ProcessUID {
 
     /// Whether a process with this `pid` and `start_time` exists.
     fn is_active(&self) -> bool {
-        System::new_with_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()))
-            .process(self.pid.into())
-            .is_some_and(|p| p.start_time() == self.start_time)
+        System::new_with_specifics(
+            RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
+        )
+        .process(self.pid.into())
+        .is_some_and(|p| p.start_time() == self.start_time)
     }
 
     /// Writes `pid` and `start_time` to a file.
     fn write(&self, path: &Path) -> Result<(), StorageLockError> {
-        Ok(reth_fs_util::write(path, format!("{}\n{}", self.pid, self.start_time))?)
+        reth_fs_util::write(path, format!("{}\n{}", self.pid, self.start_time))
+            .map_err(StorageLockError::other)
     }
 }
 

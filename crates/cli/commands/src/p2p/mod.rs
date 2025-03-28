@@ -5,7 +5,7 @@ use std::{path::PathBuf, sync::Arc};
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
@@ -73,7 +73,7 @@ pub enum Subcommands {
     Rlpx(rlpx::Command),
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `p2p` command
     pub async fn execute<N: NetworkPrimitives>(self) -> eyre::Result<()> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());

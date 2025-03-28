@@ -1,5 +1,4 @@
 use alloc::string::{String, ToString};
-use reth_fs_util::FsPathError;
 
 /// Storage lock error.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -12,9 +11,9 @@ pub enum StorageLockError {
     Other(String),
 }
 
-/// TODO: turn into variant once `ProviderError`
-impl From<FsPathError> for StorageLockError {
-    fn from(error: FsPathError) -> Self {
-        Self::Other(error.to_string())
+impl StorageLockError {
+    /// Converts any error into the `Other` variant of `StorageLockError`.
+    pub fn other<E: core::error::Error>(err: E) -> Self {
+        Self::Other(err.to_string())
     }
 }

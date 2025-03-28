@@ -1,7 +1,7 @@
 //! Utilities for end-to-end tests.
 
 use node::NodeTestContext;
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
@@ -9,13 +9,11 @@ use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
     EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
-    NodeConfig, NodeHandle, NodeTypesWithDBAdapter, NodeTypesWithEngine, PayloadAttributesBuilder,
-    PayloadTypes,
+    NodeConfig, NodeHandle, NodePrimitives, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
-use reth_provider::providers::{
-    BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
-};
+use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
@@ -24,6 +22,7 @@ use wallet::Wallet;
 
 /// Wrapper type to create test nodes
 pub mod node;
+pub mod testsuite;
 
 /// Helper for transaction operations
 pub mod transaction;
@@ -37,28 +36,26 @@ mod payload;
 /// Helper for network operations
 mod network;
 
-/// Helper for engine api operations
-mod engine_api;
 /// Helper for rpc operations
 mod rpc;
-
-/// Helper traits
-mod traits;
 
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForTree + NodeTypesWithEngine,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider + NodeTypesWithEngine,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
-    N::AddOns: RethRpcAddOns<Adapter<N>>,
+    N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
+    LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
+        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+    >,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -112,29 +109,16 @@ pub async fn setup_engine<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
-    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Copy + 'static,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(
-    Vec<NodeHelperType<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+    Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
     TaskManager,
     Wallet,
 )>
 where
-    N: Default
-        + Node<TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + NodeTypesWithEngine
-        + NodeTypesForProvider,
-    N::ComponentsBuilder: NodeComponentsBuilder<
-        TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
-        Components: NodeComponents<
-            TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
-            Network: PeersHandleProvider,
-        >,
-    >,
-    N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + EngineValidatorAddOn<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>,
-    LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-    >,
+    N: NodeBuilderHelper,
+    LocalPayloadAttributesBuilder<N::ChainSpec>:
+        PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -164,7 +148,7 @@ where
         let node = N::default();
         let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
-            .with_types_and_provider::<N, BlockchainProvider2<_>>()
+            .with_types_and_provider::<N, BlockchainProvider<_>>()
             .with_components(node.components_builder())
             .with_add_ons(node.add_ons())
             .launch_with_fn(|builder| {
@@ -180,7 +164,7 @@ where
         let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
         let genesis = node.block_hash(0);
-        node.engine_api.update_forkchoice(genesis, genesis).await?;
+        node.update_forkchoice(genesis, genesis).await?;
 
         // Connect each node in a chain.
         if let Some(previous_node) = nodes.last_mut() {
@@ -218,3 +202,74 @@ pub type Adapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpD
 /// Type alias for a type of `NodeHelper`
 pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> =
     NodeTestContext<Adapter<N, Provider>, <N as Node<TmpNodeAdapter<N, Provider>>>::AddOns>;
+
+/// Helper trait to simplify bounds when calling setup functions.
+pub trait NodeBuilderHelper
+where
+    Self: Default
+        + NodeTypesForProvider
+        + NodeTypesWithEngine<
+            Engine: PayloadTypes<
+                PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
+            >,
+        > + Node<
+            TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            Primitives: NodePrimitives<
+                BlockHeader = alloy_consensus::Header,
+                BlockBody = alloy_consensus::BlockBody<
+                    <Self::Primitives as NodePrimitives>::SignedTx,
+                >,
+            >,
+            ComponentsBuilder: NodeComponentsBuilder<
+                TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                Components: NodeComponents<
+                    TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                    Network: PeersHandleProvider,
+                >,
+            >,
+            AddOns: RethRpcAddOns<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            > + EngineValidatorAddOn<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            >,
+            ChainSpec: From<ChainSpec> + Clone,
+        >,
+    LocalPayloadAttributesBuilder<Self::ChainSpec>:
+        PayloadAttributesBuilder<<Self::Engine as PayloadTypes>::PayloadAttributes>,
+{
+}
+
+impl<T> NodeBuilderHelper for T
+where
+    Self: Default
+        + NodeTypesForProvider
+        + NodeTypesWithEngine<
+            Engine: PayloadTypes<
+                PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
+            >,
+        > + Node<
+            TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            Primitives: NodePrimitives<
+                BlockHeader = alloy_consensus::Header,
+                BlockBody = alloy_consensus::BlockBody<
+                    <Self::Primitives as NodePrimitives>::SignedTx,
+                >,
+            >,
+            ComponentsBuilder: NodeComponentsBuilder<
+                TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                Components: NodeComponents<
+                    TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                    Network: PeersHandleProvider,
+                >,
+            >,
+            AddOns: RethRpcAddOns<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            > + EngineValidatorAddOn<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            >,
+            ChainSpec: From<ChainSpec> + Clone,
+        >,
+    LocalPayloadAttributesBuilder<Self::ChainSpec>:
+        PayloadAttributesBuilder<<Self::Engine as PayloadTypes>::PayloadAttributes>,
+{
+}

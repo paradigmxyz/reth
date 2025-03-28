@@ -30,10 +30,21 @@ tracy-client = { workspace = true, optional = true, features = ["demangle"] }
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = { workspace = true, optional = true }
+snmalloc-rs = { workspace = true, optional = true }
 libc = "0.2"
 
 [features]
 jemalloc = ["dep:tikv-jemallocator"]
+
+# Enables jemalloc profiling features
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 
+# Wraps the selected allocator in the tracy profiling allocator
 tracy-allocator = ["dep:tracy-client"]
+
+snmalloc = ["dep:snmalloc-rs"]
+
+# Enables the snmalloc-rs `native-cpu` feature, which optimizes snmalloc for the
+# native CPU of the host machine. Not sure why this feature is not derived from
+# RUSTFLAGS or enabled when `target-cpu=native`.
+snmalloc-native = ["snmalloc", "snmalloc-rs/native-cpu"]

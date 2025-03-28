@@ -1,0 +1,14 @@
+[package]
+name = "example-network-proxy"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-network.workspace = true
+reth-chainspec.workspace = true
+reth-tracing.workspace = true
+futures.workspace = true
+tokio.workspace = true
+eyre.workspace = true

@@ -5,27 +5,27 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
 use futures::StreamExt;
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
 use reth_db::DatabaseEnv;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_errors::ConsensusError;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
 use reth_node_events::node::NodeEvent;
-use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
@@ -64,7 +64,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         &self,
         config: &Config,
         client: Client,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         provider_factory: ProviderFactory<N>,
         task_executor: &TaskExecutor,
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
@@ -79,7 +79,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), provider_factory.clone())
+            .build(client, consensus.clone().as_consensus(), provider_factory.clone())
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
@@ -94,15 +94,16 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 DefaultStages::new(
                     provider_factory.clone(),
                     tip_rx,
-                    Arc::clone(&consensus),
+                    consensus.clone(),
                     header_downloader,
                     body_downloader,
                     executor.clone(),
                     stage_conf.clone(),
-                    prune_modes.clone(),
+                    prune_modes,
                 )
                 .set(ExecutionStage::new(
                     executor,
+                    consensus.clone(),
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,
@@ -110,7 +111,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                         max_duration: None,
                     },
                     stage_conf.execution_external_clean_threshold(),
-                    prune_modes,
                     ExExManagerHandle::empty(),
                 )),
             )
@@ -172,7 +172,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         // Configure and build network
@@ -196,7 +196,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let mut pipeline = self.build_pipeline(
             &config,
             fetch_client.clone(),
-            Arc::clone(&consensus),
+            consensus.clone(),
             provider_factory.clone(),
             &ctx.task_executor,
             static_file_producer,

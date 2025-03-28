@@ -57,6 +57,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
       - name: Install mdbook
         run: |
@@ -81,9 +82,7 @@ jobs:
         run: cargo docs --exclude "example-*"
         env:
           # Keep in sync with ./ci.yml:jobs.docs
-          RUSTDOCFLAGS:
-            --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page
-            -Zunstable-options
+          RUSTDOCFLAGS: --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
 
       - name: Move docs to book folder
         run: |

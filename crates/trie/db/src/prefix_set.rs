@@ -2,16 +2,18 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256,
 };
-use core::{marker::PhantomData, ops::RangeInclusive};
-use derive_more::Deref;
-use reth_db::tables;
+use core::{
+    marker::PhantomData,
+    ops::{Deref, RangeInclusive},
+};
 use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
+    tables,
     transaction::DbTx,
     DatabaseError,
 };
-use reth_primitives::StorageEntry;
+use reth_primitives_traits::StorageEntry;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     KeyHasher, Nibbles,

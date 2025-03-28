@@ -2,18 +2,16 @@ use crate::{ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::Header;
-use alloy_eips::eip1559::BaseFeeParams;
+use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use core::fmt::{Debug, Display};
+use reth_ethereum_forks::EthereumHardforks;
 use reth_network_peers::NodeRecord;
 
 /// Trait representing type configuring a chain spec.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthChainSpec: Send + Sync + Unpin + Debug {
-    // todo: make chain spec type generic over hardfork
-    //type Hardfork: Clone + Copy + 'static;
-
     /// The header type of the network.
     type Header;
 
@@ -30,6 +28,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams;
+
+    /// Get the [`BlobParams`] for the given timestamp
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams>;
 
     /// Returns the deposit contract data for the chain, if it's present
     fn deposit_contract(&self) -> Option<&DepositContract>;
@@ -61,6 +62,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn is_ethereum(&self) -> bool {
         self.chain().is_ethereum()
     }
+
+    /// Returns the final total difficulty if the Paris hardfork is known.
+    fn final_paris_total_difficulty(&self) -> Option<U256>;
 }
 
 impl EthChainSpec for ChainSpec {
@@ -76,6 +80,16 @@ impl EthChainSpec for ChainSpec {
 
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.base_fee_params_at_timestamp(timestamp)
+    }
+
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
+        if self.is_prague_active_at_timestamp(timestamp) {
+            Some(self.blob_params.prague)
+        } else if self.is_cancun_active_at_timestamp(timestamp) {
+            Some(self.blob_params.cancun)
+        } else {
+            None
+        }
     }
 
     fn deposit_contract(&self) -> Option<&DepositContract> {
@@ -108,5 +122,9 @@ impl EthChainSpec for ChainSpec {
 
     fn is_optimism(&self) -> bool {
         false
+    }
+
+    fn final_paris_total_difficulty(&self) -> Option<U256> {
+        self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
     }
 }

@@ -24,4 +24,4 @@ tracing.workspace = true
 reqwest.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 jsonrpsee = { workspace = true, features = ["server"] }
-http-body-util.workspace=true
+http-body-util.workspace = true

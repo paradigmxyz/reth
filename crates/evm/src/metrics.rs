@@ -2,13 +2,14 @@
 //!
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use crate::{execute::Executor, system_calls::OnStateHook};
+use crate::{execute::Executor, Database, OnStateHook};
 use alloy_consensus::BlockHeader;
+use alloy_evm::block::StateChangeSource;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives::BlockWithSenders;
-use revm_primitives::EvmState;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use revm::state::EvmState;
 use std::time::Instant;
 
 /// Wrapper struct that combines metrics and state hook
@@ -18,7 +19,7 @@ struct MeteredStateHook {
 }
 
 impl OnStateHook for MeteredStateHook {
-    fn on_state(&mut self, state: &EvmState) {
+    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
         let accounts = state.keys().len();
         let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
@@ -33,7 +34,7 @@ impl OnStateHook for MeteredStateHook {
         self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
 
         // Call the original state hook
-        self.inner_hook.on_state(state);
+        self.inner_hook.on_state(source, state);
     }
 }
 
@@ -68,7 +69,7 @@ pub struct ExecutorMetrics {
 }
 
 impl ExecutorMetrics {
-    fn metered<F, R, B>(&self, block: &BlockWithSenders<B>, f: F) -> R
+    fn metered<F, R, B>(&self, block: &RecoveredBlock<B>, f: F) -> R
     where
         F: FnOnce() -> R,
         B: reth_primitives_traits::Block,
@@ -94,20 +95,15 @@ impl ExecutorMetrics {
     /// of accounts, storage slots and bytecodes loaded and updated.
     /// Execute the given block using the provided [`Executor`] and update metrics for the
     /// execution.
-    pub fn execute_metered<'a, E, DB, O, Error, B>(
+    pub fn execute_metered<E, DB>(
         &self,
         executor: E,
-        input: &'a BlockWithSenders<B>,
+        input: &RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         state_hook: Box<dyn OnStateHook>,
-    ) -> Result<BlockExecutionOutput<O>, Error>
+    ) -> Result<BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>, E::Error>
     where
-        E: Executor<
-            DB,
-            Input<'a> = &'a BlockWithSenders<B>,
-            Output = BlockExecutionOutput<O>,
-            Error = Error,
-        >,
-        B: reth_primitives_traits::Block,
+        DB: Database,
+        E: Executor<DB>,
     {
         // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
         // they are gloally registered so that the data recorded in the hook will
@@ -131,9 +127,9 @@ impl ExecutorMetrics {
     }
 
     /// Execute the given block and update metrics for the execution.
-    pub fn metered_one<F, R, B>(&self, input: &BlockWithSenders<B>, f: F) -> R
+    pub fn metered_one<F, R, B>(&self, input: &RecoveredBlock<B>, f: F) -> R
     where
-        F: FnOnce(&BlockWithSenders<B>) -> R,
+        F: FnOnce(&RecoveredBlock<B>) -> R,
         B: reth_primitives_traits::Block,
     {
         self.metered(input, || f(input))
@@ -144,10 +140,14 @@ impl ExecutorMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
+    use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-    use revm::db::BundleState;
-    use revm_primitives::{
-        Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot, B256, U256,
+    use reth_ethereum_primitives::EthPrimitives;
+    use reth_execution_types::BlockExecutionResult;
+    use revm::{
+        database::State,
+        database_interface::EmptyDB,
+        state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
     };
     use std::sync::mpsc;
 
@@ -156,54 +156,46 @@ mod tests {
         state: EvmState,
     }
 
-    impl Executor<()> for MockExecutor {
-        type Input<'a>
-            = &'a BlockWithSenders
-        where
-            Self: 'a;
-        type Output = BlockExecutionOutput<()>;
+    impl<DB: Database + Default> Executor<DB> for MockExecutor {
+        type Primitives = EthPrimitives;
         type Error = std::convert::Infallible;
 
-        fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-            Ok(BlockExecutionOutput {
-                state: BundleState::default(),
-                receipts: vec![],
-                requests: Requests::default(),
-                gas_used: 0,
-            })
-        }
-        fn execute_with_state_closure<F>(
-            self,
-            _input: Self::Input<'_>,
-            _state: F,
-        ) -> Result<Self::Output, Self::Error>
-        where
-            F: FnMut(&revm::State<()>),
+        fn execute_one(
+            &mut self,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         {
-            Ok(BlockExecutionOutput {
-                state: BundleState::default(),
+            Ok(BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),
                 gas_used: 0,
             })
         }
-        fn execute_with_state_hook<F>(
-            self,
-            _input: Self::Input<'_>,
+
+        fn execute_one_with_state_hook<F>(
+            &mut self,
+            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
             mut hook: F,
-        ) -> Result<Self::Output, Self::Error>
+        ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         where
             F: OnStateHook + 'static,
         {
             // Call hook with our mock state
-            hook.on_state(&self.state);
+            hook.on_state(StateChangeSource::Transaction(0), &self.state);
 
-            Ok(BlockExecutionOutput {
-                state: BundleState::default(),
+            Ok(BlockExecutionResult {
                 receipts: vec![],
                 requests: Requests::default(),
                 gas_used: 0,
             })
+        }
+
+        fn into_state(self) -> revm::database::State<DB> {
+            State::builder().with_database(Default::default()).build()
+        }
+
+        fn size_hint(&self) -> usize {
+            0
         }
     }
 
@@ -213,7 +205,7 @@ mod tests {
     }
 
     impl OnStateHook for ChannelStateHook {
-        fn on_state(&mut self, _state: &EvmState) {
+        fn on_state(&mut self, _source: StateChangeSource, _state: &EvmState) {
             let _ = self.sender.send(self.output);
         }
     }
@@ -229,7 +221,7 @@ mod tests {
     fn test_executor_metrics_hook_metrics_recorded() {
         let snapshotter = setup_test_recorder();
         let metrics = ExecutorMetrics::default();
-        let input = BlockWithSenders::default();
+        let input = RecoveredBlock::default();
 
         let (tx, _rx) = mpsc::channel();
         let expected_output = 42;
@@ -255,7 +247,7 @@ mod tests {
             state
         };
         let executor = MockExecutor { state };
-        let _result = metrics.execute_metered(executor, &input, state_hook).unwrap();
+        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
 
         let snapshot = snapshotter.snapshot().into_vec();
 
@@ -278,7 +270,7 @@ mod tests {
     #[test]
     fn test_executor_metrics_hook_called() {
         let metrics = ExecutorMetrics::default();
-        let input = BlockWithSenders::default();
+        let input = RecoveredBlock::default();
 
         let (tx, rx) = mpsc::channel();
         let expected_output = 42;
@@ -287,7 +279,7 @@ mod tests {
         let state = EvmState::default();
 
         let executor = MockExecutor { state };
-        let _result = metrics.execute_metered(executor, &input, state_hook).unwrap();
+        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);

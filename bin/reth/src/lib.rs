@@ -41,9 +41,9 @@ pub mod utils {
 
 /// Re-exported payload related types
 pub mod payload {
+    pub use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
     pub use reth_payload_builder::*;
     pub use reth_payload_primitives::*;
-    pub use reth_payload_validator::ExecutionPayloadValidator;
 }
 
 /// Re-exported from `reth_node_api`.
@@ -103,13 +103,9 @@ pub mod primitives {
     pub use reth_primitives::*;
 }
 
-/// Re-exported from `reth_beacon_consensus`.
+/// Re-exported from `reth_ethereum_consensus`.
 pub mod beacon_consensus {
-    pub use reth_beacon_consensus::*;
-}
-/// Re-exported from `reth_blockchain_tree`.
-pub mod blockchain_tree {
-    pub use reth_blockchain_tree::*;
+    pub use reth_node_ethereum::consensus::*;
 }
 
 /// Re-exported from `reth_consensus`.
@@ -185,6 +181,9 @@ pub mod rpc {
         pub use reth_rpc_types_compat::*;
     }
 }
+
+/// Ress subprotocol installation.
+pub mod ress;
 
 // re-export for convenience
 #[doc(inline)]

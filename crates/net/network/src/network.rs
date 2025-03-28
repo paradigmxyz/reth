@@ -505,7 +505,7 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     EthMessage {
         /// The peer to send the message to.
         peer_id: PeerId,
-        /// The message to send to the peer's sessions.
+        /// The `eth` protocol message to send to the peer's session.
         message: PeerMessage<N>,
     },
     /// Applies a reputation change to the given peer.

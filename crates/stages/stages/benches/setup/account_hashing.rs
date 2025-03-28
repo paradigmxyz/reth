@@ -2,9 +2,8 @@
 
 use super::constants;
 use alloy_primitives::BlockNumber;
-use reth_db::tables;
 use reth_db_api::{
-    cursor::DbCursorRO, database::Database, transaction::DbTx, DatabaseError as DbError,
+    cursor::DbCursorRO, database::Database, tables, transaction::DbTx, DatabaseError as DbError,
 };
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
