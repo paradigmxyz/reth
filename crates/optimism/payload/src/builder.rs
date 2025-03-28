@@ -625,13 +625,7 @@ where
         let base_fee = builder.evm_mut().block().basefee;
 
         while let Some(tx) = best_txs.next(()) {
-            // We skip invalid cross chain tx, they would be removed on the next block update in the
-            // maintenance job
-            if let Some(interop) = tx.interop() {
-                if !interop.is_valid(self.config.attributes.timestamp()) {
-                    continue
-                }
-            }
+            let interop = tx.interop();
             let tx = tx.into_consensus();
             // Check that cross chain tx is validated by supervisor for this block
             if info.is_tx_over_limits(tx.inner(), block_gas_limit, tx_da_limit, block_da_limit) {
@@ -648,6 +642,14 @@ where
                 continue
             }
 
+            // We skip invalid cross chain tx, they would be removed on the next block update in the
+            // maintenance job
+            if let Some(interop) = interop {
+                if !interop.is_valid(self.config.attributes.timestamp()) {
+                    best_txs.mark_invalid(tx.signer(), tx.nonce());
+                    continue
+                }
+            }
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
                 return Ok(Some(()))
