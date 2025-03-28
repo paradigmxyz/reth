@@ -303,8 +303,7 @@ where
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
         self.supervisor_client
-            .as_ref()
-            .unwrap()
+            .as_ref()?
             .is_valid_cross_tx(
                 tx.access_list(),
                 tx.hash(),
