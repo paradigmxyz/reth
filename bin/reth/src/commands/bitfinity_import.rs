@@ -44,8 +44,6 @@ use tracing::{debug, error, info, warn};
 pub struct BitfinityImportCommand {
     config: Config,
 
-    datadir: ChainPath<DataDirPath>,
-
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain or the path to a chain specification file.
@@ -86,7 +84,7 @@ impl BitfinityImportCommand {
             config.stages.etl.dir = Some(EtlConfig::from_datadir(datadir.data_dir()));
         }
 
-        Self { config, datadir, chain, bitfinity, provider_factory, blockchain_provider }
+        Self { config, chain, bitfinity, provider_factory, blockchain_provider }
     }
 
     /// Schedule the import job and return a handle to it.
