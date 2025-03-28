@@ -1,7 +1,7 @@
 //! RPC errors specific to OP.
 
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
-use alloy_transport::{RpcError,TransportErrorKind};
+use alloy_transport::{RpcError, TransportErrorKind};
 use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use op_revm::{OpHaltReason, OpTransactionError};
 use reth_optimism_evm::OpBlockExecutionError;
