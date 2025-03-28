@@ -76,6 +76,21 @@ where
         self.inner.validate_one(origin, transaction)
     }
 
+    /// Validates a single transaction with the provided state provider.
+    ///
+    /// This allows reusing the same provider across multiple transaction validations,
+    /// which can improve performance when validating many transactions.
+    ///
+    /// If `state` is `None`, a new state provider will be created.
+    pub fn validate_one_with_state(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: &mut Option<Box<dyn StateProvider>>,
+    ) -> TransactionValidationOutcome<Tx> {
+        self.inner.validate_one_with_provider(origin, transaction, state)
+    }
+
     /// Validates all given transactions.
     ///
     /// Returns all outcomes for the given transactions in the same order.
