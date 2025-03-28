@@ -199,9 +199,6 @@ where
             }
             _ => {}
         }
-        transaction.set_interop(TransactionInterop {
-            timeout: self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
-        });
 
         let outcome = self.inner.validate_one(origin, transaction);
 
