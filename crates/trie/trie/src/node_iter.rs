@@ -138,14 +138,34 @@ where
                         Some(key) => key,
                         None => break, // no more keys
                     };
+
                     trace!(
                         target: "trie::node_iter",
                         ?seek_key,
                         can_skip_current_node = self.walker.can_skip_current_node,
                         "seeking to the next unprocessed hashed entry"
                     );
-                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
+                    let can_skip_node = self.walker.can_skip_current_node;
                     self.walker.advance()?;
+
+                    // We should get the iterator to return a branch node if we can skip the
+                    // current node, its hashed flag is set, and the tree flag is set.
+                    //
+                    // `can_skip_node` is already set when the hash flag is set, so we don't need
+                    // to check for the hash flag explicitly
+                    if can_skip_node && self.walker.children_are_in_trie() {
+                        trace!(
+                            target: "trie::node_iter",
+                            ?seek_key,
+                            walker_hash = ?self.walker.hash(),
+                            "skipping hashed seek"
+                        );
+
+                        self.current_walker_key_checked = false;
+                        continue
+                    }
+
+                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
                 }
             }
         }
