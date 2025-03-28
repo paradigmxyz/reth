@@ -63,6 +63,8 @@ pub(crate) struct EngineMetrics {
 pub(crate) struct BlockValidationMetrics {
     /// Total number of storage tries updated in the state root calculation
     pub(crate) state_root_storage_tries_updated_total: Counter,
+    /// Total number of times the parallel state root computation fell back to regular.
+    pub(crate) state_root_parallel_fallback_total: Counter,
     /// Histogram of state root duration
     pub(crate) state_root_histogram: Histogram,
     /// Latest state root duration
