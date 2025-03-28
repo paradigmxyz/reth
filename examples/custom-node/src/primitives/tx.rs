@@ -112,10 +112,13 @@ impl SignedTransaction for CustomTransaction {
     fn tx_hash(&self) -> &TxHash {
         self.inner.tx_hash()
     }
-
 }
 
+// Custom implementation to provide access to the signature field
+// which is not part of the SignedTransaction trait
 impl CustomTransaction {
+    /// Returns the transaction signature by cloning the inner transaction
+    /// and extracting the signature using split()
     pub fn signature(&self) -> PrimitiveSignature {
         let inner_clone = self.inner.clone();
         let (_, signature) = inner_clone.split();
