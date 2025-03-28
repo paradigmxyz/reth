@@ -308,16 +308,18 @@ pub struct TaskExecutor {
 // === impl TaskExecutor ===
 
 impl TaskExecutor {
-    /// Returns the current TaskExecutor if one has been initialized
+    /// Returns the current `TaskExecutor` if one has been initialized
     pub fn current() -> Option<Self> {
         GLOBAL_EXECUTOR.get().cloned()
     }
-    /// Returns the current TaskExecutor or creates one if none exists
+    /// Returns the current `TaskExecutor` or creates one if none exists
     pub fn current_or_create() -> Self {
         Self::current().unwrap_or_else(|| {
             let handle = Handle::try_current().unwrap_or_else(|_| {
                 static RT: OnceLock<Runtime> = OnceLock::new();
-                let rt = RT.get_or_init(|| Runtime::new().unwrap());
+                let rt = RT.get_or_init(|| {
+                    tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()
+                });
                 rt.handle().clone()
             });
 
