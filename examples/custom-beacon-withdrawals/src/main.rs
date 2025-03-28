@@ -5,7 +5,7 @@
 
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
+    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
     eth::{EthBlockExecutionCtx, EthBlockExecutor},
     EthEvm, EthEvmFactory,
 };
@@ -31,7 +31,7 @@ use reth_evm::{
 use reth_evm_ethereum::{EthBlockAssembler, EthEvmConfig, RethReceiptBuilder};
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
 use reth_primitives::{
-    EthPrimitives, Header, Receipt, Recovered, SealedBlock, SealedHeader, TransactionSigned,
+    EthPrimitives, Header, Receipt, SealedBlock, SealedHeader, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -177,7 +177,7 @@ where
 
     fn execute_transaction_with_result_closure(
         &mut self,
-        tx: Recovered<&TransactionSigned>,
+        tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
     ) -> Result<u64, BlockExecutionError> {
         self.inner.execute_transaction_with_result_closure(tx, f)
