@@ -10,7 +10,7 @@ use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use futures::Future;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
-use reth_primitives::{Recovered};
+use reth_primitives::Recovered;
 use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_types::TransactionSource;
 use reth_rpc_server_types::result::internal_rpc_err;
@@ -105,9 +105,9 @@ pub trait BitfinityEvmRpc {
                 <Self::Transaction as alloy_rlp::Decodable>::decode(&mut encoded.as_ref())
                     .map_err(|e| internal_rpc_err(format!("failed to decode BitfinityEvmRpc::Transaction from received did::Transaction: {e}")))?;
 
-            let signer = self_tx.recover_signer().ok_or_else(|| {
+            let signer = self_tx.recover_signer().map_err(|err| {
                 internal_rpc_err(
-                    "failed to recover signer from decoded BitfinityEvmRpc::Transaction",
+                    format!("failed to recover signer from decoded BitfinityEvmRpc::Transaction: {:?}", err)
                 )
             })?;
             let recovered_tx = Recovered::new_unchecked(self_tx, signer);
