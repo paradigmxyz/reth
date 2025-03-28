@@ -627,7 +627,6 @@ where
         while let Some(tx) = best_txs.next(()) {
             let interop = tx.interop();
             let tx = tx.into_consensus();
-            // Check that cross chain tx is validated by supervisor for this block
             if info.is_tx_over_limits(tx.inner(), block_gas_limit, tx_da_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
@@ -642,7 +641,7 @@ where
                 continue
             }
 
-            // We skip invalid cross chain tx, they would be removed on the next block update in the
+            // We skip invalid cross chain txs, they would be removed on the next block update in the
             // maintenance job
             if let Some(interop) = interop {
                 if !interop.is_valid(self.config.attributes.timestamp()) {
