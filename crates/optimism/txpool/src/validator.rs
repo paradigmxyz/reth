@@ -181,32 +181,39 @@ where
         }
 
         // Interop cross tx validation
-        if let Some(Err(err)) = self.is_valid_cross_tx(&transaction).await {
-            match err {
-                InvalidCrossTx::CrossChainTxPreInterop => {
-                    return TransactionValidationOutcome::Invalid(
-                        transaction,
-                        InvalidTransactionError::TxTypeNotSupported.into(),
-                    )
-                }
-                InvalidCrossTx::ValidationError(InteropTxValidatorError::InvalidInboxEntry(e))
-                    if e.is_msg_at_least_cross_unsafe() =>
-                {
-                    // message is currently invalid w.r.t. locally configured min safety
-                    // level, but is at least cross-unsafe already. pass as valid anyway, in order
-                    // to store in pool. interop validity is revalidated in block building.
-                }
-                err => {
-                    return TransactionValidationOutcome::Invalid(
-                        transaction,
-                        InvalidPoolTransactionError::Other(Box::new(err)),
-                    )
+        match self.is_valid_cross_tx(&transaction).await {
+            Some(Err(err)) => {
+                match err {
+                    InvalidCrossTx::CrossChainTxPreInterop => {
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidTransactionError::TxTypeNotSupported.into(),
+                        )
+                    }
+                    InvalidCrossTx::ValidationError(
+                        InteropTxValidatorError::InvalidInboxEntry(e),
+                    ) if e.is_msg_at_least_cross_unsafe() => {
+                        // message is currently invalid w.r.t. locally configured min safety
+                        // level, but is at least cross-unsafe already. pass as valid anyway, in
+                        // order to store in pool. interop validity is
+                        // revalidated in block building.
+                    }
+                    err => {
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidPoolTransactionError::Other(Box::new(err)),
+                        )
+                    }
                 }
             }
+            Some(Ok(_)) => {
+                // valid interop tx
+                transaction.set_interop(TransactionInterop {
+                    timeout: self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
+                });
+            }
+            _ => {}
         }
-        transaction.set_interop(TransactionInterop {
-            timeout: self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
-        });
 
         let outcome = self.inner.validate_one(origin, transaction);
 
