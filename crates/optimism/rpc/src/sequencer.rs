@@ -1,13 +1,10 @@
 //! Helpers for optimism specific RPC implementations.
 
-use std::sync::{
-    atomic::{self, AtomicUsize},
-    Arc,
-};
+use std::sync::Arc;
 
 use alloy_primitives::hex;
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
-use reqwest::Client;
+use alloy_rpc_client::RpcClient as Client;
 use serde_json::{json, Value};
 use tracing::warn;
 
@@ -22,7 +19,8 @@ pub struct SequencerClient {
 impl SequencerClient {
     /// Creates a new [`SequencerClient`].
     pub fn new(sequencer_endpoint: impl Into<String>) -> Self {
-        let client = Client::builder().use_rustls_tls().build().unwrap();
+        let sequencer_endpoint: String = sequencer_endpoint.into();
+        let client = Client::new_http(reqwest::Url::parse(&sequencer_endpoint).unwrap());
         Self::with_client(sequencer_endpoint, client)
     }
 
@@ -31,7 +29,6 @@ impl SequencerClient {
         let inner = SequencerClientInner {
             sequencer_endpoint: sequencer_endpoint.into(),
             http_client,
-            id: AtomicUsize::new(0),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -46,47 +43,24 @@ impl SequencerClient {
         &self.inner.http_client
     }
 
-    /// Returns the next id for the request
-    fn next_request_id(&self) -> usize {
-        self.inner.id.fetch_add(1, atomic::Ordering::SeqCst)
-    }
-
-    /// Helper function to get body of the request with the given params array.
-    fn request_body(&self, method: &str, params: Value) -> serde_json::Result<String> {
-        let request = json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-            "id": self.next_request_id()
-        });
-
-        serde_json::to_string(&request)
-    }
-
     /// Sends a POST request to the sequencer endpoint.
-    async fn post_request(&self, body: String) -> Result<(), reqwest::Error> {
+    async fn post_request(&self, method: &str, params: Value) -> Result<(), SequencerClientError> {
         self.http_client()
-            .post(self.endpoint())
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(body)
-            .send()
-            .await?;
+            .request::<Value, ()>(method.to_string(), params)
+            .await
+            .inspect_err(|err| {
+                warn!(
+                    target: "rpc::sequencer",
+                    %err,
+                    "HTTP request to sequencer failed",
+                );
+            })?;
         Ok(())
     }
 
     /// Forwards a transaction to the sequencer endpoint.
     pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerClientError> {
-        let body = self
-            .request_body("eth_sendRawTransaction", json!([format!("0x{}", hex::encode(tx))]))
-            .map_err(|_| {
-                warn!(
-                    target: "rpc::eth",
-                    "Failed to serialize transaction for forwarding to sequencer"
-                );
-                SequencerClientError::InvalidSequencerTransaction
-            })?;
-
-        self.post_request(body).await.inspect_err(|err| {
+        self.post_request("eth_sendRawTransaction", json!([format!("0x{}", hex::encode(tx))])).await.inspect_err(|err| {
             warn!(
                 target: "rpc::eth",
                 %err,
@@ -104,16 +78,8 @@ impl SequencerClient {
         condition: TransactionConditional,
     ) -> Result<(), SequencerClientError> {
         let params = json!([format!("0x{}", hex::encode(tx)), condition]);
-        let body =
-            self.request_body("eth_sendRawTransactionConditional", params).map_err(|_| {
-                warn!(
-                    target: "rpc::eth",
-                    "Failed to serialize transaction for forwarding to sequencer"
-                );
-                SequencerClientError::InvalidSequencerTransaction
-            })?;
 
-        self.post_request(body).await.inspect_err(|err| {
+        self.post_request("eth_sendRawTransaction", params).await.inspect_err(|err| {
             warn!(
                 target: "rpc::eth",
                 %err,
@@ -124,14 +90,21 @@ impl SequencerClient {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SequencerClientInner {
     /// The endpoint of the sequencer
     sequencer_endpoint: String,
     /// The HTTP client
     http_client: Client,
-    /// Keeps track of unique request ids
-    id: AtomicUsize,
+}
+
+impl Default for SequencerClientInner {
+    fn default() -> Self {
+        Self {
+            sequencer_endpoint: String::new(),
+            http_client: Client::new_http(reqwest::Url::parse("http://localhost:8545").unwrap()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -144,21 +117,23 @@ mod tests {
         let client = SequencerClient::new("http://localhost:8545");
         let params = json!(["0x1234", {"block_number":10}]);
 
-        let body = client.request_body("eth_getBlockByNumber", params).unwrap();
+        let request = client.http_client().make_request("eth_getBlockByNumber", params).serialize().unwrap().take_request();
+        let body = request.get();
 
         assert_eq!(
             body,
-            r#"{"id":0,"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x1234",{"block_number":10}]}"#
+            r#"{"method":"eth_getBlockByNumber","params":["0x1234",{"block_number":10}],"id":0,"jsonrpc":"2.0"}"#
         );
 
         let condition = TransactionConditional::default();
         let params = json!([format!("0x{}", hex::encode("abcd")), condition]);
 
-        let body = client.request_body("eth_sendRawTransactionConditional", params).unwrap();
+        let request = client.http_client().make_request("eth_sendRawTransactionConditional", params).serialize().unwrap().take_request();
+        let body = request.get();
 
         assert_eq!(
             body,
-            r#"{"id":1,"jsonrpc":"2.0","method":"eth_sendRawTransactionConditional","params":["0x61626364",{"knownAccounts":{}}]}"#
+            r#"{"method":"eth_sendRawTransactionConditional","params":["0x61626364",{"knownAccounts":{}}],"id":1,"jsonrpc":"2.0"}"#
         );
     }
 }
