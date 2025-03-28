@@ -42,6 +42,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
+    "op-alloy-consensus/arbitrary",
     "op-alloy-rpc-types-engine/arbitrary",
     "reth-chainspec/arbitrary",
     "reth-codecs/arbitrary",
