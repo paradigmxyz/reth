@@ -1,6 +1,6 @@
 use crate::{
     interop::{MaybeInteropTransaction, TransactionInterop},
-    supervisor::{is_valid_cross_tx, SupervisorClient},
+    supervisor::SupervisorClient,
     InvalidCrossTx,
 };
 use alloy_consensus::{BlockHeader, Transaction};
@@ -302,7 +302,7 @@ where
     pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
-        is_valid_cross_tx(
+        SupervisorClient::is_valid_cross_tx(
             tx.access_list(),
             tx.hash(),
             self.block_info.timestamp.load(Ordering::Relaxed),
