@@ -1,5 +1,6 @@
 use alloy_consensus::Transaction;
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
+#[allow(unused_imports)]
 use alloy_primitives::{PrimitiveSignature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use reth_codecs::Compact;
@@ -110,10 +111,6 @@ impl SignedTransaction for CustomTransaction {
 
     fn tx_hash(&self) -> &TxHash {
         self.inner.tx_hash()
-    }
-
-    fn signature(&self) -> &PrimitiveSignature {
-        self.inner.signature()
     }
 }
 
