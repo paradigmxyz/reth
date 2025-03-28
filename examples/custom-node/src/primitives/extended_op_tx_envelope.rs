@@ -227,6 +227,38 @@ where
     }
 }
 
+impl<T> Encodable2718 for ExtendedOpTxEnvelope<T>
+where
+    T: Encodable2718,
+{
+    fn encode_2718(&self, out: &mut dyn BufMut) {
+        match self {
+            Self::BuiltIn(envelope) => match envelope.tx_type() {
+                OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
+                    envelope.encode_2718(out)
+                }
+            },
+            Self::Other(tx) => {
+                tx.encode_2718(out)
+            }
+        }
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        match self {
+            Self::BuiltIn(envelope) => match envelope.tx_type() {
+                OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
+                    envelope.encode_2718_len()
+                }
+            },
+            Self::Other(tx) => {
+                tx.encode_2718_len()
+            }
+        }
+    }
+}
+
+
 impl<T> Encodable for ExtendedOpTxEnvelope<T>
 where
     T: Encodable,
@@ -265,18 +297,6 @@ where
         match self {
             Self::BuiltIn(tx) => tx.encode(out),
             Self::Other(tx) => tx.encode(out),
-        }
-    }
-}
-
-impl<T> Compact for ExtendedOpTxEnvelope<T>
-where
-    T: Compact,
-{
-    fn size(&self) -> usize {
-        match self {
-            Self::BuiltIn(tx) => tx.size(),
-            Self::Other(tx) => tx.size(),
         }
     }
 }
