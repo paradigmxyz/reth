@@ -1,6 +1,6 @@
 use alloy_consensus::Transaction;
 use alloy_eips::{
-    eip2718::Eip2718Result, eip2930::AccessList, eip7702::SignedAuthorization, Decodable2718,
+    eip2718::{Eip2718Result,Eip2718Error}, eip2930::AccessList, eip7702::SignedAuthorization, Decodable2718,
     Encodable2718, Typed2718,
 };
 use alloy_primitives::{ChainId, PrimitiveSignature, TxHash};
@@ -184,7 +184,7 @@ where
     fn ty(&self) -> u8 {
         match self {
             Self::BuiltIn(tx) => tx.ty(),
-            Self::Other(tx) => tx.transaction.tx_type() as u8,
+            Self::Other(tx) => tx.ty(),
         }
     }
 }
@@ -194,21 +194,42 @@ where
     T: Decodable2718,
 {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        OpTxEnvelope::typed_decode(ty, buf)
-            .map(Self::BuiltIn)
-            .or_else(|_| OpTransactionSigned::typed_decode(ty, buf).map(Self::Other))
+        let tx_type: OpTxType = ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))?;
+        match tx_type {
+            // These types are handled via the built-in envelope.
+            OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
+                let envelope = OpTxEnvelope::typed_decode(ty, buf)?;
+                Ok(Self::BuiltIn(envelope))
+            }
+            // Handle Legacy or any other type as needed.
+            OpTxType::Legacy => {
+                let other = OpTransactionSigned::typed_decode(ty, buf)?;
+                Ok(Self::Other(other))
+            }
+        }
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        OpTxEnvelope::fallback_decode(buf)
-            .map(Self::BuiltIn)
-            .or_else(|_| OpTransactionSigned::fallback_decode(buf).map(Self::Other))
+        let type_byte = buf[0];
+        let tx_type: OpTxType = type_byte
+            .try_into()
+            .map_err(|_| Eip2718Error::UnexpectedType(type_byte))?;
+        match tx_type {
+            OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
+                let envelope = OpTxEnvelope::fallback_decode(buf)?;
+                Ok(Self::BuiltIn(envelope))
+            }
+            OpTxType::Legacy => {
+                let other = OpTransactionSigned::fallback_decode(buf)?;
+                Ok(Self::Other(other))
+            }
+        }
     }
 }
 
-impl<T> Decodable for ExtendedOpTxEnvelope<T>
+impl<T> Encodable for ExtendedOpTxEnvelope<T>
 where
-    T: Decodable,
+    T: Encodable,
 {
     fn encode_2718(&self, out: &mut dyn BufMut) {
         match self {
@@ -225,9 +246,9 @@ where
     }
 }
 
-impl<T> Encodable for ExtendedOpTxEnvelope<T>
+impl<T> Decodable for ExtendedOpTxEnvelope<T>
 where
-    T: Encodable,
+    T: Decodable,
 {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
         OpTxEnvelope::decode(buf)
@@ -293,11 +314,12 @@ where
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        if let Ok((builtin, rest)) = OpTxEnvelope::from_compact(buf, len) {
-            (Self::BuiltIn(builtin), rest)
-        } else {
-            let (other, rest) = OpTransactionSigned::from_compact(buf, len);
-            (Self::Other(other), rest)
+        match OpTxEnvelope::from_compact(buf, len) {
+            Ok((built_in_tx, remaining)) => (Self::BuiltIn(built_in_tx), remaining),
+            Err(_) => {
+                let (other_tx, remaining) = T::from_compact(buf, len);
+                (Self::Other(other_tx), remaining)
+            }
         }
     }
 }
