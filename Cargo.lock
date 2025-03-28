@@ -7262,6 +7262,7 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-db-common",
+ "reth-discv5",
  "reth-downloaders",
  "reth-engine-util",
  "reth-errors",

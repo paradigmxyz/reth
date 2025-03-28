@@ -2,17 +2,24 @@
 
 use std::sync::Arc;
 
+use alloy_network::TransactionResponse;
 use did::{Block, H256};
 use ethereum_json_rpc_client::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use futures::Future;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
+use reth_primitives::RecoveredTx;
+use reth_primitives_traits::SignedTransaction;
+use reth_rpc_eth_types::TransactionSource;
 use reth_rpc_server_types::result::internal_rpc_err;
 use revm_primitives::{Address, Bytes, B256, U256};
 
 /// Proxy to the Bitfinity EVM RPC.
 pub trait BitfinityEvmRpc {
+    /// Transaction type.
+    type Transaction: SignedTransaction;
+
     /// Returns the `ChainSpec`.
     fn chain_spec(&self) -> Arc<ChainSpec>;
 
@@ -36,7 +43,7 @@ pub trait BitfinityEvmRpc {
     }
 
     /// Forwards `eth_gasPrice` calls to the Bitfinity EVM.
-    fn gas_price(&self) -> impl Future<Output = RpcResult<U256>> + Send {
+    fn btf_gas_price(&self) -> impl Future<Output = RpcResult<U256>> + Send {
         let chain_spec = self.chain_spec();
         async move {
             let (rpc_url, client) = get_client(&chain_spec)?;
@@ -53,7 +60,7 @@ pub trait BitfinityEvmRpc {
     }
 
     /// Forwards `eth_maxPriorityFeePerGas` calls to the Bitfinity EVM
-    fn max_priority_fee_per_gas(&self) -> impl Future<Output = RpcResult<U256>> + Send {
+    fn btf_max_priority_fee_per_gas(&self) -> impl Future<Output = RpcResult<U256>> + Send {
         let chain_spec = self.chain_spec();
         async move {
             let (rpc_url, client) = get_client(&chain_spec)?;
@@ -69,8 +76,63 @@ pub trait BitfinityEvmRpc {
         }
     }
 
+    /// Returns transaction from forwarder or query it from EVM RPC.
+    fn btf_transaction_by_hash(
+        &self,
+        hash: B256,
+    ) -> impl Future<Output = RpcResult<Option<TransactionSource<Self::Transaction>>>> + Send {
+        let chain_spec = self.chain_spec();
+
+        async move {
+            let (rpc_url, client) = get_client(&chain_spec)?;
+            let Some(tx) = client.get_transaction_by_hash(hash.into()).await.map_err(|e| {
+                internal_rpc_err(format!(
+                    "failed to forward eth_transactionByHash request to {}: {}",
+                    rpc_url, e
+                ))
+            })?
+            else {
+                return Ok(None);
+            };
+
+            let alloy_tx: alloy_rpc_types_eth::Transaction = tx.try_into().map_err(|e| {
+                internal_rpc_err(format!(
+                    "failed to convert did::Transaction into alloy_rpc_types::Transaction: {e}"
+                ))
+            })?;
+            let encoded = alloy_rlp::encode(&alloy_tx.inner);
+            let self_tx =
+                <Self::Transaction as alloy_rlp::Decodable>::decode(&mut encoded.as_ref())
+                    .map_err(|e| internal_rpc_err(format!("failed to decode BitfinityEvmRpc::Transaction from received did::Transaction: {e}")))?;
+
+            let signer = self_tx.recover_signer().ok_or_else(|| {
+                internal_rpc_err(
+                    "failed to recover signer from decoded BitfinityEvmRpc::Transaction",
+                )
+            })?;
+            let recovered_tx = RecoveredTx::new_unchecked(self_tx, signer);
+
+            let block_params = alloy_tx
+                .block_number()
+                .zip(alloy_tx.transaction_index())
+                .zip(alloy_tx.block_hash());
+            let tx_source = match block_params {
+                Some(((block_number, index), block_hash)) => TransactionSource::Block {
+                    transaction: recovered_tx,
+                    index,
+                    block_hash,
+                    block_number,
+                    base_fee: None,
+                },
+                None => TransactionSource::Pool(recovered_tx),
+            };
+
+            Ok(Some(tx_source))
+        }
+    }
+
     /// Forwards `eth_sendRawTransaction` calls to the Bitfinity EVM
-    fn send_raw_transaction(&self, tx: Bytes) -> impl Future<Output = RpcResult<B256>> + Send {
+    fn btf_send_raw_transaction(&self, tx: Bytes) -> impl Future<Output = RpcResult<B256>> + Send {
         let chain_spec = self.chain_spec();
         async move {
             let (rpc_url, client) = get_client(&chain_spec)?;
