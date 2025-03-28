@@ -52,6 +52,11 @@ impl InvalidInboxEntry {
         }
     }
 
+    /// Returns `true` if message is invalid.
+    pub fn is_msg_invalid(&self) -> bool {
+        matches!(self, Self::MinimumSafety { got: SafetyLevel::Invalid, .. })
+    }
+
     /// Returns `true` if message is unsafe.
     pub fn is_msg_unsafe(&self) -> bool {
         matches!(self, Self::MinimumSafety { got: SafetyLevel::Unsafe, .. })
