@@ -8243,7 +8243,6 @@ dependencies = [
  "reth-discv5",
  "reth-dns-discovery",
  "reth-ecies",
- "reth-engine-primitives",
  "reth-eth-wire",
  "reth-eth-wire-types",
  "reth-ethereum-forks",
