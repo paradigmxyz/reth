@@ -19,7 +19,7 @@ use reth::{
         },
         handler::{EthPrecompiles, PrecompileProvider},
         inspector::{Inspector, NoOpInspector},
-        interpreter::{interpreter::EthInterpreter, InterpreterResult},
+        interpreter::{interpreter::EthInterpreter, InputsImpl, InterpreterResult},
         precompile::{PrecompileFn, PrecompileOutput, PrecompileResult, Precompiles},
         primitives::hardfork::SpecId,
         MainBuilder, MainContext,
@@ -169,23 +169,25 @@ pub fn prague_custom() -> &'static Precompiles {
 impl<CTX: ContextTr> PrecompileProvider<CTX> for CustomPrecompiles {
     type Output = InterpreterResult;
 
-    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) {
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
         let spec_id = spec.clone().into();
         if spec_id == SpecId::PRAGUE {
-            self.precompiles = EthPrecompiles { precompiles: prague_custom() }
+            self.precompiles = EthPrecompiles { precompiles: prague_custom(), spec: spec.into() }
         } else {
             PrecompileProvider::<CTX>::set_spec(&mut self.precompiles, spec);
         }
+        true
     }
 
     fn run(
         &mut self,
         context: &mut CTX,
         address: &Address,
-        bytes: &Bytes,
+        inputs: &InputsImpl,
+        is_static: bool,
         gas_limit: u64,
     ) -> Result<Option<Self::Output>, String> {
-        self.precompiles.run(context, address, bytes, gas_limit)
+        self.precompiles.run(context, address, inputs, is_static, gas_limit)
     }
 
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
