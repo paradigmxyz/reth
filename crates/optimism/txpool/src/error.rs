@@ -22,9 +22,8 @@ impl PoolTransactionError for InvalidCrossTx {
                     InteropTxValidatorError::InvalidInboxEntry(err) => match err {
                         // This transaction could become valid after a while
                         InvalidInboxEntry::MinimumSafety { got, .. } => match got {
-                            // This transaction will never become valid or we don't want to accept
-                            // unsafe tx
-                            SafetyLevel::Invalid | SafetyLevel::Unsafe => true,
+                            // This transaction will never become valid
+                            SafetyLevel::Invalid => true,
                             // This transaction will become valid when origin chain progress
                             _ => false,
                         },
