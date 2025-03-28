@@ -23,6 +23,12 @@ pub enum ExtendedOpTxEnvelope<T> {
     Other(T),
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
+pub enum ExtendedOpTxEnvelopeRepr<'a, T: SerdeBincodeCompat> {
+    BuiltIn(<OpTxEnvelope as SerdeBincodeCompat>::BincodeRepr<'a>),
+    Other(T::BincodeRepr<'a>),
+}
+
 impl<T> Transaction for ExtendedOpTxEnvelope<T>
 where
     T: Transaction,
@@ -293,10 +299,23 @@ impl<T> SerdeBincodeCompat for ExtendedOpTxEnvelope<T>
 where
     T: SerdeBincodeCompat,
 {
-    fn encode(&self, out: &mut dyn BufMut) {
+    type BincodeRepr<'a> = ExtendedOpTxEnvelopeRepr<'a, T>;
+
+    fn as_repr(&self) -> Self::BincodeRepr<'_> {
         match self {
-            Self::BuiltIn(tx) => tx.encode(out),
-            Self::Other(tx) => tx.encode(out),
+            Self::BuiltIn(tx) => ExtendedOpTxEnvelopeRepr::BuiltIn(tx.as_repr()),
+            Self::Other(tx) => ExtendedOpTxEnvelopeRepr::Other(tx.as_repr()),
+        }
+    }
+
+    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+        match repr {
+            ExtendedOpTxEnvelopeRepr::BuiltIn(tx_repr) => {
+                Self::BuiltIn(OpTxEnvelope::from_repr(tx_repr))
+            }
+            ExtendedOpTxEnvelopeRepr::Other(tx_repr) => {
+                Self::Other(T::from_repr(tx_repr))
+            }
         }
     }
 }
