@@ -149,7 +149,13 @@ where
 
     fn tx_hash(&self) -> &TxHash {
         match self {
-            Self::BuiltIn(tx) => tx.tx_hash(),
+            Self::BuiltIn(tx) => match tx {
+                OpTxEnvelope::Legacy(tx) => tx.hash(),
+                OpTxEnvelope::Eip1559(tx) => tx.hash(),
+                OpTxEnvelope::Eip2930(tx) => tx.hash(),
+                OpTxEnvelope::Eip7702(tx) => tx.hash(),
+                OpTxEnvelope::Deposit(tx) => tx.hash_ref(),
+            },
             Self::Other(tx) => tx.tx_hash(),
         }
     }
