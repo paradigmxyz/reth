@@ -139,6 +139,7 @@ impl InteropTxValidatorError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_json_rpc::RpcError;
 
     const MIN_SAFETY_CROSS_UNSAFE_ERROR: &str = "message {0x4200000000000000000000000000000000000023 4 1 1728507701 901} (safety level: unsafe) does not meet the minimum safety cross-unsafe";
     const MIN_SAFETY_UNSAFE_ERROR: &str = "message {0x4200000000000000000000000000000000000023 1091637521 4369 0 901} (safety level: invalid) does not meet the minimum safety unsafe";
