@@ -139,7 +139,7 @@ impl InteropTxValidatorError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_json_rpc::RpcError;
+    use alloy_json_rpc::{ErrorPayload, RpcError};
 
     const MIN_SAFETY_CROSS_UNSAFE_ERROR: &str = "message {0x4200000000000000000000000000000000000023 4 1 1728507701 901} (safety level: unsafe) does not meet the minimum safety cross-unsafe";
     const MIN_SAFETY_UNSAFE_ERROR: &str = "message {0x4200000000000000000000000000000000000023 1091637521 4369 0 901} (safety level: invalid) does not meet the minimum safety unsafe";
@@ -184,7 +184,9 @@ mod tests {
 
     #[test]
     fn test_client_error_parsing() {
-        let rpc_err = RpcError::Custom(MIN_SAFETY_CROSS_UNSAFE_ERROR.to_string());
+        let err =
+            ErrorPayload { code: 0, message: MIN_SAFETY_CROSS_UNSAFE_ERROR.into(), data: None };
+        let rpc_err = RpcError::<InvalidInboxEntry>::ErrorResp(err);
         let error = InteropTxValidatorError::client(rpc_err);
 
         assert!(matches!(
@@ -196,7 +198,8 @@ mod tests {
         ));
 
         // Testing with Unknown message
-        let rpc_err = RpcError::Custom("unknown error".to_string());
+        let err = ErrorPayload { code: 0, message: "unknown error".into(), data: None };
+        let rpc_err = RpcError::<InvalidInboxEntry>::ErrorResp(err);
         let error = InteropTxValidatorError::client(rpc_err);
         assert!(matches!(error, InteropTxValidatorError::RpcClientError(_)));
     }
