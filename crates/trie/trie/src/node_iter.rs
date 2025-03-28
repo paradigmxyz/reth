@@ -433,20 +433,11 @@ mod tests {
                     visit_type: KeyVisitType::SeekNonExact(account_1),
                     visited_key: Some(account_1)
                 },
-                // We should not seek to account 6, we already have the hash for its branch node.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_6),
-                    visited_key: Some(account_6)
-                },
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_11),
                     visited_key: Some(account_11)
                 },
-                // We should not seek to account 11 two additional times, we're already at it.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_11),
-                    visited_key: Some(account_11)
-                },
+                // We should not seek to account 11 one additional time, we're already at it.
                 KeyVisit {
                     visit_type: KeyVisitType::SeekNonExact(account_11),
                     visited_key: Some(account_11)
