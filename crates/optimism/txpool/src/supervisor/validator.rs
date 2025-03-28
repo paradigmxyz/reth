@@ -1,8 +1,5 @@
 use crate::{
-    supervisor::{
-        parse_access_list_items_to_inbox_entries, ExecutingDescriptor, InteropTxValidatorError,
-        SupervisorClient,
-    },
+    supervisor::{parse_access_list_items_to_inbox_entries, ExecutingDescriptor, SupervisorClient},
     InvalidCrossTx,
 };
 use alloy_eips::eip2930::AccessList;
