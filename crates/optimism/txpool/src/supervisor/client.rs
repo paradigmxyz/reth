@@ -82,7 +82,7 @@ impl SupervisorClient {
         timestamp: u64,
         timeout: Option<u64>,
         is_interop_active: bool,
-        client: Option<&SupervisorClient>,
+        client: Option<&Self>,
     ) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool

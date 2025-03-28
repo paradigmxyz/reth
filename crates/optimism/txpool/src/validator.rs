@@ -298,7 +298,7 @@ where
         outcome
     }
 
-    /// Wrapper for [`is_valid_cross_tx`]
+    /// Wrapper for is valid cross tx
     pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
