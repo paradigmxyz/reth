@@ -117,9 +117,15 @@ where
     }
 }
 
-impl<T> InMemorySize for ExtendedOpTxEnvelope<T> {
+impl<T> InMemorySize for ExtendedOpTxEnvelope<T>
+where
+    T: InMemorySize,
+{
     fn size(&self) -> usize {
-        0
+        match self {
+            Self::BuiltIn(tx) => tx.size(),
+            Self::Other(tx) => tx.size(),
+        }
     }
 }
 
