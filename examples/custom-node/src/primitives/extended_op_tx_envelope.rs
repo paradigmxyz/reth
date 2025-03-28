@@ -9,9 +9,9 @@ use alloy_primitives::{ChainId, PrimitiveSignature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use op_alloy_consensus::{OpTxEnvelope, OpTxType};
 use reth_codecs::Compact;
-use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::{transaction::signed::RecoveryError, InMemorySize, SignedTransaction};
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
+use std::convert::TryInto;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -24,7 +24,7 @@ macro_rules! delegate {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
 pub enum ExtendedOpTxEnvelope<T> {
-    BuiltIn(OpTxEnvelope),
+    BuiltIn(Box<OpTxEnvelope>),
     Other(T),
 }
 
@@ -144,7 +144,7 @@ where
 
     fn tx_hash(&self) -> &TxHash {
         match self {
-            Self::BuiltIn(tx) => match tx {
+            Self::BuiltIn(tx) => match &**tx {
                 OpTxEnvelope::Legacy(tx) => tx.hash(),
                 OpTxEnvelope::Eip1559(tx) => tx.hash(),
                 OpTxEnvelope::Eip2930(tx) => tx.hash(),
@@ -181,11 +181,11 @@ where
             Ok(tx_type) => match tx_type {
                 OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
                     let envelope = OpTxEnvelope::typed_decode(ty, buf)?;
-                    Ok(Self::BuiltIn(envelope))
+                    Ok(Self::BuiltIn(Box::new(envelope)))
                 }
                 OpTxType::Legacy => {
                     let envelope = OpTxEnvelope::typed_decode(ty, buf)?;
-                    Ok(Self::BuiltIn(envelope))
+                    Ok(Self::BuiltIn(Box::new(envelope)))
                 }
             },
             Err(_) => {
@@ -205,11 +205,11 @@ where
             Ok(tx_type) => match tx_type {
                 OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
                     let envelope = OpTxEnvelope::fallback_decode(buf)?;
-                    Ok(Self::BuiltIn(envelope))
+                    Ok(Self::BuiltIn(Box::new(envelope)))
                 }
                 OpTxType::Legacy => {
                     let envelope = OpTxEnvelope::fallback_decode(buf)?;
-                    Ok(Self::BuiltIn(envelope))
+                    Ok(Self::BuiltIn(Box::new(envelope)))
                 }
             },
             Err(_) => {
@@ -263,7 +263,9 @@ where
     T: Decodable,
 {
     fn decode(buf: &mut &[u8]) -> RlpResult<Self> {
-        OpTxEnvelope::decode(buf).map(Self::BuiltIn).or_else(|_| T::decode(buf).map(Self::Other))
+        OpTxEnvelope::decode(buf)
+            .map(|tx_envelope| Self::BuiltIn(Box::new(tx_envelope)))
+            .or_else(|_| T::decode(buf).map(Self::Other))
     }
 }
 
@@ -306,12 +308,15 @@ where
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        match OpTxEnvelope::from_compact(buf, len) {
-            Ok((built_in_tx, remaining)) => (Self::BuiltIn(built_in_tx), remaining),
-            Err(_) => {
-                let (other_tx, remaining) = T::from_compact(buf, len);
-                (Self::Other(other_tx), remaining)
+        if !buf.is_empty() {
+            let type_byte = buf[0];
+            if let Ok(_tx_type) = <u8 as TryInto<OpTxType>>::try_into(type_byte) {
+                let (tx, remaining) = OpTxEnvelope::from_compact(buf, len);
+                return (Self::BuiltIn(Box::new(tx)), remaining);
             }
         }
+
+        let (tx, remaining) = T::from_compact(buf, len);
+        (Self::Other(tx), remaining)
     }
 }
