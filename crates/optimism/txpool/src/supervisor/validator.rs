@@ -54,8 +54,8 @@ pub async fn is_valid_cross_tx(
 
         if let Some(err) = err.as_invalid_inbox_entry_err() {
             if err.is_msg_at_least_cross_unsafe() {
-                // message is invalid w.r.t. locally configured minimum safety level, but is at
-                // least cross-unsafe already
+                // message is currently invalid w.r.t. locally configured minimum safety level,
+                // but is at least cross-unsafe already
                 todo!("store tx somewhere for re-attempting pool insertion once valid (or discard after timeout). interop maintenance should take txns from this new storage.")
             }
         }

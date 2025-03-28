@@ -52,27 +52,27 @@ impl InvalidInboxEntry {
         }
     }
 
-    /// Returns `true` if message is invalid.
+    /// Returns `true` if message is [`SafetyLevel::Invalid`]
     pub fn is_msg_invalid(&self) -> bool {
         matches!(self, Self::MinimumSafety { got: SafetyLevel::Invalid, .. })
     }
 
-    /// Returns `true` if message is unsafe.
+    /// Returns `true` if message is [`SafetyLevel::Unsafe`].
     pub fn is_msg_unsafe(&self) -> bool {
         matches!(self, Self::MinimumSafety { got: SafetyLevel::Unsafe, .. })
     }
 
-    /// Returns `true` if message is cross-unsafe.
+    /// Returns `true` if message is [`SafetyLevel::CrossUnsafe`].
     pub fn is_msg_cross_unsafe(&self) -> bool {
         matches!(self, Self::MinimumSafety { got: SafetyLevel::CrossUnsafe, .. })
     }
 
-    /// Returns `true` if message is local-safe.
+    /// Returns `true` if message is [`SafetyLevel::LocalSafe`].
     pub fn is_msg_local_safe(&self) -> bool {
         matches!(self, Self::MinimumSafety { got: SafetyLevel::LocalSafe, .. })
     }
 
-    /// Returns `true` if message is safe.
+    /// Returns `true` if message is [`SafetyLevel::Safe`].
     pub fn is_msg_safe(&self) -> bool {
         matches!(self, Self::MinimumSafety { got: SafetyLevel::Safe, .. })
     }
