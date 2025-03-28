@@ -15,26 +15,27 @@ use reth::{
     dirs::{DataDirPath, MaybePlatformPath},
 };
 use reth_consensus::FullConsensus;
-use reth_db::{init_db, test_utils::tempdir_path, DatabaseEnv};
+use reth_db::test_utils::TempDatabase;
+use reth_db::DatabaseEnv;
+use reth_db::{init_db, test_utils::tempdir_path};
 use reth_discv5::discv5::enr::secp256k1::{Keypair, Secp256k1};
 use reth_network::NetworkHandle;
 use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
-use reth_node_builder::{
-    components::Components, rpc::RpcAddOns, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle,
-};
+use reth_node_builder::components::Components;
+use reth_node_builder::engine_tree_config::TreeConfig;
+use reth_node_builder::rpc::RpcAddOns;
+use reth_node_builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
+use reth_node_ethereum::node::{EthereumAddOns, EthereumEngineValidatorBuilder};
 use reth_node_ethereum::{
-    node::EthereumEngineValidatorBuilder, BasicBlockExecutorProvider, EthEvmConfig,
-    EthExecutionStrategyFactory, EthereumNode,
+    BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory, EthereumNode,
 };
 use reth_primitives::{Transaction, TransactionSigned};
-use reth_provider::providers::BlockchainProvider;
+use reth_provider::providers::BlockchainProvider2;
 use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
-use reth_transaction_pool::blobstore::DiskFileBlobStore;
-use reth_transaction_pool::test_utils::MockTransaction;
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool,
-    TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
+    EthTransactionValidator, Pool, TransactionValidationTaskExecutor,
 };
 use revm_primitives::{hex, Address, B256, U256};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
@@ -336,21 +337,28 @@ pub async fn start_reth_node(
         NodeAdapter<
             FullNodeTypesAdapter<
                 EthereumNode,
-                Arc<DatabaseEnv>,
-                BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                Arc<TempDatabase<DatabaseEnv>>,
+                BlockchainProvider2<
+                    NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
+                >,
             >,
             Components<
                 FullNodeTypesAdapter<
                     EthereumNode,
-                    Arc<DatabaseEnv>,
-                    BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                    Arc<TempDatabase<DatabaseEnv>>,
+                    BlockchainProvider2<
+                        NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
+                    >,
                 >,
                 reth_network::EthNetworkPrimitives,
                 Pool<
                     TransactionValidationTaskExecutor<
                         EthTransactionValidator<
-                            BlockchainProvider<
-                                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                            BlockchainProvider2<
+                                NodeTypesWithDBAdapter<
+                                    EthereumNode,
+                                    Arc<TempDatabase<DatabaseEnv>>,
+                                >,
                             >,
                             EthPooledTransaction,
                         >,
@@ -367,21 +375,28 @@ pub async fn start_reth_node(
             NodeAdapter<
                 FullNodeTypesAdapter<
                     EthereumNode,
-                    Arc<DatabaseEnv>,
-                    BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                    Arc<TempDatabase<DatabaseEnv>>,
+                    BlockchainProvider2<
+                        NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
+                    >,
                 >,
                 Components<
                     FullNodeTypesAdapter<
                         EthereumNode,
-                        Arc<DatabaseEnv>,
-                        BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                        Arc<TempDatabase<DatabaseEnv>>,
+                        BlockchainProvider2<
+                            NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
+                        >,
                     >,
                     reth_network::EthNetworkPrimitives,
                     Pool<
                         TransactionValidationTaskExecutor<
                             EthTransactionValidator<
-                                BlockchainProvider<
-                                    NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                                BlockchainProvider2<
+                                    NodeTypesWithDBAdapter<
+                                        EthereumNode,
+                                        Arc<TempDatabase<DatabaseEnv>>,
+                                    >,
                                 >,
                                 EthPooledTransaction,
                             >,
@@ -395,12 +410,17 @@ pub async fn start_reth_node(
                 >,
             >,
             EthApi<
-                BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                BlockchainProvider2<
+                    NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
+                >,
                 Pool<
                     TransactionValidationTaskExecutor<
                         EthTransactionValidator<
-                            BlockchainProvider<
-                                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                            BlockchainProvider2<
+                                NodeTypesWithDBAdapter<
+                                    EthereumNode,
+                                    Arc<TempDatabase<DatabaseEnv>>,
+                                >,
                             >,
                             EthPooledTransaction,
                         >,
@@ -447,10 +467,21 @@ pub async fn start_reth_node(
         Arc::new(init_db(data_dir.db(), Default::default()).unwrap())
     };
 
+    let exec = tasks.executor();
     let node_handle = NodeBuilder::new(node_config)
         .with_database(database)
-        .with_launch_context(tasks.executor())
-        .launch_node(EthereumNode::default())
+        .testing_node(exec)
+        .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch_with_fn(|builder| {
+            let launcher = EngineNodeLauncher::new(
+                builder.task_executor().clone(),
+                builder.config().datadir(),
+                TreeConfig::default(),
+            );
+            builder.launch_with(launcher)
+        })
         .await
         .unwrap();
 

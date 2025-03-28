@@ -18,8 +18,6 @@ use reth::{
     commands::bitfinity_import::BitfinityImportCommand,
     dirs::{ChainPath, DataDirPath, PlatformPath},
 };
-use reth_beacon_consensus::EthBeaconConsensus;
-use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals};
 use reth_chainspec::ChainSpec;
 use reth_db::{init_db, DatabaseEnv};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
@@ -29,7 +27,7 @@ use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_provider::{
-    providers::{BlockchainProvider, StaticFileProvider},
+    providers::{BlockchainProvider2, StaticFileProvider},
     BlockNumReader, ExecutionOutcome, ProviderError, ProviderFactory,
 };
 use reth_prune::PruneModes;
@@ -75,7 +73,7 @@ pub struct ImportData {
     /// The provider factory.
     pub provider_factory: ProviderFactory<NodeTypes>,
     /// The blockchain provider.
-    pub blockchain_db: BlockchainProvider<NodeTypes>,
+    pub blockchain_db: BlockchainProvider2<NodeTypes>,
     /// The bitfinity import arguments.
     pub bitfinity_args: BitfinityImportArgs,
 }
@@ -146,17 +144,7 @@ pub async fn bitfinity_import_config_data(
 
     reth_db_common::init::init_genesis(&provider_factory)?;
 
-    let consensus = Arc::new(EthBeaconConsensus::new(chain.clone()));
-
-    let executor = MockExecutorProvider::default(); //EvmExecutorFac::new(self.chain.clone(), EthEvmConfig::default());
-
-    let blockchain_tree =
-        Arc::new(ShareableBlockchainTree::new(reth_blockchain_tree::BlockchainTree::new(
-            TreeExternals::new(provider_factory.clone(), consensus, executor),
-            BlockchainTreeConfig::default(),
-        )?));
-
-    let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree)?;
+    let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
 
     let bitfinity_args = BitfinityImportArgs {
         rpc_url: evm_datasource_url.to_string(),

@@ -23,9 +23,10 @@ use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
+use reth_provider::providers::BlockchainProvider2;
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockNumReader, CanonChainTracker,
-    ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory,
+    BlockHashReader, BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory,
+    HeaderProvider, ProviderError, ProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -39,11 +40,9 @@ use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
 /// Syncs RLP encoded blocks from a file.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BitfinityImportCommand {
     config: Config,
-
-    datadir: ChainPath<DataDirPath>,
 
     /// The chain this node is running.
     ///
@@ -55,20 +54,8 @@ pub struct BitfinityImportCommand {
 
     provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 
-    blockchain_provider: BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-}
-
-/// Manually implement `Debug` for `ImportCommand` because `BlockchainProvider` doesn't implement
-/// it.
-impl std::fmt::Debug for BitfinityImportCommand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ImportCommand")
-            .field("config", &self.config)
-            .field("datadir", &self.datadir)
-            .field("chain", &self.chain)
-            .field("bitfinity", &self.bitfinity)
-            .finish()
-    }
+    blockchain_provider:
+        BlockchainProvider2<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 }
 
 type TypedPipeline = Pipeline<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>;
@@ -81,7 +68,7 @@ impl BitfinityImportCommand {
         chain: Arc<ChainSpec>,
         bitfinity: BitfinityImportArgs,
         provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-        blockchain_provider: BlockchainProvider<
+        blockchain_provider: BlockchainProvider2<
             NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
         >,
     ) -> Self {
@@ -97,7 +84,7 @@ impl BitfinityImportCommand {
             config.stages.etl.dir = Some(EtlConfig::from_datadir(datadir.data_dir()));
         }
 
-        Self { config, datadir, chain, bitfinity, provider_factory, blockchain_provider }
+        Self { config, chain, bitfinity, provider_factory, blockchain_provider }
     }
 
     /// Schedule the import job and return a handle to it.
@@ -188,12 +175,19 @@ impl BitfinityImportCommand {
                     Some(v) => v,
                     None => {
                         error!(target: "reth::cli - BitfinityImportCommand", "Hash of latest safe block ({}) is not in the blockchain state", safe_block_number);
-                        return Err(eyre!("Hash of latest safe block ({}) is not in the blockchain state", safe_block_number));
+                        return Err(eyre!(
+                            "Hash of latest safe block ({}) is not in the blockchain state",
+                            safe_block_number
+                        ));
                     }
                 },
                 false => {
                     error!(target: "reth::cli - BitfinityImportCommand", "Last imported block ({}) is not the last safe block ({})", last_imported_block, safe_block_number);
-                    return Err(eyre!("Last imported block ({}) is not the last safe block ({})", last_imported_block, safe_block_number));
+                    return Err(eyre!(
+                        "Last imported block ({}) is not the last safe block ({})",
+                        last_imported_block,
+                        safe_block_number
+                    ));
                 }
             }
         };
