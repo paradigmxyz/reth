@@ -45,7 +45,7 @@ pub enum InvalidInboxEntry {
 impl InvalidInboxEntry {
     /// Returns the [`SafetyLevel`] of message, if this is a [`MinimumSafety`](Self::MinimumSafety)
     /// error.
-    pub fn safety_level(&self) -> Option<SafetyLevel> {
+    pub fn msg_safety_level(&self) -> Option<SafetyLevel> {
         match self {
             Self::MinimumSafety { got, .. } => Some(*got),
             Self::UnknownChain(_) => None,
