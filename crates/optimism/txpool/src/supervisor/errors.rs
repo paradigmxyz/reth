@@ -173,14 +173,6 @@ impl InteropTxValidatorError {
     pub fn server_unexpected(err: impl error::Error + Send + Sync + 'static) -> Self {
         Self::SupervisorServerError(Box::new(err))
     }
-
-    /// If error is [`InvalidInboxEntry`], returns reference to error.
-    pub fn as_invalid_inbox_entry_err(&self) -> Option<&InvalidInboxEntry> {
-        match self {
-            Self::InvalidInboxEntry(invalid_entry) => Some(invalid_entry),
-            _ => None,
-        }
-    }
 }
 
 #[cfg(test)]
