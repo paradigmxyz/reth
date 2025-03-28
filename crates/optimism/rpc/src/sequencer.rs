@@ -41,7 +41,7 @@ impl SequencerClient {
         &self.inner.http_client
     }
 
-    /// Sends a [`RpcCall`] request to the sequencer endpoint.
+    /// Sends a [`alloy_rpc_client::RpcCall`] request to the sequencer endpoint.
     async fn send_rpc_call(&self, method: &str, params: Value) -> Result<(), SequencerClientError> {
         self.http_client().request::<Value, ()>(method.to_string(), params).await.inspect_err(
             |err| {
