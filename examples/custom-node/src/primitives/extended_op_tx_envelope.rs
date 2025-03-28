@@ -1,11 +1,13 @@
 use alloy_consensus::Transaction;
 use alloy_eips::{
-    eip2718::{Eip2718Result,Eip2718Error}, eip2930::AccessList, eip7702::SignedAuthorization, Decodable2718,
-    Encodable2718, Typed2718,
+    eip2718::{Eip2718Error, Eip2718Result},
+    eip2930::AccessList,
+    eip7702::SignedAuthorization,
+    Decodable2718, Encodable2718, Typed2718,
 };
 use alloy_primitives::{ChainId, PrimitiveSignature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{OpTxEnvelope, OpTxType};
 use reth_codecs::Compact;
 use reth_optimism_primitives::{
     serde_bincode_compat::OpTransactionSigned as BincodeCompatOpTransactionSigned,
@@ -17,13 +19,22 @@ use reth_primitives_traits::{
 };
 use revm_primitives::{Address, Bytes, TxKind, B256, U256};
 
+macro_rules! delegate {
+    ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
+        match $self {
+            Self::BuiltIn($tx) => $tx.$method($($arg),*),
+            Self::Other($tx) => $tx.$method($($arg),*),
+        }
+    };
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
 pub enum ExtendedOpTxEnvelope<T> {
     BuiltIn(OpTxEnvelope),
     Other(T),
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum ExtendedOpTxEnvelopeRepr<'a, T: SerdeBincodeCompat> {
     BuiltIn(<OpTxEnvelope as SerdeBincodeCompat>::BincodeRepr<'a>),
     Other(T::BincodeRepr<'a>),
@@ -34,83 +45,60 @@ where
     T: Transaction,
 {
     fn chain_id(&self) -> Option<ChainId> {
-        match self {
-            Self::BuiltIn(tx) => tx.chain_id(),
-            Self::Other(tx) => tx.chain_id(),
-        }
+        delegate!(self => tx.chain_id())
     }
+
     fn nonce(&self) -> u64 {
-        match self {
-            Self::BuiltIn(tx) => tx.nonce(),
-            Self::Other(tx) => tx.nonce(),
-        }
+        delegate!(self => tx.nonce())
     }
+
     fn gas_limit(&self) -> u64 {
-        match self {
-            Self::BuiltIn(tx) => tx.gas_limit(),
-            Self::Other(tx) => tx.gas_limit(),
-        }
+        delegate!(self => tx.gas_limit())
     }
+
     fn gas_price(&self) -> Option<u128> {
-        match self {
-            Self::BuiltIn(tx) => tx.gas_price(),
-            Self::Other(tx) => tx.gas_price(),
-        }
+        delegate!(self => tx.gas_price())
     }
+
     fn max_fee_per_gas(&self) -> u128 {
-        match self {
-            Self::BuiltIn(tx) => tx.max_fee_per_gas(),
-            Self::Other(tx) => tx.max_fee_per_gas(),
-        }
+        delegate!(self => tx.max_fee_per_gas())
     }
+
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        match self {
-            Self::BuiltIn(tx) => tx.max_priority_fee_per_gas(),
-            Self::Other(tx) => tx.max_priority_fee_per_gas(),
-        }
+        delegate!(self => tx.max_priority_fee_per_gas())
     }
+
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        match self {
-            Self::BuiltIn(tx) => tx.max_fee_per_blob_gas(),
-            Self::Other(tx) => tx.max_fee_per_blob_gas(),
-        }
+        delegate!(self => tx.max_fee_per_blob_gas())
     }
+
     fn priority_fee_or_price(&self) -> u128 {
-        match self {
-            Self::BuiltIn(tx) => tx.priority_fee_or_price(),
-            Self::Other(tx) => tx.priority_fee_or_price(),
-        }
+        delegate!(self => tx.priority_fee_or_price())
     }
+
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        match self {
-            Self::BuiltIn(tx) => tx.effective_gas_price(base_fee),
-            Self::Other(tx) => tx.effective_gas_price(base_fee),
-        }
+        delegate!(self => tx.effective_gas_price(base_fee))
     }
+
     fn is_dynamic_fee(&self) -> bool {
-        match self {
-            Self::BuiltIn(tx) => tx.is_dynamic_fee(),
-            Self::Other(tx) => tx.is_dynamic_fee(),
-        }
+        delegate!(self => tx.is_dynamic_fee())
     }
+
     fn kind(&self) -> TxKind {
-        match self {
-            Self::BuiltIn(tx) => tx.kind(),
-            Self::Other(tx) => tx.kind(),
-        }
+        delegate!(self => tx.kind())
     }
+
     fn is_create(&self) -> bool {
         match self {
             Self::BuiltIn(tx) => tx.is_create(),
-            Self::Other(tx) => false,
+            Self::Other(_tx) => false,
         }
     }
+
     fn value(&self) -> U256 {
-        match self {
-            Self::BuiltIn(tx) => tx.value(),
-            Self::Other(tx) => tx.value(),
-        }
+        delegate!(self => tx.value())
     }
+
     fn input(&self) -> &Bytes {
         match self {
             Self::BuiltIn(tx) => tx.input(),
@@ -120,23 +108,23 @@ where
             }
         }
     }
+
     fn access_list(&self) -> Option<&AccessList> {
-        match self {
-            Self::BuiltIn(tx) => tx.access_list(),
-            Self::Other(tx) => tx.access_list(),
-        }
+        delegate!(self => tx.access_list())
     }
+
     fn blob_versioned_hashes(&self) -> Option<&[B256]> {
-        match self {
-            Self::BuiltIn(tx) => tx.blob_versioned_hashes(),
-            Self::Other(tx) => tx.blob_versioned_hashes(),
-        }
+        delegate!(self => tx.blob_versioned_hashes())
     }
+
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
-        match self {
-            Self::BuiltIn(tx) => tx.authorization_list(),
-            Self::Other(tx) => tx.authorization_list(),
-        }
+        delegate!(self => tx.authorization_list())
+    }
+}
+
+impl<T> InMemorySize for ExtendedOpTxEnvelope<T> {
+    fn size(&self) -> usize {
+        0
     }
 }
 
@@ -145,27 +133,18 @@ where
     T: SignedTransaction,
 {
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        match self {
-            Self::BuiltIn(tx) => tx.recover_signer(),
-            Self::Other(tx) => tx.recover_signer(),
-        }
+        delegate!(self => tx.recover_signer())
     }
 
     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-        match self {
-            Self::BuiltIn(tx) => tx.recover_signer_unchecked(),
-            Self::Other(tx) => tx.recover_signer_unchecked(),
-        }
+        delegate!(self => tx.recover_signer_unchecked())
     }
 
     fn recover_signer_unchecked_with_buf(
         &self,
         buf: &mut Vec<u8>,
     ) -> Result<Address, RecoveryError> {
-        match self {
-            Self::BuiltIn(tx) => tx.recover_signer_unchecked_with_buf(buf),
-            Self::Other(tx) => tx.recover_signer_unchecked_with_buf(buf),
-        }
+        delegate!(self => tx.recover_signer_unchecked_with_buf(buf))
     }
 
     fn tx_hash(&self) -> &TxHash {
@@ -176,10 +155,7 @@ where
     }
 
     fn signature(&self) -> &PrimitiveSignature {
-        match self {
-            Self::BuiltIn(tx) => tx.signature(),
-            Self::Other(tx) => tx.signature(),
-        }
+        delegate!(self => tx.signature())
     }
 }
 
@@ -217,9 +193,8 @@ where
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
         let type_byte = buf[0];
-        let tx_type: OpTxType = type_byte
-            .try_into()
-            .map_err(|_| Eip2718Error::UnexpectedType(type_byte))?;
+        let tx_type: OpTxType =
+            type_byte.try_into().map_err(|_| Eip2718Error::UnexpectedType(type_byte))?;
         match tx_type {
             OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
                 let envelope = OpTxEnvelope::fallback_decode(buf)?;
@@ -239,47 +214,34 @@ where
 {
     fn encode_2718(&self, out: &mut dyn BufMut) {
         match self {
-            Self::BuiltIn(envelope) => match envelope.tx_type() {
-                OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
-                    envelope.encode_2718(out)
-                }
-            },
-            Self::Other(tx) => {
-                tx.encode_2718(out)
-            }
-        }
-    }
-
-    fn encode_2718_len(&self) -> usize {
-        match self {
-            Self::BuiltIn(envelope) => match envelope.tx_type() {
-                OpTxType::Eip2930 | OpTxType::Eip1559 | OpTxType::Eip7702 | OpTxType::Deposit => {
-                    envelope.encode_2718_len()
-                }
-            },
-            Self::Other(tx) => {
-                tx.encode_2718_len()
-            }
-        }
-    }
-}
-
-
-impl<T> Encodable for ExtendedOpTxEnvelope<T>
-where
-    T: Encodable,
-{
-    fn encode_2718(&self, out: &mut dyn BufMut) {
-        match self {
-            Self::BuiltIn(tx) => tx.encode_2718(out),
+            Self::BuiltIn(envelope) => envelope.encode_2718(out),
             Self::Other(tx) => tx.encode_2718(out),
         }
     }
 
     fn encode_2718_len(&self) -> usize {
         match self {
-            Self::BuiltIn(tx) => tx.encode_2718_len(),
+            Self::BuiltIn(envelope) => envelope.encode_2718_len(),
             Self::Other(tx) => tx.encode_2718_len(),
+        }
+    }
+}
+
+impl<T> Encodable for ExtendedOpTxEnvelope<T>
+where
+    T: Encodable,
+{
+    fn encode(&self, out: &mut dyn BufMut) {
+        match self {
+            Self::BuiltIn(envelope) => envelope.encode(out),
+            Self::Other(tx) => tx.encode(out),
+        }
+    }
+
+    fn length(&self) -> usize {
+        match self {
+            Self::BuiltIn(envelope) => envelope.length(),
+            Self::Other(tx) => tx.length(),
         }
     }
 }
@@ -313,34 +275,14 @@ where
             ExtendedOpTxEnvelopeRepr::BuiltIn(tx_repr) => {
                 Self::BuiltIn(OpTxEnvelope::from_repr(tx_repr))
             }
-            ExtendedOpTxEnvelopeRepr::Other(tx_repr) => {
-                Self::Other(T::from_repr(tx_repr))
-            }
+            ExtendedOpTxEnvelopeRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
         }
-    }
-}
-
-impl<T> SerdeBincodeCompat for ExtendedOpTxEnvelope<T>
-where 
-    T:SerdeBincodeCompat
-{
-    type BincodeRepr<'a> = BincodeCompatOpTransactionSigned<'a>;
-
-    fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        match self {
-            Self::BuiltIn(tx) => tx.as_repr(),
-            Self::Other(tx) => tx.as_repr(),
-        }
-    }
-
-    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        Self::Other(repr.into())
     }
 }
 
 impl<T> Compact for ExtendedOpTxEnvelope<T>
 where
-    T:Compact
+    T: Compact,
 {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
