@@ -31,7 +31,7 @@ use reth::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_evm::{Database, EvmEnv};
 use reth_evm_ethereum::{EthEvm, EthEvmConfig};
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine, PayloadTypes};
+use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumPayloadBuilder},
@@ -107,7 +107,7 @@ pub struct MyPayloadBuilder {
 
 impl<Types, Node, Pool> PayloadBuilderBuilder<Node, Pool> for MyPayloadBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
         + Unpin
