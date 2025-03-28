@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod validator;
-pub use validator::{is_valid_cross_tx, OpL1BlockInfo, OpTransactionValidator};
+pub use validator::{OpL1BlockInfo, OpTransactionValidator};
 
 pub mod conditional;
 pub mod supervisor;

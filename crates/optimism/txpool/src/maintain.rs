@@ -10,8 +10,7 @@ const MAX_SUPERVISOR_QUERIES: usize = 10;
 use crate::{
     conditional::MaybeConditionalTransaction,
     interop::{MaybeInteropTransaction, TransactionInterop},
-    supervisor::SupervisorClient,
-    validator::is_valid_cross_tx,
+    supervisor::{is_valid_cross_tx, SupervisorClient},
 };
 use alloy_consensus::{conditional::BlockConditionalAttributes, BlockHeader, Transaction};
 use futures_util::{future::BoxFuture, FutureExt, Stream, StreamExt};
@@ -54,7 +53,8 @@ impl MaintainPoolInteropMetrics {
         self.removed_tx_interop.increment(count as u64);
     }
 }
-/// Returns a spawnable future for maintaining the state of the transaction pool.
+/// Returns a spawnable future for maintaining the state of the conditional txs in the transaction
+/// pool.
 pub fn maintain_transaction_pool_conditional_future<N, Pool, St>(
     pool: Pool,
     events: St,
@@ -71,9 +71,11 @@ where
     .boxed()
 }
 
-/// Maintains the state of the transaction pool by handling new blocks and reorgs.
+/// Maintains the state of the conditional tx in the transaction pool by handling new blocks and
+/// reorgs.
 ///
-/// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
+/// This listens for any new blocks and reorgs and updates the conditional txs in the
+/// transaction pool's state accordingly
 pub async fn maintain_transaction_pool_conditional<N, Pool, St>(pool: Pool, mut events: St)
 where
     N: NodePrimitives,
@@ -85,9 +87,6 @@ where
     loop {
         let Some(event) = events.next().await else { break };
         if let CanonStateNotification::Commit { new } = event {
-            if new.is_empty() {
-                continue;
-            }
             let block_attr = BlockConditionalAttributes {
                 number: new.tip().number(),
                 timestamp: new.tip().timestamp(),
@@ -99,14 +98,14 @@ where
                 }
             }
             if !to_remove.is_empty() {
-                metrics.inc_removed_tx_conditional(to_remove.len());
-                let _ = pool.remove_transactions(to_remove);
+                let removed = pool.remove_transactions(to_remove);
+                metrics.inc_removed_tx_conditional(removed.len());
             }
         }
     }
 }
 
-/// Returns a spawnable future for maintaining the state of the transaction pool.
+/// Returns a spawnable future for maintaining the state of the interop tx in the transaction pool.
 pub fn maintain_transaction_pool_interop_future<N, Pool, St>(
     pool: Pool,
     events: St,
@@ -124,9 +123,10 @@ where
     .boxed()
 }
 
-/// Maintains the state of the transaction pool by handling new blocks and reorgs.
+/// Maintains the state of the interop tx in the transaction pool by handling new blocks and reorgs.
 ///
-/// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
+/// This listens for any new blocks and reorgs and updates the interop tx in the transaction pool's
+/// state accordingly
 pub async fn maintain_transaction_pool_interop<N, Pool, St>(
     pool: Pool,
     mut events: St,
@@ -142,9 +142,6 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
     loop {
         let Some(event) = events.next().await else { break };
         if let CanonStateNotification::Commit { new } = event {
-            if new.is_empty() {
-                continue;
-            }
             let timestamp = new.tip().timestamp();
             let mut to_remove = Vec::new();
             let mut to_revalidate = Vec::new();
@@ -199,8 +196,8 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
                 }
             }
             if !to_remove.is_empty() {
-                metrics.inc_removed_tx_interop(to_remove.len());
-                let _ = pool.remove_transactions(to_remove);
+                let removed = pool.remove_transactions(to_remove);
+                metrics.inc_removed_tx_interop(removed.len());
             }
         }
     }
