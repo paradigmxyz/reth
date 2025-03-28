@@ -641,8 +641,8 @@ where
                 continue
             }
 
-            // We skip invalid cross chain txs, they would be removed on the next block update in the
-            // maintenance job
+            // We skip invalid cross chain txs, they would be removed on the next block update in
+            // the maintenance job
             if let Some(interop) = interop {
                 if !interop.is_valid(self.config.attributes.timestamp()) {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
