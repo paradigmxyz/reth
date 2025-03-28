@@ -115,6 +115,14 @@ impl SignedTransaction for CustomTransaction {
 
 }
 
+impl CustomTransaction {
+    pub fn signature(&self) -> PrimitiveSignature {
+        let inner_clone = self.inner.clone();
+        let (_, signature) = inner_clone.split();
+        signature
+    }
+}
+
 impl Typed2718 for CustomTransaction {
     fn ty(&self) -> u8 {
         TRANSFER_TX_TYPE_ID
