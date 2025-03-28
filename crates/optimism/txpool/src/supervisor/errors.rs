@@ -77,6 +77,11 @@ impl InvalidInboxEntry {
         matches!(self, Self::MinimumSafety { got: SafetyLevel::Safe, .. })
     }
 
+    /// Returns `true` if message is at least [`SafetyLevel::CrossUnsafe`].
+    pub fn is_msg_at_least_cross_unsafe(&self) -> bool {
+        self.is_msg_cross_unsafe() || self.is_msg_local_safe() || self.is_msg_safe()
+    }
+
     /// Parses error message. Returns `None`, if message is not recognized.
     // todo: match on error code instead of message string once resolved <https://github.com/ethereum-optimism/optimism/issues/14603>
     pub fn parse_err_msg(err_msg: &str) -> Option<Self> {
@@ -167,6 +172,14 @@ impl InteropTxValidatorError {
     /// Returns a new instance of [`RpcClientError`](Self::RpcClientError) variant.
     pub fn server_unexpected(err: impl error::Error + Send + Sync + 'static) -> Self {
         Self::SupervisorServerError(Box::new(err))
+    }
+
+    /// If error is [`InvalidInboxEntry`], returns reference to error.
+    pub fn as_invalid_inbox_entry_err(&self) -> Option<&InvalidInboxEntry> {
+        match self {
+            Self::InvalidInboxEntry(invalid_entry) => Some(invalid_entry),
+            _ => None,
+        }
     }
 }
 

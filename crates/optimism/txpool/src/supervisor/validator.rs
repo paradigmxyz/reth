@@ -1,5 +1,8 @@
 use crate::{
-    supervisor::{parse_access_list_items_to_inbox_entries, ExecutingDescriptor, SupervisorClient},
+    supervisor::{
+        parse_access_list_items_to_inbox_entries, ExecutingDescriptor, InteropTxValidatorError,
+        SupervisorClient,
+    },
     InvalidCrossTx,
 };
 use alloy_eips::eip2930::AccessList;
@@ -43,8 +46,21 @@ pub async fn is_valid_cross_tx(
         .check_access_list(inbox_entries.as_slice(), ExecutingDescriptor::new(timestamp, timeout))
         .await
     {
-        trace!(target: "txpool", hash=%hash, err=%err, "Cross chain transaction invalid");
-        return Some(Err(InvalidCrossTx::ValidationError(err)));
+        trace!(target: "txpool",
+            hash=%hash,
+            err=%err,
+            "Cross chain transaction invalid"
+        );
+
+        if let Some(err) = err.as_invalid_inbox_entry_err() {
+            if err.is_msg_at_least_cross_unsafe() {
+                // message is invalid w.r.t. locally configured minimum safety level, but is at
+                // least cross-unsafe already
+                todo!("store tx somewhere for re-attempting pool insertion once valid (or discard after timeout). interop maintenance should take txns from this new storage.")
+            }
+        }
+
+        return Some(Err(InvalidCrossTx::ValidationError(err)))
     }
     Some(Ok(()))
 }
