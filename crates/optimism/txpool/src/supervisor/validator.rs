@@ -43,13 +43,8 @@ pub async fn is_valid_cross_tx(
         .check_access_list(inbox_entries.as_slice(), ExecutingDescriptor::new(timestamp, timeout))
         .await
     {
-        trace!(target: "txpool",
-            hash=%hash,
-            err=%err,
-            "Cross chain transaction invalid"
-        );
-
-        return Some(Err(InvalidCrossTx::ValidationError(err)))
+        trace!(target: "txpool", hash=%hash, err=%err, "Cross chain transaction invalid");
+        return Some(Err(InvalidCrossTx::ValidationError(err)));
     }
     Some(Ok(()))
 }
