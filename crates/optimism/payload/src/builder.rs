@@ -625,15 +625,15 @@ where
         let base_fee = builder.evm_mut().block().basefee;
 
         while let Some(tx) = best_txs.next(()) {
-            let interop = tx.interop();
-            let tx = tx.into_consensus();
-            // Check that cross chain tx is validated by supervisor for this block
-            if let Some(interop) = interop {
+            // We skip invalid cross chain tx, they would be removed on the next block update in the
+            // maintenance job
+            if let Some(interop) = tx.interop() {
                 if !interop.is_valid(self.config.attributes.timestamp()) {
-                    best_txs.mark_invalid(tx.signer(), tx.nonce());
                     continue
                 }
             }
+            let tx = tx.into_consensus();
+            // Check that cross chain tx is validated by supervisor for this block
             if info.is_tx_over_limits(tx.inner(), block_gas_limit, tx_da_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
