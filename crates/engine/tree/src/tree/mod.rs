@@ -2532,7 +2532,7 @@ where
         } else {
             // fallback is to compute the state root regularly in sync
             debug!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
-            self.metrics.block_validation.state_root_parallel_failed_total.increment(1);
+            self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
