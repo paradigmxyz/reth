@@ -196,7 +196,7 @@ impl AccessRights {
 }
 
 /// Helper trait with a common set of requirements for the
-/// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
+/// [`NodeTypes`] in CLI.
 pub trait CliNodeTypes: NodeTypes + NodeTypesForProvider {}
 impl<N> CliNodeTypes for N where N: NodeTypes + NodeTypesForProvider {}
 

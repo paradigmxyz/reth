@@ -17,7 +17,7 @@ use reth_tokio_util::EventSender;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{fmt::Debug, future::Future, marker::PhantomData};
 
-/// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds stateful
+/// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful
 /// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.

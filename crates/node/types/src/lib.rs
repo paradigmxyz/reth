@@ -38,7 +38,7 @@ pub trait NodeTypes: Clone + Debug + Send + Sync + Unpin + 'static {
     type Payload: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = Self::Primitives>>;
 }
 
-/// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds database to the
+/// A helper trait that is downstream of the [`NodeTypes`] trait and adds database to the
 /// node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
@@ -138,7 +138,7 @@ where
     type Payload = PL;
 }
 
-/// A [`NodeTypesWithEngine`] type builder.
+/// A [`NodeTypes`] type builder.
 #[derive(Clone, Debug, Default)]
 pub struct AnyNodeTypesWithEngine<P = (), E = (), C = (), SC = (), S = (), PL = ()> {
     /// Embedding the basic node types.

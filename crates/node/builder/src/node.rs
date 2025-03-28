@@ -20,7 +20,7 @@ use std::{
 
 use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
 
-/// A [`crate::Node`] is a [`NodeTypesWithEngine`] that comes with preconfigured components.
+/// A [`crate::Node`] is a [`NodeTypes`] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
 pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
