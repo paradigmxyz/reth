@@ -53,8 +53,8 @@ pub enum Subcommands {
     Version,
     /// Returns the full database path
     Path,
-    /// Runs a bootstrap node for the discovery protocol
-    Bootstrap(bootnode::Command),
+    /// Runs a bootnode for the discovery protocol
+    Bootnode(bootnode::Command),
 }
 
 /// `db_ro_exec` opens a database in read-only mode, and then execute with the provided command
@@ -154,7 +154,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::Path => {
                 println!("{}", db_path.display());
             }
-            Subcommands::Bootstrap(command) => todo!(),
+            Subcommands::Bootnode(command) => command.execute(),
         }
 
         Ok(())
