@@ -112,6 +112,7 @@ impl SignedTransaction for CustomTransaction {
     fn tx_hash(&self) -> &TxHash {
         self.inner.tx_hash()
     }
+
 }
 
 impl Typed2718 for CustomTransaction {
