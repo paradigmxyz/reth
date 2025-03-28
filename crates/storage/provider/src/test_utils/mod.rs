@@ -9,6 +9,7 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_errors::ProviderResult;
+use reth_ethereum_engine_primitives::EthPayloadTypes;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
 use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::StateRoot;
@@ -30,6 +31,7 @@ pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
     reth_chainspec::ChainSpec,
     reth_trie_db::MerklePatriciaTrie,
     crate::EthStorage,
+    EthPayloadTypes,
 >;
 
 /// Mock [`reth_node_types::NodeTypesWithDB`] for testing.
