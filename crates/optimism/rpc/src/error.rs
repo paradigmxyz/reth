@@ -137,7 +137,7 @@ impl From<TxConditionalErr> for jsonrpsee_types::error::ErrorObject<'static> {
 /// Error type when interacting with the Sequencer
 #[derive(Debug, thiserror::Error)]
 pub enum SequencerClientError {
-    /// Wrapper around an [`reqwest::Error`].
+    /// Wrapper around an [`RpcError<TransportErrorKind>`].
     #[error(transparent)]
     HttpError(#[from] RpcError<TransportErrorKind>),
     /// Thrown when serializing transaction to forward to sequencer

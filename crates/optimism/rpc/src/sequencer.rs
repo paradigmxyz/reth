@@ -41,8 +41,8 @@ impl SequencerClient {
         &self.inner.http_client
     }
 
-    /// Sends a POST request to the sequencer endpoint.
-    async fn post_request(&self, method: &str, params: Value) -> Result<(), SequencerClientError> {
+    /// Sends a [`RpcCall`] request to the sequencer endpoint.
+    async fn send_rpc_call(&self, method: &str, params: Value) -> Result<(), SequencerClientError> {
         self.http_client().request::<Value, ()>(method.to_string(), params).await.inspect_err(
             |err| {
                 warn!(
@@ -57,7 +57,7 @@ impl SequencerClient {
 
     /// Forwards a transaction to the sequencer endpoint.
     pub async fn forward_raw_transaction(&self, tx: &[u8]) -> Result<(), SequencerClientError> {
-        self.post_request("eth_sendRawTransaction", json!([format!("0x{}", hex::encode(tx))]))
+        self.send_rpc_call("eth_sendRawTransaction", json!([format!("0x{}", hex::encode(tx))]))
             .await
             .inspect_err(|err| {
                 warn!(
@@ -78,7 +78,7 @@ impl SequencerClient {
     ) -> Result<(), SequencerClientError> {
         let params = json!([format!("0x{}", hex::encode(tx)), condition]);
 
-        self.post_request("eth_sendRawTransaction", params).await.inspect_err(|err| {
+        self.send_rpc_call("eth_sendRawTransaction", params).await.inspect_err(|err| {
             warn!(
                 target: "rpc::eth",
                 %err,
