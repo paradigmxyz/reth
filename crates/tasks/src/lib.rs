@@ -27,18 +27,19 @@ use std::{
     pin::{pin, Pin},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     task::{ready, Context, Poll},
 };
 use tokio::{
-    runtime::Handle,
+    runtime::{Handle, Runtime},
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
 use tracing::{debug, error};
 use tracing_futures::Instrument;
 
+static GLOBAL_EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
 pub mod metrics;
 pub mod shutdown;
 
@@ -190,14 +191,17 @@ impl TaskManager {
     pub fn new(handle: Handle) -> Self {
         let (panicked_tasks_tx, panicked_tasks_rx) = unbounded_channel();
         let (signal, on_shutdown) = signal();
-        Self {
+        let manager = Self {
             handle,
             panicked_tasks_tx,
             panicked_tasks_rx,
             signal: Some(signal),
             on_shutdown,
             graceful_tasks: Arc::new(AtomicUsize::new(0)),
-        }
+        };
+        let _ = GLOBAL_EXECUTOR.set(manager.executor());
+
+        manager
     }
 
     /// Returns a new [`TaskExecutor`] that can spawn new tasks onto the tokio runtime this type is
@@ -304,6 +308,23 @@ pub struct TaskExecutor {
 // === impl TaskExecutor ===
 
 impl TaskExecutor {
+    /// Returns the current TaskExecutor if one has been initialized
+    pub fn current() -> Option<Self> {
+        GLOBAL_EXECUTOR.get().cloned()
+    }
+    /// Returns the current TaskExecutor or creates one if none exists
+    pub fn current_or_create() -> Self {
+        Self::current().unwrap_or_else(|| {
+            let handle = Handle::try_current().unwrap_or_else(|_| {
+                static RT: OnceLock<Runtime> = OnceLock::new();
+                let rt = RT.get_or_init(|| Runtime::new().unwrap());
+                rt.handle().clone()
+            });
+
+            let manager = TaskManager::new(handle);
+            manager.executor()
+        })
+    }
     /// Returns the [Handle] to the tokio runtime.
     pub const fn handle(&self) -> &Handle {
         &self.handle
