@@ -302,15 +302,17 @@ where
     pub async fn is_valid_cross_tx(&self, tx: &Tx) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
-        SupervisorClient::is_valid_cross_tx(
-            tx.access_list(),
-            tx.hash(),
-            self.block_info.timestamp.load(Ordering::Relaxed),
-            Some(TRANSACTION_VALIDITY_WINDOW_SECS),
-            self.fork_tracker.is_interop_activated(),
-            self.supervisor_client.as_ref(),
-        )
-        .await
+        self.supervisor_client
+            .as_ref()
+            .unwrap()
+            .is_valid_cross_tx(
+                tx.access_list(),
+                tx.hash(),
+                self.block_info.timestamp.load(Ordering::Relaxed),
+                Some(TRANSACTION_VALIDITY_WINDOW_SECS),
+                self.fork_tracker.is_interop_activated(),
+            )
+            .await
     }
 }
 

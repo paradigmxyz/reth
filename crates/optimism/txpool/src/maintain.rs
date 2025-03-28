@@ -163,18 +163,18 @@ pub async fn maintain_transaction_pool_interop<N, Pool, St>(
                     futures_util::stream::iter(to_revalidate.into_iter().map(|tx| {
                         let supervisor_client = supervisor_client.clone();
                         async move {
-                            let check = SupervisorClient::is_valid_cross_tx(
-                                tx.transaction.access_list(),
-                                tx.transaction.hash(),
-                                timestamp,
-                                Some(TRANSACTION_VALIDITY_WINDOW),
-                                // We could assume that interop is enabled, because
-                                // tx.transaction.interop() would be set only in
-                                // this case
-                                true,
-                                Some(supervisor_client.as_ref()),
-                            )
-                            .await;
+                            let check = supervisor_client
+                                .is_valid_cross_tx(
+                                    tx.transaction.access_list(),
+                                    tx.transaction.hash(),
+                                    timestamp,
+                                    Some(TRANSACTION_VALIDITY_WINDOW),
+                                    // We could assume that interop is enabled, because
+                                    // tx.transaction.interop() would be set only in
+                                    // this case
+                                    true,
+                                )
+                                .await;
                             (tx.clone(), check)
                         }
                     }))

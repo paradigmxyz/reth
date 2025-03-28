@@ -77,12 +77,12 @@ impl SupervisorClient {
     /// Some(Ok(()) - if tx is valid cross chain,
     /// Some(Err(e)) - if tx is not valid or interop is not active
     pub async fn is_valid_cross_tx(
+        &self,
         access_list: Option<&AccessList>,
         hash: &TxHash,
         timestamp: u64,
         timeout: Option<u64>,
         is_interop_active: bool,
-        client: Option<&Self>,
     ) -> Option<Result<(), InvalidCrossTx>> {
         // We don't need to check for deposit transaction in here, because they won't come from
         // txpool
@@ -99,10 +99,8 @@ impl SupervisorClient {
             // No cross chain tx allowed before interop
             return Some(Err(InvalidCrossTx::CrossChainTxPreInterop))
         }
-        let client =
-            client.expect("supervisor client should be always set after interop is active");
 
-        if let Err(err) = client
+        if let Err(err) = self
             .check_access_list(
                 inbox_entries.as_slice(),
                 ExecutingDescriptor::new(timestamp, timeout),
