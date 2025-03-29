@@ -16,8 +16,9 @@ use reth_cli_util::get_secret_key;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_exex::ExExContext;
 use reth_network::{
-    transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
-    NetworkHandle, NetworkManager, NetworkPrimitives,
+    transactions::{config::TransactionPropagationKind, TransactionsManagerConfig},
+    NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
+    NetworkPrimitives,
 };
 use reth_node_api::{
     FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
@@ -703,7 +704,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         Node::Provider: BlockReaderFor<N>,
     {
         let (handle, network, txpool, eth) = builder
-            .transactions(pool, tx_config)
+            .transactions(pool, tx_config, TransactionPropagationKind::default()) // @mattse do we need this to be generic over `TransactionPropagationPolicy`?
             .request_handler(self.provider().clone())
             .split_with_handle();
 

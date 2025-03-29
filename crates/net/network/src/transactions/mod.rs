@@ -12,6 +12,7 @@ pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
+use config::TransactionPropagationKind;
 pub use config::{
     TransactionFetcherConfig, TransactionPropagationMode, TransactionPropagationPolicy,
     TransactionsManagerConfig,
@@ -237,7 +238,11 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// propagate new transactions over the network.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct TransactionsManager<
+    Pool,
+    N: NetworkPrimitives = EthNetworkPrimitives,
+    P: TransactionPropagationPolicy = TransactionPropagationKind,
+> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Network access.
@@ -295,9 +300,13 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     config: TransactionsManagerConfig,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
+    /// The transaction propagation policy.
+    transaction_propagation_policy: P,
 }
 
-impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
+impl<Pool: TransactionPool, N: NetworkPrimitives, P: TransactionPropagationPolicy>
+    TransactionsManager<Pool, N, P>
+{
     /// Sets up a new instance.
     ///
     /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
@@ -306,6 +315,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         pool: Pool,
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
         transactions_manager_config: TransactionsManagerConfig,
+        transaction_propagation_policy: P,
     ) -> Self {
         let network_events = network.event_listener();
 
@@ -345,6 +355,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             ),
             config: transactions_manager_config,
             metrics,
+            transaction_propagation_policy,
         }
     }
 
@@ -521,8 +532,8 @@ where
 
         // keep track of the transactions the peer knows
         let mut count_txns_already_seen_by_peer = 0;
-        for tx in msg.iter_hashes() {
-            if !peer.seen_transactions.insert(*tx) {
+        for tx in msg.iter_hashes().copied() {
+            if !peer.seen_transactions.insert(tx) {
                 count_txns_already_seen_by_peer += 1;
             }
         }
@@ -894,13 +905,8 @@ where
 
         // Note: Assuming ~random~ order due to random state of the peers map hasher
         for (peer_idx, (peer_id, peer)) in self.peers.iter_mut().enumerate() {
-            match self.config.propogation_policy {
-                TransactionPropagationPolicy::All => {}
-                TransactionPropagationPolicy::Trusted => {
-                    if !matches!(peer.peer_kind, PeerKind::Trusted) {
-                        continue
-                    }
-                }
+            if !self.transaction_propagation_policy.filter(peer) {
+                continue
             }
             // determine whether to send full tx objects or hashes.
             let mut builder = if peer_idx > max_num_full {
@@ -1972,7 +1978,11 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(
+                pool.clone(),
+                transactions_manager_config,
+                TransactionPropagationKind::All,
+            )
             .split_with_handle();
 
         (transactions, network)
@@ -2028,7 +2038,11 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(
+                pool.clone(),
+                transactions_manager_config,
+                TransactionPropagationKind::All,
+            )
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -2096,7 +2110,11 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(
+                pool.clone(),
+                transactions_manager_config,
+                TransactionPropagationKind::All,
+            )
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -2164,7 +2182,11 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(
+                pool.clone(),
+                transactions_manager_config,
+                TransactionPropagationKind::All,
+            )
             .split_with_handle();
 
         let peer_id_1 = PeerId::new([1; 64]);
@@ -2268,7 +2290,11 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(
+                pool.clone(),
+                transactions_manager_config,
+                TransactionPropagationKind::All,
+            )
             .split_with_handle();
         tokio::task::spawn(network);
 
@@ -2344,7 +2370,11 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(
+                pool.clone(),
+                transactions_manager_config,
+                TransactionPropagationKind::All,
+            )
             .split_with_handle();
         tokio::task::spawn(network);
 

@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use super::{
-    DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
+    PeerMetadata, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
     DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
@@ -10,6 +10,8 @@ use crate::transactions::constants::tx_fetcher::{
     DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
 };
 use derive_more::{Constructor, Display};
+use reth_eth_wire::NetworkPrimitives;
+use reth_network_api::PeerKind;
 
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Clone)]
@@ -22,9 +24,6 @@ pub struct TransactionsManagerConfig {
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
-    /// The transaction propagation policy.
-    #[cfg_attr(feature = "serde", serde(default))]
-    pub propogation_policy: TransactionPropagationPolicy,
 }
 
 impl Default for TransactionsManagerConfig {
@@ -33,15 +32,22 @@ impl Default for TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             propagation_mode: TransactionPropagationMode::default(),
-            propogation_policy: TransactionPropagationPolicy::default(),
         }
     }
+}
+
+/// A trait for filtering peers based on their metadata.
+///
+/// This is used to determine whether a transaction should be propagated to a given peer.
+pub trait TransactionPropagationPolicy: Default + Clone {
+    /// Returns true if we should propagate the transaction to the given peer.
+    fn filter<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool;
 }
 
 /// Determines which peers pending transactions are propagated to.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Display)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum TransactionPropagationPolicy {
+pub enum TransactionPropagationKind {
     /// Propagate transactions to all peers.
     #[default]
     All,
@@ -52,7 +58,16 @@ pub enum TransactionPropagationPolicy {
     Trusted,
 }
 
-impl FromStr for TransactionPropagationPolicy {
+impl TransactionPropagationPolicy for TransactionPropagationKind {
+    fn filter<N: NetworkPrimitives>(&self, peer: &mut PeerMetadata<N>) -> bool {
+        match self {
+            Self::All => true,
+            Self::Trusted => matches!(peer.peer_kind, PeerKind::Trusted),
+        }
+    }
+}
+
+impl FromStr for TransactionPropagationKind {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

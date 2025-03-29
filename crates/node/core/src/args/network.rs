@@ -17,6 +17,7 @@ use reth_discv5::{
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
+        config::TransactionPropagationKind,
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -26,7 +27,7 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             },
         },
-        TransactionFetcherConfig, TransactionPropagationPolicy, TransactionsManagerConfig,
+        TransactionFetcherConfig, TransactionsManagerConfig,
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
@@ -160,8 +161,8 @@ pub struct NetworkArgs {
     /// The policy determines which peers transactions are gossiped to.
     ///
     /// Defaults to `All`.
-    #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationPolicy::All)]
-    pub tx_propagation_policy: TransactionPropagationPolicy,
+    #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
+    pub tx_propagation_policy: TransactionPropagationKind,
 }
 
 impl NetworkArgs {
@@ -204,7 +205,6 @@ impl NetworkArgs {
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: Default::default(),
-            propogation_policy: self.tx_propagation_policy.clone(),
         }
     }
 
@@ -342,7 +342,7 @@ impl Default for NetworkArgs {
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
-            tx_propagation_policy: TransactionPropagationPolicy::default()
+            tx_propagation_policy: TransactionPropagationKind::default()
         }
     }
 }
