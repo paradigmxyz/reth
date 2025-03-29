@@ -504,6 +504,7 @@ where
         TransactionValidationOutcome::Valid {
             balance: account.balance,
             state_nonce: account.nonce,
+            bytecode_hash: account.bytecode_hash,
             transaction: ValidTransaction::new(transaction, maybe_blob_sidecar),
             // by this point assume all external transactions should be propagated
             propagate: match origin {

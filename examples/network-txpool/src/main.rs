@@ -89,6 +89,7 @@ impl TransactionValidator for OkValidator {
         TransactionValidationOutcome::Valid {
             balance: *transaction.cost(),
             state_nonce: transaction.nonce(),
+            bytecode_hash: None,
             transaction: ValidTransaction::Valid(transaction),
             propagate: false,
         }
