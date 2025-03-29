@@ -19,6 +19,7 @@ use reth_provider::{
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    metrics::TrieType,
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
     proof::StorageProof,
@@ -31,7 +32,7 @@ use reth_trie::{
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::{mpsc::Receiver, Arc};
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Parallel proof calculator.
 ///
@@ -197,6 +198,7 @@ where
             // place when we iterate over the trie
             storage_proofs.insert(hashed_address, receiver);
         }
+        trace!(target: "trie::parallel_proof", keys = ?storage_proofs.keys(), "Starting storage proof computation");
 
         let provider_ro = self.view.provider_ro()?;
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -229,6 +231,7 @@ where
         let mut account_node_iter = TrieNodeIter::new(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+            TrieType::State,
         );
         while let Some(account_node) =
             account_node_iter.try_next().map_err(ProviderError::Database)?
@@ -239,16 +242,25 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let storage_multiproof = match storage_proofs.remove(&hashed_address) {
-                        Some(rx) => rx.recv().map_err(|_| {
-                            ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                DatabaseError::Other(format!(
-                                    "channel closed for {hashed_address}"
-                                )),
-                            ))
-                        })??,
+                        Some(rx) => {
+                            trace!(target: "trie::parallel_proof", ?hashed_address, "Found storage proof, waiting for it");
+                            rx.recv().map_err(|_| {
+                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                                    DatabaseError::Other(format!(
+                                        "channel closed for {hashed_address}"
+                                    )),
+                                ))
+                            })??
+                        }
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
+                            trace!(
+                                target: "trie::parallel_proof",
+                                ?hashed_address,
+                                ?targets,
+                                "Missing leaf, computing storage proof"
+                            );
                             tracker.inc_missed_leaves();
                             StorageProof::new_hashed(
                                 trie_cursor_factory.clone(),

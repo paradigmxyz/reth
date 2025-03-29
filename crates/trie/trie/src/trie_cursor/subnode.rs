@@ -1,5 +1,5 @@
 use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
-use alloy_primitives::B256;
+use reth_trie_common::RlpNode;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -98,11 +98,11 @@ impl CursorSubNode {
     }
 
     /// Returns the root hash of the current node, if it has one.
-    pub fn hash(&self) -> Option<B256> {
+    pub fn hash(&self) -> Option<RlpNode> {
         if self.hash_flag() {
             let node = self.node.as_ref().unwrap();
             match self.nibble {
-                -1 => node.root_hash,
+                -1 => node.root_hash.as_ref().map(RlpNode::word_rlp),
                 _ => Some(node.hash_for_nibble(self.nibble as u8)),
             }
         } else {

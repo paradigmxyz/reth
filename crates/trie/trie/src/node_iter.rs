@@ -1,6 +1,12 @@
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
+use crate::{
+    hashed_cursor::HashedCursor, metrics::TrieType, trie_cursor::TrieCursor, walker::TrieWalker,
+    Nibbles,
+};
 use alloy_primitives::B256;
+use metrics::Counter;
+use reth_metrics::Metrics;
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::RlpNode;
 use tracing::trace;
 
 /// Represents a branch node in the trie.
@@ -9,14 +15,14 @@ pub struct TrieBranchNode {
     /// The key associated with the node.
     pub key: Nibbles,
     /// The value associated with the node.
-    pub value: B256,
+    pub value: RlpNode,
     /// Indicates whether children are in the trie.
     pub children_are_in_trie: bool,
 }
 
 impl TrieBranchNode {
     /// Creates a new `TrieBranchNode`.
-    pub const fn new(key: Nibbles, value: B256, children_are_in_trie: bool) -> Self {
+    pub const fn new(key: Nibbles, value: RlpNode, children_are_in_trie: bool) -> Self {
         Self { key, value, children_are_in_trie }
     }
 }
@@ -41,21 +47,33 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     /// used to resume iterating from the last returned leaf node.
     previous_hashed_key: Option<B256>,
 
+    /// The hashed cursor key to seek to.
+    hashed_cursor_seek: Option<B256>,
+    /// Flag indicating whether we should advance the hashed cursor by one after seeking.
+    hashed_cursor_next: bool,
+
     /// Current hashed  entry.
     current_hashed_entry: Option<(B256, <H as HashedCursor>::Value)>,
     /// Flag indicating whether we should check the current walker key.
     current_walker_key_checked: bool,
+
+    #[cfg(feature = "metrics")]
+    metrics: TrieNodeIterMetrics,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     /// Creates a new [`TrieNodeIter`].
-    pub const fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,
             hashed_cursor,
             previous_hashed_key: None,
+            hashed_cursor_seek: None,
+            hashed_cursor_next: false,
             current_hashed_entry: None,
             current_walker_key_checked: false,
+            #[cfg(feature = "metrics")]
+            metrics: TrieNodeIterMetrics::new_with_labels(&[("type", trie_type.as_str())]),
         }
     }
 
@@ -94,13 +112,37 @@ where
                     self.current_walker_key_checked = true;
                     // If it's possible to skip the current node in the walker, return a branch node
                     if self.walker.can_skip_current_node {
+                        let hash = self.walker.hash().unwrap();
+                        let children_are_in_trie = self.walker.children_are_in_trie();
+                        trace!(
+                            target: "trie::node_iter",
+                            ?key,
+                            ?hash,
+                            children_are_in_trie,
+                            "Skipping current node in walker and returning branch node"
+                        );
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
                             key.clone(),
-                            self.walker.hash().unwrap(),
-                            self.walker.children_are_in_trie(),
+                            hash,
+                            children_are_in_trie,
                         ))))
                     }
                 }
+            }
+
+            // Seek the hashed cursor if we have a key.
+            if let Some(hashed_key) = self.hashed_cursor_seek.take() {
+                trace!(target: "trie::node_iter", ?hashed_key, "Seeking to hashed key");
+                let entry = self.hashed_cursor.seek(hashed_key)?;
+                if self.hashed_cursor_next {
+                    self.current_hashed_entry = self.hashed_cursor.next()?;
+                    self.hashed_cursor_next = false;
+                } else {
+                    self.current_hashed_entry = entry;
+                }
+
+                #[cfg(feature = "metrics")]
+                self.metrics.hashed_cursor_seeks_total.increment(1);
             }
 
             // If there's a hashed entry...
@@ -111,6 +153,8 @@ where
                     self.current_walker_key_checked = false;
                     continue
                 }
+
+                trace!(target: "trie::node_iter", ?hashed_key, "Returning leaf node");
 
                 // Set the next hashed entry as a leaf node and return
                 trace!(target: "trie::node_iter", ?hashed_key, "next hashed entry");
@@ -127,8 +171,8 @@ where
                     self.current_hashed_entry = self.hashed_cursor.next()?;
                 }
                 None => {
-                    // Get the seek key and set the current hashed entry based on walker's next
-                    // unprocessed key
+                    // Get the seek key and lazily set the current hashed entry based on walker's
+                    // next unprocessed key
                     let seek_key = match self.walker.next_unprocessed_key() {
                         Some(key) => key,
                         None => break, // no more keys
@@ -149,13 +193,21 @@ where
     }
 }
 
+#[derive(Metrics)]
+#[metrics(scope = "trie.node_iter")]
+struct TrieNodeIterMetrics {
+    /// The number of times the hashed cursor was seeked.
+    pub hashed_cursor_seeks_total: Counter,
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, time::Instant};
 
     use alloy_primitives::{
         b256,
         map::{B256Map, HashMap},
+        B256,
     };
     use alloy_trie::{
         BranchNodeCompact, HashBuilder, Nibbles, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
@@ -172,7 +224,8 @@ mod tests {
             mock::MockHashedCursorFactory, noop::NoopHashedAccountCursor, HashedCursorFactory,
             HashedPostStateAccountCursor,
         },
-        mock::{KeyVisit, KeyVisitType},
+        metrics::TrieType,
+        mock::{CursorType, KeyVisit},
         trie_cursor::{
             mock::MockTrieCursorFactory, noop::NoopAccountTrieCursor, TrieCursorFactory,
         },
@@ -204,6 +257,7 @@ mod tests {
                 NoopHashedAccountCursor::default(),
                 hashed_post_state.accounts(),
             ),
+            TrieType::State,
         );
 
         while let Some(node) = node_iter.try_next().unwrap() {
@@ -245,9 +299,9 @@ mod tests {
         //     │      └── 1 -> Leaf (`account_2`, Key = 0x0)
         //     ├── 1 -> Branch (`branch_node_2`)
         //     │      ├── 0 -> Branch (`branch_node_3`)
-        //     │      │      ├── 0 -> Leaf (`account_3`, marked as changed)
+        //     │      │      ├── 0 -> Leaf (`account_3`)
         //     │      │      └── 1 -> Leaf (`account_4`)
-        //     │      └── 1 -> Leaf (`account_5`, Key = 0x0)
+        //     │      └── 1 -> Leaf (`account_5`, Key = 0x0, marked as changed)
 
         let account_1 = b256!("0x0000000000000000000000000000000000000000000000000000000000000000");
         let account_2 = b256!("0x0000000000000000000000000000000000000000000000000000000000000010");
@@ -264,6 +318,19 @@ mod tests {
             (Nibbles::unpack(account_5), empty_account),
         ]);
 
+        let branch_node_1 = (
+            Nibbles::from_nibbles([0; 62]),
+            BranchNodeCompact::new(
+                TrieMask::new(0b11),
+                TrieMask::new(0b00),
+                TrieMask::new(0b11),
+                vec![
+                    empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
+                    empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
+                ],
+                None,
+            ),
+        );
         let branch_node_1_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
             vec![
                 empty_leaf_rlp_for_key(Nibbles::from_nibbles([0])),
@@ -272,6 +339,19 @@ mod tests {
             TrieMask::new(0b11),
         )));
 
+        let branch_node_3 = (
+            Nibbles::from_nibbles([vec![0; 61], vec![1, 0]].concat()),
+            BranchNodeCompact::new(
+                TrieMask::new(0b11),
+                TrieMask::new(0b00),
+                TrieMask::new(0b11),
+                vec![
+                    empty_leaf_rlp_for_key(Nibbles::default()),
+                    empty_leaf_rlp_for_key(Nibbles::default()),
+                ],
+                None,
+            ),
+        );
         let branch_node_3_rlp = RlpNode::from_rlp(&alloy_rlp::encode(BranchNode::new(
             vec![
                 empty_leaf_rlp_for_key(Nibbles::default()),
@@ -284,9 +364,9 @@ mod tests {
             Nibbles::from_nibbles([vec![0; 61], vec![1]].concat()),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
-                TrieMask::new(0b00),
                 TrieMask::new(0b01),
-                vec![branch_node_3_rlp.as_hash().unwrap()],
+                TrieMask::new(0b11),
+                vec![branch_node_3_rlp.clone(), empty_leaf_rlp_for_key(Nibbles::from_nibbles([0]))],
                 None,
             ),
         );
@@ -298,14 +378,15 @@ mod tests {
             Nibbles::from_nibbles([0; 61]),
             BranchNodeCompact::new(
                 TrieMask::new(0b11),
-                TrieMask::new(0b10),
                 TrieMask::new(0b11),
-                vec![branch_node_1_rlp.as_hash().unwrap(), branch_node_2_rlp.as_hash().unwrap()],
+                TrieMask::new(0b11),
+                vec![branch_node_1_rlp, branch_node_2_rlp],
                 None,
             ),
         );
 
-        let mock_trie_nodes = vec![branch_node_0.clone(), branch_node_2.clone()];
+        let mock_trie_nodes =
+            vec![branch_node_0.clone(), branch_node_1, branch_node_2.clone(), branch_node_3];
         pretty_assertions::assert_eq!(
             hash_builder_branch_nodes.into_iter().sorted().collect::<Vec<_>>(),
             mock_trie_nodes,
@@ -314,9 +395,9 @@ mod tests {
         let trie_cursor_factory =
             MockTrieCursorFactory::new(mock_trie_nodes.into_iter().collect(), B256Map::default());
 
-        // Mark the account 3 as changed.
+        // Mark the account 5 as changed.
         let mut prefix_set = PrefixSetMut::default();
-        prefix_set.insert(Nibbles::unpack(account_3));
+        prefix_set.insert(Nibbles::unpack(account_5));
         let prefix_set = prefix_set.freeze();
 
         let walker =
@@ -333,66 +414,50 @@ mod tests {
             B256Map::default(),
         );
 
-        let mut iter =
-            TrieNodeIter::new(walker, hashed_cursor_factory.hashed_account_cursor().unwrap());
+        let mut iter = TrieNodeIter::new(
+            walker,
+            hashed_cursor_factory.hashed_account_cursor().unwrap(),
+            TrieType::State,
+        );
 
         // Walk the iterator until it's exhausted.
         while iter.try_next().unwrap().is_some() {}
 
+        let visited_account_nodes = trie_cursor_factory
+            .visited_account_keys()
+            .iter()
+            .cloned()
+            .map(CursorType::Trie)
+            .chain(
+                hashed_cursor_factory
+                    .visited_account_keys()
+                    .iter()
+                    .cloned()
+                    .map(CursorType::Hashed),
+            )
+            .sorted()
+            .collect::<Vec<_>>();
+
         pretty_assertions::assert_eq!(
-            *trie_cursor_factory.visited_account_keys(),
+            visited_account_nodes,
             vec![
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekExact(Nibbles::default()),
-                    visited_key: None
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x0])),
-                    visited_key: Some(branch_node_0.0)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(branch_node_2.0.clone()),
-                    visited_key: Some(branch_node_2.0)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(Nibbles::from_nibbles([0x1])),
-                    visited_key: None
-                }
+                CursorType::Trie(KeyVisit::seek_exact(Nibbles::default(), None)),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_1, Some(account_1))),
+                CursorType::Trie(KeyVisit::seek_non_exact(
+                    Nibbles::from_nibbles([0x0]),
+                    Some(branch_node_0.0)
+                )),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_3, Some(account_3))),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_3, Some(account_3))),
+                CursorType::Trie(KeyVisit::seek_non_exact(
+                    branch_node_2.0.clone(),
+                    Some(branch_node_2.0)
+                )),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_5, Some(account_5))),
+                CursorType::Hashed(KeyVisit::seek_non_exact(account_5, Some(account_5))),
+                CursorType::Trie(KeyVisit::seek_non_exact(Nibbles::from_nibbles([0x1]), None)),
+                CursorType::Hashed(KeyVisit::next(None)),
             ]
-        );
-        pretty_assertions::assert_eq!(
-            *hashed_cursor_factory.visited_account_keys(),
-            vec![
-                // Why do we always seek this key first?
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_1),
-                    visited_key: Some(account_1)
-                },
-                // Seek to the modified account.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                // Why do we seek the modified account two more times?
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_3),
-                    visited_key: Some(account_3)
-                },
-                // Collect the siblings of the modified account
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_4) },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: Some(account_5) },
-                // We seek the account 5 because its hash is not in the branch node, but we already
-                // walked it before, so there should be no need for it.
-                KeyVisit {
-                    visit_type: KeyVisitType::SeekNonExact(account_5),
-                    visited_key: Some(account_5)
-                },
-                KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
-            ],
         );
     }
 }
