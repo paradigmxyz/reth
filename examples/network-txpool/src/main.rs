@@ -10,7 +10,10 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_consensus::Transaction;
-use reth_network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager};
+use reth_network::{
+    config::rng_secret_key, transactions::config::TransactionPropagationKind, EthNetworkPrimitives,
+    NetworkConfig, NetworkManager,
+};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, validate::ValidTransaction, CoinbaseTipOrdering,
@@ -44,7 +47,11 @@ async fn main() -> eyre::Result<()> {
     // create the network instance
     let (_handle, network, txpool, _) = NetworkManager::builder(config)
         .await?
-        .transactions(pool.clone(), transactions_manager_config)
+        .transactions(
+            pool.clone(),
+            transactions_manager_config,
+            TransactionPropagationKind::default(),
+        )
         .split_with_handle();
 
     // this can be used to interact with the `txpool` service directly
