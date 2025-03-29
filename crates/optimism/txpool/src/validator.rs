@@ -209,7 +209,9 @@ where
             }
             Some(Ok(_)) => {
                 // valid interop tx
-                transaction.set_interop(self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS);
+                transaction.set_interop_deadlone(
+                    self.block_timestamp() + TRANSACTION_VALIDITY_WINDOW_SECS,
+                );
             }
             _ => {}
         }

@@ -1,7 +1,4 @@
-use crate::{
-    conditional::MaybeConditionalTransaction,
-    interop::{MaybeInteropTransaction, TransactionInterop},
-};
+use crate::{conditional::MaybeConditionalTransaction, interop::MaybeInteropTransaction};
 use alloy_consensus::{
     transaction::Recovered, BlobTransactionSidecar, BlobTransactionValidationError, Typed2718,
 };
@@ -20,7 +17,7 @@ use std::sync::{
     Arc, OnceLock,
 };
 
-/// tx is not validated
+/// Marker for no-interop transactions
 pub(crate) const NO_INTEROP_TX: u64 = 0;
 
 /// Pool transaction for OP.
@@ -43,7 +40,7 @@ pub struct OpPooledTransaction<
     /// Optional conditional attached to this transaction.
     conditional: Option<Box<TransactionConditional>>,
 
-    /// Optional interop validation attached to this transaction.
+    /// Optional interop deadline attached to this transaction.
     interop: Arc<AtomicU64>,
 
     /// Cached EIP-2718 encoded bytes of the transaction, lazily computed.
@@ -96,11 +93,11 @@ impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Poo
 }
 
 impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled> {
-    fn set_interop(&self, deadline: TransactionInterop) {
+    fn set_interop_deadlone(&self, deadline: u64) {
         self.interop.store(deadline, Ordering::Relaxed);
     }
 
-    fn interop(&self) -> Option<TransactionInterop> {
+    fn interop_deadline(&self) -> Option<u64> {
         let interop = self.interop.load(Ordering::Relaxed);
         if interop > NO_INTEROP_TX {
             return Some(interop)
