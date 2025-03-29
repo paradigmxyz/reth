@@ -139,7 +139,7 @@ where
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
         );
-        let max_concurrency = 256;
+        let max_concurrency = 1;
         let proof_task = ProofTaskManager::new(
             self.executor.handle().clone(),
             state_root_config.consistent_view.clone(),

@@ -1,4 +1,9 @@
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
+use crate::{
+    hashed_cursor::HashedCursor,
+    trie_cursor::{CursorSubNode, TrieCursor},
+    walker::TrieWalker,
+    Nibbles,
+};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use tracing::trace;
@@ -12,13 +17,37 @@ pub struct TrieBranchNode {
     pub value: B256,
     /// Indicates whether children are in the trie.
     pub children_are_in_trie: bool,
+    /// Full subnode
+    pub subnode: CursorSubNode,
 }
 
 impl TrieBranchNode {
     /// Creates a new `TrieBranchNode`.
-    pub const fn new(key: Nibbles, value: B256, children_are_in_trie: bool) -> Self {
-        Self { key, value, children_are_in_trie }
+    pub const fn new(
+        key: Nibbles,
+        value: B256,
+        subnode: CursorSubNode,
+        children_are_in_trie: bool,
+    ) -> Self {
+        Self { key, value, children_are_in_trie, subnode }
     }
+}
+
+/// Represents metrics for the trie node iteration, that are only intended to be exposed in logs.
+#[derive(Debug, Default)]
+pub struct TrieNodeIterMetrics {
+    /// The number of intermediate branch nodes returned.
+    pub branch_nodes: usize,
+    /// The number of leaf nodes returned.
+    pub leaf_nodes: usize,
+
+    /// The number of times the hashed cursor was seeked.
+    pub hashed_cursor_seek_count: usize,
+    /// The number of times the hashed cursor was advanced.
+    pub hashed_cursor_advance_count: usize,
+
+    /// The number of times the trie walker was advanced.
+    pub walker_advance_count: usize,
 }
 
 /// Represents variants of trie nodes returned by the iteration.
@@ -45,17 +74,20 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     current_hashed_entry: Option<(B256, <H as HashedCursor>::Value)>,
     /// Flag indicating whether we should check the current walker key.
     current_walker_key_checked: bool,
+    /// Metrics for the trie node iteration.
+    metrics: TrieNodeIterMetrics,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
     /// Creates a new [`TrieNodeIter`].
-    pub const fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
+    pub fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
         Self {
             walker,
             hashed_cursor,
             previous_hashed_key: None,
             current_hashed_entry: None,
             current_walker_key_checked: false,
+            metrics: TrieNodeIterMetrics::default(),
         }
     }
 
@@ -94,9 +126,11 @@ where
                     self.current_walker_key_checked = true;
                     // If it's possible to skip the current node in the walker, return a branch node
                     if self.walker.can_skip_current_node {
+                        self.metrics.branch_nodes += 1;
                         return Ok(Some(TrieElement::Branch(TrieBranchNode::new(
                             key.clone(),
                             self.walker.hash().unwrap(),
+                            self.walker.subnode().cloned().unwrap(),
                             self.walker.children_are_in_trie(),
                         ))))
                     }
@@ -107,6 +141,7 @@ where
             if let Some((hashed_key, value)) = self.current_hashed_entry.take() {
                 // If the walker's key is less than the unpacked hashed key,
                 // reset the checked status and continue
+                // walker.key -> cb
                 if self.walker.key().is_some_and(|key| key < &Nibbles::unpack(hashed_key)) {
                     self.current_walker_key_checked = false;
                     continue
@@ -115,6 +150,10 @@ where
                 // Set the next hashed entry as a leaf node and return
                 trace!(target: "trie::node_iter", ?hashed_key, "next hashed entry");
                 self.current_hashed_entry = self.hashed_cursor.next()?;
+
+                // update metrics
+                self.metrics.leaf_nodes += 1;
+                self.metrics.hashed_cursor_advance_count += 1;
                 return Ok(Some(TrieElement::Leaf(hashed_key, value)))
             }
 
@@ -125,6 +164,10 @@ where
                     // Seek to the previous hashed key and get the next hashed entry
                     self.hashed_cursor.seek(hashed_key)?;
                     self.current_hashed_entry = self.hashed_cursor.next()?;
+
+                    // update metrics
+                    self.metrics.hashed_cursor_seek_count += 1;
+                    self.metrics.hashed_cursor_advance_count += 1;
                 }
                 None => {
                     // Get the seek key and set the current hashed entry based on walker's next
@@ -133,17 +176,32 @@ where
                         Some(key) => key,
                         None => break, // no more keys
                     };
+
+                    // if current_hashed_entry is prefixed by seek_key just use it?
                     trace!(
                         target: "trie::node_iter",
-                        ?seek_key,
+                        ?seek_key, // c5
                         can_skip_current_node = self.walker.can_skip_current_node,
                         "seeking to the next unprocessed hashed entry"
                     );
-                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?;
-                    self.walker.advance()?;
+
+                    // if we are traversing a node that is not in the target path, and we have a
+                    // hash for it, we should be able to return a trie element for it
+                    self.current_hashed_entry = self.hashed_cursor.seek(seek_key)?; // c5
+                    self.walker.advance()?; // walker.key() is what -> cb
+
+                    // update metrics
+                    self.metrics.hashed_cursor_seek_count += 1;
+                    self.metrics.walker_advance_count += 1;
                 }
             }
         }
+
+        trace!(
+            target: "trie::node_iter_metrics",
+            final_metrics = ?self.metrics,
+            "exhausted trie node iteration"
+        );
 
         Ok(None)
     }
