@@ -1,20 +1,20 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
 use alloy_consensus::BlockHeader;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::SealedHeader;
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
-    ProviderReceipt, ProviderTx, StateProviderFactory,
-};
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
+    StateProviderFactory,
+};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm_primitives::B256;
 

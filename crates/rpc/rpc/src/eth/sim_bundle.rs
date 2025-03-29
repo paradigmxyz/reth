@@ -11,7 +11,6 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, Evm};
 use reth_primitives_traits::{Recovered, SignedTransaction};
-use reth_provider::ProviderTx;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
@@ -21,6 +20,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     revm_utils::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
 };
+use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};

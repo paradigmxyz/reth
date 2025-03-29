@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(evm.block, evm_env.block_env);
 
         // Default spec ID
-        assert_eq!(evm.cfg.spec, SpecId::LATEST);
+        assert_eq!(evm.cfg.spec, SpecId::default());
     }
 
     #[test]
@@ -368,7 +368,7 @@ mod tests {
 
         // Check that the EVM environment is set with custom configuration
         assert_eq!(evm.cfg, cfg_env);
-        assert_eq!(evm.cfg.spec, SpecId::LATEST);
+        assert_eq!(evm.cfg.spec, SpecId::default());
     }
 
     #[test]
@@ -385,7 +385,7 @@ mod tests {
 
         // Verify that the block and transaction environments are set correctly
         assert_eq!(evm.block, evm_env.block_env);
-        assert_eq!(evm.cfg.spec, SpecId::LATEST);
+        assert_eq!(evm.cfg.spec, SpecId::default());
     }
 
     #[test]

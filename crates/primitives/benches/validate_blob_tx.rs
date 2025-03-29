@@ -57,9 +57,9 @@ fn validate_blob_tx(
 
     let group_id = format!("validate_blob | num blobs: {num_blobs} | {description}");
 
+    let kzg_settings = kzg_settings.get();
     // for now we just use the default SubPoolLimit
     group.bench_function(group_id, |b| {
-        let kzg_settings = kzg_settings.get();
         b.iter_with_setup(setup, |(tx, blob_sidecar)| {
             let r = tx.validate_blob(&blob_sidecar, kzg_settings);
             (r, tx, blob_sidecar)

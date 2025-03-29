@@ -15,18 +15,13 @@ use alloy_rpc_types_trace::geth::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvm, EvmEnvFor, TxEnvFor,
 };
 use reth_primitives_traits::{
     Block as _, BlockBody, NodePrimitives, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
-};
-use reth_provider::{
-    BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProofProvider, StateProvider, StateProviderFactory,
-    TransactionVariant,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -40,6 +35,10 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use reth_storage_api::{
+    BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
+    StateProofProvider, StateProvider, StateProviderFactory, TransactionVariant,
+};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
 use revm_inspectors::tracing::{

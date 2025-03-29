@@ -10,7 +10,7 @@
 use chainspec::CustomChainSpec;
 use engine::CustomEngineTypes;
 use primitives::CustomNodePrimitives;
-use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
+use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
 use reth_optimism_node::{
     node::{OpConsensusBuilder, OpPoolBuilder, OpStorage},
@@ -29,16 +29,13 @@ impl NodeTypes for CustomNode {
     type ChainSpec = CustomChainSpec;
     type StateCommitment = <OpNode as NodeTypes>::StateCommitment;
     type Storage = <OpNode as NodeTypes>::Storage;
-}
-
-impl NodeTypesWithEngine for CustomNode {
     type Payload = CustomEngineTypes;
 }
 
 impl<N> Node<N> for CustomNode
 where
     N: FullNodeTypes<
-        Types: NodeTypesWithEngine<
+        Types: NodeTypes<
             Payload = CustomEngineTypes,
             ChainSpec = CustomChainSpec,
             Primitives = CustomNodePrimitives,
