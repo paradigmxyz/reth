@@ -116,6 +116,7 @@ pub struct NodeConfig<ChainSpec> {
     /// - `AUTH_PORT`: default + `instance` * 100 - 100
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
+    /// - `IPC_PATH`: default + `instance`
     pub instance: Option<u16>,
 
     /// All networking related arguments
@@ -401,10 +402,8 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// Change rpc port numbers based on the instance number, using the inner
     /// [`RpcServerArgs::adjust_instance_ports`] method.
     pub fn adjust_instance_ports(&mut self) {
-        self.rpc.adjust_instance_ports(self.instance);
         self.network.adjust_instance_ports(self.instance);
-        self.rpc.ipcpath =
-            RpcServerArgs::append_instance_to_ipc_path(&self.rpc.ipcpath, self.instance);
+        self.rpc.adjust_instance_ports(self.instance);
     }
 
     /// Sets networking and RPC ports to zero, causing the OS to choose random unused ports when

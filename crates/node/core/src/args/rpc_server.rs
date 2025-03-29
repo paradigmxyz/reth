@@ -230,19 +230,11 @@ impl RpcServerArgs {
         self
     }
 
-    /// Appends the instance number to the IPC path if provided.
-    pub fn append_instance_to_ipc_path(base_path: &str, instance: Option<u16>) -> String {
-        if let Some(num) = instance {
-            format!("{}-{}", base_path, num)
-        } else {
-            base_path.to_string()
-        }
-    }
-
     /// Change rpc port numbers based on the instance number, if provided.
     /// * The `auth_port` is scaled by a factor of `instance * 100`
     /// * The `http_port` is scaled by a factor of `-instance`
     /// * The `ws_port` is scaled by a factor of `instance * 2`
+    /// * The `ipcpath` is appended with the instance number: `/tmp/reth.ipc-<instance>`
     ///
     /// # Panics
     /// Warning: if `instance` is zero in debug mode, this will panic.
@@ -261,6 +253,9 @@ impl RpcServerArgs {
             self.http_port -= instance - 1;
             // ws port is scaled by a factor of instance * 2
             self.ws_port += instance * 2 - 2;
+
+            // append instance file to ipc path
+            self.ipcpath = format!("{}-{}", self.ipcpath, instance);
         }
     }
 
