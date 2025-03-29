@@ -355,6 +355,11 @@ impl TransactionSigned {
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }
+
+    /// Returns the signature of the transaction
+    pub fn signature(&self) -> &Signature {
+        &self.signature
+    }
 }
 
 impl Hash for TransactionSigned {

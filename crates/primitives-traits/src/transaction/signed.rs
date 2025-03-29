@@ -173,10 +173,7 @@ where
 #[cfg(feature = "op")]
 mod op {
     use super::*;
-    use alloy_primitives::U256;
     use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
-    #[allow(dead_code)]
-    const DEPOSIT_SIGNATURE: Signature = Signature::new(U256::ZERO, U256::ZERO, false);
 
     impl SignedTransaction for OpPooledTransaction {
         fn tx_hash(&self) -> &TxHash {
@@ -189,14 +186,7 @@ mod op {
         }
 
         fn recover_signer(&self) -> Result<Address, RecoveryError> {
-            let signature_hash = self.signature_hash();
-            let signature = match self {
-                Self::Legacy(tx) => tx.signature(),
-                Self::Eip2930(tx) => tx.signature(),
-                Self::Eip1559(tx) => tx.signature(),
-                Self::Eip7702(tx) => tx.signature(),
-            };
-            recover_signer(signature, signature_hash)
+            recover_signer(self.signature(), self.signature_hash())
         }
 
         fn recover_signer_unchecked_with_buf(
@@ -210,13 +200,7 @@ mod op {
                 Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
             }
             let signature_hash = keccak256(buf);
-            let signature = match self {
-                Self::Legacy(tx) => tx.signature(),
-                Self::Eip2930(tx) => tx.signature(),
-                Self::Eip1559(tx) => tx.signature(),
-                Self::Eip7702(tx) => tx.signature(),
-            };
-            recover_signer_unchecked(signature, signature_hash)
+            recover_signer_unchecked(self.signature(), signature_hash)
         }
     }
 
