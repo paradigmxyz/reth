@@ -230,7 +230,7 @@ impl RpcServerArgs {
         self
     }
 
-    /// Change rpc port numbers based on the instance number.
+    /// Change rpc port numbers based on the instance number, if provided.
     /// * The `auth_port` is scaled by a factor of `instance * 100`
     /// * The `http_port` is scaled by a factor of `-instance`
     /// * The `ws_port` is scaled by a factor of `instance * 2`
@@ -244,17 +244,16 @@ impl RpcServerArgs {
     /// * `self.auth_port / 100 + (instance - 1)` would overflow `u16`
     ///
     /// In release mode, this will silently wrap around.
-    pub fn adjust_instance_ports(&mut self, instance: u16) {
-        debug_assert_ne!(instance, 0, "instance must be non-zero");
-        // auth port is scaled by a factor of instance * 100
-        self.auth_port += instance * 100 - 100;
-        // http port is scaled by a factor of -instance
-        self.http_port -= instance - 1;
-        // ws port is scaled by a factor of instance * 2
-        self.ws_port += instance * 2 - 2;
-
-        // if multiple instances are being run, append the instance number to the ipc path
-        if instance > 1 {
+    pub fn adjust_instance_ports(&mut self, instance: Option<u16>) {
+        if let Some(instance) = instance {
+            debug_assert_ne!(instance, 0, "instance must be non-zero");
+            // auth port is scaled by a factor of instance * 100
+            self.auth_port += instance * 100 - 100;
+            // http port is scaled by a factor of -instance
+            self.http_port -= instance - 1;
+            // ws port is scaled by a factor of instance * 2
+            self.ws_port += instance * 2 - 2;
+            // append instance file to ipc path
             self.ipcpath = format!("{}-{}", self.ipcpath, instance);
         }
     }
