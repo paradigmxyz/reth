@@ -335,7 +335,7 @@ mod tests {
 
         let mut cmd: NodeCommand = NodeCommand::parse_from(["reth", "--instance", "2"]);
         cmd.rpc.adjust_instance_ports(cmd.instance);
-        cmd.network.port = DEFAULT_DISCOVERY_PORT;
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + 2 - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8651);
         assert_eq!(cmd.rpc.http_port, 8544);
