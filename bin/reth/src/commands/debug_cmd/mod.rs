@@ -7,6 +7,7 @@ use reth_cli_commands::common::CliNodeTypes;
 use reth_cli_runner::CliContext;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_node_ethereum::EthEngineTypes;
+use std::sync::Arc;
 
 mod build_block;
 mod execution;
@@ -50,6 +51,15 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             Subcommands::Merkle(command) => command.execute::<N>(ctx).await,
             Subcommands::InMemoryMerkle(command) => command.execute::<N>(ctx).await,
             Subcommands::BuildBlock(command) => command.execute::<N>(ctx).await,
+        }
+    }
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        match &self.command {
+            Subcommands::Execution(command) => command.chain_spec(),
+            Subcommands::Merkle(command) => command.chain_spec(),
+            Subcommands::InMemoryMerkle(command) => command.chain_spec(),
+            Subcommands::BuildBlock(command) => command.chain_spec(),
         }
     }
 }
