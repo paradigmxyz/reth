@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use alloy_primitives::hex;
-use alloy_rpc_client::RpcClient as Client;
+use alloy_rpc_client::{ClientBuilder, RpcClient as Client};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
+use alloy_transport_http::Http;
 use serde_json::{json, Value};
 use tracing::warn;
 
@@ -19,15 +20,20 @@ pub struct SequencerClient {
 impl SequencerClient {
     /// Creates a new [`SequencerClient`].
     pub fn new(sequencer_endpoint: impl Into<String>) -> Self {
-        let sequencer_endpoint: String = sequencer_endpoint.into();
-        let client = Client::new_http(reqwest::Url::parse(&sequencer_endpoint).unwrap());
+        let client = reqwest::Client::builder().use_rustls_tls().build().unwrap();
         Self::with_client(sequencer_endpoint, client)
     }
 
     /// Creates a new [`SequencerClient`].
-    pub fn with_client(sequencer_endpoint: impl Into<String>, http_client: Client) -> Self {
-        let inner =
-            SequencerClientInner { sequencer_endpoint: sequencer_endpoint.into(), http_client };
+    pub fn with_client(sequencer_endpoint: impl Into<String>, client: reqwest::Client) -> Self {
+        let sequencer_endpoint: String = sequencer_endpoint.into();
+
+        let http_client =
+            Http::with_client(client, reqwest::Url::parse(&sequencer_endpoint).unwrap());
+        let is_local = http_client.guess_local();
+        let http_client = ClientBuilder::default().transport(http_client, is_local);
+
+        let inner = SequencerClientInner { sequencer_endpoint, http_client };
         Self { inner: Arc::new(inner) }
     }
 
@@ -95,15 +101,6 @@ struct SequencerClientInner {
     sequencer_endpoint: String,
     /// The HTTP client
     http_client: Client,
-}
-
-impl Default for SequencerClientInner {
-    fn default() -> Self {
-        Self {
-            sequencer_endpoint: String::new(),
-            http_client: Client::new_http(reqwest::Url::parse("http://localhost:8545").unwrap()),
-        }
-    }
 }
 
 #[cfg(test)]
