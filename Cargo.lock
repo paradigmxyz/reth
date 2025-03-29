@@ -3470,6 +3470,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "derive_more 2.0.1",
+ "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reth-chain-state",
  "reth-chainspec",

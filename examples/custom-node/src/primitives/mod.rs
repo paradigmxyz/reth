@@ -6,6 +6,8 @@ pub mod block;
 pub use block::*;
 pub mod tx;
 pub use tx::*;
+pub mod extended_op_tx_envelope;
+pub use extended_op_tx_envelope::*;
 
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::NodePrimitives;
