@@ -964,7 +964,7 @@ mod tests {
             + Clone
             + 'static,
     {
-        let executor = WorkloadExecutor::with_num_cpu_threads(2);
+        let executor = WorkloadExecutor::with_num_cpu_threads(2, None);
         let config = create_state_root_config(factory, TrieInput::default());
         let task_ctx = ProofTaskCtx::new(
             config.nodes_sorted.clone(),
