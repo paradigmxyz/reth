@@ -3,7 +3,7 @@
 /// Helper trait that allows attaching a [`TransactionInterop`].
 pub trait MaybeInteropTransaction {
     /// Attach a [`TransactionInterop`].
-    fn set_interop(&self, interop: TransactionInterop);
+    fn set_interop(&self, deadline: TransactionInterop);
 
     /// Get attached [`TransactionInterop`] if any.
     fn interop(&self) -> Option<TransactionInterop>;
@@ -19,22 +19,15 @@ pub trait MaybeInteropTransaction {
 }
 
 /// Helper to keep track of cross transaction interop validity
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub struct TransactionInterop {
-    /// Unix timestamp until which tx if considered valid by supervisor.
-    ///
-    /// If None - tx is not validated, it should be automatically revalidated by interop tracker.
-    pub timeout: u64,
+pub type TransactionInterop = u64;
+/// Checks if provided timestamp fits into tx validation window
+#[inline]
+pub fn is_valid(timeout: TransactionInterop, timestamp: u64) -> bool {
+    timestamp < timeout
 }
 
-impl TransactionInterop {
-    /// Checks if provided timestamp fits into tx validation window
-    pub fn is_valid(&self, timestamp: u64) -> bool {
-        timestamp < self.timeout
-    }
-
-    /// Checks if transaction needs revalidation based on offset
-    pub fn is_stale(&self, timestamp: u64, offset: u64) -> bool {
-        timestamp + offset > self.timeout
-    }
+/// Checks if transaction needs revalidation based on offset
+#[inline]
+pub fn is_stale(timeout: TransactionInterop, timestamp: u64, offset: u64) -> bool {
+    timestamp + offset > timeout
 }

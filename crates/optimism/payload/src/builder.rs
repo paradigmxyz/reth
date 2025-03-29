@@ -25,7 +25,10 @@ use reth_execution_types::ExecutionOutcome;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::transaction::signed::OpTransaction;
-use reth_optimism_txpool::{interop::MaybeInteropTransaction, OpPooledTx};
+use reth_optimism_txpool::{
+    interop::{is_valid, MaybeInteropTransaction},
+    OpPooledTx,
+};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
@@ -644,7 +647,7 @@ where
             // We skip invalid cross chain txs, they would be removed on the next block update in
             // the maintenance job
             if let Some(interop) = interop {
-                if !interop.is_valid(self.config.attributes.timestamp()) {
+                if !is_valid(interop, self.config.attributes.timestamp()) {
                     best_txs.mark_invalid(tx.signer(), tx.nonce());
                     continue
                 }
