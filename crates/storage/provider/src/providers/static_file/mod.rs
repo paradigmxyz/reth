@@ -64,9 +64,9 @@ mod tests {
     use reth_db_api::{
         transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers,
     };
-    use reth_primitives::{
-        static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
-        EthPrimitives, Receipt, TransactionSigned,
+    use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
+    use reth_static_file_types::{
+        find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
     use reth_storage_api::{ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};
