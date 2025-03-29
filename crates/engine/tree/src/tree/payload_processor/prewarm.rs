@@ -97,6 +97,20 @@ where
         }
     }
 
+    /// Spawns all pending transactions as blocking tasks by first chunking them.
+    fn spawn_all(&self) {
+        let chunk_size = (self.pending.len() / self.max_concurrency).max(1);
+        let pending_vec = self.pending.iter().cloned().collect::<Vec<_>>();
+        let pending_chunks = pending_vec.as_slice().chunks(chunk_size).map(|chunk| chunk.to_vec());
+        for chunk in pending_chunks {
+            let sender = self.actions_tx.clone();
+            let ctx = self.ctx.clone();
+            self.executor.spawn_blocking(move || {
+                let _ = ctx.transact_batch(&chunk, sender);
+            });
+        }
+    }
+
     /// Spawns the given transaction as a blocking task.
     fn spawn_transaction(&self, tx: Recovered<N::SignedTx>) {
         let ctx = self.ctx.clone();
@@ -161,7 +175,7 @@ where
         self.ctx.metrics.transactions_histogram.record(self.pending.len() as f64);
 
         // spawn execution tasks.
-        self.spawn_next();
+        self.spawn_all();
 
         while let Ok(event) = self.actions_rx.recv() {
             match event {
@@ -171,7 +185,6 @@ where
                 }
                 PrewarmTaskEvent::Outcome { proof_targets } => {
                     // completed a transaction, frees up one slot
-                    self.in_progress -= 1;
                     self.send_multi_proof_targets(proof_targets);
                 }
                 PrewarmTaskEvent::Terminate { block_output } => {
@@ -183,9 +196,6 @@ where
                     break
                 }
             }
-
-            // schedule followup transactions
-            self.spawn_next();
         }
     }
 }
@@ -251,6 +261,48 @@ where
         let evm = evm_config.evm_with_env(state_provider, evm_env);
 
         Some((evm, evm_config, metrics))
+    }
+
+    /// Transacts the vec of transactions and returns the state outcome.
+    ///
+    /// Returns `None` if executing the transactions failed to a non Revert error.
+    /// Returns the touched+modified state of the transaction.
+    ///
+    /// Note: Since here are no ordering guarantees this won't the state the txs produce when
+    /// executed sequentially.
+    fn transact_batch(
+        self,
+        txs: &[Recovered<N::SignedTx>],
+        sender: Sender<PrewarmTaskEvent>,
+    ) -> Option<()> {
+        let (mut evm, evm_config, metrics) = self.evm_for_ctx()?;
+
+        for tx in txs {
+            // create the tx env
+            let tx_env = evm_config.tx_env(tx);
+            let start = Instant::now();
+            let res = match evm.transact(tx_env) {
+                Ok(res) => res,
+                Err(err) => {
+                    trace!(
+                        target: "engine::tree",
+                        %err,
+                        tx_hash=%tx.tx_hash(),
+                        sender=%tx.signer(),
+                        "Error when executing prewarm transaction",
+                    );
+                    return None
+                }
+            };
+            metrics.execution_duration.record(start.elapsed());
+
+            let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+            metrics.prefetch_storage_targets.record(storage_targets as f64);
+
+            let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
+        }
+
+        Some(())
     }
 
     /// Transacts the transaction and returns the state outcome.
