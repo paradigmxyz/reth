@@ -35,7 +35,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
     // make the node advance
-    let (payload, _) = node.advance_block().await?;
+    let payload = node.advance_block().await?;
 
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;
@@ -83,7 +83,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
 
     // make the node advance
-    let (payload, _) = node.advance_block().await?;
+    let payload = node.advance_block().await?;
 
     let block_hash = payload.block().hash();
     let block_number = payload.block().number;

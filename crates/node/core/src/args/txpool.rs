@@ -1,7 +1,7 @@
 //! Transaction pool arguments
 
 use crate::cli::config::RethTransactionPoolConfig;
-use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
 use reth_cli_util::parse_duration_from_secs_or_ms;
@@ -49,6 +49,10 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.blobpool-max-size", alias = "txpool.blobpool_max_size", default_value_t = TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT)]
     pub blobpool_max_size: usize,
 
+    /// Max number of entries for the in memory cache of the blob store.
+    #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size")]
+    pub blob_cache_size: Option<u32>,
+
     /// Max number of executable transaction slots guaranteed per account
     #[arg(long = "txpool.max-account-slots", alias = "txpool.max_account_slots", default_value_t = TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER)]
     pub max_account_slots: usize,
@@ -62,7 +66,7 @@ pub struct TxPoolArgs {
     pub minimal_protocol_basefee: u64,
 
     /// The default enforced gas limit for transactions entering the pool
-    #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT)]
+    #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT_30M)]
     pub enforced_gas_limit: u64,
 
     /// Price bump percentage to replace an already existing blob transaction
@@ -119,10 +123,11 @@ impl Default for TxPoolArgs {
             queued_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
             blobpool_max_count: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
             blobpool_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+            blob_cache_size: None,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            enforced_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            enforced_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
             max_cached_entries: DEFAULT_MAX_CACHED_BLOBS,
@@ -163,6 +168,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 max_txs: self.blobpool_max_count,
                 max_size: self.blobpool_max_size.saturating_mul(1024 * 1024),
             },
+            blob_cache_size: self.blob_cache_size,
             max_account_slots: self.max_account_slots,
             price_bumps: PriceBumpConfig {
                 default_price_bump: self.price_bump,

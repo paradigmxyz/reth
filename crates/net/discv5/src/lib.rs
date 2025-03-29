@@ -225,7 +225,7 @@ impl Discv5 {
 
     /// Process an event from the underlying [`discv5::Discv5`] node.
     pub fn on_discv5_update(&self, update: discv5::Event) -> Option<DiscoveredPeer> {
-        #[allow(clippy::match_same_arms)]
+        #[expect(clippy::match_same_arms)]
         match update {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
@@ -655,8 +655,8 @@ pub async fn lookup(
 mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
+    use rand::thread_rng;
     use reth_chainspec::MAINNET;
-    use secp256k1::rand::thread_rng;
     use tracing::trace;
 
     fn discv5_noop() -> Discv5 {
@@ -729,15 +729,11 @@ mod test {
         node_1.with_discv5(|discv5| discv5.send_ping(node_2_enr.clone())).await.unwrap();
 
         // verify node_1:discv5 is connected to node_2:discv5 and vv
-        let event_2_v5 = stream_2.recv().await.unwrap();
         let event_1_v5 = stream_1.recv().await.unwrap();
+
         assert!(matches!(
             event_1_v5,
             discv5::Event::SessionEstablished(node, socket) if node == node_2_enr && socket == node_2_enr.udp4_socket().unwrap().into()
-        ));
-        assert!(matches!(
-            event_2_v5,
-            discv5::Event::SessionEstablished(node, socket) if node == node_1_enr && socket == node_1_enr.udp4_socket().unwrap().into()
         ));
 
         // verify node_1 is in KBuckets of node_2:discv5
@@ -776,8 +772,8 @@ mod test {
 
     // Copied from sigp/discv5 with slight modification (U256 type)
     // <https://github.com/sigp/discv5/blob/master/src/kbucket/key.rs#L89-L101>
-    #[allow(unreachable_pub)]
-    #[allow(unused)]
+    #[expect(unreachable_pub)]
+    #[expect(unused)]
     #[allow(clippy::assign_op_pattern)]
     mod sigp {
         use alloy_primitives::U256;

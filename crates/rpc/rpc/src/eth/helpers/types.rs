@@ -1,11 +1,12 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::{Transaction as _, TxEip4844Variant, TxEnvelope};
+use alloy_consensus::{Transaction as _, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
-use reth_primitives::{Recovered, TransactionSigned};
+use reth_ethereum_primitives::TransactionSigned;
+use reth_primitives_traits::Recovered;
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
@@ -29,7 +30,7 @@ impl EthApiTypes for EthereumEthApiTypes {
 #[non_exhaustive]
 pub struct EthTxBuilder;
 
-impl TransactionCompat for EthTxBuilder
+impl TransactionCompat<TransactionSigned> for EthTxBuilder
 where
     Self: Send + Sync,
 {
@@ -42,8 +43,7 @@ where
         tx: Recovered<TransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
-        let (tx, from) = tx.into_parts();
-        let inner: TxEnvelope = tx.into();
+        let tx = tx.convert::<TxEnvelope>();
 
         let TransactionInfo {
             block_hash, block_number, index: transaction_index, base_fee, ..
@@ -51,16 +51,15 @@ where
 
         let effective_gas_price = base_fee
             .map(|base_fee| {
-                inner.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
+                tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
             })
-            .unwrap_or_else(|| inner.max_fee_per_gas());
+            .unwrap_or_else(|| tx.max_fee_per_gas());
 
         Ok(Transaction {
-            inner,
+            inner: tx,
             block_hash,
             block_number,
             transaction_index,
-            from,
             effective_gas_price: Some(effective_gas_price),
         })
     }
@@ -79,16 +78,7 @@ where
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = match &mut tx.inner {
-            TxEnvelope::Eip1559(tx) => &mut tx.tx_mut().input,
-            TxEnvelope::Eip2930(tx) => &mut tx.tx_mut().input,
-            TxEnvelope::Legacy(tx) => &mut tx.tx_mut().input,
-            TxEnvelope::Eip4844(tx) => match tx.tx_mut() {
-                TxEip4844Variant::TxEip4844(tx) => &mut tx.input,
-                TxEip4844Variant::TxEip4844WithSidecar(tx) => &mut tx.tx.input,
-            },
-            TxEnvelope::Eip7702(tx) => &mut tx.tx_mut().input,
-        };
+        let input = tx.inner.inner_mut().input_mut();
         *input = input.slice(..4);
     }
 }

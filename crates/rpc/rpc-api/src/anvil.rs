@@ -102,7 +102,7 @@ pub trait AnvilApi {
     #[method(name = "dumpState")]
     async fn anvil_dump_state(&self) -> RpcResult<Bytes>;
 
-    /// Append chain state buffer to current chain.Will overwrite any conflicting addresses or
+    /// Append chain state buffer to current chain. Will overwrite any conflicting addresses or
     /// storage.
     #[method(name = "loadState")]
     async fn anvil_load_state(&self, state: Bytes) -> RpcResult<bool>;

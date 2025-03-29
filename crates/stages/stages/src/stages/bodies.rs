@@ -1,9 +1,11 @@
 use super::missing_static_data_error;
 use futures_util::TryStreamExt;
-use reth_db::{tables, transaction::DbTx};
-use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
+use reth_db_api::{
+    cursor::DbCursorRO,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
-use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
     StaticFileProviderFactory, StatsReader, StorageLocation,
@@ -12,6 +14,7 @@ use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     cmp::Ordering,
@@ -36,19 +39,19 @@ use tracing::*;
 ///
 /// The bodies are processed and data is inserted into these tables:
 ///
-/// - [`BlockOmmers`][reth_db::tables::BlockOmmers]
-/// - [`BlockBodies`][reth_db::tables::BlockBodyIndices]
-/// - [`Transactions`][reth_db::tables::Transactions]
-/// - [`TransactionBlocks`][reth_db::tables::TransactionBlocks]
+/// - [`BlockOmmers`][reth_db_api::tables::BlockOmmers]
+/// - [`BlockBodies`][reth_db_api::tables::BlockBodyIndices]
+/// - [`Transactions`][reth_db_api::tables::Transactions]
+/// - [`TransactionBlocks`][reth_db_api::tables::TransactionBlocks]
 ///
 /// # Genesis
 ///
 /// This stage expects that the genesis has been inserted into the appropriate tables:
 ///
 /// - The header tables (see [`HeaderStage`][crate::stages::HeaderStage])
-/// - The [`BlockOmmers`][reth_db::tables::BlockOmmers] table
-/// - The [`BlockBodies`][reth_db::tables::BlockBodyIndices] table
-/// - The [`Transactions`][reth_db::tables::Transactions] table
+/// - The [`BlockOmmers`][reth_db_api::tables::BlockOmmers] table
+/// - The [`BlockBodies`][reth_db_api::tables::BlockBodyIndices] table
+/// - The [`Transactions`][reth_db_api::tables::Transactions] table
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
@@ -488,6 +491,7 @@ mod tests {
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             transaction::{DbTx, DbTxMut},
         };
+        use reth_ethereum_primitives::{Block, BlockBody};
         use reth_network_p2p::{
             bodies::{
                 downloader::{BodyDownloader, BodyDownloaderResult},
@@ -495,12 +499,13 @@ mod tests {
             },
             error::DownloadResult,
         };
-        use reth_primitives::{BlockBody, SealedBlock, SealedHeader, StaticFileSegment};
+        use reth_primitives_traits::{SealedBlock, SealedHeader};
         use reth_provider::{
             providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, HeaderProvider,
             ProviderFactory, StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
+        use reth_static_file_types::StaticFileSegment;
         use reth_testing_utils::generators::{
             self, random_block_range, random_signed_tx, BlockRangeParams,
         };
@@ -515,7 +520,7 @@ mod tests {
         pub(crate) const GENESIS_HASH: B256 = B256::ZERO;
 
         /// A helper to create a collection of block bodies keyed by their hash.
-        pub(crate) fn body_by_hash(block: &SealedBlock) -> (B256, BlockBody) {
+        pub(crate) fn body_by_hash(block: &SealedBlock<Block>) -> (B256, BlockBody) {
             (block.hash(), block.body().clone())
         }
 
@@ -559,7 +564,7 @@ mod tests {
         }
 
         impl ExecuteStageTestRunner for BodyTestRunner {
-            type Seed = Vec<SealedBlock>;
+            type Seed = Vec<SealedBlock<Block>>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
                 let start = input.checkpoint().block_number;
@@ -759,7 +764,7 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            type Block = reth_primitives::Block;
+            type Block = Block;
 
             fn set_download_range(
                 &mut self,
@@ -781,7 +786,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = BodyDownloaderResult<reth_primitives::Block>;
+            type Item = BodyDownloaderResult<Block>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 

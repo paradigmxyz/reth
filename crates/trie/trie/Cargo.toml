@@ -20,7 +20,7 @@ reth-storage-errors.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie-common = { workspace = true, features = ["rayon"] }
 
-revm.workspace = true
+revm-database.workspace = true
 
 # alloy
 alloy-eips.workspace = true
@@ -41,22 +41,28 @@ reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 # `test-utils` feature
-triehash = { version = "0.8", optional = true }
+triehash = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
-reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-ethereum-primitives = { workspace = true, features = ["arbitrary", "std"] }
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
+# revm
+revm-state.workspace = true
+
 # trie
-triehash = "0.8"
+triehash.workspace = true
 
 # misc
-proptest.workspace = true
-proptest-arbitrary-interop.workspace = true
-serde_json.workspace = true
 criterion.workspace = true
+parking_lot.workspace = true
+pretty_assertions.workspace = true
+proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
@@ -65,14 +71,21 @@ serde = [
     "alloy-consensus/serde",
     "alloy-trie/serde",
     "alloy-eips/serde",
-    "revm/serde",
     "reth-trie-common/serde",
     "reth-primitives-traits/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-trie/serde",
+    "alloy-eips/serde",
+    "reth-trie-common/serde",
+    "revm-database/serde",
     "reth-stages-types/serde",
+    "revm-state/serde",
+    "parking_lot/serde",
+    "reth-ethereum-primitives/serde",
 ]
 test-utils = [
     "triehash",
-    "revm/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",

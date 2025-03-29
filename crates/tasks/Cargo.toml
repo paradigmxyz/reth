@@ -15,7 +15,7 @@ workspace = true
 # async
 tokio = { workspace = true, features = ["sync", "rt"] }
 tracing-futures.workspace = true
-futures-util.workspace = true
+futures-util = { workspace = true, features = ["std"] }
 
 # metrics
 reth-metrics.workspace = true

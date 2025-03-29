@@ -1,12 +1,13 @@
-#![allow(unreachable_pub)]
+#![expect(unreachable_pub)]
 use alloy_primitives::{Address, B256, U256};
 use itertools::concat;
-use reth_db::{tables, test_utils::TempDatabase, Database, DatabaseEnv};
+use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO,
+    tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{Account, SealedBlock, SealedHeader};
+use reth_primitives_traits::{Account, SealedBlock, SealedHeader};
 use reth_provider::{
     test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory, TrieWriter,
 };
@@ -89,7 +90,7 @@ where
 // Returns the path to the database file.
 pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
     // This is way too slow.
-    #[allow(unexpected_cfgs)]
+    #[expect(unexpected_cfgs)]
     if cfg!(codspeed) {
         std::process::exit(0);
     }

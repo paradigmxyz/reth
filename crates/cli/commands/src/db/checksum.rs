@@ -5,8 +5,11 @@ use crate::{
 use ahash::RandomState;
 use clap::Parser;
 use reth_chainspec::EthereumHardforks;
-use reth_db::{DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables};
-use reth_db_api::{cursor::DbCursorRO, table::Table, transaction::DbTx};
+use reth_db::DatabaseEnv;
+use reth_db_api::{
+    cursor::DbCursorRO, table::Table, transaction::DbTx, RawKey, RawTable, RawValue, TableViewer,
+    Tables,
+};
 use reth_db_common::DbTool;
 use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_provider::{providers::ProviderNodeTypes, DBProvider};

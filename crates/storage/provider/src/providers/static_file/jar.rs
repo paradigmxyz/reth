@@ -10,17 +10,16 @@ use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
-use reth_db::{
+use reth_db::static_file::{
+    BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,
+    StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalsMask,
+};
+use reth_db_api::{
     models::StoredBlockBodyIndices,
-    static_file::{
-        BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,
-        StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalsMask,
-    },
     table::{Decompress, Value},
 };
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
-use reth_primitives::SealedHeader;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{SealedHeader, SignedTransaction};
 use reth_storage_api::{BlockBodyIndicesProvider, OmmersProvider, WithdrawalsProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -28,7 +27,6 @@ use std::{
     ops::{Deref, RangeBounds, RangeInclusive},
     sync::Arc,
 };
-
 /// Provider over a specific `NippyJar` and range.
 #[derive(Debug)]
 pub struct StaticFileJarProvider<'a, N> {

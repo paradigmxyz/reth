@@ -7,6 +7,8 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
+use reth_codecs_derive::add_arbitrary_tests;
 
 /// Message IDs for the snap sync protocol
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +34,9 @@ pub enum SnapMessageId {
 
 /// Request for a range of accounts from the state trie.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getaccountrange-0x00
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetAccountRangeMessage {
     /// Request ID to match up responses with
     pub request_id: u64,
@@ -47,7 +51,9 @@ pub struct GetAccountRangeMessage {
 }
 
 /// Account data in the response.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct AccountData {
     /// Hash of the account address (trie path)
     pub hash: B256,
@@ -57,7 +63,9 @@ pub struct AccountData {
 
 /// Response containing a number of consecutive accounts and the Merkle proofs for the entire range.
 // http://github.com/ethereum/devp2p/blob/master/caps/snap.md#accountrange-0x01
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct AccountRangeMessage {
     /// ID of the request this is a response for
     pub request_id: u64,
@@ -69,7 +77,9 @@ pub struct AccountRangeMessage {
 
 /// Request for the storage slots of multiple accounts' storage tries.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getstorageranges-0x02
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetStorageRangesMessage {
     /// Request ID to match up responses with
     pub request_id: u64,
@@ -86,7 +96,9 @@ pub struct GetStorageRangesMessage {
 }
 
 /// Storage slot data in the response.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct StorageData {
     /// Hash of the storage slot key (trie path)
     pub hash: B256,
@@ -98,7 +110,9 @@ pub struct StorageData {
 /// and optionally the merkle proofs for the last range (boundary proofs) if it only partially
 /// covers the storage trie.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#storageranges-0x03
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct StorageRangesMessage {
     /// ID of the request this is a response for
     pub request_id: u64,
@@ -110,7 +124,9 @@ pub struct StorageRangesMessage {
 
 /// Request to get a number of requested contract codes.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getbytecodes-0x04
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetByteCodesMessage {
     /// Request ID to match up responses with
     pub request_id: u64,
@@ -122,7 +138,9 @@ pub struct GetByteCodesMessage {
 
 /// Response containing a number of requested contract codes.
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#bytecodes-0x05
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct ByteCodesMessage {
     /// ID of the request this is a response for
     pub request_id: u64,
@@ -131,7 +149,9 @@ pub struct ByteCodesMessage {
 }
 
 /// Path in the trie for an account and its storage
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct TriePath {
     /// Path in the account trie
     pub account_path: Bytes,
@@ -141,7 +161,9 @@ pub struct TriePath {
 
 /// Request a number of state (either account or storage) Merkle trie nodes by path
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#gettrienodes-0x06
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct GetTrieNodesMessage {
     /// Request ID to match up responses with
     pub request_id: u64,
@@ -155,7 +177,9 @@ pub struct GetTrieNodesMessage {
 
 /// Response containing a number of requested state trie nodes
 // https://github.com/ethereum/devp2p/blob/master/caps/snap.md#trienodes-0x07
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
 pub struct TrieNodesMessage {
     /// ID of the request this is a response for
     pub request_id: u64,

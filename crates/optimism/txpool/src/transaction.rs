@@ -1,3 +1,7 @@
+use crate::{
+    conditional::MaybeConditionalTransaction,
+    interop::{MaybeInteropTransaction, TransactionInterop},
+};
 use alloy_consensus::{
     transaction::Recovered, BlobTransactionSidecar, BlobTransactionValidationError, Typed2718,
 };
@@ -6,6 +10,7 @@ use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use c_kzg::KzgSettings;
 use core::fmt::Debug;
+use parking_lot::RwLock;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_transaction_pool::{
@@ -32,6 +37,12 @@ pub struct OpPooledTransaction<
 
     /// Optional conditional attached to this transaction.
     conditional: Option<Box<TransactionConditional>>,
+
+    /// Optional interop validation attached to this transaction.
+    interop: Arc<RwLock<Option<TransactionInterop>>>,
+
+    /// Cached EIP-2718 encoded bytes of the transaction, lazily computed.
+    encoded_2718: OnceLock<Bytes>,
 }
 
 impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
@@ -41,17 +52,25 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
             inner: EthPooledTransaction::new(transaction, encoded_length),
             estimated_tx_compressed_size: Default::default(),
             conditional: None,
+            interop: Arc::new(RwLock::new(None)),
             _pd: core::marker::PhantomData,
+            encoded_2718: Default::default(),
         }
     }
 
     /// Returns the estimated compressed size of a transaction in bytes scaled by 1e6.
     /// This value is computed based on the following formula:
     /// `max(minTransactionSize, intercept + fastlzCoef*fastlzSize)`
+    /// Uses cached EIP-2718 encoded bytes to avoid recomputing the encoding for each estimation.
     pub fn estimated_compressed_size(&self) -> u64 {
-        *self.estimated_tx_compressed_size.get_or_init(|| {
-            op_alloy_flz::tx_estimated_size_fjord(&self.inner.transaction().encoded_2718())
-        })
+        *self
+            .estimated_tx_compressed_size
+            .get_or_init(|| op_alloy_flz::tx_estimated_size_fjord(self.encoded_2718()))
+    }
+
+    /// Returns lazily computed EIP-2718 encoded bytes of the transaction.
+    pub fn encoded_2718(&self) -> &Bytes {
+        self.encoded_2718.get_or_init(|| self.inner.transaction().encoded_2718().into())
     }
 
     /// Conditional setter.
@@ -59,10 +78,25 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
         self.conditional = Some(Box::new(conditional));
         self
     }
+}
 
-    /// Conditional getter.
-    pub fn conditional(&self) -> Option<&TransactionConditional> {
+impl<Cons, Pooled> MaybeConditionalTransaction for OpPooledTransaction<Cons, Pooled> {
+    fn set_conditional(&mut self, conditional: TransactionConditional) {
+        self.conditional = Some(Box::new(conditional))
+    }
+
+    fn conditional(&self) -> Option<&TransactionConditional> {
         self.conditional.as_deref()
+    }
+}
+
+impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled> {
+    fn set_interop(&self, interop: TransactionInterop) {
+        *self.interop.write() = Some(interop);
+    }
+
+    fn interop(&self) -> Option<TransactionInterop> {
+        self.interop.read().clone()
     }
 }
 
@@ -85,8 +119,7 @@ where
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
         let encoded_len = tx.encode_2718_len();
-        let tx = tx.map_transaction(|tx| tx.into());
-        Self::new(tx, encoded_len)
+        Self::new(tx.convert(), encoded_len)
     }
 
     fn hash(&self) -> &TxHash {
@@ -229,6 +262,17 @@ where
     }
 }
 
+/// Helper trait to provide payload builder with access to conditionals and encoded bytes of
+/// transaction.
+pub trait OpPooledTx:
+    MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction
+{
+}
+impl<T> OpPooledTx for T where
+    T: MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction
+{
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{OpPooledTransaction, OpTransactionValidator};
@@ -243,8 +287,8 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, TransactionOrigin,
         TransactionValidationOutcome,
     };
-    #[test]
-    fn validate_optimism_transaction() {
+    #[tokio::test]
+    async fn validate_optimism_transaction() {
         let client = MockEthProvider::default().with_chain_spec(OP_MAINNET.clone());
         let validator = EthTransactionValidatorBuilder::new(client)
             .no_shanghai()
@@ -269,7 +313,7 @@ mod tests {
         let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx: OpPooledTransaction = OpPooledTransaction::new(signed_recovered, len);
-        let outcome = validator.validate_one(origin, pooled_tx);
+        let outcome = validator.validate_one(origin, pooled_tx).await;
 
         let err = match outcome {
             TransactionValidationOutcome::Invalid(_, err) => err,

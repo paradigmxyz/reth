@@ -13,14 +13,12 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-db.workspace = true
-reth-engine-local.workspace = true
-reth-primitives.workspace = true
+reth-db = { workspace = true, features = ["op"] }
+reth-engine-local = { workspace = true, features = ["op"] }
 reth-primitives-traits.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-util.workspace = true
 reth-payload-validator.workspace = true
-reth-basic-payload-builder.workspace = true
 reth-consensus.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true
@@ -32,9 +30,13 @@ reth-evm.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-trie-db.workspace = true
 reth-rpc-server-types.workspace = true
-reth-rpc-types-compat.workspace = true
+reth-rpc-eth-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-tasks = { workspace = true, optional = true }
+reth-trie-common.workspace = true
+reth-node-core.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-rpc-api.workspace = true
 
 # op-reth
 reth-optimism-payload-builder.workspace = true
@@ -42,29 +44,27 @@ reth-optimism-evm.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-txpool.workspace = true
 reth-optimism-chainspec.workspace = true
-reth-optimism-consensus.workspace = true
+reth-optimism-consensus = { workspace = true, features = ["std"] }
 reth-optimism-forks.workspace = true
-reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 
 # revm with required optimism features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
+op-revm.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
-op-alloy-flz.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
 
 # misc
 clap.workspace = true
-derive_more.workspace = true
 serde.workspace = true
 eyre.workspace = true
-parking_lot.workspace = true
 
 # rpc
 serde_json.workspace = true
@@ -85,28 +85,13 @@ reth-tasks.workspace = true
 
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
-alloy-signer-local.workspace = true
 alloy-network.workspace = true
 alloy-consensus.workspace = true
 futures.workspace = true
 
 [features]
 default = ["reth-codec"]
-optimism = [
-    "reth-optimism-evm/optimism",
-    "reth-optimism-payload-builder/optimism",
-    "revm/optimism",
-    "reth-optimism-rpc/optimism",
-    "reth-engine-local/op",
-    "reth-optimism-consensus/optimism",
-    "reth-db/optimism",
-    "reth-optimism-node/optimism",
-    "reth-node-core/optimism",
-    "reth-optimism-primitives/optimism",
-    "reth-optimism-txpool/optimism",
-]
 asm-keccak = [
-    "reth-primitives/asm-keccak",
     "alloy-primitives/asm-keccak",
     "revm/asm-keccak",
     "reth-optimism-node/asm-keccak",
@@ -126,18 +111,16 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-network/test-utils",
     "reth-payload-builder/test-utils",
-    "reth-primitives/test-utils",
     "reth-revm/test-utils",
     "reth-db/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
     "reth-trie-db/test-utils",
-    "revm/test-utils",
     "reth-optimism-node/test-utils",
     "reth-optimism-primitives/arbitrary",
     "reth-primitives-traits/test-utils",
+    "reth-trie-common/test-utils",
 ]
 reth-codec = [
-    "reth-primitives/reth-codec",
     "reth-optimism-primitives/reth-codec",
 ]

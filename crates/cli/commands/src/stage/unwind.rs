@@ -115,9 +115,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let builder = if self.offline {
             Pipeline::<N>::builder().add_stages(
-                OfflineStages::new(executor, config.stages, prune_modes.clone())
-                    .builder()
-                    .disable(reth_stages::StageId::SenderRecovery),
+                OfflineStages::new(
+                    executor,
+                    NoopConsensus::arc(),
+                    config.stages,
+                    prune_modes.clone(),
+                )
+                .builder()
+                .disable(reth_stages::StageId::SenderRecovery),
             )
         } else {
             Pipeline::<N>::builder().with_tip_sender(tip_tx).add_stages(
@@ -133,6 +138,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 )
                 .set(ExecutionStage::new(
                     executor,
+                    Arc::new(NoopConsensus::default()),
                     ExecutionStageThresholds {
                         max_blocks: None,
                         max_changes: None,

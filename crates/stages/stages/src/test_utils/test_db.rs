@@ -1,7 +1,6 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::MAINNET;
 use reth_db::{
-    tables,
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
 };
@@ -11,17 +10,18 @@ use reth_db_api::{
     database::Database,
     models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::Table,
+    tables,
     transaction::{DbTx, DbTxMut},
     DatabaseError as DbError,
 };
-use reth_primitives::{
-    Account, EthPrimitives, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
-};
+use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
+use reth_primitives_traits::{Account, SealedBlock, SealedHeader, StorageEntry};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     test_utils::MockNodeTypesWithDB,
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use reth_testing_utils::generators::ChangeSet;
 use std::{collections::BTreeMap, fmt::Debug, path::Path};
@@ -220,7 +220,7 @@ impl TestStageDB {
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
     pub fn insert_blocks<'a, I>(&self, blocks: I, storage_kind: StorageKind) -> ProviderResult<()>
     where
-        I: IntoIterator<Item = &'a SealedBlock>,
+        I: IntoIterator<Item = &'a SealedBlock<Block>>,
     {
         let provider = self.factory.static_file_provider();
 
@@ -478,7 +478,7 @@ pub enum StorageKind {
 }
 
 impl StorageKind {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const fn is_database(&self) -> bool {
         matches!(self, Self::Database(_))
     }

@@ -23,6 +23,7 @@ reth-tasks.workspace = true
 reth-engine-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
+reth-rpc-server-types.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -53,5 +54,6 @@ reth-primitives-traits.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-rlp.workspace = true
+reth-node-ethereum.workspace = true
 
 assert_matches.workspace = true

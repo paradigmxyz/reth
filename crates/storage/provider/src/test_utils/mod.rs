@@ -9,8 +9,9 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_errors::ProviderResult;
+use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
-use reth_primitives::{Account, StorageEntry};
+use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
@@ -25,11 +26,12 @@ pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
 
 /// Mock [`reth_node_types::NodeTypes`] for testing.
 pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
-    reth_primitives::EthPrimitives,
+    reth_ethereum_primitives::EthPrimitives,
     reth_ethereum_engine_primitives::EthEngineTypes,
     reth_chainspec::ChainSpec,
     reth_trie_db::MerklePatriciaTrie,
     crate::EthStorage,
+    EthEngineTypes,
 >;
 
 /// Mock [`reth_node_types::NodeTypesWithDB`] for testing.

@@ -19,11 +19,13 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams,
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip4844::env_settings::EnvKzgSettings,
+    eip7840::BlobParams,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_primitives::{InvalidTransactionError, SealedBlock};
-use reth_primitives_traits::{Block, GotExpected};
+use reth_primitives_traits::{
+    transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
+};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -36,6 +38,7 @@ use std::{
 use tokio::sync::Mutex;
 
 /// Validator for Ethereum transactions.
+/// It is a [`TransactionValidator`] implementation that validates ethereum transaction.
 #[derive(Debug, Clone)]
 pub struct EthTransactionValidator<Client, T> {
     /// The type that performs the actual validation.
@@ -71,6 +74,21 @@ where
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one(origin, transaction)
+    }
+
+    /// Validates a single transaction with the provided state provider.
+    ///
+    /// This allows reusing the same provider across multiple transaction validations,
+    /// which can improve performance when validating many transactions.
+    ///
+    /// If `state` is `None`, a new state provider will be created.
+    pub fn validate_one_with_state(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: &mut Option<Box<dyn StateProvider>>,
+    ) -> TransactionValidationOutcome<Tx> {
+        self.inner.validate_one_with_provider(origin, transaction, state)
     }
 
     /// Validates all given transactions.
@@ -278,7 +296,7 @@ where
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
         if !self.local_transactions_config.is_local(origin, transaction.sender_ref()) &&
-            transaction.is_eip1559() &&
+            transaction.is_dynamic_fee() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
             return TransactionValidationOutcome::Invalid(
@@ -298,7 +316,7 @@ where
         }
 
         if transaction.is_eip7702() {
-            // Cancun fork is required for 7702 txs
+            // Prague fork is required for 7702 txs
             if !self.fork_tracker.is_prague_activated() {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
@@ -543,7 +561,7 @@ where
     }
 }
 
-/// A builder for [`TransactionValidationTaskExecutor`]
+/// A builder for [`EthTransactionValidator`] and [`TransactionValidationTaskExecutor`]
 #[derive(Debug)]
 pub struct EthTransactionValidatorBuilder<Client> {
     client: Client,
@@ -591,7 +609,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     ///  - EIP-4844
     pub fn new(client: Client) -> Self {
         Self {
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT.into(),
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
             client,
             minimum_priority_fee: None,
             additional_tasks: 1,
@@ -884,7 +902,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
     fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
-    use revm_primitives::SpecId;
+    use revm_primitives::hardfork::SpecId;
     let spec_id = if fork_tracker.is_prague_activated() {
         SpecId::PRAGUE
     } else if fork_tracker.is_shanghai_activated() {
@@ -897,8 +915,12 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         spec_id,
         transaction.input(),
         transaction.is_create(),
-        transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
-        transaction.authorization_list().map(|l| l.len()).unwrap_or(0) as u64,
+        transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
+        transaction
+            .access_list()
+            .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
+            .unwrap_or_default() as u64,
+        transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
     );
 
     let gas_limit = transaction.gas_limit();
@@ -919,7 +941,8 @@ mod tests {
     use alloy_consensus::Transaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, PooledTransaction};
+    use reth_ethereum_primitives::PooledTransaction;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

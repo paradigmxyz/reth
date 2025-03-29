@@ -81,7 +81,7 @@ mod impl_secp256k1 {
         msg: &[u8; 32],
     ) -> Result<Address, Error> {
         let sig =
-            RecoverableSignature::from_compact(&sig[0..64], RecoveryId::from_i32(sig[64] as i32)?)?;
+            RecoverableSignature::from_compact(&sig[0..64], RecoveryId::try_from(sig[64] as i32)?)?;
 
         let public = SECP256K1.recover_ecdsa(&Message::from_digest(*msg), &sig)?;
         Ok(public_key_to_address(public))
@@ -97,7 +97,7 @@ mod impl_secp256k1 {
         let signature = Signature::new(
             U256::try_from_be_slice(&data[..32]).expect("The slice has at most 32 bytes"),
             U256::try_from_be_slice(&data[32..64]).expect("The slice has at most 32 bytes"),
-            rec_id.to_i32() != 0,
+            i32::from(rec_id) != 0,
         );
         Ok(signature)
     }

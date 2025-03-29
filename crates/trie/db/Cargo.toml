@@ -15,9 +15,7 @@ workspace = true
 # reth
 reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
-reth-db.workspace = true
 reth-db-api.workspace = true
-reth-storage-errors.workspace = true
 reth-trie.workspace = true
 
 revm.workspace = true
@@ -37,7 +35,7 @@ reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 # `test-utils` feature
-triehash = { version = "0.8", optional = true }
+triehash = { workspace = true, optional = true }
 
 # `serde` feature
 serde = { workspace = true, optional = true }
@@ -53,9 +51,10 @@ reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 
 alloy-consensus.workspace = true
+revm-database.workspace = true
 
 # trie
-triehash = "0.8"
+triehash.workspace = true
 
 # misc
 proptest.workspace = true
@@ -73,12 +72,11 @@ serde = [
     "alloy-primitives/serde",
     "reth-trie/serde",
     "reth-trie-common/serde",
-    "reth-provider/serde",
     "reth-primitives-traits/serde",
+    "revm-database/serde",
 ]
 test-utils = [
     "triehash",
-    "revm/test-utils",
     "reth-trie-common/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-chainspec/test-utils",

@@ -1,22 +1,25 @@
 use crate::{
-    blinded::{BlindedProviderFactory, DefaultBlindedProviderFactory},
-    RevealedSparseTrie, SparseTrie,
+    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
+    metrics::SparseStateTrieMetrics,
+    RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloy_primitives::{
     hex,
-    map::{B256HashMap, HashSet},
+    map::{B256Map, HashMap, HashSet},
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
+use core::fmt;
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
+    proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, Nibbles, RlpNode, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    MultiProof, Nibbles, RlpNode, StorageMultiProof, TrieAccount, TrieMask, TrieNode,
+    EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{collections::VecDeque, fmt, iter::Peekable};
+use std::{collections::VecDeque, iter::Peekable};
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {
@@ -25,27 +28,31 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Sparse account trie.
     state: SparseTrie<F::AccountNodeProvider>,
     /// Sparse storage tries.
-    storages: B256HashMap<SparseTrie<F::StorageNodeProvider>>,
+    storages: B256Map<SparseTrie<F::StorageNodeProvider>>,
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// Collection of revealed storage trie paths, per account.
-    revealed_storage_paths: B256HashMap<HashSet<Nibbles>>,
+    revealed_storage_paths: B256Map<HashSet<Nibbles>>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
     account_rlp_buf: Vec<u8>,
+    /// Metrics for the sparse state trie.
+    metrics: SparseStateTrieMetrics,
 }
 
+#[cfg(test)]
 impl Default for SparseStateTrie {
     fn default() -> Self {
         Self {
-            provider_factory: Default::default(),
+            provider_factory: DefaultBlindedProviderFactory,
             state: Default::default(),
             storages: Default::default(),
             revealed_account_paths: Default::default(),
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            metrics: Default::default(),
         }
     }
 }
@@ -63,6 +70,7 @@ impl<P: BlindedProviderFactory> fmt::Debug for SparseStateTrie<P> {
     }
 }
 
+#[cfg(test)]
 impl SparseStateTrie {
     /// Create state trie from state trie.
     pub fn from_state(state: SparseTrie) -> Self {
@@ -81,6 +89,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             revealed_storage_paths: Default::default(),
             retain_updates: false,
             account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
+            metrics: Default::default(),
         }
     }
 
@@ -174,8 +183,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         let trie = self.state.reveal_root_with_provider(
             self.provider_factory.account_node_provider(),
             root_node,
-            None,
-            None,
+            TrieMasks::none(),
             self.retain_updates,
         )?;
 
@@ -185,7 +193,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 continue
             }
             let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(path.clone(), node, None, None)?;
+            trie.reveal_node(path.clone(), node, TrieMasks::none())?;
 
             // Track the revealed path.
             self.revealed_account_paths.insert(path);
@@ -219,8 +227,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
             self.provider_factory.storage_node_provider(account),
             root_node,
-            None,
-            None,
+            TrieMasks::none(),
             self.retain_updates,
         )?;
 
@@ -233,7 +240,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 continue
             }
             let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(path.clone(), node, None, None)?;
+            trie.reveal_node(path.clone(), node, TrieMasks::none())?;
 
             // Track the revealed path.
             revealed_nodes.insert(path);
@@ -245,7 +252,36 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Reveal unknown trie paths from multiproof.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_multiproof(&mut self, multiproof: MultiProof) -> SparseStateTrieResult<()> {
-        let account_subtree = multiproof.account_subtree.into_nodes_sorted();
+        let MultiProof {
+            account_subtree,
+            storages,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+        } = multiproof;
+
+        // first reveal the account proof nodes
+        self.reveal_account_multiproof(
+            account_subtree,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+        )?;
+
+        // then reveal storage proof nodes for each storage trie
+        for (account, storage_subtree) in storages {
+            self.reveal_storage_multiproof(account, storage_subtree)?;
+        }
+
+        Ok(())
+    }
+
+    /// Reveals an account multiproof.
+    pub fn reveal_account_multiproof(
+        &mut self,
+        account_subtree: ProofNodes,
+        branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+        branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    ) -> SparseStateTrieResult<()> {
+        let account_subtree = account_subtree.into_nodes_sorted();
         let mut account_nodes = account_subtree.into_iter().peekable();
 
         if let Some(root_node) = self.validate_root_node(&mut account_nodes)? {
@@ -253,72 +289,93 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             let trie = self.state.reveal_root_with_provider(
                 self.provider_factory.account_node_provider(),
                 root_node,
-                multiproof.branch_node_hash_masks.get(&Nibbles::default()).copied(),
-                multiproof.branch_node_tree_masks.get(&Nibbles::default()).copied(),
+                TrieMasks {
+                    hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
+                    tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
+                },
                 self.retain_updates,
             )?;
 
             // Reveal the remaining proof nodes.
             for (path, bytes) in account_nodes {
+                self.metrics.increment_total_account_nodes();
                 // If the node is already revealed, skip it.
                 if self.revealed_account_paths.contains(&path) {
+                    self.metrics.increment_skipped_account_nodes();
                     continue
                 }
                 let node = TrieNode::decode(&mut &bytes[..])?;
                 let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
                     (
-                        multiproof.branch_node_hash_masks.get(&path).copied(),
-                        multiproof.branch_node_tree_masks.get(&path).copied(),
+                        branch_node_hash_masks.get(&path).copied(),
+                        branch_node_tree_masks.get(&path).copied(),
                     )
                 } else {
                     (None, None)
                 };
 
                 trace!(target: "trie::sparse", ?path, ?node, ?hash_mask, ?tree_mask, "Revealing account node");
-                trie.reveal_node(path.clone(), node, tree_mask, hash_mask)?;
+                trie.reveal_node(path.clone(), node, TrieMasks { hash_mask, tree_mask })?;
 
                 // Track the revealed path.
                 self.revealed_account_paths.insert(path);
             }
         }
 
-        for (account, storage_subtree) in multiproof.storages {
-            let subtree = storage_subtree.subtree.into_nodes_sorted();
-            let mut nodes = subtree.into_iter().peekable();
+        Ok(())
+    }
 
-            if let Some(root_node) = self.validate_root_node(&mut nodes)? {
-                // Reveal root node if it wasn't already.
-                let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
-                    self.provider_factory.storage_node_provider(account),
-                    root_node,
-                    storage_subtree.branch_node_hash_masks.get(&Nibbles::default()).copied(),
-                    storage_subtree.branch_node_tree_masks.get(&Nibbles::default()).copied(),
-                    self.retain_updates,
-                )?;
-                let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
+    /// Reveals a storage multiproof for the given address.
+    pub fn reveal_storage_multiproof(
+        &mut self,
+        account: B256,
+        storage_subtree: StorageMultiProof,
+    ) -> SparseStateTrieResult<()> {
+        let subtree = storage_subtree.subtree.into_nodes_sorted();
+        let mut nodes = subtree.into_iter().peekable();
 
-                // Reveal the remaining proof nodes.
-                for (path, bytes) in nodes {
-                    // If the node is already revealed, skip it.
-                    if revealed_nodes.contains(&path) {
-                        continue
-                    }
-                    let node = TrieNode::decode(&mut &bytes[..])?;
-                    let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
-                        (
-                            storage_subtree.branch_node_hash_masks.get(&path).copied(),
-                            storage_subtree.branch_node_tree_masks.get(&path).copied(),
-                        )
-                    } else {
-                        (None, None)
-                    };
+        if let Some(root_node) = self.validate_root_node(&mut nodes)? {
+            // Reveal root node if it wasn't already.
+            let trie = self.storages.entry(account).or_default().reveal_root_with_provider(
+                self.provider_factory.storage_node_provider(account),
+                root_node,
+                TrieMasks {
+                    hash_mask: storage_subtree
+                        .branch_node_hash_masks
+                        .get(&Nibbles::default())
+                        .copied(),
+                    tree_mask: storage_subtree
+                        .branch_node_tree_masks
+                        .get(&Nibbles::default())
+                        .copied(),
+                },
+                self.retain_updates,
+            )?;
+            let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
-                    trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
-                    trie.reveal_node(path.clone(), node, tree_mask, hash_mask)?;
-
-                    // Track the revealed path.
-                    revealed_nodes.insert(path);
+            // Reveal the remaining proof nodes.
+            for (path, bytes) in nodes {
+                self.metrics.increment_total_storage_nodes();
+                // If the node is already revealed, skip it.
+                if revealed_nodes.contains(&path) {
+                    self.metrics.increment_skipped_storage_nodes();
+                    continue
                 }
+                let node = TrieNode::decode(&mut &bytes[..])?;
+                let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
+                    (
+                        storage_subtree.branch_node_hash_masks.get(&path).copied(),
+                        storage_subtree.branch_node_tree_masks.get(&path).copied(),
+                    )
+                } else {
+                    (None, None)
+                };
+
+                trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
+                trie.reveal_node(path.clone(), node, TrieMasks { hash_mask, tree_mask })?;
+
+                // Track the revealed path.
+                revealed_nodes.insert(path);
             }
         }
 
@@ -331,7 +388,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn reveal_witness(
         &mut self,
         state_root: B256,
-        witness: &B256HashMap<Bytes>,
+        witness: &B256Map<Bytes>,
     ) -> SparseStateTrieResult<()> {
         // Create a `(hash, path, maybe_account)` queue for traversing witness trie nodes
         // starting from the root node.
@@ -392,8 +449,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         storage_trie_entry.reveal_root_with_provider(
                             self.provider_factory.storage_node_provider(account),
                             trie_node,
-                            None,
-                            None,
+                            TrieMasks::none(),
                             self.retain_updates,
                         )?;
                     } else {
@@ -401,7 +457,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         storage_trie_entry
                             .as_revealed_mut()
                             .ok_or(SparseTrieErrorKind::Blind)?
-                            .reveal_node(path.clone(), trie_node, None, None)?;
+                            .reveal_node(path.clone(), trie_node, TrieMasks::none())?;
                     }
 
                     // Track the revealed path.
@@ -415,8 +471,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     self.state.reveal_root_with_provider(
                         self.provider_factory.account_node_provider(),
                         trie_node,
-                        None,
-                        None,
+                        TrieMasks::none(),
                         self.retain_updates,
                     )?;
                 } else {
@@ -424,8 +479,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?.reveal_node(
                         path.clone(),
                         trie_node,
-                        None,
-                        None,
+                        TrieMasks::none(),
                     )?;
                 }
 
@@ -468,8 +522,12 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Calculates the hashes of the nodes below the provided level.
+    ///
+    /// If the trie has not been revealed, this function does nothing.
     pub fn calculate_below_level(&mut self, level: usize) {
-        self.state.calculate_below_level(level);
+        if let SparseTrie::Revealed(trie) = &mut self.state {
+            trie.update_rlp_node_level(level);
+        }
     }
 
     /// Returns storage sparse trie root if the trie has been revealed.
@@ -477,46 +535,109 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         self.storages.get_mut(&account).and_then(|trie| trie.root())
     }
 
-    /// Returns sparse trie root if the trie has been revealed.
-    pub fn root(&mut self) -> Option<B256> {
-        self.state.root()
+    /// Returns mutable reference to the revealed sparse trie.
+    ///
+    /// If the trie is not revealed yet, its root will be revealed using the blinded node provider.
+    fn revealed_trie_mut(
+        &mut self,
+    ) -> SparseStateTrieResult<&mut RevealedSparseTrie<F::AccountNodeProvider>> {
+        match self.state {
+            SparseTrie::Blind => {
+                let (root_node, hash_mask, tree_mask) = self
+                    .provider_factory
+                    .account_node_provider()
+                    .blinded_node(&Nibbles::default())?
+                    .map(|node| {
+                        TrieNode::decode(&mut &node.node[..])
+                            .map(|decoded| (decoded, node.hash_mask, node.tree_mask))
+                    })
+                    .transpose()?
+                    .unwrap_or((TrieNode::EmptyRoot, None, None));
+                self.state
+                    .reveal_root_with_provider(
+                        self.provider_factory.account_node_provider(),
+                        root_node,
+                        TrieMasks { hash_mask, tree_mask },
+                        self.retain_updates,
+                    )
+                    .map_err(Into::into)
+            }
+            SparseTrie::Revealed(ref mut trie) => Ok(trie),
+        }
+    }
+
+    /// Returns sparse trie root.
+    ///
+    /// If the trie has not been revealed, this function reveals the root node and returns its hash.
+    pub fn root(&mut self) -> SparseStateTrieResult<B256> {
+        // record revealed node metrics
+        self.metrics.record();
+
+        Ok(self.revealed_trie_mut()?.root())
+    }
+
+    /// Returns sparse trie root and trie updates if the trie has been revealed.
+    pub fn root_with_updates(&mut self) -> SparseStateTrieResult<(B256, TrieUpdates)> {
+        // record revealed node metrics
+        self.metrics.record();
+
+        let storage_tries = self.storage_trie_updates();
+        let revealed = self.revealed_trie_mut()?;
+
+        let (root, updates) = (revealed.root(), revealed.take_updates());
+        let updates = TrieUpdates {
+            account_nodes: updates.updated_nodes,
+            removed_nodes: updates.removed_nodes,
+            storage_tries,
+        };
+        Ok((root, updates))
+    }
+
+    /// Returns storage trie updates for tries that have been revealed.
+    ///
+    /// Panics if any of the storage tries are not revealed.
+    pub fn storage_trie_updates(&mut self) -> B256Map<StorageTrieUpdates> {
+        self.storages
+            .iter_mut()
+            .map(|(address, trie)| {
+                let trie = trie.as_revealed_mut().unwrap();
+                let updates = trie.take_updates();
+                let updates = StorageTrieUpdates {
+                    is_deleted: updates.wiped,
+                    storage_nodes: updates.updated_nodes,
+                    removed_nodes: updates.removed_nodes,
+                };
+                (*address, updates)
+            })
+            .filter(|(_, updates)| !updates.is_empty())
+            .collect()
     }
 
     /// Returns [`TrieUpdates`] by taking the updates from the revealed sparse tries.
     ///
     /// Returns `None` if the accounts trie is not revealed.
     pub fn take_trie_updates(&mut self) -> Option<TrieUpdates> {
+        let storage_tries = self.storage_trie_updates();
         self.state.as_revealed_mut().map(|state| {
             let updates = state.take_updates();
             TrieUpdates {
                 account_nodes: updates.updated_nodes,
                 removed_nodes: updates.removed_nodes,
-                storage_tries: self
-                    .storages
-                    .iter_mut()
-                    .map(|(address, trie)| {
-                        let trie = trie.as_revealed_mut().unwrap();
-                        let updates = trie.take_updates();
-                        let updates = StorageTrieUpdates {
-                            is_deleted: updates.wiped,
-                            storage_nodes: updates.updated_nodes,
-                            removed_nodes: updates.removed_nodes,
-                        };
-                        (*address, updates)
-                    })
-                    .filter(|(_, updates)| !updates.is_empty())
-                    .collect(),
+                storage_tries,
             }
         })
     }
-}
-impl<F: BlindedProviderFactory> SparseStateTrie<F> {
+
     /// Update the account leaf node.
     pub fn update_account_leaf(
         &mut self,
         path: Nibbles,
         value: Vec<u8>,
     ) -> SparseStateTrieResult<()> {
+        if !self.revealed_account_paths.contains(&path) {
+            self.revealed_account_paths.insert(path.clone());
+        }
+
         self.state.update_leaf(path, value)?;
         Ok(())
     }
@@ -528,6 +649,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         slot: Nibbles,
         value: Vec<u8>,
     ) -> SparseStateTrieResult<()> {
+        if !self.revealed_storage_paths.get(&address).is_some_and(|slots| slots.contains(&slot)) {
+            self.revealed_storage_paths.entry(address).or_default().insert(slot.clone());
+        }
+
         let storage_trie = self.storages.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
         storage_trie.update_leaf(slot, value)?;
         Ok(())
@@ -539,14 +664,14 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// If the new account info and storage trie are empty, the account leaf will be removed.
     pub fn update_account(&mut self, address: B256, account: Account) -> SparseStateTrieResult<()> {
         let nibbles = Nibbles::unpack(address);
+
         let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
             storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
         } else if self.is_account_revealed(address) {
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
-            let state = self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
             // The account was revealed, either...
-            if let Some(value) = state.get_leaf_value(&nibbles) {
+            if let Some(value) = self.get_account_value(&address) {
                 // ..it exists and we should take it's current storage root or...
                 TrieAccount::decode(&mut &value[..])?.storage_root
             } else {
@@ -566,6 +691,55 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
             self.update_account_leaf(nibbles, self.account_rlp_buf.clone())
         }
+    }
+
+    /// Update the storage root of a revealed account.
+    ///
+    /// If the account doesn't exist in the trie, the function is a no-op.
+    ///
+    /// If the new storage root is empty, and the account info was already empty, the account leaf
+    /// will be removed.
+    pub fn update_account_storage_root(&mut self, address: B256) -> SparseStateTrieResult<()> {
+        if !self.is_account_revealed(address) {
+            return Err(SparseTrieErrorKind::Blind.into())
+        }
+
+        // Nothing to update if the account doesn't exist in the trie.
+        let Some(mut trie_account) = self
+            .get_account_value(&address)
+            .map(|v| TrieAccount::decode(&mut &v[..]))
+            .transpose()?
+        else {
+            trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
+            return Ok(())
+        };
+
+        // Calculate the new storage root. If the storage trie doesn't exist, the storage root will
+        // be empty.
+        let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
+            trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
+            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
+        } else {
+            EMPTY_ROOT_HASH
+        };
+
+        // Update the account with the new storage root.
+        trie_account.storage_root = storage_root;
+
+        let nibbles = Nibbles::unpack(address);
+        if trie_account == TrieAccount::default() {
+            // If the account is empty, remove it.
+            trace!(target: "trie::sparse", ?address, "Removing account because the storage root is empty");
+            self.remove_account_leaf(&nibbles)?;
+        } else {
+            // Otherwise, update the account leaf.
+            trace!(target: "trie::sparse", ?address, "Updating account with the new storage root");
+            self.account_rlp_buf.clear();
+            trie_account.encode(&mut self.account_rlp_buf);
+            self.update_account_leaf(nibbles, self.account_rlp_buf.clone())?;
+        }
+
+        Ok(())
     }
 
     /// Remove the account leaf node.
@@ -826,13 +1000,13 @@ mod tests {
         let mut bytes = [0u8; 1024];
         rng.fill(bytes.as_mut_slice());
 
-        let slot_1 = b256!("1000000000000000000000000000000000000000000000000000000000000000");
+        let slot_1 = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let slot_path_1 = Nibbles::unpack(slot_1);
         let value_1 = U256::from(rng.gen::<u64>());
-        let slot_2 = b256!("1100000000000000000000000000000000000000000000000000000000000000");
+        let slot_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
         let slot_path_2 = Nibbles::unpack(slot_2);
         let value_2 = U256::from(rng.gen::<u64>());
-        let slot_3 = b256!("2000000000000000000000000000000000000000000000000000000000000000");
+        let slot_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let slot_path_3 = Nibbles::unpack(slot_3);
         let value_3 = U256::from(rng.gen::<u64>());
 
@@ -851,11 +1025,11 @@ mod tests {
             (Nibbles::from_nibbles([0x1]), TrieMask::new(0b11)),
         ]);
 
-        let address_1 = b256!("1000000000000000000000000000000000000000000000000000000000000000");
+        let address_1 = b256!("0x1000000000000000000000000000000000000000000000000000000000000000");
         let address_path_1 = Nibbles::unpack(address_1);
         let account_1 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
         let mut trie_account_1 = account_1.into_trie_account(storage_root);
-        let address_2 = b256!("1100000000000000000000000000000000000000000000000000000000000000");
+        let address_2 = b256!("0x1100000000000000000000000000000000000000000000000000000000000000");
         let address_path_2 = Nibbles::unpack(address_2);
         let account_2 = Account::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
         let mut trie_account_2 = account_2.into_trie_account(EMPTY_ROOT_HASH);
@@ -903,9 +1077,9 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(sparse.root(), Some(root));
+        assert_eq!(sparse.root().unwrap(), root);
 
-        let address_3 = b256!("2000000000000000000000000000000000000000000000000000000000000000");
+        let address_3 = b256!("0x2000000000000000000000000000000000000000000000000000000000000000");
         let address_path_3 = Nibbles::unpack(address_3);
         let account_3 = Account { nonce: account_1.nonce + 1, ..account_1 };
         let trie_account_3 = account_3.into_trie_account(EMPTY_ROOT_HASH);
@@ -920,7 +1094,7 @@ mod tests {
         trie_account_2.storage_root = sparse.storage_root(address_2).unwrap();
         sparse.update_account_leaf(address_path_2, alloy_rlp::encode(trie_account_2)).unwrap();
 
-        sparse.root();
+        sparse.root().unwrap();
 
         let sparse_updates = sparse.take_trie_updates().unwrap();
         // TODO(alexey): assert against real state root calculation updates
@@ -929,7 +1103,7 @@ mod tests {
             TrieUpdates {
                 account_nodes: HashMap::default(),
                 storage_tries: HashMap::from_iter([(
-                    b256!("1100000000000000000000000000000000000000000000000000000000000000"),
+                    b256!("0x1100000000000000000000000000000000000000000000000000000000000000"),
                     StorageTrieUpdates {
                         is_deleted: true,
                         storage_nodes: HashMap::default(),

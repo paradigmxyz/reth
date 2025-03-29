@@ -30,7 +30,7 @@ fn main() {
     }
 
     // Run until either exit or sigint or sigterm
-    let runner = CliRunner::default();
+    let runner = CliRunner::try_default_runtime().unwrap();
     runner
         .run_command_until_exit(|ctx| {
             let command = BenchmarkCommand::parse();

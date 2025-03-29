@@ -11,7 +11,7 @@ on:
 
 jobs:
   check-reth:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
 
     steps:
@@ -30,7 +30,7 @@ jobs:
         run: cargo check --target x86_64-pc-windows-gnu
 
   check-op-reth:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
 
     steps:
@@ -46,4 +46,4 @@ jobs:
       - name: mingw-w64
         run: sudo apt-get install -y mingw-w64
       - name: Check OP-Reth
-        run: cargo check -p op-reth --features optimism --target x86_64-pc-windows-gnu
+        run: cargo check -p op-reth --target x86_64-pc-windows-gnu

@@ -1,6 +1,4 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 use clap::Parser;
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
@@ -19,9 +17,10 @@ fn main() {
     }
 
     if let Err(err) =
-        Cli::<OpChainSpecParser, RollupArgs>::parse().run(|builder, rollup_args| async move {
+        Cli::<OpChainSpecParser, RollupArgs>::parse().run(async move |builder, rollup_args| {
             info!(target: "reth::cli", "Launching node");
-            let handle = builder.launch_node(OpNode::new(rollup_args)).await?;
+            let handle =
+                builder.node(OpNode::new(rollup_args)).launch_with_debug_capabilities().await?;
             handle.node_exit_future.await
         })
     {

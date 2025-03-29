@@ -1,14 +1,15 @@
 use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
-use reth_db::{static_file::TransactionMask, table::Value, tables, RawValue};
+use reth_db::static_file::TransactionMask;
 use reth_db_api::{
     cursor::DbCursorRW,
+    table::Value,
+    tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt,
+    DbTxUnwindExt, RawValue,
 };
-use reth_primitives::{GotExpected, NodePrimitives, StaticFileSegment};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
     BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     StaticFileProviderFactory, StatsReader,
@@ -18,6 +19,7 @@ use reth_stages_api::{
     BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
     StageId, UnwindInput, UnwindOutput,
 };
+use reth_static_file_types::StaticFileSegment;
 use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
 use tracing::*;
@@ -35,7 +37,7 @@ type RecoveryResultSender = mpsc::Sender<Result<(u64, Address), Box<SenderRecove
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
-/// in [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
+/// in [`TransactionSenders`][reth_db_api::tables::TransactionSenders] table.
 #[derive(Clone, Debug)]
 pub struct SenderRecoveryStage {
     /// The size of inserted items after which the control
@@ -70,9 +72,9 @@ where
     }
 
     /// Retrieve the range of transactions to iterate over by querying
-    /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
+    /// [`BlockBodyIndices`][reth_db_api::tables::BlockBodyIndices],
     /// collect transactions within that range, recover signer for each transaction and store
-    /// entries in the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
+    /// entries in the [`TransactionSenders`][reth_db_api::tables::TransactionSenders] table.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
@@ -373,8 +375,8 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{SealedBlock, TransactionSigned};
-    use reth_primitives_traits::SignedTransaction;
+    use reth_ethereum_primitives::{Block, TransactionSigned};
+    use reth_primitives_traits::{SealedBlock, SignedTransaction};
     use reth_provider::{
         providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
         PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
@@ -633,7 +635,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for SenderRecoveryTestRunner {
-        type Seed = Vec<SealedBlock>;
+        type Seed = Vec<SealedBlock<Block>>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let mut rng = generators::rng();

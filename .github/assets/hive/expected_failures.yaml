@@ -1,9 +1,9 @@
-# https://github.com/paradigmxyz/reth/issues/7015
-# https://github.com/paradigmxyz/reth/issues/6332
+# https://github.com/paradigmxyz/reth/issues/13879
 rpc-compat:
   - debug_getRawBlock/get-invalid-number (reth)
   - debug_getRawHeader/get-invalid-number (reth)
   - debug_getRawReceipts/get-invalid-number (reth)
+  - debug_getRawReceipts/get-block-n (reth)
   - debug_getRawTransaction/get-invalid-hash (reth)
 
   - eth_call/call-callenv (reth)
@@ -12,9 +12,9 @@ rpc-compat:
   - eth_getTransactionReceipt/get-access-list (reth)
   - eth_getTransactionReceipt/get-blob-tx (reth)
   - eth_getTransactionReceipt/get-dynamic-fee (reth)
-
-  # https://github.com/paradigmxyz/reth/issues/13879
-  - eth_createAccessList/create-al-contract-eip1559 (reth)
+  - eth_getTransactionReceipt/get-legacy-contract (reth)
+  - eth_getTransactionReceipt/get-legacy-input (reth)
+  - eth_getTransactionReceipt/get-legacy-receipt (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:

@@ -1,15 +1,12 @@
 //! A no operation block executor implementation.
 
-use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{NodePrimitives, RecoveredBlock};
-use revm::State;
-
 use crate::{
-    execute::{BatchExecutor, BlockExecutorProvider, Executor},
-    system_calls::OnStateHook,
-    Database,
+    execute::{BlockExecutorProvider, Executor},
+    Database, OnStateHook,
 };
+use reth_execution_errors::BlockExecutionError;
+use reth_execution_types::BlockExecutionResult;
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 
@@ -23,69 +20,42 @@ impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
 
     type Executor<DB: Database> = Self;
 
-    type BatchExecutor<DB: Database> = Self;
-
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
     where
         DB: Database,
     {
         Self::default()
     }
-
-    fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
-    where
-        DB: Database,
-    {
-        Self::default()
-    }
 }
 
-impl<DB, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider<P> {
-    type Input<'a> = &'a RecoveredBlock<P::Block>;
-    type Output = BlockExecutionOutput<P::Receipt>;
+impl<DB: Database, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider<P> {
+    type Primitives = P;
     type Error = BlockExecutionError;
 
-    fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
-    }
-
-    fn execute_with_state_closure<F>(
-        self,
-        _: Self::Input<'_>,
-        _: F,
-    ) -> Result<Self::Output, Self::Error>
-    where
-        F: FnMut(&State<DB>),
+    fn execute_one(
+        &mut self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 
-    fn execute_with_state_hook<F>(
-        self,
-        _: Self::Input<'_>,
-        _: F,
-    ) -> Result<Self::Output, Self::Error>
+    fn execute_one_with_state_hook<F>(
+        &mut self,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        _state_hook: F,
+    ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        F: OnStateHook,
+        F: OnStateHook + 'static,
     {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
-}
 
-impl<DB, P: NodePrimitives> BatchExecutor<DB> for NoopBlockExecutorProvider<P> {
-    type Input<'a> = &'a RecoveredBlock<P::Block>;
-    type Output = ExecutionOutcome<P::Receipt>;
-    type Error = BlockExecutionError;
-
-    fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
-        Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
-    }
-
-    fn finalize(self) -> Self::Output {
+    fn into_state(self) -> revm::database::State<DB> {
         unreachable!()
     }
 
-    fn size_hint(&self) -> Option<usize> {
-        None
+    fn size_hint(&self) -> usize {
+        0
     }
 }

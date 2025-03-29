@@ -6,9 +6,11 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run --release -p example-network-proxy
 //! ```
+
+#![warn(unused_crate_dependencies)]
 
 use futures::StreamExt;
 use reth_chainspec::DEV;

@@ -4,12 +4,12 @@
 [advisories]
 yanked = "warn"
 ignore = [
-    # https://rustsec.org/advisories/RUSTSEC-2024-0379 used by boa (js-tracer)
-    "RUSTSEC-2024-0379",
     # https://rustsec.org/advisories/RUSTSEC-2024-0384 used by sse example
     "RUSTSEC-2024-0384",
-    # https://rustsec.org/advisories/RUSTSEC-2024-0388 used by ssz, will be removed https://github.com/sigp/ethereum_ssz/pull/34
-    "RUSTSEC-2024-0388",
+    # https://rustsec.org/advisories/RUSTSEC-2024-0436 paste! is unmaintained
+    "RUSTSEC-2024-0436",
+    # https://rustsec.org/advisories/RUSTSEC-2025-0014 humantime is unmaintained
+    "RUSTSEC-2025-0014",
 ]
 
 # This section is considered when running `cargo deny check bans`.
@@ -48,12 +48,9 @@ allow = [
     "0BSD",
     "CC0-1.0",
     "ISC",
-    "Unicode-DFS-2016",
     "Unlicense",
     "Unicode-3.0",
     "Zlib",
-    # https://github.com/briansmith/ring/issues/902
-    "LicenseRef-ring",
     # https://github.com/rustls/webpki/blob/main/LICENSE ISC Style
     "LicenseRef-rustls-webpki",
 ]
@@ -65,12 +62,8 @@ exceptions = [
     # These dependencies are grandfathered in https://github.com/paradigmxyz/reth/pull/6980
     { allow = ["MPL-2.0"], name = "option-ext" },
     { allow = ["MPL-2.0"], name = "webpki-roots" },
+    { allow = ["MPL-2.0"], name = "webpki-root-certs" },
 ]
-
-[[licenses.clarify]]
-name = "ring"
-expression = "LicenseRef-ring"
-license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [[licenses.clarify]]
 name = "rustls-webpki"
@@ -93,4 +86,6 @@ allow-git = [
     "https://github.com/foundry-rs/block-explorers",
     "https://github.com/bluealloy/revm",
     "https://github.com/paradigmxyz/revm-inspectors",
+    "https://github.com/alloy-rs/evm",
+    "https://github.com/alloy-rs/hardforks",
 ]

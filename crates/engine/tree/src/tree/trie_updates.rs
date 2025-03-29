@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use alloy_primitives::{map::HashMap, B256};
 use reth_db::DatabaseError;
 use reth_trie::{
@@ -7,6 +5,7 @@ use reth_trie::{
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeCompact, Nibbles,
 };
+use std::collections::BTreeSet;
 use tracing::warn;
 
 #[derive(Debug)]
@@ -163,7 +162,7 @@ pub(super) fn compare_trie_updates(
         let (mut task, mut regular) =
             (task.storage_tries.remove(&key), regular.storage_tries.remove(&key));
         if task != regular {
-            #[allow(clippy::or_fun_call)]
+            #[expect(clippy::or_fun_call)]
             let storage_diff = compare_storage_trie_updates(
                 || trie_cursor_factory.storage_trie_cursor(key),
                 // Compare non-existent storage tries as empty.

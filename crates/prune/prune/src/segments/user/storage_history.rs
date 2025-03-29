@@ -4,8 +4,11 @@ use crate::{
     PrunerError,
 };
 use itertools::Itertools;
-use reth_db::{tables, transaction::DbTxMut};
-use reth_db_api::models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress};
+use reth_db_api::{
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
+    tables,
+    transaction::DbTxMut,
+};
 use reth_provider::DBProvider;
 use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
 use rustc_hash::FxHashMap;
@@ -136,7 +139,7 @@ mod tests {
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
-    use reth_db::{tables, BlockNumberList};
+    use reth_db_api::{tables, BlockNumberList};
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
@@ -232,7 +235,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            #[allow(clippy::skip_while_next)]
+            #[expect(clippy::skip_while_next)]
             let pruned = changesets
                 .iter()
                 .enumerate()

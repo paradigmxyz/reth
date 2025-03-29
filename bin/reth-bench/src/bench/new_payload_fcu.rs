@@ -11,16 +11,14 @@ use crate::{
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
-use alloy_primitives::B256;
-use alloy_provider::{network::AnyRpcBlock, Provider};
+use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ExecutionPayload, ForkchoiceState};
 use clap::Parser;
 use csv::Writer;
+use humantime::parse_duration;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::SealedHeader;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
 /// `reth benchmark new-payload-fcu` command
@@ -29,6 +27,10 @@ pub struct Command {
     /// The RPC url to use for getting data.
     #[arg(long, value_name = "RPC_URL", verbatim_doc_comment)]
     rpc_url: String,
+
+    /// How long to wait after a forkchoice update before sending the next payload.
+    #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
+    wait_time: Option<Duration>,
 
     #[command(flatten)]
     benchmark: BenchmarkArgs,
@@ -43,16 +45,31 @@ impl Command {
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res =
-                    block_provider.get_block_by_number(next_block.into(), true.into()).await;
+                let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
-                let block = from_any_rpc_block(block);
-                let head_block_hash = block.hash();
-                let safe_block_hash = block_provider
-                    .get_block_by_number(block.number.saturating_sub(32).into(), false.into());
 
-                let finalized_block_hash = block_provider
-                    .get_block_by_number(block.number.saturating_sub(64).into(), false.into());
+                let block = block
+                    .into_inner()
+                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+                    .try_map_transactions(|tx| {
+                        // try to convert unknowns into op type so that we can also support optimism
+                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
+                    })
+                    .unwrap()
+                    .into_consensus();
+
+                let blob_versioned_hashes =
+                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
+
+                // Convert to execution payload
+                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+                let header = block.header;
+                let head_block_hash = payload.block_hash();
+                let safe_block_hash =
+                    block_provider.get_block_by_number(header.number.saturating_sub(32).into());
+
+                let finalized_block_hash =
+                    block_provider.get_block_by_number(header.number.saturating_sub(64).into());
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
@@ -62,7 +79,15 @@ impl Command {
 
                 next_block += 1;
                 sender
-                    .send((block, head_block_hash, safe_block_hash, finalized_block_hash))
+                    .send((
+                        header,
+                        blob_versioned_hashes,
+                        payload,
+                        sidecar,
+                        head_block_hash,
+                        safe_block_hash,
+                        finalized_block_hash,
+                    ))
                     .await
                     .unwrap();
             }
@@ -71,17 +96,17 @@ impl Command {
         // put results in a summary vec so they can be printed at the end
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
+        let mut total_wait_time = Duration::ZERO;
 
-        while let Some((block, head, safe, finalized)) = receiver.recv().await {
+        while let Some((header, versioned_hashes, payload, sidecar, head, safe, finalized)) = {
+            let wait_start = Instant::now();
+            let result = receiver.recv().await;
+            total_wait_time += wait_start.elapsed();
+            result
+        } {
             // just put gas used here
-            let gas_used = block.gas_used;
-            let block_number = block.number;
-
-            let versioned_hashes: Vec<B256> =
-                block.body().blob_versioned_hashes_iter().copied().collect();
-            let parent_beacon_block_root = block.parent_beacon_block_root;
-            let (payload, _) =
-                ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+            let gas_used = header.gas_used;
+            let block_number = header.number;
 
             debug!(target: "reth-bench", ?block_number, "Sending payload",);
 
@@ -96,7 +121,8 @@ impl Command {
             let message_version = call_new_payload(
                 &auth_provider,
                 payload,
-                parent_beacon_block_root,
+                sidecar,
+                header.parent_beacon_block_root,
                 versioned_hashes,
             )
             .await?;
@@ -112,11 +138,17 @@ impl Command {
             let combined_result =
                 CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
 
-            // current duration since the start of the benchmark
-            let current_duration = total_benchmark_duration.elapsed();
+            // current duration since the start of the benchmark minus the time
+            // waiting for blocks
+            let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
 
             // convert gas used to gigagas, then compute gigagas per second
             info!(%combined_result);
+
+            // wait if we need to
+            if let Some(wait_time) = self.wait_time {
+                tokio::time::sleep(wait_time).await;
+            }
 
             // record the current result
             let gas_row = TotalGasRow { block_number, gas_used, time: current_duration };
@@ -161,20 +193,4 @@ impl Command {
 
         Ok(())
     }
-}
-
-// TODO(mattsse): integrate in alloy
-pub(crate) fn from_any_rpc_block(block: AnyRpcBlock) -> SealedBlock {
-    let block = block.inner;
-    let block_hash = block.header.hash;
-    let block = block.try_map_transactions(|tx| tx.try_into()).unwrap();
-
-    SealedBlock::from_sealed_parts(
-        SealedHeader::new(block.header.inner.into_header_with_defaults(), block_hash),
-        reth_primitives::BlockBody {
-            transactions: block.transactions.into_transactions().collect(),
-            ommers: Default::default(),
-            withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
-        },
-    )
 }

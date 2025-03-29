@@ -18,7 +18,7 @@ use reth_db::DatabaseEnv;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_network::EthNetworkPrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -98,6 +98,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// This accepts a closure that is used to launch the node via the
     /// [`NodeCommand`](node::NodeCommand).
     ///
+    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    ///
     ///
     /// # Example
     ///
@@ -106,7 +108,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// use reth_node_ethereum::EthereumNode;
     ///
     /// Cli::parse_args()
-    ///     .run(|builder, _| async move {
+    ///     .run(async move |builder, _| {
     ///         let handle = builder.launch_node(EthereumNode::default()).await?;
     ///
     ///         handle.wait_for_node_exit().await
@@ -129,14 +131,45 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// }
     ///
     /// Cli::<EthereumChainSpecParser, MyArgs>::parse()
-    ///     .run(|builder, my_args: MyArgs| async move {
+    ///     .run(async move |builder, my_args: MyArgs|
     ///         // launch the node
-    ///
-    ///         Ok(())
-    ///     })
+    ///         Ok(()))
     ///     .unwrap();
     /// ````
-    pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
+    pub fn run<L, Fut>(self, launcher: L) -> eyre::Result<()>
+    where
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
+        self.with_runner(CliRunner::try_default_runtime()?, launcher)
+    }
+
+    /// Execute the configured cli command with the provided [`CliRunner`].
+    ///
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use reth::cli::Cli;
+    /// use reth_cli_runner::CliRunner;
+    /// use reth_node_ethereum::EthereumNode;
+    ///
+    /// let runtime = tokio::runtime::Builder::new_multi_thread()
+    ///     .worker_threads(4)
+    ///     .max_blocking_threads(256)
+    ///     .enable_all()
+    ///     .build()
+    ///     .unwrap();
+    /// let runner = CliRunner::from_runtime(runtime);
+    ///
+    /// Cli::parse_args()
+    ///     .with_runner(runner, |builder, _| async move {
+    ///         let handle = builder.launch_node(EthereumNode::default()).await?;
+    ///         handle.wait_for_node_exit().await
+    ///     })
+    ///     .unwrap();
+    /// ```
+    pub fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
@@ -151,7 +184,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        let runner = CliRunner::default();
+        let components = |spec: Arc<C::ChainSpec>| {
+            (EthExecutorProvider::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
+        };
         match self.command {
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
@@ -162,18 +197,15 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             Commands::InitState(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
-            Commands::Import(command) => runner.run_blocking_until_ctrl_c(
-                command.execute::<EthereumNode, _, _>(EthExecutorProvider::ethereum),
-            ),
+            Commands::Import(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode, _, _>(components))
+            }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<EthereumNode, _, _, EthNetworkPrimitives>(
-                    ctx,
-                    EthExecutorProvider::ethereum,
-                )
+                command.execute::<EthereumNode, _, _, EthNetworkPrimitives>(ctx, components)
             }),
             Commands::P2P(command) => {
                 runner.run_until_ctrl_c(command.execute::<EthNetworkPrimitives>())
@@ -203,6 +235,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
+#[expect(clippy::large_enum_variant)]
 pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Start the node
     #[command(name = "node")]
@@ -304,7 +337,7 @@ mod tests {
     fn parse_env_filter_directives() {
         let temp_dir = tempfile::tempdir().unwrap();
 
-        std::env::set_var("RUST_LOG", "info,evm=debug");
+        unsafe { std::env::set_var("RUST_LOG", "info,evm=debug") };
         let reth = Cli::try_parse_args_from([
             "reth",
             "init",
@@ -314,6 +347,6 @@ mod tests {
             "debug,net=trace",
         ])
         .unwrap();
-        assert!(reth.run(|_, _| async move { Ok(()) }).is_ok());
+        assert!(reth.run(async move |_, _| Ok(())).is_ok());
     }
 }

@@ -1,10 +1,10 @@
-use alloy_consensus::Transaction;
-use alloy_eips::eip2718::Encodable2718;
+use alloy_consensus::Sealable;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
-use alloy_rpc_types_eth::{Block, BlockTransactions};
-use reth_node_api::EngineTypes;
-use reth_rpc_builder::auth::AuthServerHandle;
+use reth_node_api::{
+    BeaconConsensusEngineHandle, BuiltPayload, EngineApiMessageVersion, ExecutionPayload,
+    NodePrimitives, PayloadTypes,
+};
+use reth_primitives_traits::{Block, SealedBlock};
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::future::Future;
@@ -14,13 +14,20 @@ use tokio::sync::mpsc;
 /// by number to fetch past finalized and safe blocks.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockProvider: Send + Sync + 'static {
+    /// The block type.
+    type Block: Block;
+
     /// Runs a block provider to send new blocks to the given sender.
     ///
-    /// Note: This is expected to be spawned in a separate task.
-    fn subscribe_blocks(&self, tx: mpsc::Sender<Block>) -> impl Future<Output = ()> + Send;
+    /// Note: This is expected to be spawned in a separate task, and as such it should ignore
+    /// errors.
+    fn subscribe_blocks(&self, tx: mpsc::Sender<Self::Block>) -> impl Future<Output = ()> + Send;
 
     /// Get a past block by number.
-    fn get_block(&self, block_number: u64) -> impl Future<Output = eyre::Result<Block>> + Send;
+    fn get_block(
+        &self,
+        block_number: u64,
+    ) -> impl Future<Output = eyre::Result<Self::Block>> + Send;
 
     /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
     /// started more recently than `offset`), fetch it using `get_block`.
@@ -45,7 +52,7 @@ pub trait BlockProvider: Send + Sync + 'static {
                 None => return Ok(B256::default()),
             };
             let block = self.get_block(previous_block_number).await?;
-            Ok(block.header.hash)
+            Ok(block.header().hash_slow())
         }
     }
 }
@@ -53,30 +60,33 @@ pub trait BlockProvider: Send + Sync + 'static {
 /// Debug consensus client that sends FCUs and new payloads using recent blocks from an external
 /// provider like Etherscan or an RPC endpoint.
 #[derive(Debug)]
-pub struct DebugConsensusClient<P: BlockProvider> {
+pub struct DebugConsensusClient<P: BlockProvider, T: PayloadTypes> {
     /// Handle to execution client.
-    auth_server: AuthServerHandle,
+    engine_handle: BeaconConsensusEngineHandle<T>,
     /// Provider to get consensus blocks from.
     block_provider: P,
 }
 
-impl<P: BlockProvider> DebugConsensusClient<P> {
+impl<P: BlockProvider, T: PayloadTypes> DebugConsensusClient<P, T> {
     /// Create a new debug consensus client with the given handle to execution
     /// client and block provider.
-    pub const fn new(auth_server: AuthServerHandle, block_provider: P) -> Self {
-        Self { auth_server, block_provider }
+    pub const fn new(engine_handle: BeaconConsensusEngineHandle<T>, block_provider: P) -> Self {
+        Self { engine_handle, block_provider }
     }
 }
 
-impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
+impl<P, T> DebugConsensusClient<P, T>
+where
+    P: BlockProvider + Clone,
+    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = P::Block>>>,
+{
     /// Spawn the client to start sending FCUs and new payloads by periodically fetching recent
     /// blocks.
-    pub async fn run<T: EngineTypes>(self) {
-        let execution_client = self.auth_server.http_client();
+    pub async fn run(self) {
         let mut previous_block_hashes = AllocRingBuffer::new(64);
 
         let mut block_stream = {
-            let (tx, rx) = mpsc::channel::<Block>(64);
+            let (tx, rx) = mpsc::channel::<P::Block>(64);
             let block_provider = self.block_provider.clone();
             tokio::spawn(async move {
                 block_provider.subscribe_blocks(tx).await;
@@ -85,7 +95,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
         };
 
         while let Some(block) = block_stream.recv().await {
-            let payload = block_to_execution_payload_v3(block);
+            let payload = T::block_to_payload(SealedBlock::new_unhashed(block));
 
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
@@ -93,16 +103,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
             previous_block_hashes.push(block_hash);
 
             // Send new events to execution client
-            let _ = reth_rpc_api::EngineApiClient::<T>::new_payload_v3(
-                &execution_client,
-                payload.execution_payload_v3,
-                payload.versioned_hashes,
-                payload.parent_beacon_block_root,
-            )
-            .await
-                .inspect_err(|err|  {
-                    warn!(target: "consensus::debug-client", %err, %block_hash,  %block_number, "failed to submit new payload to execution client");
-                });
+            let _ = self.engine_handle.new_payload(payload).await;
 
             // Load previous block hashes. We're using (head - 32) and (head - 64) as the safe and
             // finalized block hashes.
@@ -135,89 +136,10 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
                 safe_block_hash,
                 finalized_block_hash,
             };
-            let _ = reth_rpc_api::EngineApiClient::<T>::fork_choice_updated_v3(
-                &execution_client,
-                state,
-                None,
-            )
-            .await
-            .inspect_err(|err|  {
-                warn!(target: "consensus::debug-client", %err, ?state, "failed to submit fork choice update to execution client");
-            });
+            let _ = self
+                .engine_handle
+                .fork_choice_updated(state, None, EngineApiMessageVersion::V3)
+                .await;
         }
-    }
-}
-
-/// Cancun "new payload" event.
-#[derive(Debug)]
-pub struct ExecutionNewPayload {
-    pub execution_payload_v3: ExecutionPayloadV3,
-    pub versioned_hashes: Vec<B256>,
-    pub parent_beacon_block_root: B256,
-}
-
-impl ExecutionNewPayload {
-    /// Get block hash from block in the payload
-    pub const fn block_hash(&self) -> B256 {
-        self.execution_payload_v3.payload_inner.payload_inner.block_hash
-    }
-
-    /// Get block number from block in the payload
-    pub const fn block_number(&self) -> u64 {
-        self.execution_payload_v3.payload_inner.payload_inner.block_number
-    }
-}
-
-/// Convert a block from RPC / Etherscan to params for an execution client's "new payload"
-/// method. Assumes that the block contains full transactions.
-pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
-    let transactions = match &block.transactions {
-        BlockTransactions::Full(txs) => txs.clone(),
-        // Empty array gets deserialized as BlockTransactions::Hashes.
-        BlockTransactions::Hashes(txs) if txs.is_empty() => vec![],
-        BlockTransactions::Hashes(_) | BlockTransactions::Uncle => {
-            panic!("Received uncle block or hash-only transactions from Etherscan API")
-        }
-    };
-
-    // Concatenate all blob hashes from all transactions in order
-    // https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#specification
-    let versioned_hashes = transactions
-        .iter()
-        .flat_map(|tx| tx.blob_versioned_hashes().unwrap_or_default())
-        .copied()
-        .collect();
-
-    let payload: ExecutionPayloadV3 = ExecutionPayloadV3 {
-        payload_inner: ExecutionPayloadV2 {
-            payload_inner: ExecutionPayloadV1 {
-                parent_hash: block.header.parent_hash,
-                fee_recipient: block.header.beneficiary,
-                state_root: block.header.state_root,
-                receipts_root: block.header.receipts_root,
-                logs_bloom: block.header.logs_bloom,
-                prev_randao: block.header.mix_hash,
-                block_number: block.header.number,
-                gas_limit: block.header.gas_limit,
-                gas_used: block.header.gas_used,
-                timestamp: block.header.timestamp,
-                extra_data: block.header.extra_data.clone(),
-                base_fee_per_gas: block.header.base_fee_per_gas.unwrap().try_into().unwrap(),
-                block_hash: block.header.hash,
-                transactions: transactions
-                    .into_iter()
-                    .map(|tx| tx.inner.encoded_2718().into())
-                    .collect(),
-            },
-            withdrawals: block.withdrawals.clone().unwrap_or_default().into_inner(),
-        },
-        blob_gas_used: block.header.blob_gas_used.unwrap(),
-        excess_blob_gas: block.header.excess_blob_gas.unwrap(),
-    };
-
-    ExecutionNewPayload {
-        execution_payload_v3: payload,
-        versioned_hashes,
-        parent_beacon_block_root: block.header.parent_beacon_block_root.unwrap(),
     }
 }

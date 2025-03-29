@@ -4,11 +4,11 @@ use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header, TxEip2930};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
-use reth_evm::execute::{BatchExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_node_api::FullNodePrimitives;
-use reth_primitives::{Block, BlockBody, Receipt, RecoveredBlock, Transaction};
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
     ProviderFactory,
@@ -51,14 +51,14 @@ pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
 pub(crate) fn execute_block_and_commit_to_database<N>(
     provider_factory: &ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
-    block: &RecoveredBlock<reth_primitives::Block>,
+    block: &RecoveredBlock<reth_ethereum_primitives::Block>,
 ) -> eyre::Result<BlockExecutionOutput<Receipt>>
 where
     N: ProviderNodeTypes<
         Primitives: FullNodePrimitives<
-            Block = reth_primitives::Block,
-            BlockBody = reth_primitives::BlockBody,
-            Receipt = reth_primitives::Receipt,
+            Block = reth_ethereum_primitives::Block,
+            BlockBody = reth_ethereum_primitives::BlockBody,
+            Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
 {
@@ -89,14 +89,16 @@ where
 fn blocks(
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<(RecoveredBlock<reth_primitives::Block>, RecoveredBlock<reth_primitives::Block>)>
-{
+) -> eyre::Result<(
+    RecoveredBlock<reth_ethereum_primitives::Block>,
+    RecoveredBlock<reth_ethereum_primitives::Block>,
+)> {
     // First block has a transaction that transfers some ETH to zero address
     let block1 = Block {
         header: Header {
             parent_hash: chain_spec.genesis_hash(),
             receipts_root: b256!(
-                "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
+                "0xd3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 1,
@@ -127,7 +129,7 @@ fn blocks(
         header: Header {
             parent_hash: block1.hash(),
             receipts_root: b256!(
-                "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
+                "0xd3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
             ),
             difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
             number: 2,
@@ -160,13 +162,15 @@ pub(crate) fn blocks_and_execution_outputs<N>(
     provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<Vec<(RecoveredBlock<reth_primitives::Block>, BlockExecutionOutput<Receipt>)>>
+) -> eyre::Result<
+    Vec<(RecoveredBlock<reth_ethereum_primitives::Block>, BlockExecutionOutput<Receipt>)>,
+>
 where
     N: ProviderNodeTypes<
         Primitives: FullNodePrimitives<
-            Block = reth_primitives::Block,
-            BlockBody = reth_primitives::BlockBody,
-            Receipt = reth_primitives::Receipt,
+            Block = reth_ethereum_primitives::Block,
+            BlockBody = reth_ethereum_primitives::BlockBody,
+            Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
 {
@@ -184,20 +188,22 @@ pub(crate) fn blocks_and_execution_outcome<N>(
     provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<(Vec<RecoveredBlock<reth_primitives::Block>>, ExecutionOutcome)>
+) -> eyre::Result<(Vec<RecoveredBlock<reth_ethereum_primitives::Block>>, ExecutionOutcome)>
 where
     N: ProviderNodeTypes,
-    N::Primitives:
-        FullNodePrimitives<Block = reth_primitives::Block, Receipt = reth_primitives::Receipt>,
+    N::Primitives: FullNodePrimitives<
+        Block = reth_ethereum_primitives::Block,
+        Receipt = reth_ethereum_primitives::Receipt,
+    >,
 {
     let (block1, block2) = blocks(chain_spec.clone(), key_pair)?;
 
     let provider = provider_factory.provider()?;
 
     let executor = EthExecutorProvider::ethereum(chain_spec)
-        .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)));
+        .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)));
 
-    let mut execution_outcome = executor.execute_and_verify_batch(vec![&block1, &block2])?;
+    let mut execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
     execution_outcome.state_mut().reverts.sort();
 
     // Commit the block's execution outcome to the database

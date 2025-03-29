@@ -16,7 +16,7 @@ to make a PR!
 | [Custom event hooks](./node-event-hooks)            | Illustrates how to hook to various node lifecycle events                                         |
 | [Custom dev node](./custom-dev-node)                | Illustrates how to run a custom dev node programmatically and submit a transaction to it via RPC |
 | [Custom EVM](./custom-evm)                          | Illustrates how to implement a node with a custom EVM                                            |
-| [Custom Stateful Precompile](./stateful-precompile) | Illustrates how to implement a node with a stateful precompile                                   |
+| [Custom Precompile Cache](./precompile-cache)       | Illustrates how to implement a node with a stateful precompile cache                             |
 | [Custom inspector](./custom-inspector)              | Illustrates how to use a custom EVM inspector to trace new transactions                          |
 | [Custom engine types](./custom-engine-types)        | Illustrates how to create a node with custom engine types                                        |
 | [Custom node components](./custom-node-components)  | Illustrates how to configure custom node components                                              |

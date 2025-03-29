@@ -1,16 +1,13 @@
 //! Compatibility functions for rpc `Transaction` type.
 
+use alloy_consensus::transaction::Recovered;
+use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInfo};
 use core::error;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInfo};
-use reth_primitives::{Recovered, TransactionSigned};
-use serde::{Deserialize, Serialize};
-
 /// Builds RPC transaction w.r.t. network.
-pub trait TransactionCompat<T = TransactionSigned>:
-    Send + Sync + Unpin + Clone + fmt::Debug
-{
+pub trait TransactionCompat<T>: Send + Sync + Unpin + Clone + fmt::Debug {
     /// RPC transaction response type.
     type Transaction: Serialize
         + for<'de> Deserialize<'de>

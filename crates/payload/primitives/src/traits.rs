@@ -7,7 +7,7 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_primitives::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
 /// Represents a built payload type that contains a built `SealedBlock` and can be converted into
 /// engine API execution payloads.
@@ -27,7 +27,7 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
         None
     }
 
-    /// Returns the EIP-7865 requests for the payload if any.
+    /// Returns the EIP-7685 requests for the payload if any.
     fn requests(&self) -> Option<Requests>;
 }
 

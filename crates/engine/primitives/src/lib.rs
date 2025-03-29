@@ -12,18 +12,17 @@
 extern crate alloc;
 
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip7685::Requests, Decodable2718};
-use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ExecutionPayloadSidecar, PayloadError};
-use core::fmt::{self, Debug};
+use reth_errors::ConsensusError;
 use reth_payload_primitives::{
-    validate_execution_requests, BuiltPayload, EngineApiMessageVersion,
-    EngineObjectValidationError, InvalidPayloadAttributesError, PayloadAttributes,
-    PayloadOrAttributes, PayloadTypes,
+    EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
+    NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives::{NodePrimitives, SealedBlock};
-use reth_primitives_traits::Block;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use reth_primitives_traits::{Block, RecoveredBlock};
+use reth_trie_common::HashedPostState;
+use serde::{de::DeserializeOwned, Serialize};
+
+// Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
+pub use reth_payload_primitives::ExecutionPayload;
 
 mod error;
 pub use error::*;
@@ -40,68 +39,8 @@ pub use event::*;
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
-/// Struct aggregating [`alloy_rpc_types_engine::ExecutionPayload`] and [`ExecutionPayloadSidecar`]
-/// and encapsulating complete payload supplied for execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionData {
-    /// Execution payload.
-    pub payload: alloy_rpc_types_engine::ExecutionPayload,
-    /// Additional fork-specific fields.
-    pub sidecar: ExecutionPayloadSidecar,
-}
-
-impl ExecutionData {
-    /// Creates new instance of [`ExecutionData`].
-    pub const fn new(
-        payload: alloy_rpc_types_engine::ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
-    ) -> Self {
-        Self { payload, sidecar }
-    }
-
-    /// Tries to create a new unsealed block from the given payload and payload sidecar.
-    ///
-    /// Performs additional validation of `extra_data` and `base_fee_per_gas` fields.
-    ///
-    /// # Note
-    ///
-    /// The log bloom is assumed to be validated during serialization.
-    ///
-    /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
-    pub fn try_into_block<T: Decodable2718>(
-        self,
-    ) -> Result<alloy_consensus::Block<T>, PayloadError> {
-        self.payload.try_into_block_with_sidecar(&self.sidecar)
-    }
-}
-
-/// An execution payload.
-pub trait ExecutionPayload:
-    Serialize + DeserializeOwned + Debug + Clone + Send + Sync + 'static
-{
-    /// Returns the parent hash of the block.
-    fn parent_hash(&self) -> B256;
-
-    /// Returns the hash of the block.
-    fn block_hash(&self) -> B256;
-
-    /// Returns the number of the block.
-    fn block_number(&self) -> u64;
-}
-
-impl ExecutionPayload for ExecutionData {
-    fn parent_hash(&self) -> B256 {
-        self.payload.parent_hash()
-    }
-
-    fn block_hash(&self) -> B256 {
-        self.payload.block_hash()
-    }
-
-    fn block_number(&self) -> u64 {
-        self.payload.block_number()
-    }
-}
+pub mod config;
+pub use config::*;
 
 /// This type defines the versioned types of the engine API.
 ///
@@ -115,7 +54,6 @@ pub trait EngineTypes:
                           + TryInto<Self::ExecutionPayloadEnvelopeV4>,
     > + DeserializeOwned
     + Serialize
-    + 'static
 {
     /// Execution Payload V1 envelope type.
     type ExecutionPayloadEnvelopeV1: DeserializeOwned
@@ -149,20 +87,11 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
-    /// Execution data.
-    type ExecutionData: ExecutionPayload;
-
-    /// Converts a [`BuiltPayload`] into an [`ExecutionPayload`] and [`ExecutionPayloadSidecar`].
-    fn block_to_payload(
-        block: SealedBlock<
-            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
-        >,
-    ) -> Self::ExecutionData;
 }
 
 /// Type that validates an [`ExecutionPayload`].
 #[auto_impl::auto_impl(&, Arc)]
-pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
+pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
 
@@ -180,27 +109,33 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
     fn ensure_well_formed_payload(
         &self,
         payload: Self::ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, PayloadError>;
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
+
+    /// Verifies payload post-execution w.r.t. hashed state updates.
+    fn validate_block_post_execution_with_hashed_state(
+        &self,
+        _state_updates: &HashedPostState,
+        _block: &RecoveredBlock<Self::Block>,
+    ) -> Result<(), ConsensusError> {
+        // method not used by l1
+        Ok(())
+    }
 }
 
 /// Type that validates the payloads processed by the engine.
-pub trait EngineValidator<Types: EngineTypes>:
+pub trait EngineValidator<Types: PayloadTypes>:
     PayloadValidator<ExecutionData = Types::ExecutionData>
 {
-    /// Validates the execution requests according to [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685).
-    fn validate_execution_requests(
-        &self,
-        requests: &Requests,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_execution_requests(requests)
-    }
-
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, <Types as PayloadTypes>::PayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<
+            '_,
+            Types::ExecutionData,
+            <Types as PayloadTypes>::PayloadAttributes,
+        >,
     ) -> Result<(), EngineObjectValidationError>;
 
     /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].

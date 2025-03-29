@@ -12,60 +12,63 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
-reth-consensus.workspace = true
-reth-consensus-common.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
-reth-primitives.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
 reth-storage-errors.workspace = true
+reth-trie-common.workspace = true
+
+reth-ethereum-primitives = { workspace = true, optional = true }
 
 revm.workspace = true
-revm-primitives.workspace = true
+op-revm = { workspace = true, optional = true }
 
 # alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
 auto_impl.workspace = true
+derive_more.workspace = true
 futures-util.workspace = true
 metrics = { workspace = true, optional = true }
 parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
-parking_lot.workspace = true
 reth-ethereum-forks.workspace = true
+reth-ethereum-primitives.workspace = true
+parking_lot.workspace = true
 alloy-consensus.workspace = true
 metrics-util = { workspace = true, features = ["debugging"] }
 
 [features]
 default = ["std"]
 std = [
-    "dep:metrics",
-    "dep:reth-metrics",
-    "reth-consensus/std",
-    "reth-primitives/std",
     "reth-primitives-traits/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
-    "revm-primitives/std",
     "revm/std",
     "reth-ethereum-forks/std",
-    "reth-ethereum-primitives/std",
-    "reth-chainspec/std",
-    "reth-consensus-common/std",
+    "reth-ethereum-primitives?/std",
+    "alloy-evm/std",
+    "op-revm?/std",
+    "reth-execution-errors/std",
+    "reth-execution-types/std",
+    "reth-storage-errors/std",
+    "futures-util/std",
+    "derive_more/std",
+    "reth-storage-api/std",
+    "reth-trie-common/std",
 ]
+metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [
     "dep:parking_lot",
-    "reth-chainspec/test-utils",
-    "reth-consensus/test-utils",
     "reth-ethereum-primitives/test-utils",
-    "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
-    "revm/test-utils",
+    "reth-trie-common/test-utils",
 ]
+op = ["op-revm", "alloy-evm/op", "reth-primitives-traits/op"]

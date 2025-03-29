@@ -3,26 +3,28 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
-use reth_primitives::{gas_spent_by_transactions, GotExpected, Receipt, RecoveredBlock};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{
+    receipt::gas_spent_by_transactions, Block, GotExpected, Receipt, RecoveredBlock,
+};
 
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
-pub fn validate_block_post_execution<B, ChainSpec>(
+pub fn validate_block_post_execution<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
-    receipts: &[Receipt],
+    receipts: &[R],
     requests: &Requests,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
+    R: Receipt,
     ChainSpec: EthereumHardforks,
 {
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
-        receipts.last().map(|receipt| receipt.cumulative_gas_used).unwrap_or(0);
+        receipts.last().map(|receipt| receipt.cumulative_gas_used()).unwrap_or(0);
     if block.header().gas_used() != cumulative_gas_used {
         return Err(ConsensusError::BlockGasUsed {
             gas: GotExpected { got: cumulative_gas_used, expected: block.header().gas_used() },
@@ -61,13 +63,13 @@ where
 
 /// Calculate the receipts root, and compare it against against the expected receipts root and logs
 /// bloom.
-fn verify_receipts(
+fn verify_receipts<R: Receipt>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
-    receipts: &[Receipt],
+    receipts: &[R],
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.
-    let receipts_with_bloom = receipts.iter().map(Receipt::with_bloom_ref).collect::<Vec<_>>();
+    let receipts_with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
     let receipts_root = calculate_receipt_root(&receipts_with_bloom);
 
     // Calculate header logs bloom.
@@ -108,9 +110,9 @@ fn compare_receipts_root_and_logs_bloom(
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::hex;
-
     use super::*;
+    use alloy_primitives::{b256, hex};
+    use reth_ethereum_primitives::Receipt;
 
     #[test]
     fn test_verify_receipts_success() {
@@ -119,7 +121,7 @@ mod tests {
 
         // Compare against expected values
         assert!(verify_receipts(
-            B256::from(hex!("61353b4fb714dc1fccacbf7eafc4273e62f3d1eed716fe41b2a0cd2e12c63ebc")),
+            b256!("0x61353b4fb714dc1fccacbf7eafc4273e62f3d1eed716fe41b2a0cd2e12c63ebc"),
             Bloom::from(hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
             &receipts
         )

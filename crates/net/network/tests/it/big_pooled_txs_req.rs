@@ -1,12 +1,12 @@
 use alloy_primitives::{PrimitiveSignature as Signature, B256};
 use reth_eth_wire::{GetPooledTransactions, PooledTransactions};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
     NetworkEventListenerProvider, PeerRequest,
 };
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
-use reth_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::MockEthProvider;
 use reth_transaction_pool::{

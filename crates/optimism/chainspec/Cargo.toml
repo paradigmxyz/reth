@@ -20,6 +20,7 @@ reth-network-peers.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 
 # ethereum
 alloy-chains.workspace = true
@@ -27,6 +28,7 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
+alloy-hardforks.workspace = true
 
 # op
 op-alloy-rpc-types.workspace = true
@@ -57,6 +59,7 @@ std = [
     "reth-ethereum-forks/std",
     "reth-primitives-traits/std",
     "reth-optimism-forks/std",
+    "reth-optimism-primitives/std",
     "alloy-consensus/std",
     "once_cell/std",
     "derive_more/std",

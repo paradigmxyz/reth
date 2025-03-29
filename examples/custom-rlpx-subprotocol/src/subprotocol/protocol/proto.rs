@@ -86,7 +86,7 @@ impl CustomRlpxProtoMessage {
     /// Decodes a `CustomRlpxProtoMessage` from the given message buffer.
     pub fn decode_message(buf: &mut &[u8]) -> Option<Self> {
         if buf.is_empty() {
-            return None;
+            return None
         }
         let id = buf[0];
         buf.advance(1);

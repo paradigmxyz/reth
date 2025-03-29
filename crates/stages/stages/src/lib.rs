@@ -32,9 +32,10 @@
 //! # use reth_config::config::StageConfig;
 //! # use reth_consensus::{Consensus, ConsensusError};
 //! # use reth_consensus::test_utils::TestConsensus;
+//! # use reth_consensus::FullConsensus;
 //! #
 //! # let chain_spec = MAINNET.clone();
-//! # let consensus: Arc<dyn Consensus<reth_primitives::Block, Error = ConsensusError>> = Arc::new(TestConsensus::default());
+//! # let consensus: Arc<dyn FullConsensus<reth_ethereum_primitives::EthPrimitives, Error = ConsensusError>> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
 //! #    Arc::new(TestHeadersClient::default()),
 //! #    consensus.clone().as_header_validator()
@@ -42,7 +43,7 @@
 //! # let provider_factory = create_test_provider_factory();
 //! # let bodies_downloader = BodiesDownloaderBuilder::default().build(
 //! #    Arc::new(TestBodiesClient { responder: |_| Ok((PeerId::ZERO, vec![]).into()) }),
-//! #    consensus.clone(),
+//! #    consensus.clone().as_consensus(),
 //! #    provider_factory.clone()
 //! # );
 //! # let (tip_tx, tip_rx) = watch::channel(B256::default());
@@ -80,7 +81,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 

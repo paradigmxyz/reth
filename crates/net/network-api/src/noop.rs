@@ -26,7 +26,7 @@ impl NetworkInfo for NoopNetwork {
     }
 
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         Ok(NetworkStatus {
             client_version: "reth-test".to_string(),
             protocol_version: ProtocolVersion::V5 as u64,

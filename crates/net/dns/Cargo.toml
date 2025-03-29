@@ -19,7 +19,7 @@ reth-tokio-util = { workspace = true, features = ["time"] }
 
 # ethereum
 alloy-primitives.workspace = true
-secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery", "serde"] }
 enr.workspace = true
 
 # async/futures
@@ -27,10 +27,10 @@ tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tokio-stream.workspace = true
 
 # trust-dns
-hickory-resolver = { version = "0.25.0-alpha.4" }
+hickory-resolver = { workspace = true, features = ["tokio"] }
 
 # misc
-data-encoding = "2"
+data-encoding.workspace = true
 linked_hash_set.workspace = true
 schnellru.workspace = true
 thiserror.workspace = true

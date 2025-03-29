@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_eips::eip2718::Encodable2718;
 use rayon::prelude::*;
-use reth_db::{tables, transaction::DbTxMut};
+use reth_db_api::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider};
 use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
 use tracing::{instrument, trace};
@@ -116,7 +116,7 @@ mod tests {
         FoldWhile::{Continue, Done},
         Itertools,
     };
-    use reth_db::tables;
+    use reth_db_api::tables;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{

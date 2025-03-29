@@ -8,9 +8,8 @@ mod writer;
 pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
-
 use reth_nippy_jar::NippyJar;
-use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
+use reth_static_file_types::{SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::Deref, sync::Arc};
 
@@ -31,7 +30,7 @@ impl LoadedJar {
                 let mmap_handle = Arc::new(data_reader);
                 Ok(Self { jar, mmap_handle })
             }
-            Err(e) => Err(ProviderError::NippyJar(e.to_string())),
+            Err(e) => Err(ProviderError::other(e)),
         }
     }
 
@@ -61,11 +60,10 @@ mod tests {
     use alloy_consensus::{Header, Transaction};
     use alloy_primitives::{BlockHash, TxNumber, B256, U256};
     use rand::seq::SliceRandom;
-    use reth_db::{
-        test_utils::create_test_static_files_dir, CanonicalHeaders, HeaderNumbers,
-        HeaderTerminalDifficulties, Headers,
+    use reth_db::test_utils::create_test_static_files_dir;
+    use reth_db_api::{
+        transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers,
     };
-    use reth_db_api::transaction::DbTxMut;
     use reth_primitives::{
         static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
         EthPrimitives, Receipt, TransactionSigned,
@@ -413,7 +411,7 @@ mod tests {
         let file_set_count = 3; // Number of sets of files to create
         let initial_file_count = files_per_range * file_set_count;
 
-        #[allow(clippy::too_many_arguments)]
+        #[expect(clippy::too_many_arguments)]
         fn prune_and_validate(
             sf_rw: &StaticFileProvider<EthPrimitives>,
             static_dir: impl AsRef<Path>,

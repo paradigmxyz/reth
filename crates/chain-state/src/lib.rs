@@ -31,4 +31,4 @@ pub use memory_overlay::{MemoryOverlayStateProvider, MemoryOverlayStateProviderR
 pub mod test_utils;
 
 // todo: remove when generic data prim integration complete
-pub use reth_primitives::EthPrimitives;
+pub use reth_ethereum_primitives::EthPrimitives;

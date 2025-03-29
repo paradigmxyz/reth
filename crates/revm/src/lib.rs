@@ -21,12 +21,14 @@ pub mod cancelled;
 /// Contains glue code for integrating reth database into revm's [Database].
 pub mod database;
 
+pub use revm::{database as db, inspector};
+
 /// Common test helpers
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
 // Convenience re-exports.
-pub use revm::{self, *};
+pub use revm::{self, database::State, *};
 
 /// Either type for flexible usage of different database types in the same context.
 pub mod either;

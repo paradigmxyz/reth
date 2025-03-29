@@ -21,6 +21,8 @@ use crate::args::{
     GasPriceOracleArgs, RpcStateCacheArgs,
 };
 
+use super::types::MaxOr;
+
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
 
@@ -145,6 +147,10 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
     pub rpc_max_tracing_requests: usize,
 
+    /// Maximum number of blocks for `trace_filter` requests.
+    #[arg(long = "rpc.max-trace-filter-blocks", alias = "rpc-max-trace-filter-blocks", value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_TRACE_FILTER_BLOCKS)]
+    pub rpc_max_trace_filter_blocks: u64,
+
     /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
     #[arg(long = "rpc.max-blocks-per-filter", alias = "rpc-max-blocks-per-filter", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
     pub rpc_max_blocks_per_filter: ZeroAsNoneU64,
@@ -158,7 +164,7 @@ pub struct RpcServerArgs {
         long = "rpc.gascap",
         alias = "rpc-gascap",
         value_name = "GAS_CAP",
-        value_parser = RangedU64ValueParser::<u64>::new().range(1..),
+        value_parser = MaxOr::new(RangedU64ValueParser::<u64>::new().range(1..)),
         default_value_t = constants::gas_oracle::RPC_DEFAULT_GAS_CAP
     )]
     pub rpc_gas_cap: u64,
@@ -328,6 +334,7 @@ impl Default for RpcServerArgs {
             rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
             rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS.into(),
             rpc_max_tracing_requests: constants::default_max_tracing_requests(),
+            rpc_max_trace_filter_blocks: constants::DEFAULT_MAX_TRACE_FILTER_BLOCKS,
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,

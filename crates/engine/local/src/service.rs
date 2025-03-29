@@ -30,7 +30,7 @@ use reth_engine_tree::{
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
-use reth_node_types::{BlockTy, HeaderTy, TxTy};
+use reth_node_types::BlockTy;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
 use reth_provider::{
@@ -54,9 +54,9 @@ where
     /// Processes requests.
     ///
     /// This type is responsible for processing incoming requests.
-    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine, N::Primitives>, N::Primitives>,
+    handler: EngineApiRequestHandler<EngineApiRequest<N::Payload, N::Primitives>, N::Primitives>,
     /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
-    incoming_requests: EngineMessageStream<N::Engine>,
+    incoming_requests: EngineMessageStream<N::Payload>,
 }
 
 impl<N> LocalEngineService<N>
@@ -64,28 +64,28 @@ where
     N: EngineNodeTypes,
 {
     /// Constructor for [`LocalEngineService`].
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new<B, V, C>(
         consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
-        payload_builder: PayloadBuilderHandle<N::Engine>,
+        payload_builder: PayloadBuilderHandle<N::Payload>,
         payload_validator: V,
         tree_config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N::Primitives>>,
         sync_metrics_tx: MetricEventsSender,
-        to_engine: UnboundedSender<BeaconEngineMessage<N::Engine>>,
-        from_engine: EngineMessageStream<N::Engine>,
+        to_engine: UnboundedSender<BeaconEngineMessage<N::Payload>>,
+        from_engine: EngineMessageStream<N::Payload>,
         mode: MiningMode,
         payload_attributes_builder: B,
         evm_config: C,
     ) -> Self
     where
-        B: PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
-        V: EngineValidator<N::Engine, Block = BlockTy<N>>,
-        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>>,
+        B: PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
+        V: EngineValidator<N::Payload, Block = BlockTy<N>>,
+        C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let chain_spec = provider.chain_spec();
         let engine_kind =

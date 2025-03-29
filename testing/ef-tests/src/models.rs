@@ -5,9 +5,9 @@ use alloy_consensus::Header as RethHeader;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-use reth_db::tables;
 use reth_db_api::{
     cursor::DbDupCursorRO,
+    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{Account as RethAccount, Bytecode, SealedHeader, StorageEntry};

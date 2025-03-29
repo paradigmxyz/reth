@@ -1,10 +1,10 @@
 use alloy_primitives::{B256, U256};
-use revm::db::states::RevertToSlot;
+use revm_database::states::RevertToSlot;
 use std::iter::Peekable;
 
 /// Iterator over storage reverts.
 /// See [`StorageRevertsIter::next`] for more details.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct StorageRevertsIter<R: Iterator, W: Iterator> {
     reverts: Peekable<R>,
     wiped: Peekable<W>,

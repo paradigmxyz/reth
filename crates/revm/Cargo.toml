@@ -38,13 +38,14 @@ std = [
     "revm/std",
     "alloy-consensus/std",
     "reth-ethereum-forks/std",
+    "reth-storage-api/std",
+    "reth-storage-errors/std",
 ]
 witness = ["dep:reth-trie"]
 test-utils = [
     "dep:reth-trie",
     "reth-primitives-traits/test-utils",
     "reth-trie?/test-utils",
-    "revm/test-utils",
 ]
 serde = [
     "revm/serde",
@@ -54,3 +55,4 @@ serde = [
     "reth-ethereum-forks/serde",
     "reth-primitives-traits/serde",
 ]
+portable = ["revm/portable"]

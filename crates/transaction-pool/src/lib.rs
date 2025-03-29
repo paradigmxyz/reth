@@ -164,7 +164,7 @@ pub use crate::{
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
         blob_tx_priority, fee_delta, state::SubPool, AllTransactionsEvents, FullTransactionEvent,
-        TransactionEvent, TransactionEvents,
+        NewTransactionEvent, TransactionEvent, TransactionEvents, TransactionListenerKind,
     },
     traits::*,
     validate::{
@@ -179,8 +179,7 @@ use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
-use reth_primitives::Recovered;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, Recovered};
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;

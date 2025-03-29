@@ -65,37 +65,52 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 <br>
 
 ## MerkleUnwindStage
-* TODO: explain stage
+
+The `MerkleUnwindStage` is responsible for unwinding the Merkle Patricia trie state when a reorg occurs or when there's a need to rollback state changes. This stage ensures that the state trie remains consistent with the chain's canonical history by reverting any state changes that need to be undone. It works closely with the `MerkleExecuteStage` to maintain state integrity.
+
 <br>
 
 ## AccountHashingStage
-* TODO: explain stage
+
+The `AccountHashingStage` handles the computation of account state hashes. It processes all accounts in the state and computes their cryptographic hashes, which are essential for building the state trie. This stage is crucial for maintaining the integrity of the state and enabling efficient state proof verification.
+
 <br>
 
 ## StorageHashingStage
-* TODO: explain stage
+
+The `StorageHashingStage` is responsible for computing hashes of contract storage. Similar to the `AccountHashingStage`, it processes storage slots of smart contracts and generates cryptographic hashes that are used in the state trie. This stage ensures that contract storage can be efficiently verified and proven.
+
 <br>
 
 ## MerkleExecuteStage
-* TODO: explain stage
+
+The `MerkleExecuteStage` handles the construction and updates of the Merkle Patricia trie, which is Ethereum's core data structure for storing state. This stage processes state changes from executed transactions and builds the corresponding branches in the state trie. It's responsible for maintaining the state root that's included in block headers.
+
 <br>
 
 ## TransactionLookupStage
-* TODO: explain stage
+
+The `TransactionLookupStage` builds and maintains transaction lookup indices. These indices enable efficient querying of transactions by hash or block position. This stage is crucial for RPC functionality, allowing users to quickly retrieve transaction information without scanning the entire blockchain.
+
 <br>
 
 ## IndexStorageHistoryStage
-* TODO: explain stage
+
+The `IndexStorageHistoryStage` creates indices for historical contract storage states. It tracks how contract storage values change over time, enabling historical state queries. This is essential for features like state debugging, transaction tracing, and historical state access.
+
 <br>
 
 ## IndexAccountHistoryStage
-* TODO: explain stage
+
+The `IndexAccountHistoryStage` builds indices for account history, tracking how account states (balance, nonce, code) change over time. Similar to the storage history stage, this enables historical queries of account states at any block height, which is crucial for debugging and analysis tools.
+
 <br>
 
 ## FinishStage
-* TODO: explain stage
-<br>
 
+The `FinishStage` is the final stage in the pipeline that performs cleanup and verification tasks. It ensures that all previous stages have completed successfully and that the node's state is consistent. This stage may also update various metrics and status indicators to reflect the completion of a sync cycle.
+
+<br>
 
 # Next Chapter
 

@@ -1,5 +1,5 @@
 //! Command for debugging merkle tree calculation.
-use crate::{args::NetworkArgs, utils::get_single_header};
+use crate::{args::NetworkArgs, providers::ExecutionOutcome, utils::get_single_header};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
@@ -11,10 +11,9 @@ use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_consensus::{Consensus, ConsensusError};
-use reth_db::tables;
-use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
@@ -113,7 +112,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let executor_provider = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // Initialize the fetch client
-        info!(target: "reth::cli", target_block_number=self.to, "Downloading tip of block range");
+        info!(target: "reth::cli", target_block_number = self.to, "Downloading tip of block range");
         let fetch_client = network.fetch_client().await?;
 
         // fetch the header at `self.to`
@@ -161,14 +160,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             provider_rw.insert_block(sealed_block.clone(), StorageLocation::Database)?;
 
             td += sealed_block.difficulty();
-            let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
-                LatestStateProviderRef::new(&provider_rw),
-            ));
-            executor.execute_and_verify_one(&sealed_block)?;
-            let execution_outcome = executor.finalize();
+            let executor = executor_provider
+                .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider_rw)));
+            let output = executor.execute(&sealed_block)?;
 
             provider_rw.write_state(
-                &execution_outcome,
+                &ExecutionOutcome::single(block_number, output),
                 OriginalValuesKnown::Yes,
                 StorageLocation::Database,
             )?;

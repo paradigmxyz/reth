@@ -12,19 +12,17 @@ use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_consensus::{
-    Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
-};
+use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
-use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-    Block, BlockHeader,
+    Block, BlockHeader, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -99,14 +97,14 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
 impl<ChainSpec, N> FullConsensus<N> for EthBeaconConsensus<ChainSpec>
 where
     ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
-    N: NodePrimitives<Receipt = Receipt>,
+    N: NodePrimitives,
 {
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
-        input: PostExecutionInput<'_, N::Receipt>,
+        result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
+        validate_block_post_execution(block, &self.chain_spec, &result.receipts, &result.requests)
     }
 }
 
@@ -204,8 +202,7 @@ where
         header: &H,
         _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        let is_post_merge =
-            self.chain_spec.is_paris_active_at_block(header.number()).is_some_and(|active| active);
+        let is_post_merge = self.chain_spec.is_paris_active_at_block(header.number());
 
         if is_post_merge {
             if !header.difficulty().is_zero() {
@@ -264,7 +261,7 @@ mod tests {
     use reth_primitives_traits::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
-        let header = reth_primitives::Header { gas_limit, ..Default::default() };
+        let header = reth_primitives_traits::Header { gas_limit, ..Default::default() };
         SealedHeader::new(header, B256::ZERO)
     }
 
@@ -344,7 +341,7 @@ mod tests {
         // that the header is valid
         let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
 
-        let header = reth_primitives::Header {
+        let header = reth_primitives_traits::Header {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             ..Default::default()
