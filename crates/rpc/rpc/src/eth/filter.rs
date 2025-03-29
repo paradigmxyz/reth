@@ -10,7 +10,6 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_primitives_traits::RecoveredBlock;
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
     RpcTransaction, TransactionCompat,
