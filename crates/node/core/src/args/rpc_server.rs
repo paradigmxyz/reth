@@ -253,7 +253,6 @@ impl RpcServerArgs {
             self.http_port -= instance - 1;
             // ws port is scaled by a factor of instance * 2
             self.ws_port += instance * 2 - 2;
-
             // append instance file to ipc path
             self.ipcpath = format!("{}-{}", self.ipcpath, instance);
         }

@@ -61,8 +61,9 @@ pub struct NodeCommand<
     /// - `AUTH_PORT`: default + `instance` * 100 - 100
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
-    #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
-    pub instance: u16,
+    /// - `IPC_PATH`: default + `-instance`
+    #[arg(long, value_name = "INSTANCE", global = true, value_parser = value_parser!(u16).range(..=200))]
+    pub instance: Option<u16>,
 
     /// Sets all ports to unused, allowing the OS to choose random unused ports when sockets are
     /// bound.
@@ -173,7 +174,7 @@ impl<
             config,
             chain,
             metrics,
-            instance: Some(instance),
+            instance,
             network,
             rpc,
             txpool,
@@ -323,8 +324,8 @@ mod tests {
     #[test]
     fn parse_instance() {
         let mut cmd: NodeCommand = NodeCommand::parse_from(["reth"]);
-        cmd.rpc.adjust_instance_ports(Some(cmd.instance));
-        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
+        cmd.rpc.adjust_instance_ports(cmd.instance);
+        cmd.network.port = DEFAULT_DISCOVERY_PORT;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8551);
         assert_eq!(cmd.rpc.http_port, 8545);
@@ -333,8 +334,8 @@ mod tests {
         assert_eq!(cmd.network.port, 30303);
 
         let mut cmd: NodeCommand = NodeCommand::parse_from(["reth", "--instance", "2"]);
-        cmd.rpc.adjust_instance_ports(Some(cmd.instance));
-        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
+        cmd.rpc.adjust_instance_ports(cmd.instance);
+        cmd.network.port = DEFAULT_DISCOVERY_PORT;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8651);
         assert_eq!(cmd.rpc.http_port, 8544);
@@ -343,8 +344,8 @@ mod tests {
         assert_eq!(cmd.network.port, 30304);
 
         let mut cmd: NodeCommand = NodeCommand::parse_from(["reth", "--instance", "3"]);
-        cmd.rpc.adjust_instance_ports(Some(cmd.instance));
-        cmd.network.port = DEFAULT_DISCOVERY_PORT + cmd.instance - 1;
+        cmd.rpc.adjust_instance_ports(cmd.instance);
+        cmd.network.port = DEFAULT_DISCOVERY_PORT + 3 - 1;
         // check rpc port numbers
         assert_eq!(cmd.rpc.auth_port, 8751);
         assert_eq!(cmd.rpc.http_port, 8543);
